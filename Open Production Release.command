@@ -43,16 +43,20 @@ fi
 
 REMOTE_URL="$(git config --get remote.origin.url)"
 
+# Strip any embedded credentials (https://user:token@github.com/... → https://github.com/...)
+# so the URL is safe to display and the case-statement matchers work.
+CLEAN_URL="$(echo "$REMOTE_URL" | sed -E 's|https://[^@]+@github.com|https://github.com|')"
+
 # Normalize SSH form (git@github.com:user/repo.git) → web URL
-case "$REMOTE_URL" in
+case "$CLEAN_URL" in
   git@github.com:*)
-    REPO_PATH="${REMOTE_URL#git@github.com:}"
+    REPO_PATH="${CLEAN_URL#git@github.com:}"
     REPO_PATH="${REPO_PATH%.git}"
     WEB_URL="https://github.com/$REPO_PATH" ;;
   https://github.com/*)
-    WEB_URL="${REMOTE_URL%.git}" ;;
+    WEB_URL="${CLEAN_URL%.git}" ;;
   *)
-    echo "ERROR: don't recognize remote URL format: $REMOTE_URL"
+    echo "ERROR: don't recognize remote URL format: $CLEAN_URL"
     read -r -p "Press Enter to close..." _
     exit 1 ;;
 esac
