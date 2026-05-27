@@ -15,7 +15,35 @@ import { pool } from './db.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname  = path.dirname(__filename);
-const MIG_DIR    = path.resolve(__dirname, '..', 'migrations');
+
+/**
+ * Find the migrations directory. Tries multiple paths so the runner works
+ * on local Mac, Railway/Railpack, Docker, etc. Picks the first candidate
+ * that contains at least one .sql file.
+ */
+function findMigDir() {
+  const candidates = [
+    process.env.MIGRATIONS_DIR,                         // explicit override
+    path.resolve(__dirname, '..', 'migrations'),        // local Mac + standard Railway
+    path.resolve(process.cwd(), 'migrations'),          // if cwd is Portal/
+    path.resolve(process.cwd(), '..', 'migrations'),    // if cwd is Portal/server/
+    '/app/migrations',                                   // Railway with Portal as root dir
+    '/app/Portal/migrations',                            // Railway with repo as root dir
+    path.resolve(__dirname, 'migrations'),              // alongside server
+  ].filter(Boolean);
+
+  for (const dir of candidates) {
+    try {
+      if (fs.existsSync(dir) && fs.readdirSync(dir).some(f => f.endsWith('.sql'))) {
+        return dir;
+      }
+    } catch { /* try next */ }
+  }
+  return path.resolve(__dirname, '..', 'migrations');
+}
+
+const MIG_DIR = findMigDir();
+console.log(`[bdi] MIG_DIR resolved to: ${MIG_DIR}`);
 
 // Tracking table is BDI-namespaced to avoid colliding with any pre-existing
 // `schema_migrations` table that another tool (Rails, Sequelize, Liquibase…)

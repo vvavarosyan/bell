@@ -1,0 +1,20 @@
+# Don't copy these into the Docker image — keeps the image small and avoids
+# stale node_modules from local Mac causing version drift on Railway.
+
+server/node_modules/
+**/node_modules/
+
+# Local-only data + logs (also in .gitignore but belt-and-suspenders)
+../Data/
+../Operations/
+../Config/
+
+# Editor / OS junk
+.DS_Store
+**/.DS_Store
+.vscode/
+.idea/
+
+# Tests / docs / nothing-the-server-needs
+*.md
+*.log

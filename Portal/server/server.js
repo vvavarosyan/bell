@@ -15,6 +15,7 @@ process.on('uncaughtException', (err) => {
 
 import express from 'express';
 import cors from 'cors';
+import fs from 'fs';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { pingDatabase } from './db.js';
@@ -37,9 +38,38 @@ import { startScheduler as startOpenDataScheduler } from './sources/qatar_open_d
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname  = path.dirname(__filename);
-const UI_DIR     = path.resolve(__dirname, '..', 'ui');
+
+/**
+ * Find the Portal UI directory. Tries multiple paths so the server works
+ * regardless of how the deployment structures the filesystem (local Mac,
+ * Railway/Railpack, Docker, etc.). Picks the first candidate that actually
+ * has `index.html` in it.
+ */
+function findUiDir() {
+  const candidates = [
+    process.env.UI_DIR,                             // explicit override
+    path.resolve(__dirname, '..', 'ui'),            // local Mac + standard Railway (Portal/ui)
+    path.resolve(process.cwd(), 'ui'),              // if cwd is Portal/
+    path.resolve(process.cwd(), '..', 'ui'),        // if cwd is Portal/server/
+    '/app/ui',                                       // Railway with Portal as root dir
+    '/app/Portal/ui',                                // Railway with repo root as root dir
+    path.resolve(__dirname, 'ui'),                  // if ui got placed alongside server
+  ].filter(Boolean);
+
+  for (const dir of candidates) {
+    try {
+      if (fs.existsSync(path.join(dir, 'index.html'))) return dir;
+    } catch { /* try next */ }
+  }
+  // Nothing found — return the conventional path and let express log the 404
+  return path.resolve(__dirname, '..', 'ui');
+}
+
+const UI_DIR     = findUiDir();
 const PORT       = Number(process.env.PORT || 3939);
 const HOST       = process.env.HOST || '127.0.0.1';
+
+console.log(`[bdi] UI_DIR resolved to: ${UI_DIR} (exists=${fs.existsSync(path.join(UI_DIR, 'index.html'))})`);
 
 const app = express();
 app.use(cors());
