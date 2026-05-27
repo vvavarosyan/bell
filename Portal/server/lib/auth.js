@@ -17,8 +17,8 @@
 //   requireRole(...roles)          — middleware factory; rejects if user role not in list
 //   getModeInfo()                  — read mode + identity for /api/me responses
 
-import { verifyToken } from '@clerk/backend';
-import { query } from '../db.js';
+import { verifyToken, createClerkClient } from '@clerk/backend';
+import { query, withTransaction } from '../db.js';
 
 const MODE = (process.env.BDI_MODE || 'local-admin').toLowerCase();
 const CLERK_SECRET = process.env.CLERK_SECRET_KEY || null;
@@ -97,7 +97,7 @@ export async function requireAuth(req, res, next) {
     return res.status(401).json({ error: 'unauthorized', reason: 'no_subject_claim' });
   }
 
-  const r = await query(`
+  let r = await query(`
     SELECT u.*, t.id AS t_id, t.name AS t_name, t.slug AS t_slug, t.plan AS t_plan,
            t.is_active AS t_is_active
       FROM users u
@@ -106,15 +106,37 @@ export async function requireAuth(req, res, next) {
      LIMIT 1
   `, [clerkUserId]);
 
+  // LAZY PROVISIONING: if the user authenticated via Clerk but we have no
+  // row, fetch their profile from Clerk and create the row + personal tenant
+  // right here. This makes the webhook a nice-to-have (for updates/deletes)
+  // rather than a strict requirement. No more "user_not_provisioned" races
+  // even if the webhook is misconfigured.
   if (!r.rows.length) {
-    // User authenticated via Clerk but our DB doesn't know them. This can
-    // happen briefly between sign-up and webhook delivery. Tell the client
-    // to retry; do NOT auto-create here (that's the webhook's job — keeps
-    // identity creation atomic).
-    return res.status(401).json({
-      error: 'unauthorized',
-      reason: 'user_not_provisioned',
-      hint: 'Sign-up webhook may not have completed yet. Try again in a moment.',
+    try {
+      await lazyProvisionUser(clerkUserId);
+      // Re-query after provisioning
+      r = await query(`
+        SELECT u.*, t.id AS t_id, t.name AS t_name, t.slug AS t_slug, t.plan AS t_plan,
+               t.is_active AS t_is_active
+          FROM users u
+          JOIN tenants t ON t.id = u.tenant_id
+         WHERE u.clerk_user_id = $1 AND u.is_active = true
+         LIMIT 1
+      `, [clerkUserId]);
+    } catch (err) {
+      console.error('[auth] lazy provision failed for', clerkUserId, '—', err.message);
+      return res.status(500).json({
+        error: 'provisioning_failed',
+        reason: 'could_not_create_user_record',
+        detail: err.message,
+      });
+    }
+  }
+  if (!r.rows.length) {
+    // Still no row after attempt — something is genuinely broken
+    return res.status(500).json({
+      error: 'provisioning_failed',
+      reason: 'user_row_missing_after_provision',
     });
   }
 
@@ -185,6 +207,86 @@ export function requireRole(...allowedRoles) {
  * Use for "any signed-in user with write permission".
  */
 export const requireWriter = requireRole('platform_admin', 'owner', 'admin', 'lead', 'member');
+
+// ---------------------------------------------------------------------------
+// Lazy provisioning — same logic as the Clerk webhook, runs synchronously
+// on first authenticated request when the user row doesn't exist yet.
+// ---------------------------------------------------------------------------
+let _clerkClient = null;
+function clerkClient() {
+  if (_clerkClient) return _clerkClient;
+  _clerkClient = createClerkClient({ secretKey: CLERK_SECRET });
+  return _clerkClient;
+}
+
+async function lazyProvisionUser(clerkUserId) {
+  // 1. Fetch the user profile from Clerk
+  const clerkUser = await clerkClient().users.getUser(clerkUserId);
+  if (!clerkUser) throw new Error('Clerk getUser returned null');
+
+  const primaryEmailObj = (clerkUser.emailAddresses || []).find(
+    e => e.id === clerkUser.primaryEmailAddressId
+  ) || clerkUser.emailAddresses?.[0];
+  const primaryEmail = primaryEmailObj?.emailAddress;
+  if (!primaryEmail) throw new Error('Clerk user has no primary email');
+
+  const firstName = clerkUser.firstName || '';
+  const lastName  = clerkUser.lastName  || '';
+  const fullName  = [firstName, lastName].filter(Boolean).join(' ').trim()
+                  || primaryEmail.split('@')[0];
+
+  // 2. Are they a platform admin (Bell.qa staff)?
+  const platformAdmins = (process.env.BDI_PLATFORM_ADMIN_EMAILS || '')
+    .split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+  const isPlatformAdmin = platformAdmins.includes(primaryEmail.toLowerCase());
+  const role = isPlatformAdmin ? 'platform_admin' : 'owner';
+
+  // 3. Create personal tenant + user row
+  await withTransaction(async (client) => {
+    // Double-check inside the txn — race with webhook firing concurrently
+    const existing = await client.query(
+      `SELECT id FROM users WHERE clerk_user_id = $1 LIMIT 1`,
+      [clerkUserId]
+    );
+    if (existing.rows.length) return;   // webhook beat us
+
+    // Unique slug
+    const slugBase = slugify(fullName) || slugify(primaryEmail.split('@')[0]) || 'workspace';
+    let slug = slugBase, i = 0;
+    while (true) {
+      const s = await client.query(`SELECT 1 FROM tenants WHERE slug = $1 LIMIT 1`, [slug]);
+      if (!s.rows.length) break;
+      i++; slug = `${slugBase}-${i}`;
+    }
+    const tenantName = `${firstName || slugBase}'s Workspace`.replace(/^'s/, 'Personal');
+
+    const tR = await client.query(`
+      INSERT INTO tenants (name, slug, plan) VALUES ($1, $2, 'free') RETURNING id
+    `, [tenantName, slug]);
+    const tenantId = Number(tR.rows[0].id);
+
+    await client.query(`
+      INSERT INTO users (
+        tenant_id, clerk_user_id, email, full_name, first_name, last_name,
+        avatar_url, role, joined_at
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, now())
+      ON CONFLICT (clerk_user_id) DO NOTHING
+    `, [
+      tenantId, clerkUserId, primaryEmail.toLowerCase(),
+      fullName, firstName || null, lastName || null,
+      clerkUser.imageUrl || null,
+      role,
+    ]);
+    console.log(`[auth] LAZY-provisioned user ${primaryEmail} as ${role} of tenant '${tenantName}' (id=${tenantId})`);
+  });
+}
+
+function slugify(s) {
+  return String(s || '').toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 60);
+}
 
 /**
  * Middleware: require the tenant to have an active subscription.
