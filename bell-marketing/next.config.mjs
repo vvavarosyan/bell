@@ -15,10 +15,19 @@ const nextConfig = {
   typescript: {
     ignoreBuildErrors: true,
   },
-  // Marketing site is largely static — favour SSG where possible.
-  experimental: {
-    optimizePackageImports: ['lucide-react', 'framer-motion'],
-  },
+  // Standalone output bundles only the deps actually used, with a minimal
+  // server.js entrypoint. The official Next.js recommendation for
+  // Docker/Railway deploys — produces smaller, more reliable images and
+  // fixes a class of webpack module-resolution errors caused by the default
+  // bundler's interaction with hosted build environments.
+  // See: https://nextjs.org/docs/app/api-reference/next-config-js/output
+  output: 'standalone',
+  // NOTE: experimental.optimizePackageImports was removed here. It tree-shakes
+  // lucide-react / framer-motion at build time but has a known bug where
+  // webpack can lose track of unrelated components during the optimization
+  // pass on Linux build hosts (manifesting as "Cannot resolve @/components/X"
+  // for files that exist and have correct exports). Cost is a slightly bigger
+  // bundle in exchange for reliable builds. Not worth keeping enabled.
   // Old / renamed URLs → new canonical paths. Issued as HTTP 301
   // (`permanent: true`) so search engines update their index.
   //
