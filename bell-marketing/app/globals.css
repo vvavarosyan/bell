@@ -1,0 +1,186 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/* ---------------------------------------------------------------------------
+   Brand tokens — copied from BDI Portal so admin + marketing share one palette.
+   Edit here AND in BDI Portal's styles.css to keep them in sync (until we
+   extract them into a @bell/brand package in a future round).
+   --------------------------------------------------------------------------- */
+:root {
+  --bg:           10 14 26;      /* #0a0e1a — deep navy/black */
+  --bg-elev:      19 24 41;      /* #131829 */
+  --bg-elev-2:    26 32 52;      /* #1a2034 */
+  --border:       50 58 84;      /* #323a54 — slightly brighter for visibility */
+
+  --text:         235 240 255;   /* #ebf0ff — primary, AAA on bg */
+  --text-muted:   194 202 220;   /* #c2cadc — bumped from #8a93a6 for readability (10:1 on bg) */
+  --text-dim:     156 165 185;   /* #9ca5b9 — bumped from #5a6478 (was failing AA) — now 7:1 on bg */
+
+  --accent:        91 140 255;   /* #5b8cff — Bell blue */
+  --accent-bright: 165 195 255;  /* #a5c3ff — slightly brighter for high-contrast highlights */
+
+  --font-sans: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+}
+
+* {
+  border-color: rgb(var(--border));
+}
+
+html {
+  background: rgb(var(--bg));
+  color-scheme: dark;
+}
+
+body {
+  background: rgb(var(--bg));
+  color: rgb(var(--text));
+  font-family: var(--font-sans);
+  font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Selection styles match brand accent */
+::selection {
+  background: rgb(var(--accent) / 0.4);
+  color: rgb(var(--text));
+}
+
+/* Focus ring — visible but elegant */
+:focus-visible {
+  outline: 2px solid rgb(var(--accent));
+  outline-offset: 2px;
+}
+
+/* Tabular numbers everywhere by default for stats/data */
+.tabular-nums {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Gradient text helper for hero headlines */
+.text-gradient {
+  background: linear-gradient(135deg, rgb(var(--text)) 0%, rgb(var(--accent-bright)) 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
+  color: transparent;
+}
+
+/* ---------------------------------------------------------------------------
+   Map signal pulses — used by <HeroGlobe/>
+   Dot + outward-pulsing ring at the actual lng/lat on the map. No text
+   labels here: the human-readable copy lives in <HeroSignalCards/> on the
+   side of the hero. The map dot is purely a spatial cue.
+   --------------------------------------------------------------------------- */
+.bell-signal-pulse {
+  position: relative;
+  width: 12px;
+  height: 12px;
+  pointer-events: none;
+}
+.bell-signal-dot {
+  position: absolute;
+  top: 0; left: 0;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  box-shadow: 0 0 14px currentColor;
+  animation: bell-signal-pop .35s ease-out;
+}
+.bell-signal-ring {
+  position: absolute;
+  top: 0; left: 0;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  border: 2px solid;
+  opacity: .8;
+  animation: bell-signal-ring 1.8s ease-out infinite;
+}
+@keyframes bell-signal-pop {
+  0%   { transform: scale(0); opacity: 0; }
+  100% { transform: scale(1); opacity: 1; }
+}
+@keyframes bell-signal-ring {
+  0%   { transform: scale(1);   opacity: 0.7; }
+  100% { transform: scale(3.2); opacity: 0;   }
+}
+
+/* Fallback static pulses (when Mapbox can't load) — pure CSS */
+.bell-signal-pulse-static {
+  position: absolute;
+  width: 12px; height: 12px;
+  border-radius: 50%;
+  background: var(--pulse-color);
+  box-shadow: 0 0 16px var(--pulse-color);
+  animation: bell-signal-pulse-static 3.6s ease-in-out infinite;
+}
+.bell-signal-pulse-static::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  border-radius: 50%;
+  border: 2px solid var(--pulse-color);
+  animation: bell-signal-ring 2.4s ease-out infinite;
+}
+@keyframes bell-signal-pulse-static {
+  0%, 100% { opacity: 0.55; transform: scale(1);    }
+  50%      { opacity: 1;    transform: scale(1.15); }
+}
+
+/* ── /platform/map — annotated pulses (dot + labeled chip) ───────────────── */
+/* Used by <MapPageLive/>. The pulse itself reuses .bell-signal-dot and
+ * .bell-signal-ring above; this wrapper adds a labeled chip floating to the
+ * top-right of the dot so each pulse explains itself on the map. */
+.bell-map-pulse {
+  position: relative;
+  width: 12px;
+  height: 12px;
+  pointer-events: none;
+  animation: bell-map-pulse-fade 0.45s ease-out;
+}
+.bell-map-pulse-label {
+  position: absolute;
+  bottom: 16px;           /* sit above the dot */
+  left: 16px;             /* offset to the right */
+  min-width: 180px;
+  max-width: 280px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: rgba(13, 18, 35, 0.92);
+  backdrop-filter: blur(8px);
+  border: 1px solid rgba(255, 255, 255, 0.06);
+  border-left: 2px solid currentColor;
+  box-shadow: 0 8px 24px -8px rgba(0, 0, 0, 0.55);
+  white-space: normal;
+  pointer-events: none;
+  animation: bell-map-pulse-fade 0.55s ease-out;
+}
+.bell-map-pulse-kind {
+  display: block;
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, monospace);
+  font-size: 9.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin-bottom: 2px;
+}
+.bell-map-pulse-text {
+  display: block;
+  font-size: 12px;
+  color: rgb(220 230 250);
+  line-height: 1.35;
+  margin-bottom: 3px;
+}
+.bell-map-pulse-loc {
+  display: block;
+  font-family: var(--font-mono, ui-monospace, SFMono-Regular, monospace);
+  font-size: 9.5px;
+  color: rgb(140 156 196);
+}
+@keyframes bell-map-pulse-fade {
+  0%   { opacity: 0; transform: translateY(4px); }
+  100% { opacity: 1; transform: translateY(0);   }
+}

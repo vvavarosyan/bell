@@ -1,0 +1,165 @@
+// Ingest runner — reads a source's latest JSON, normalizes via the source
+// mapper, and upserts records into companies + company_sources in batches.
+//
+// Idempotent: re-running on the same JSON updates last_seen_at without
+// creating duplicate companies. Multi-source dedup happens later (Phase 5
+// Assembly) — at ingest we keep one company row per (source, source_record_id).
+
+import fs from 'fs/promises';
+import path from 'path';
+import { fileURLToPath } from 'url';
+import { withTransaction } from '../db.js';
+import { MAPPERS } from './mappers.js';
+import { recomputeCompanyStatus } from './recompute_status.js';
+
+const __filename = fileURLToPath(import.meta.url);
+const SERVER_DIR = path.dirname(path.dirname(__filename));
+const WORKSPACE  = path.resolve(SERVER_DIR, '..', '..');
+const DIR_ROOT   = path.join(WORKSPACE, 'Data', 'Companies', '1. Data Gathering', 'Directories');
+
+const LATEST_FILE = {
+  QFZ:  'QFZ/scans/qfz_companies_latest.json',
+  QFC:  'QFC/scans/qfc_companies_latest.json',
+  MOCI: 'MOCI/scans/moci_companies_latest.json',
+  QSTP: 'QSTP/scans/qstp_companies_latest.json',
+};
+
+const BATCH_SIZE = 200;
+
+/** Public entry: ingest the latest scrape for a single source. */
+export async function ingestSource(source, jobProgress) {
+  if (!MAPPERS[source]) throw new Error('Unknown source: ' + source);
+  const file = path.join(DIR_ROOT, LATEST_FILE[source]);
+
+  jobProgress?.(`Reading ${LATEST_FILE[source]} ...`);
+  const buf = await fs.readFile(file, 'utf-8');
+  const json = JSON.parse(buf);
+
+  // Each scraper bundles records under a 'companies' key (and QFC also has 'trusts')
+  const rawRows = collectRows(source, json);
+  jobProgress?.(`Parsed ${rawRows.length.toLocaleString()} raw rows`);
+
+  // Map → normalized payload
+  const mapper = MAPPERS[source];
+  const normalized = [];
+  for (const r of rawRows) {
+    const mapped = mapper(r);
+    if (mapped) normalized.push(mapped);
+  }
+  const dropped = rawRows.length - normalized.length;
+  jobProgress?.(`Normalized: ${normalized.length.toLocaleString()} kept · ${dropped.toLocaleString()} dropped (missing key fields)`);
+
+  // Batched upsert
+  let inserted = 0, updated = 0;
+  for (let i = 0; i < normalized.length; i += BATCH_SIZE) {
+    const slice = normalized.slice(i, i + BATCH_SIZE);
+    const result = await upsertBatch(source, slice);
+    inserted += result.inserted;
+    updated  += result.updated;
+    if ((i / BATCH_SIZE) % 10 === 0 || i + BATCH_SIZE >= normalized.length) {
+      jobProgress?.(`  ${(i + slice.length).toLocaleString()}/${normalized.length.toLocaleString()} — +${inserted} new, +${updated} updated`);
+    }
+  }
+
+  return {
+    source,
+    raw_rows:   rawRows.length,
+    dropped,
+    normalized: normalized.length,
+    inserted,
+    updated,
+  };
+}
+
+function collectRows(source, json) {
+  if (Array.isArray(json)) return json;
+  // Concatenate without using `push(...arr)` — that blows the call stack on
+  // very large arrays (e.g. MOCI ships 133k+ rows in one file).
+  let rows = [];
+  for (const key of ['companies', 'trusts', 'rows', 'data']) {
+    if (Array.isArray(json[key])) rows = rows.concat(json[key]);
+  }
+  return rows;
+}
+
+async function upsertBatch(source, slice) {
+  let inserted = 0, updated = 0;
+  await withTransaction(async (client) => {
+    for (const rec of slice) {
+      const { source_record_id, source_url, companyFields, extraFields, rawPayload } = rec;
+
+      // 1. Look up existing source link
+      const existing = await client.query(
+        `SELECT company_id FROM company_sources WHERE source = $1 AND source_record_id = $2`,
+        [source, source_record_id]
+      );
+
+      let companyId;
+      if (existing.rows.length === 0) {
+        // Insert new company row
+        const colNames = Object.keys(companyFields);
+        const placeholders = colNames.map((_, i) => `$${i + 1}`);
+        const sql = `
+          INSERT INTO companies (${colNames.join(', ')}, extra_fields)
+          VALUES (${placeholders.join(', ')}, $${colNames.length + 1}::jsonb)
+          RETURNING id
+        `;
+        const params = colNames.map(k => companyFields[k]).concat([JSON.stringify(extraFields || {})]);
+        const r = await client.query(sql, params);
+        companyId = r.rows[0].id;
+        inserted++;
+      } else {
+        // Update existing company row (only refresh non-null incoming fields,
+        // so a later source doesn't blank out a richer earlier value).
+        companyId = existing.rows[0].company_id;
+        const nonNullFields = Object.entries(companyFields).filter(([, v]) => v !== null && v !== undefined);
+        if (nonNullFields.length > 0) {
+          const setParts = nonNullFields.map(([k], i) => `${k} = COALESCE($${i + 1}, ${k})`);
+          const params   = nonNullFields.map(([, v]) => v);
+          params.push(JSON.stringify(extraFields || {}));
+          params.push(companyId);
+          const sql = `
+            UPDATE companies
+            SET ${setParts.join(', ')},
+                extra_fields = extra_fields || $${params.length - 1}::jsonb
+            WHERE id = $${params.length}
+          `;
+          await client.query(sql, params);
+        }
+        updated++;
+      }
+
+      // 2. Upsert the company_sources link
+      await client.query(
+        `INSERT INTO company_sources (company_id, source, source_record_id, source_url, raw_payload, first_seen_at, last_seen_at)
+         VALUES ($1, $2, $3, $4, $5::jsonb, now(), now())
+         ON CONFLICT (source, source_record_id) DO UPDATE
+           SET last_seen_at = now(),
+               raw_payload  = EXCLUDED.raw_payload`,
+        [companyId, source, source_record_id, source_url, JSON.stringify(rawPayload || {})]
+      );
+
+      // 3. Recompute is_active across ALL sources (ANY active → active).
+      // Means: a company expired in MOCI but still Licensed in QFC stays active.
+      await recomputeCompanyStatus(companyId, client);
+    }
+  });
+  return { inserted, updated };
+}
+
+/** Stat helper used by the Sources view */
+export async function describeSourceLatestFile(source) {
+  if (!LATEST_FILE[source]) return null;
+  const file = path.join(DIR_ROOT, LATEST_FILE[source]);
+  try {
+    const stat = await fs.stat(file);
+    return {
+      path: file,
+      relative_path: LATEST_FILE[source],
+      size_bytes: stat.size,
+      mtime: stat.mtime.toISOString(),
+    };
+  } catch {
+    return null;
+  }
+}

@@ -1,0 +1,101 @@
+// Tiny fetch wrapper around the Portal's local JSON API.
+const BASE = '';
+
+async function request(path, options = {}) {
+  const r = await fetch(BASE + path, {
+    headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
+    ...options,
+  });
+  const ct = r.headers.get('content-type') || '';
+  const body = ct.includes('application/json') ? await r.json() : await r.text();
+  if (!r.ok) {
+    const msg = body?.message || body?.error || ('HTTP ' + r.status);
+    throw new Error(msg);
+  }
+  return body;
+}
+
+export const api = {
+  health:                 () => request('/api/health'),
+  stats:                  () => request('/api/stats'),
+  stageProgress:          () => request('/api/stats/stage-progress'),
+
+  companies:              (q = {}) => request('/api/companies?' + new URLSearchParams(q)),
+  companiesMap:           () => request('/api/companies/map'),
+  publicToken:            (name) => request('/api/settings/public-token/' + name),
+  company:                (id) => request('/api/companies/' + id),
+  updateCompany:          (id, body) => request('/api/companies/' + id, { method: 'PATCH', body: JSON.stringify(body) }),
+  archiveCompany:         (id, archived) => request(`/api/companies/${id}/archive`, { method: 'POST', body: JSON.stringify({ archived }) }),
+  resetEnrichment:        (id) => request(`/api/companies/${id}/reset-enrichment`, { method: 'POST', body: '{}' }),
+
+  jobRuns:                (params = {}) => request('/api/job-runs?' + new URLSearchParams(params)),
+  jobRun:                 (id, since = 0) => request(`/api/job-runs/${id}?since=${since}`),
+  setLinkedInUrl:         (id, url) => request(`/api/companies/${id}/set-linkedin-url`, { method: 'POST', body: JSON.stringify({ url }) }),
+  reclassifyStatuses:     () => request('/api/companies/reclassify-statuses', { method: 'POST', body: '{}' }),
+  addCompanyContact:      (id, body) => request(`/api/companies/${id}/contacts`, { method: 'POST', body: JSON.stringify(body) }),
+  setCompanyContactPrimary: (id, cid, type) => request(`/api/companies/${id}/contacts/${cid}/primary`, { method: 'POST', body: JSON.stringify({ type }) }),
+  deleteCompanyContact:   (id, cid) => request(`/api/companies/${id}/contacts/${cid}`, { method: 'DELETE' }),
+
+  people:                 (q = {}) => request('/api/people?' + new URLSearchParams(q)),
+  person:                 (id) => request('/api/people/' + id),
+  updatePerson:           (id, body) => request('/api/people/' + id, { method: 'PATCH', body: JSON.stringify(body) }),
+  archivePerson:          (id, archived) => request(`/api/people/${id}/archive`, { method: 'POST', body: JSON.stringify({ archived }) }),
+  revealPerson:           (id, adminEmail) => request(`/api/people/${id}/reveal`, { method: 'POST', body: JSON.stringify({ admin_email: adminEmail }) }),
+  deepEnrichPeople:       (personIds) => request('/api/people/deep-enrich', { method: 'POST', body: JSON.stringify({ person_ids: personIds }) }),
+  recomputeSeniority:     () => request('/api/people/recompute-seniority', { method: 'POST', body: '{}' }),
+  addPersonContact:       (id, body) => request(`/api/people/${id}/contacts`, { method: 'POST', body: JSON.stringify(body) }),
+  setPersonContactPrimary: (id, cid, type) => request(`/api/people/${id}/contacts/${cid}/primary`, { method: 'POST', body: JSON.stringify({ type }) }),
+  deletePersonContact:    (id, cid) => request(`/api/people/${id}/contacts/${cid}`, { method: 'DELETE' }),
+
+  jobs:                   (q = {}) => request('/api/jobs?' + new URLSearchParams(q)),
+  job:                    (id) => request('/api/jobs/' + id),
+  updateJob:              (id, body) => request('/api/jobs/' + id, { method: 'PATCH', body: JSON.stringify(body) }),
+
+  settings:               () => request('/api/settings'),
+  updateSettings:         (body) => request('/api/settings', { method: 'PATCH', body: JSON.stringify(body) }),
+  setApiKey:              (name, value) => request('/api/settings/api-keys/' + name, { method: 'POST', body: JSON.stringify({ value }) }),
+  deleteApiKey:           (name) => request('/api/settings/api-keys/' + name, { method: 'DELETE' }),
+
+  sources:                () => request('/api/sources'),
+  startIngest:            (source) => request(`/api/sources/${source}/ingest`, { method: 'POST', body: '{}' }),
+  startScrape:            (source) => request(`/api/sources/${source}/scrape`, { method: 'POST', body: '{}' }),
+  sourceJob:              (id, since = 0) => request(`/api/sources/jobs/${id}?since=${since}`),
+
+  enrichmentStages:       () => request('/api/enrichment/stages'),
+  enrichmentRuns:         (limit = 25) => request('/api/enrichment/runs?limit=' + limit),
+  runEnrichment:          (body) => request('/api/enrichment/run', { method: 'POST', body: JSON.stringify(body) }),
+  enrichmentJob:          (id, since = 0) => request(`/api/enrichment/jobs/${id}?since=${since}`),
+
+  // Assembly (Phase 5)
+  assemblyStats:          () => request('/api/assembly/stats'),
+  assemblyRun:            () => request('/api/assembly/run', { method: 'POST', body: '{}' }),
+  assemblyAssignIds:      () => request('/api/assembly/assign-ids', { method: 'POST', body: '{}' }),
+  dedupQueue:             (limit = 50) => request('/api/assembly/dedup-queue?limit=' + limit),
+  dedupDecide:            (id, action, adminEmail) => request(`/api/assembly/dedup/${id}/decide`, { method: 'POST', body: JSON.stringify({ action, admin_email: adminEmail }) }),
+
+  similarCompanies:       (q = {}) => request('/api/similar-companies?' + new URLSearchParams(q)),
+  similarBySource:        (companyId) => request('/api/similar-companies/by-source/' + companyId),
+  decideSimilar:          (id, decision) => request('/api/similar-companies/' + id, { method: 'POST', body: JSON.stringify({ decision }) }),
+
+  // Research (Phase R1 surface)
+  researchTypes:          () => request('/api/research/types'),
+  researchStats:          () => request('/api/research/stats'),
+  researchJobs:           (q = {}) => request('/api/research/jobs?' + new URLSearchParams(q)),
+  researchJob:            (id) => request('/api/research/jobs/' + id),
+  createResearchJob:      (body) => request('/api/research/jobs', { method: 'POST', body: JSON.stringify(body) }),
+  cancelResearchJob:      (id) => request(`/api/research/jobs/${id}/cancel`, { method: 'POST', body: '{}' }),
+  runResearchJob:         (id) => request(`/api/research/jobs/${id}/run`, { method: 'POST', body: '{}' }),
+  pollResearchJob:        (id) => request(`/api/research/jobs/${id}/poll`, { method: 'POST', body: '{}' }),
+
+  // Deep Data (Qatar Open Data)
+  openDataStats:          () => request('/api/open-data/stats'),
+  openDataDatasets:       (q = {}) => request('/api/open-data/datasets?' + new URLSearchParams(q)),
+  openDataDataset:        (id) => request('/api/open-data/datasets/' + encodeURIComponent(id)),
+  openDataChart:          (id) => request('/api/open-data/datasets/' + encodeURIComponent(id) + '/chart'),
+  openDataRecords:        (id, q = {}) => request('/api/open-data/datasets/' + encodeURIComponent(id) + '/records?' + new URLSearchParams(q)),
+  openDataPreview:        (id, q = {}) => request('/api/open-data/datasets/' + encodeURIComponent(id) + '/preview?' + new URLSearchParams(q)),
+  openDataRuns:           (limit = 25) => request('/api/open-data/runs?limit=' + limit),
+  openDataSyncCatalog:    () => request('/api/open-data/sync/catalog', { method: 'POST', body: '{}' }),
+  openDataSyncRecords:    () => request('/api/open-data/sync/records', { method: 'POST', body: '{}' }),
+  openDataSyncOne:        (id) => request('/api/open-data/sync/records/' + encodeURIComponent(id), { method: 'POST', body: '{}' }),
+};

@@ -1,0 +1,68 @@
+# Bell Data Intelligence — git ignore
+# ====================================
+# Local-only data, secrets, and build artifacts. None of this belongs on GitHub.
+
+# ─── macOS / OS ────────────────────────────────────────────────────────────
+.DS_Store
+**/.DS_Store
+Thumbs.db
+*.swp
+*.swo
+.vscode/
+.idea/
+
+# ─── Node ──────────────────────────────────────────────────────────────────
+node_modules/
+**/node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+*.tsbuildinfo
+
+# ─── Next.js ───────────────────────────────────────────────────────────────
+.next/
+**/.next/
+out/
+**/out/
+
+# ─── Env files (secrets) ───────────────────────────────────────────────────
+# Local env files NEVER go to git. Use Railway env vars in production.
+.env
+.env.local
+.env.development
+.env.production
+.env.*.local
+!.env.example
+
+# ─── Bell local-only data (huge + sensitive) ───────────────────────────────
+# The Data/ folder holds raw scraper output (millions of records). Not for git.
+Data/
+**/Data/scans/
+**/Data/raw/
+
+# Run logs from local Portal sessions
+Operations/
+**/Operations/run_logs/
+**/Operations/credits/
+**/Operations/enrichment_queue/
+
+# Local config — API keys go in macOS Keychain, NOT here, but ignore just in case.
+Config/
+**/Config/secrets/
+**/Config/local/
+
+# ─── Postgres dumps / backups ──────────────────────────────────────────────
+*.dump
+*.sql.gz
+*.backup
+
+# ─── Misc ──────────────────────────────────────────────────────────────────
+*.log
+.cache/
+
+# Local-only command outputs / temp files
+*.tmp
+*.temp
+
+# Marketing site Mapbox token if accidentally written to file (it should be env)
+**/.mapbox-token

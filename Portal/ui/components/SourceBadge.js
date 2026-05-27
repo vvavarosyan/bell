@@ -1,0 +1,39 @@
+// Color-coded source badge(s). Renders one badge per source a company appears
+// in. Compact form for the grid; full form for the detail panel.
+
+import { html } from '../lib/html.js';
+
+// Each source gets its own hue + label color so admins can scan quickly.
+const COLORS = {
+  QFC:  { bg: '#1c2c52', text: '#7ea8ff', border: '#3a5ec1' },  // blue
+  QFZ:  { bg: '#2c1c52', text: '#b78bff', border: '#6e4cc1' },  // purple
+  MOCI: { bg: '#3a2812', text: '#ffb774', border: '#a36422' },  // amber/orange
+  QSTP: { bg: '#173322', text: '#7be3a8', border: '#2f8a5a' },  // green
+};
+const FALLBACK = { bg: '#1c2030', text: '#8a93a6', border: '#2b2f3d' };
+
+export function SourceBadge({ source, compact = false }) {
+  const c = COLORS[source] || FALLBACK;
+  const style = {
+    display: 'inline-block',
+    padding: compact ? '1px 6px' : '2px 8px',
+    fontSize: compact ? '10px' : '11px',
+    fontWeight: 600,
+    borderRadius: '4px',
+    background: c.bg,
+    color: c.text,
+    border: '1px solid ' + c.border,
+    letterSpacing: '.3px',
+  };
+  return html`<span style=${style}>${source}</span>`;
+}
+
+/** Render a group of badges for a company.sources array. */
+export function SourceBadges({ sources, compact = true }) {
+  if (!sources || sources.length === 0) {
+    return html`<span class="muted small">—</span>`;
+  }
+  return html`<span style=${{ display: 'inline-flex', gap: '4px', flexWrap: 'wrap' }}>
+    ${sources.map(s => html`<${SourceBadge} key=${s} source=${s} compact=${compact} />`)}
+  </span>`;
+}
