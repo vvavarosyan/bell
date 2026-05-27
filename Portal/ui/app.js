@@ -229,17 +229,39 @@ async function bootstrap() {
 
   // 6. Subscription gate: non-platform_admin users with no active sub get
   //    bounced to /subscribe. Bell has no free tier.
+  //
+  // Special case: if returning from Stripe payment (?stripe=success), the
+  // checkout.session.completed webhook may take a few seconds to fire and
+  // flip subscription_status to 'active'. Poll for ~15 seconds before
+  // giving up and sending the user back to /subscribe.
   if (me.user.role !== 'platform_admin') {
-    try {
-      const sub = await api.billingSubscription();
-      if (!sub.is_active) {
-        window.location.replace('/subscribe');
-        return;
+    const fromStripe = new URLSearchParams(window.location.search).get('stripe') === 'success';
+    const maxAttempts = fromStripe ? 8 : 1;
+    let activated = false;
+
+    if (fromStripe) renderBootMessage('Activating your subscription…');
+
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      try {
+        const sub = await api.billingSubscription();
+        if (sub.is_active) { activated = true; break; }
+      } catch { /* keep trying */ }
+      if (attempt < maxAttempts - 1) {
+        await new Promise(r => setTimeout(r, 2000));
       }
-    } catch {
-      // If subscription endpoint fails, default to /subscribe (fail safe)
+    }
+
+    if (!activated) {
       window.location.replace('/subscribe');
       return;
+    }
+
+    // Clean the ?stripe=success param so it's not preserved in the URL bar
+    if (fromStripe) {
+      const url = new URL(window.location.href);
+      url.searchParams.delete('stripe');
+      url.searchParams.delete('session_id');
+      window.history.replaceState({}, '', url.toString());
     }
   }
 

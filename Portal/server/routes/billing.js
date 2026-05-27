@@ -62,9 +62,14 @@ router.get('/subscription', requireAuth, async (req, res, next) => {
 });
 
 // ---------------------------------------------------------------------------
-// POST /api/billing/checkout — create a Stripe Checkout session for a plan
+// POST /api/billing/checkout — create a Stripe EMBEDDED Checkout session
 // Body: { plan_id: 'starter' | 'business' | 'enterprise' }
-// Returns: { url } — the URL to redirect the user to
+// Returns: { client_secret } — used by Stripe.js to mount the embedded form
+//
+// The UI mounts the embedded form inside /subscribe so the user never leaves
+// Bell during payment. After a successful payment, Stripe redirects to
+// return_url (which we set to /?stripe=success) and our app bootstrap polls
+// the subscription endpoint until the webhook activates the plan.
 // ---------------------------------------------------------------------------
 router.post('/checkout', requireAuth, async (req, res, next) => {
   try {
@@ -82,22 +87,22 @@ router.post('/checkout', requireAuth, async (req, res, next) => {
     }
 
     // Resolve or create the Stripe customer for this tenant
-    let customerId = await getOrCreateStripeCustomer(req.tenant, req.user);
+    const customerId = await getOrCreateStripeCustomer(req.tenant, req.user);
 
     const origin = req.headers.origin
       || `https://${req.hostname}`
       || `http://${req.headers.host}`;
-    const successUrl = `${origin}/?stripe=success&session_id={CHECKOUT_SESSION_ID}`;
-    const cancelUrl  = `${origin}/subscribe?stripe=cancelled`;
+    // Embedded checkout uses ONE return_url for both success + cancel.
+    // We include the session_id placeholder so the app bootstrap can verify
+    // the session if needed.
+    const returnUrl = `${origin}/?stripe=success&session_id={CHECKOUT_SESSION_ID}`;
 
     const session = await stripe().checkout.sessions.create({
+      ui_mode: 'embedded',
       mode: 'subscription',
       customer: customerId,
       line_items: [{ price: priceId, quantity: 1 }],
-      success_url: successUrl,
-      cancel_url: cancelUrl,
-      // Make tenant + user metadata visible on the resulting subscription so
-      // webhook handlers can route updates without round-tripping the DB
+      return_url: returnUrl,
       subscription_data: {
         metadata: {
           bdi_tenant_id: String(req.tenant.id),
@@ -105,14 +110,15 @@ router.post('/checkout', requireAuth, async (req, res, next) => {
           bdi_plan_id:   plan.id,
         },
       },
-      // No free trial — Bell requires payment up front
       payment_method_collection: 'always',
       allow_promotion_codes: true,
-      // Tax/billing address fields (Stripe will collect if enabled in dashboard)
       automatic_tax: { enabled: false },
     });
 
-    res.json({ url: session.url });
+    res.json({
+      client_secret: session.client_secret,
+      session_id:    session.id,
+    });
   } catch (err) {
     if (err.message?.includes('STRIPE_SECRET_KEY')) {
       return res.status(500).json({ error: 'stripe_not_configured', message: err.message });

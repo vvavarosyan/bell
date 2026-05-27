@@ -170,7 +170,17 @@ export function Sidebar({ activeId, onSelect, dbStatus, settings, stats, current
           <button class="user-dots" onClick=${() => setMenuOpen(o => !o)} title="Account menu">⋯</button>
           ${menuOpen ? html`
             <div class="user-menu">
-              <button class="user-menu-item" onClick=${() => { setMenuOpen(false); alert('Sign-out is not wired yet (no auth on the local Portal).'); }}>
+              <button class="user-menu-item" onClick=${async () => {
+                setMenuOpen(false);
+                // Use the Clerk-backed signOut bridge if it exists (user/admin
+                // mode). In local-admin mode there's no auth; show a hint.
+                if (window.__bdiAuth?.signOut) {
+                  try { await window.__bdiAuth.signOut(); }
+                  catch (err) { alert('Sign-out failed: ' + err.message); }
+                } else {
+                  alert('Local-admin mode — no sign-in to sign out of.');
+                }
+              }}>
                 Sign out
               </button>
             </div>

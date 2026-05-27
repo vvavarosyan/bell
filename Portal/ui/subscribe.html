@@ -87,6 +87,26 @@
     .sub-user button { background: transparent; border: 1px solid var(--border);
       color: var(--text-muted); padding: 5px 10px; border-radius: 6px; font-size: 11px;
       cursor: pointer; margin-left: 8px; }
+    /* Embedded Stripe Checkout panel */
+    .checkout-section {
+      max-width: 720px; margin: 0 auto 28px;
+      background: linear-gradient(180deg, rgba(19,24,41,.96) 0%, rgba(13,18,35,.96) 100%);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 22px;
+    }
+    .checkout-header {
+      display: flex; align-items: center; justify-content: space-between;
+      margin-bottom: 18px; gap: 12px;
+    }
+    .checkout-title { font-size: 16px; font-weight: 600; color: var(--text); }
+    .checkout-sub { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+    .checkout-back {
+      background: transparent; border: 1px solid var(--border);
+      color: var(--text-muted); padding: 7px 14px; border-radius: 7px;
+      font-size: 12px; cursor: pointer;
+    }
+    #stripe-checkout { min-height: 480px; }
   </style>
 </head>
 <body>
@@ -112,10 +132,25 @@
       <div class="sub-loading" style="grid-column: 1 / -1;">Loading plans…</div>
     </div>
 
+    <!-- Embedded Stripe Checkout — appears in place of plan grid after selection -->
+    <div id="checkout-section" class="checkout-section" style="display:none;">
+      <div class="checkout-header">
+        <div>
+          <div class="checkout-title" id="checkout-title">Subscribe</div>
+          <div class="checkout-sub" id="checkout-sub">Complete your payment to activate Bell.</div>
+        </div>
+        <button class="checkout-back" id="checkout-back">← Choose a different plan</button>
+      </div>
+      <div id="stripe-checkout"></div>
+    </div>
+
     <div class="sub-foot">
       Need an Enterprise quote or have questions? <a href="mailto:hello@bell.qa">hello@bell.qa</a>
     </div>
   </div>
+
+  <!-- Stripe.js — loaded once, used to mount the embedded checkout -->
+  <script src="https://js.stripe.com/v3/"></script>
 
   <script>
     (async function () {
@@ -249,13 +284,13 @@
         `;
         grid.appendChild(card);
       }
-      // Wire up buttons. Auto-retries on 401 (user_not_provisioned race)
-      // — Clerk's user.created webhook can lag 5-30 sec after sign-up.
+      // Wire up buttons. Auto-retries on 401 (user_not_provisioned race).
+      // On success, mounts embedded Stripe Checkout in-place.
       grid.querySelectorAll('.plan-cta[data-plan]').forEach(btn => {
         const originalLabel = btn.textContent;
         btn.addEventListener('click', async () => {
           btn.disabled = true;
-          btn.textContent = 'Opening Stripe…';
+          btn.textContent = 'Preparing checkout…';
 
           const tryCheckout = async () => {
             const r = await authedFetch('/api/billing/checkout', {
@@ -270,8 +305,9 @@
           let retried = 0;
           while (retried < 6) {
             result = await tryCheckout();
-            if (result.ok && result.data.url) {
-              window.location.href = result.data.url;
+            if (result.ok && result.data.client_secret) {
+              // Switch to embedded checkout view
+              await mountStripeCheckout(plans, btn.dataset.plan, result.data.client_secret);
               return;
             }
             // 401 → likely user_not_provisioned race; retry with backoff
@@ -281,11 +317,9 @@
               await new Promise(r => setTimeout(r, 2000));
               continue;
             }
-            // Any other error — stop retrying
             break;
           }
 
-          // Show whatever the server said, with as much context as possible
           btn.disabled = false;
           const d = result?.data || {};
           const parts = [d.error || 'unknown'];
@@ -293,12 +327,65 @@
           if (d.detail) parts.push(`— ${d.detail}`);
           if (d.hint)   parts.push(`— ${d.hint}`);
           btn.textContent = 'Checkout failed: ' + parts.join(' ');
-          // Also log the full payload to console for debugging
           console.error('[bdi] checkout failed', result);
-          // Restore the original label after 8 seconds so user can retry
           setTimeout(() => { btn.textContent = originalLabel; }, 8000);
         });
       });
+    }
+
+    // ---------------------------------------------------------------------
+    // Embedded Stripe Checkout — mounts inside #stripe-checkout
+    // ---------------------------------------------------------------------
+    let _stripeInstance = null;
+    let _activeCheckout = null;
+
+    async function mountStripeCheckout(plans, planId, clientSecret) {
+      // Need Stripe publishable key — fetched once from /api/auth/mode
+      let modeData;
+      try {
+        const r = await fetch('/api/auth/mode');
+        modeData = await r.json();
+      } catch {
+        alert('Could not reach the server.'); return;
+      }
+      if (!modeData.stripe_publishable_key) {
+        alert('Stripe is not configured (STRIPE_PUBLISHABLE_KEY missing).'); return;
+      }
+      if (!window.Stripe) {
+        alert('Stripe.js failed to load. Refresh and try again.'); return;
+      }
+
+      const plan = plans.find(p => p.id === planId);
+      if (!plan) { alert('Plan not found.'); return; }
+
+      // Hide plan grid, show checkout section
+      document.getElementById('plan-grid').style.display = 'none';
+      document.getElementById('checkout-section').style.display = 'block';
+      document.getElementById('checkout-title').textContent =
+        `Subscribe to ${plan.name} — QAR ${new Intl.NumberFormat('en-US').format(plan.price_qar)}/${plan.interval}`;
+      document.getElementById('checkout-sub').textContent =
+        `Your payment is processed securely by Stripe. You stay on Bell throughout.`;
+
+      // Tear down any prior checkout instance
+      if (_activeCheckout) { try { _activeCheckout.destroy(); } catch {} _activeCheckout = null; }
+
+      _stripeInstance = _stripeInstance || window.Stripe(modeData.stripe_publishable_key);
+      _activeCheckout = await _stripeInstance.initEmbeddedCheckout({
+        fetchClientSecret: async () => clientSecret,
+      });
+      _activeCheckout.mount('#stripe-checkout');
+
+      // Wire "Choose a different plan" back-button
+      document.getElementById('checkout-back').onclick = () => {
+        if (_activeCheckout) { try { _activeCheckout.destroy(); } catch {} _activeCheckout = null; }
+        document.getElementById('plan-grid').style.display = '';
+        document.getElementById('checkout-section').style.display = 'none';
+        // Re-enable all subscribe buttons
+        document.querySelectorAll('.plan-cta[data-plan]').forEach(b => {
+          b.disabled = false;
+          b.textContent = `Subscribe — QAR ${new Intl.NumberFormat('en-US').format(plans.find(p => p.id === b.dataset.plan).price_qar)}/mo`;
+        });
+      };
     }
   </script>
 </body>

@@ -51,6 +51,8 @@ export function getModeInfo() {
     auth_required: MODE !== 'local-admin',
     clerk_configured: !!CLERK_SECRET,
     publishable_key: CLERK_PUBLISHABLE,
+    // Browser-safe Stripe publishable key — needed for Stripe.js
+    stripe_publishable_key: process.env.STRIPE_PUBLISHABLE_KEY || null,
   };
 }
 
