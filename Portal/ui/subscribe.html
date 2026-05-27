@@ -288,13 +288,15 @@
           // Show whatever the server said, with as much context as possible
           btn.disabled = false;
           const d = result?.data || {};
-          const detail = d.reason ? ` (${d.reason})` : '';
-          const hint   = d.hint   ? ` — ${d.hint}` : '';
-          btn.textContent = `Checkout failed: ${d.error || 'unknown'}${detail}${hint}`;
+          const parts = [d.error || 'unknown'];
+          if (d.reason) parts.push(`(${d.reason})`);
+          if (d.detail) parts.push(`— ${d.detail}`);
+          if (d.hint)   parts.push(`— ${d.hint}`);
+          btn.textContent = 'Checkout failed: ' + parts.join(' ');
           // Also log the full payload to console for debugging
           console.error('[bdi] checkout failed', result);
-          // Restore the original label after 6 seconds so user can retry
-          setTimeout(() => { btn.textContent = originalLabel; }, 6000);
+          // Restore the original label after 8 seconds so user can retry
+          setTimeout(() => { btn.textContent = originalLabel; }, 8000);
         });
       });
     }
