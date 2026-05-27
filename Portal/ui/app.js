@@ -212,7 +212,7 @@ async function bootstrap() {
   };
 
   // 5. Fetch our DB-side user + tenant. May return 401 'user_not_provisioned'
-  //    briefly between sign-up and webhook delivery; retry once.
+  //    briefly between sign-up and webhook delivery; retry a few times.
   let me;
   for (let attempt = 0; attempt < 5; attempt++) {
     try {
@@ -224,6 +224,22 @@ async function bootstrap() {
         return;
       }
       await new Promise(r => setTimeout(r, 1500));
+    }
+  }
+
+  // 6. Subscription gate: non-platform_admin users with no active sub get
+  //    bounced to /subscribe. Bell has no free tier.
+  if (me.user.role !== 'platform_admin') {
+    try {
+      const sub = await api.billingSubscription();
+      if (!sub.is_active) {
+        window.location.replace('/subscribe');
+        return;
+      }
+    } catch {
+      // If subscription endpoint fails, default to /subscribe (fail safe)
+      window.location.replace('/subscribe');
+      return;
     }
   }
 

@@ -76,7 +76,8 @@
           await window.Clerk.load();
           if (window.Clerk.user) { window.location.replace('/'); return; }
           window.Clerk.mountSignUp(document.getElementById('clerk-sign-up'), {
-            afterSignUpUrl: '/',
+            // After sign-up, user MUST subscribe — Bell has no free tier.
+            afterSignUpUrl: '/subscribe',
             signInUrl: '/sign-in',
           });
         } catch (err) {

@@ -123,4 +123,10 @@ export const api = {
   openDataSyncCatalog:    () => request('/api/open-data/sync/catalog', { method: 'POST', body: '{}' }),
   openDataSyncRecords:    () => request('/api/open-data/sync/records', { method: 'POST', body: '{}' }),
   openDataSyncOne:        (id) => request('/api/open-data/sync/records/' + encodeURIComponent(id), { method: 'POST', body: '{}' }),
+
+  // Billing (Stripe-backed)
+  billingPlans:           () => request('/api/billing/plans'),
+  billingSubscription:    () => request('/api/billing/subscription'),
+  billingCheckout:        (plan_id) => request('/api/billing/checkout', { method: 'POST', body: JSON.stringify({ plan_id }) }),
+  billingPortal:          () => request('/api/billing/portal', { method: 'POST', body: '{}' }),
 };

@@ -185,3 +185,41 @@ export function requireRole(...allowedRoles) {
  * Use for "any signed-in user with write permission".
  */
 export const requireWriter = requireRole('platform_admin', 'owner', 'admin', 'lead', 'member');
+
+/**
+ * Middleware: require the tenant to have an active subscription.
+ *
+ * platform_admin users (Bell.qa staff) and the internal tenant_id=1 bypass
+ * this check — they don't need to subscribe to use their own product.
+ *
+ * Apply to product feature routes (companies, people, research, etc.).
+ * Don't apply to /api/auth/* or /api/billing/* — users must be able to
+ * sign in and reach the billing UI even without an active sub.
+ *
+ * On failure: 402 (Payment Required) with reason.
+ */
+export async function requireActiveSubscription(req, res, next) {
+  if (!req.user) {
+    return res.status(500).json({ error: 'server_error', reason: 'requireActiveSubscription_called_without_requireAuth' });
+  }
+  // Bell.qa staff bypass
+  if (req.user.role === 'platform_admin') return next();
+  // The internal tenant bypasses too (used in local-admin mode)
+  if (req.tenant?.id === 1) return next();
+
+  // Look up live subscription status from DB
+  const r = await query(`
+    SELECT subscription_status, plan_expires_at FROM tenants WHERE id = $1
+  `, [req.tenant.id]);
+  const t = r.rows[0];
+  const isActive = t && ['active', 'trialing'].includes(t.subscription_status);
+
+  if (!isActive) {
+    return res.status(402).json({
+      error: 'subscription_required',
+      reason: t?.subscription_status || 'no_subscription',
+      hint: 'Subscribe at /subscribe to access this resource.',
+    });
+  }
+  next();
+}

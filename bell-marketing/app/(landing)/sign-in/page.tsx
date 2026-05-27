@@ -1,20 +1,16 @@
-import type { Metadata } from 'next';
-import { ComingSoon } from '@/components/coming-soon';
+import { redirect } from 'next/navigation';
 
-export const metadata: Metadata = {
+// /sign-in — the marketing site doesn't host the auth UI. The actual
+// sign-in page lives at app.bell.qa/sign-in (Clerk). Visitors get bounced
+// there immediately. Done as a server-side 307 redirect so search engines
+// don't index this URL and the redirect is fast.
+export const metadata = {
   title: 'Sign In',
-  description: 'Sign in to the Bell.qa user portal.',
   robots: { index: false, follow: false },
 };
 
+const APP_URL = process.env.NEXT_PUBLIC_APP_URL || 'https://app.bell.qa';
+
 export default function SignInPage() {
-  // The actual user portal lives at app.bell.qa (future). This page is the
-  // marketing-site placeholder so the header's Sign In CTA always lands
-  // somewhere useful until that subdomain is live.
-  return (
-    <ComingSoon
-      title="Sign In coming soon"
-      description="The Bell.qa user portal is launching shortly at app.bell.qa. Until then, request access and we'll be in touch as soon as your account is ready."
-    />
-  );
+  redirect(`${APP_URL}/sign-in`);
 }
