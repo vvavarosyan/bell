@@ -249,27 +249,52 @@
         `;
         grid.appendChild(card);
       }
-      // Wire up buttons
+      // Wire up buttons. Auto-retries on 401 (user_not_provisioned race)
+      // — Clerk's user.created webhook can lag 5-30 sec after sign-up.
       grid.querySelectorAll('.plan-cta[data-plan]').forEach(btn => {
+        const originalLabel = btn.textContent;
         btn.addEventListener('click', async () => {
           btn.disabled = true;
           btn.textContent = 'Opening Stripe…';
-          try {
+
+          const tryCheckout = async () => {
             const r = await authedFetch('/api/billing/checkout', {
               method: 'POST',
               body: JSON.stringify({ plan_id: btn.dataset.plan }),
             });
-            const data = await r.json();
-            if (data.url) {
-              window.location.href = data.url;
-            } else {
-              btn.disabled = false;
-              btn.textContent = 'Could not open checkout: ' + (data.message || data.error);
+            const data = await r.json().catch(() => ({}));
+            return { ok: r.ok, status: r.status, data };
+          };
+
+          let result;
+          let retried = 0;
+          while (retried < 6) {
+            result = await tryCheckout();
+            if (result.ok && result.data.url) {
+              window.location.href = result.data.url;
+              return;
             }
-          } catch (err) {
-            btn.disabled = false;
-            btn.textContent = 'Error: ' + err.message;
+            // 401 → likely user_not_provisioned race; retry with backoff
+            if (result.status === 401) {
+              retried++;
+              btn.textContent = `Waiting for account setup… (${retried}/6)`;
+              await new Promise(r => setTimeout(r, 2000));
+              continue;
+            }
+            // Any other error — stop retrying
+            break;
           }
+
+          // Show whatever the server said, with as much context as possible
+          btn.disabled = false;
+          const d = result?.data || {};
+          const detail = d.reason ? ` (${d.reason})` : '';
+          const hint   = d.hint   ? ` — ${d.hint}` : '';
+          btn.textContent = `Checkout failed: ${d.error || 'unknown'}${detail}${hint}`;
+          // Also log the full payload to console for debugging
+          console.error('[bdi] checkout failed', result);
+          // Restore the original label after 6 seconds so user can retry
+          setTimeout(() => { btn.textContent = originalLabel; }, 6000);
         });
       });
     }
