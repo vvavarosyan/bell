@@ -241,16 +241,47 @@ async function lazyProvisionUser(clerkUserId) {
   const isPlatformAdmin = platformAdmins.includes(primaryEmail.toLowerCase());
   const role = isPlatformAdmin ? 'platform_admin' : 'owner';
 
-  // 3. Create personal tenant + user row
+  // 3. Provision atomically. Three possible cases:
+  //    (a) Already exists with this clerk_user_id → webhook beat us, do nothing
+  //    (b) Already exists with this email but different clerk_user_id →
+  //        RELINK that row to the new Clerk account (keeps their tenant +
+  //        credits). Common when users delete & re-create their Clerk account.
+  //    (c) Brand new → create tenant + user row
   await withTransaction(async (client) => {
-    // Double-check inside the txn — race with webhook firing concurrently
-    const existing = await client.query(
+    // (a) Same clerk_user_id?
+    const byClerk = await client.query(
       `SELECT id FROM users WHERE clerk_user_id = $1 LIMIT 1`,
       [clerkUserId]
     );
-    if (existing.rows.length) return;   // webhook beat us
+    if (byClerk.rows.length) return;
 
-    // Unique slug
+    // (b) Same email, different clerk_user_id? Relink.
+    const byEmail = await client.query(
+      `SELECT id, tenant_id, clerk_user_id FROM users WHERE email = $1 LIMIT 1`,
+      [primaryEmail.toLowerCase()]
+    );
+    if (byEmail.rows.length) {
+      const oldClerkId = byEmail.rows[0].clerk_user_id;
+      await client.query(`
+        UPDATE users
+           SET clerk_user_id = $2,
+               full_name     = COALESCE(NULLIF($3, ''), full_name),
+               first_name    = $4,
+               last_name     = $5,
+               avatar_url    = COALESCE($6, avatar_url),
+               is_active     = true,
+               updated_at    = now()
+         WHERE id = $1
+      `, [
+        byEmail.rows[0].id, clerkUserId,
+        fullName, firstName || null, lastName || null,
+        clerkUser.imageUrl || null,
+      ]);
+      console.log(`[auth] LAZY-relinked ${primaryEmail} from clerk:${oldClerkId} → clerk:${clerkUserId} (existing tenant_id=${byEmail.rows[0].tenant_id})`);
+      return;
+    }
+
+    // (c) Brand new user — create personal tenant + user row
     const slugBase = slugify(fullName) || slugify(primaryEmail.split('@')[0]) || 'workspace';
     let slug = slugBase, i = 0;
     while (true) {
@@ -270,14 +301,13 @@ async function lazyProvisionUser(clerkUserId) {
         tenant_id, clerk_user_id, email, full_name, first_name, last_name,
         avatar_url, role, joined_at
       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, now())
-      ON CONFLICT (clerk_user_id) DO NOTHING
     `, [
       tenantId, clerkUserId, primaryEmail.toLowerCase(),
       fullName, firstName || null, lastName || null,
       clerkUser.imageUrl || null,
       role,
     ]);
-    console.log(`[auth] LAZY-provisioned user ${primaryEmail} as ${role} of tenant '${tenantName}' (id=${tenantId})`);
+    console.log(`[auth] LAZY-provisioned ${primaryEmail} as ${role} of new tenant '${tenantName}' (id=${tenantId})`);
   });
 }
 
