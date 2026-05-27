@@ -62,14 +62,24 @@ router.get('/subscription', requireAuth, async (req, res, next) => {
 });
 
 // ---------------------------------------------------------------------------
-// POST /api/billing/checkout — create a Stripe EMBEDDED Checkout session
-// Body: { plan_id: 'starter' | 'business' | 'enterprise' }
-// Returns: { client_secret } — used by Stripe.js to mount the embedded form
+// POST /api/billing/checkout — create an INCOMPLETE Stripe Subscription and
+// return the PaymentIntent's client_secret for use with Stripe Elements.
 //
-// The UI mounts the embedded form inside /subscribe so the user never leaves
-// Bell during payment. After a successful payment, Stripe redirects to
-// return_url (which we set to /?stripe=success) and our app bootstrap polls
-// the subscription endpoint until the webhook activates the plan.
+// Body: { plan_id: 'starter' | 'business' | 'enterprise' }
+// Returns: { client_secret, subscription_id, customer_id }
+//
+// Client-side flow:
+//   1. POST here with plan_id → get client_secret
+//   2. Mount Stripe Payment Element with that client_secret
+//   3. User fills card details inside the styled Element
+//   4. stripe.confirmPayment() processes the payment
+//   5. Stripe redirects to return_url (/?stripe=success)
+//   6. Webhook fires invoice.payment_succeeded → sub.status flips to active
+//
+// Why this shape (not Checkout Sessions): gives us full control over the
+// payment page layout. The form, plan selector, order summary, and any
+// custom fields all live in our own page; Stripe only owns the secure card
+// input field.
 // ---------------------------------------------------------------------------
 router.post('/checkout', requireAuth, async (req, res, next) => {
   try {
@@ -89,35 +99,36 @@ router.post('/checkout', requireAuth, async (req, res, next) => {
     // Resolve or create the Stripe customer for this tenant
     const customerId = await getOrCreateStripeCustomer(req.tenant, req.user);
 
-    const origin = req.headers.origin
-      || `https://${req.hostname}`
-      || `http://${req.headers.host}`;
-    // Embedded checkout uses ONE return_url for both success + cancel.
-    // We include the session_id placeholder so the app bootstrap can verify
-    // the session if needed.
-    const returnUrl = `${origin}/?stripe=success&session_id={CHECKOUT_SESSION_ID}`;
-
-    const session = await stripe().checkout.sessions.create({
-      ui_mode: 'embedded',
-      mode: 'subscription',
+    // Create an incomplete subscription. The PaymentIntent on the latest
+    // invoice will be confirmed client-side once the user enters card data.
+    const subscription = await stripe().subscriptions.create({
       customer: customerId,
-      line_items: [{ price: priceId, quantity: 1 }],
-      return_url: returnUrl,
-      subscription_data: {
-        metadata: {
-          bdi_tenant_id: String(req.tenant.id),
-          bdi_user_id:   String(req.user.id),
-          bdi_plan_id:   plan.id,
-        },
+      items: [{ price: priceId }],
+      payment_behavior: 'default_incomplete',
+      payment_settings: {
+        save_default_payment_method: 'on_subscription',
+        payment_method_types: ['card'],
       },
-      payment_method_collection: 'always',
-      allow_promotion_codes: true,
-      automatic_tax: { enabled: false },
+      expand: ['latest_invoice.payment_intent'],
+      metadata: {
+        bdi_tenant_id: String(req.tenant.id),
+        bdi_user_id:   String(req.user.id),
+        bdi_plan_id:   plan.id,
+      },
     });
 
+    const paymentIntent = subscription.latest_invoice?.payment_intent;
+    if (!paymentIntent?.client_secret) {
+      return res.status(500).json({
+        error: 'stripe_setup_failed',
+        detail: 'Could not obtain PaymentIntent client_secret from new subscription.',
+      });
+    }
+
     res.json({
-      client_secret: session.client_secret,
-      session_id:    session.id,
+      client_secret:   paymentIntent.client_secret,
+      subscription_id: subscription.id,
+      customer_id:     customerId,
     });
   } catch (err) {
     if (err.message?.includes('STRIPE_SECRET_KEY')) {

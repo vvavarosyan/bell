@@ -10,383 +10,613 @@
       margin: 0;
       min-height: 100vh;
       background:
-        radial-gradient(ellipse 70% 50% at 50% 0%, rgba(91,140,255,0.18) 0%, transparent 65%),
+        radial-gradient(ellipse 80% 60% at 50% 0%, rgba(91,140,255,0.12) 0%, transparent 65%),
         var(--bg);
-      padding: 40px 20px;
+      padding: 28px 20px 60px;
+      color: var(--text);
     }
-    .sub-wrap { max-width: 1100px; margin: 0 auto; }
-    .sub-brand { display: flex; align-items: center; gap: 10px; margin-bottom: 24px; }
-    .sub-brand-mark { width: 36px; height: 36px; border-radius: 8px;
+    .wrap { max-width: 1080px; margin: 0 auto; }
+
+    /* Top bar */
+    .topbar {
+      display: flex; align-items: center; justify-content: space-between;
+      margin-bottom: 36px;
+    }
+    .brand { display: inline-flex; align-items: center; gap: 10px; }
+    .brand-mark {
+      width: 32px; height: 32px; border-radius: 8px;
       background: linear-gradient(135deg, rgb(91 140 255) 0%, rgb(165 195 255) 100%);
       display: flex; align-items: center; justify-content: center;
-      color: white; font-weight: 700; font-size: 13px; letter-spacing: 0.06em; }
-    .sub-brand-text { color: var(--text); font-weight: 600; font-size: 14px; }
-    .sub-header { text-align: center; margin: 24px 0 36px; }
-    .sub-eyebrow { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.14em;
-      color: var(--text-dim); font-weight: 700; margin-bottom: 12px; }
-    .sub-title { font-size: 28px; font-weight: 600; color: var(--text); margin: 0 0 8px; }
-    .sub-subtitle { font-size: 14px; color: var(--text-muted); max-width: 560px; margin: 0 auto; line-height: 1.6; }
-    .plan-grid { display: grid; gap: 16px; grid-template-columns: repeat(3, 1fr); margin-bottom: 36px; }
-    @media (max-width: 880px) { .plan-grid { grid-template-columns: 1fr; } }
-    .plan-card {
+      color: white; font-weight: 700; font-size: 11px; letter-spacing: 0.06em;
+    }
+    .brand-text { color: var(--text); font-weight: 600; font-size: 13.5px; }
+    .topbar-user {
+      font-size: 11.5px; color: var(--text-muted);
+      display: flex; align-items: center; gap: 8px;
+    }
+    .topbar-user button {
+      background: transparent; border: 1px solid var(--border);
+      color: var(--text-muted); padding: 5px 10px; border-radius: 6px;
+      font-size: 11px; cursor: pointer;
+    }
+
+    /* Page header */
+    .pg-eyebrow {
+      font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.14em;
+      color: var(--text-dim); font-weight: 700; margin-bottom: 10px;
+    }
+    .pg-title { font-size: 26px; font-weight: 600; color: var(--text); margin: 0 0 8px; line-height: 1.25; }
+    .pg-sub { font-size: 13px; color: var(--text-muted); max-width: 580px; line-height: 1.6; margin: 0 0 28px; }
+
+    /* Banner (errors / status messages) */
+    .banner {
+      padding: 12px 14px; border-radius: 8px; margin-bottom: 20px;
+      font-size: 12.5px; line-height: 1.55;
+    }
+    .banner.err  { background: rgba(232,142,168,0.08); border: 1px solid rgba(232,142,168,0.32); color: rgb(232 142 168); }
+    .banner.info { background: rgba(91,140,255,0.06); border: 1px solid rgba(91,140,255,0.32); color: var(--accent-bright); }
+
+    /* Two-column layout: plan picker + payment on left, order summary on right */
+    .grid {
+      display: grid; gap: 22px;
+      grid-template-columns: 1fr 360px;
+    }
+    @media (max-width: 880px) { .grid { grid-template-columns: 1fr; } }
+
+    /* Plan radio cards */
+    .section {
       background: linear-gradient(180deg, rgba(19,24,41,.94) 0%, rgba(13,18,35,.94) 100%);
       border: 1px solid var(--border);
-      border-radius: 16px;
-      padding: 24px;
-      display: flex; flex-direction: column;
-      position: relative;
+      border-radius: 14px;
+      padding: 18px 20px;
+      margin-bottom: 16px;
     }
-    .plan-card.featured {
-      border-color: rgba(91,140,255,0.45);
-      box-shadow: 0 14px 36px -16px rgba(91,140,255,0.35);
+    .section-title {
+      font-size: 11px; text-transform: uppercase; letter-spacing: 0.1em;
+      color: var(--text-dim); font-weight: 700; margin-bottom: 14px;
     }
-    .plan-badge {
-      position: absolute; top: -10px; right: 20px;
-      background: var(--accent); color: white;
-      font-size: 9.5px; font-weight: 700; padding: 4px 10px;
-      border-radius: 999px; letter-spacing: 0.08em; text-transform: uppercase;
-    }
-    .plan-name { font-size: 13px; font-weight: 700; color: var(--accent-bright);
-      text-transform: uppercase; letter-spacing: 0.08em; margin-bottom: 8px; }
-    .plan-price { font-size: 32px; font-weight: 700; color: var(--text); margin-bottom: 4px; }
-    .plan-price .currency { font-size: 14px; font-weight: 500; color: var(--text-muted); margin-right: 6px; }
-    .plan-price .interval { font-size: 13px; font-weight: 400; color: var(--text-muted); margin-left: 4px; }
-    .plan-tagline { font-size: 12.5px; color: var(--text-muted); line-height: 1.5; margin-bottom: 20px; }
-    .plan-features { list-style: none; padding: 0; margin: 0 0 24px; flex: 1; }
-    .plan-features li { font-size: 12.5px; color: var(--text); padding: 6px 0; padding-left: 22px;
-      position: relative; line-height: 1.5; }
-    .plan-features li::before {
-      content: '✓'; color: var(--accent-bright); position: absolute; left: 0; top: 6px;
-      font-weight: 700;
-    }
-    .plan-cta {
-      width: 100%;
-      background: var(--accent); border: 1px solid var(--accent);
-      color: white; padding: 12px; border-radius: 10px;
-      font-size: 13px; font-weight: 600; cursor: pointer;
-      transition: all .15s ease;
-    }
-    .plan-cta:hover { filter: brightness(1.1); }
-    .plan-cta:disabled { background: rgba(91,140,255,0.3); border-color: var(--border); cursor: not-allowed; }
-    .plan-cta.secondary { background: transparent; border: 1px solid var(--border); color: var(--text-muted); }
-    .sub-foot {
-      text-align: center; color: var(--text-dim); font-size: 11.5px; margin-top: 24px;
-    }
-    .sub-foot a { color: var(--accent-bright); text-decoration: none; }
-    .sub-banner {
-      max-width: 720px; margin: 0 auto 20px;
-      padding: 12px 16px;
-      background: rgba(232,142,168,0.08); border: 1px solid rgba(232,142,168,0.32);
-      border-radius: 10px;
-      font-size: 12.5px; color: rgb(232 142 168); text-align: center;
-    }
-    .sub-banner.info { background: rgba(91,140,255,0.06); border-color: rgba(91,140,255,0.32);
-      color: var(--accent-bright); }
-    .sub-loading { text-align: center; color: var(--text-dim); padding: 60px 0; font-size: 13px; }
-    .sub-user { float: right; font-size: 12px; color: var(--text-muted); }
-    .sub-user button { background: transparent; border: 1px solid var(--border);
-      color: var(--text-muted); padding: 5px 10px; border-radius: 6px; font-size: 11px;
-      cursor: pointer; margin-left: 8px; }
-    /* Embedded Stripe Checkout panel */
-    .checkout-section {
-      max-width: 720px; margin: 0 auto 28px;
-      background: linear-gradient(180deg, rgba(19,24,41,.96) 0%, rgba(13,18,35,.96) 100%);
+    .plans-stack { display: flex; flex-direction: column; gap: 8px; }
+    .plan-row {
+      display: grid; grid-template-columns: 20px 1fr auto; gap: 14px;
+      padding: 14px 14px;
+      background: rgba(255,255,255,0.015);
       border: 1px solid var(--border);
-      border-radius: 16px;
-      padding: 22px;
+      border-radius: 10px;
+      cursor: pointer;
+      align-items: center;
+      transition: border-color .12s, background .12s;
     }
-    .checkout-header {
-      display: flex; align-items: center; justify-content: space-between;
-      margin-bottom: 18px; gap: 12px;
+    .plan-row:hover { background: rgba(91,140,255,0.04); border-color: rgba(91,140,255,0.25); }
+    .plan-row.selected {
+      background: rgba(91,140,255,0.07);
+      border-color: rgba(91,140,255,0.55);
+      box-shadow: 0 0 0 1px rgba(91,140,255,0.35) inset;
     }
-    .checkout-title { font-size: 16px; font-weight: 600; color: var(--text); }
-    .checkout-sub { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
-    .checkout-back {
-      background: transparent; border: 1px solid var(--border);
-      color: var(--text-muted); padding: 7px 14px; border-radius: 7px;
-      font-size: 12px; cursor: pointer;
+    .plan-row[disabled] { opacity: 0.5; cursor: not-allowed; }
+    .plan-radio {
+      width: 16px; height: 16px; border-radius: 50%;
+      border: 1.5px solid var(--border);
+      position: relative; flex-shrink: 0;
     }
-    #stripe-checkout { min-height: 480px; }
+    .plan-row.selected .plan-radio {
+      border-color: var(--accent-bright);
+      background: var(--accent-bright);
+      box-shadow: inset 0 0 0 3px #0f1422;
+    }
+    .plan-name { font-size: 13.5px; font-weight: 600; color: var(--text); margin-bottom: 2px; }
+    .plan-name .pill {
+      display: inline-block; margin-left: 8px;
+      background: var(--accent); color: white;
+      font-size: 9px; font-weight: 700;
+      letter-spacing: 0.08em; text-transform: uppercase;
+      padding: 2px 7px; border-radius: 999px;
+      vertical-align: 2px;
+    }
+    .plan-tagline { font-size: 11.5px; color: var(--text-muted); line-height: 1.5; }
+    .plan-price { text-align: right; }
+    .plan-price-amount { font-size: 16px; font-weight: 700; color: var(--text); }
+    .plan-price-unit { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
+
+    /* Order summary */
+    .summary { position: sticky; top: 28px; }
+    .summary-card {
+      background: linear-gradient(180deg, rgba(19,24,41,.94) 0%, rgba(13,18,35,.94) 100%);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 18px 20px;
+    }
+    .summary-line { display: flex; justify-content: space-between; align-items: baseline; padding: 6px 0; font-size: 12.5px; color: var(--text-muted); }
+    .summary-line strong { color: var(--text); font-weight: 600; }
+    .summary-divider { height: 1px; background: rgba(255,255,255,0.06); margin: 10px 0; }
+    .summary-feature { font-size: 11.5px; color: var(--text-muted); padding: 4px 0; padding-left: 18px; position: relative; line-height: 1.5; }
+    .summary-feature::before {
+      content: '✓'; color: var(--accent-bright); position: absolute; left: 0; top: 4px; font-weight: 700;
+    }
+    .summary-total {
+      display: flex; justify-content: space-between; align-items: baseline;
+      padding: 14px 0 0; font-size: 13px;
+    }
+    .summary-total-label { color: var(--text-muted); }
+    .summary-total-value { color: var(--text); font-size: 18px; font-weight: 700; }
+    .summary-foot { margin-top: 14px; font-size: 10.5px; color: var(--text-dim); line-height: 1.55; }
+
+    /* Stripe Payment Element container */
+    .pay-elem-wrap {
+      background: rgba(255,255,255,0.018);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 14px;
+      margin-bottom: 16px;
+      min-height: 80px;
+    }
+    .pay-elem-loading {
+      color: var(--text-dim); font-size: 12px; text-align: center; padding: 20px 0;
+    }
+
+    /* Custom billing fields */
+    .field-grid { display: grid; gap: 12px; grid-template-columns: 1fr 1fr; }
+    .field-grid .full { grid-column: 1 / -1; }
+    .field label {
+      display: block; font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.08em;
+      color: var(--text-dim); font-weight: 700; margin-bottom: 6px;
+    }
+    .field input {
+      width: 100%;
+      padding: 10px 12px;
+      background: rgba(255,255,255,0.03);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--text);
+      font-size: 13px;
+      font-family: inherit;
+    }
+    .field input:focus {
+      outline: none;
+      border-color: rgba(91,140,255,0.5);
+      box-shadow: 0 0 0 3px rgba(91,140,255,0.12);
+    }
+
+    /* Submit button */
+    .submit {
+      width: 100%;
+      padding: 14px;
+      background: var(--accent);
+      border: 1px solid var(--accent);
+      color: white;
+      font-size: 14px; font-weight: 600;
+      border-radius: 10px;
+      cursor: pointer;
+      margin-top: 18px;
+      transition: filter .12s, transform .12s;
+      box-shadow: 0 8px 22px -8px rgba(91,140,255,0.5);
+    }
+    .submit:hover:not(:disabled) { filter: brightness(1.1); }
+    .submit:active:not(:disabled) { transform: translateY(1px); }
+    .submit:disabled {
+      background: rgba(91,140,255,0.3);
+      border-color: var(--border);
+      cursor: not-allowed;
+      box-shadow: none;
+    }
+    .submit-spinner {
+      display: inline-block; width: 14px; height: 14px;
+      border: 2px solid rgba(255,255,255,0.3); border-top-color: white;
+      border-radius: 50%; animation: spin 0.6s linear infinite;
+      vertical-align: -2px; margin-right: 8px;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    .secure-line {
+      text-align: center; margin-top: 14px; font-size: 10.5px; color: var(--text-dim);
+    }
+    .secure-line strong { color: var(--text-muted); }
   </style>
 </head>
 <body>
-  <div class="sub-wrap">
-    <div class="sub-brand">
-      <div class="sub-brand-mark">BDI</div>
-      <div class="sub-brand-text">Bell Data Intelligence</div>
-      <span id="sub-user-info" class="sub-user"></span>
-    </div>
-
-    <div id="sub-banner"></div>
-
-    <div class="sub-header">
-      <div class="sub-eyebrow">Choose your plan</div>
-      <h1 class="sub-title">Subscribe to access Bell</h1>
-      <p class="sub-subtitle">
-        Bell has no free trial — pick a plan to activate your workspace.
-        Credits roll over each cycle. Cancel anytime; data stays frozen, not deleted.
-      </p>
-    </div>
-
-    <div id="plan-grid" class="plan-grid">
-      <div class="sub-loading" style="grid-column: 1 / -1;">Loading plans…</div>
-    </div>
-
-    <!-- Embedded Stripe Checkout — appears in place of plan grid after selection -->
-    <div id="checkout-section" class="checkout-section" style="display:none;">
-      <div class="checkout-header">
-        <div>
-          <div class="checkout-title" id="checkout-title">Subscribe</div>
-          <div class="checkout-sub" id="checkout-sub">Complete your payment to activate Bell.</div>
-        </div>
-        <button class="checkout-back" id="checkout-back">← Choose a different plan</button>
+  <div class="wrap">
+    <!-- Top bar -->
+    <div class="topbar">
+      <div class="brand">
+        <div class="brand-mark">BDI</div>
+        <div class="brand-text">Bell Data Intelligence</div>
       </div>
-      <div id="stripe-checkout"></div>
+      <div class="topbar-user" id="topbar-user"></div>
     </div>
 
-    <div class="sub-foot">
-      Need an Enterprise quote or have questions? <a href="mailto:hello@bell.qa">hello@bell.qa</a>
-    </div>
+    <!-- Header -->
+    <div class="pg-eyebrow">Activate your workspace</div>
+    <h1 class="pg-title">Subscribe to Bell</h1>
+    <p class="pg-sub">Pick your plan, fill payment details, and your workspace activates instantly. Bell has no free tier — credits roll over each cycle.</p>
+
+    <div id="banner-slot"></div>
+
+    <div id="loading" class="banner info" style="text-align:center">Loading your account…</div>
+
+    <form id="pay-form" style="display:none">
+      <div class="grid">
+        <!-- LEFT: plan picker + payment -->
+        <div>
+          <!-- Plan selector -->
+          <div class="section">
+            <div class="section-title">1 — Choose a plan</div>
+            <div class="plans-stack" id="plans-stack"></div>
+          </div>
+
+          <!-- Billing contact -->
+          <div class="section">
+            <div class="section-title">2 — Billing contact</div>
+            <div class="field-grid">
+              <div class="field">
+                <label for="f-fullname">Full name</label>
+                <input id="f-fullname" name="fullname" autocomplete="name" required />
+              </div>
+              <div class="field">
+                <label for="f-company">Company (optional)</label>
+                <input id="f-company" name="company" autocomplete="organization" />
+              </div>
+              <div class="field full">
+                <label for="f-email">Billing email</label>
+                <input id="f-email" name="email" type="email" autocomplete="email" required readonly />
+              </div>
+            </div>
+          </div>
+
+          <!-- Payment (Stripe Elements) -->
+          <div class="section">
+            <div class="section-title">3 — Payment</div>
+            <div class="pay-elem-wrap">
+              <div id="payment-element">
+                <div class="pay-elem-loading">Loading secure payment field…</div>
+              </div>
+            </div>
+            <button type="submit" id="submit-btn" class="submit" disabled>Select a plan to continue</button>
+            <div class="secure-line">
+              🔒 Encrypted by <strong>Stripe</strong> — Bell never sees your card details.
+            </div>
+          </div>
+        </div>
+
+        <!-- RIGHT: order summary -->
+        <div class="summary">
+          <div class="summary-card">
+            <div class="section-title" style="margin-bottom: 10px;">Order summary</div>
+            <div id="summary-content">
+              <div style="color: var(--text-dim); font-size: 12px;">Pick a plan to see your order.</div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </form>
   </div>
 
-  <!-- Stripe.js — loaded once, used to mount the embedded checkout -->
   <script src="https://js.stripe.com/v3/"></script>
-
   <script>
-    (async function () {
-      let mode, me, banner = '';
+  (async function () {
+    // ─── Page state ─────────────────────────────────────────────────────
+    const state = {
+      mode: null,
+      plans: [],
+      selectedPlan: null,
+      stripe: null,
+      elements: null,
+      paymentElement: null,
+      clientSecret: null,
+      subscriptionId: null,
+      user: null,
+    };
 
-      // Read URL params for post-checkout messages
-      const urlParams = new URLSearchParams(window.location.search);
-      if (urlParams.get('stripe') === 'cancelled') {
-        banner = '<div class="sub-banner">Payment cancelled. Pick a plan to continue.</div>';
-      }
+    const $ = (id) => document.getElementById(id);
+    const banner = (msg, kind = 'err') => {
+      $('banner-slot').innerHTML = `<div class="banner ${kind}">${msg}</div>`;
+    };
 
-      try {
-        const r = await fetch('/api/auth/mode');
-        mode = await r.json();
-      } catch {
-        document.getElementById('plan-grid').innerHTML =
-          '<div class="sub-loading" style="grid-column:1/-1;">Could not reach the server. Please refresh.</div>';
-        return;
-      }
+    // ─── Fetch mode + check auth ────────────────────────────────────────
+    try {
+      const r = await fetch('/api/auth/mode');
+      state.mode = await r.json();
+    } catch {
+      $('loading').textContent = 'Could not reach the server. Please refresh.';
+      return;
+    }
+    if (state.mode.mode === 'local-admin' || !state.mode.auth_required) {
+      window.location.replace('/'); return;
+    }
+    if (!state.mode.publishable_key) {
+      $('loading').textContent = 'Sign-in is not configured.'; return;
+    }
+    if (!state.mode.stripe_publishable_key) {
+      $('loading').textContent = 'Payments are not configured (STRIPE_PUBLISHABLE_KEY missing).'; return;
+    }
 
-      // Local-admin: no subscription needed, send to app
-      if (mode.mode === 'local-admin' || !mode.auth_required) {
-        window.location.replace('/');
-        return;
-      }
+    // ─── Load Clerk SDK + verify signed in ──────────────────────────────
+    await new Promise((res, rej) => {
+      const s = document.createElement('script');
+      s.async = true; s.crossOrigin = 'anonymous';
+      s.setAttribute('data-clerk-publishable-key', state.mode.publishable_key);
+      s.src = 'https://cdn.jsdelivr.net/npm/@clerk/clerk-js@5/dist/clerk.browser.js';
+      s.onload = res; s.onerror = rej;
+      document.head.appendChild(s);
+    });
+    try { await window.Clerk.load(); } catch (e) {
+      $('loading').textContent = 'Failed to load auth.'; return;
+    }
+    if (!window.Clerk.user) {
+      window.location.replace('/sign-in?after_url=/subscribe'); return;
+    }
 
-      // Need Clerk for sign-in state + token
-      if (!mode.publishable_key) {
-        document.getElementById('plan-grid').innerHTML =
-          '<div class="sub-loading" style="grid-column:1/-1;">Subscription not configured.</div>';
-        return;
-      }
-
-      await new Promise((resolve, reject) => {
-        const s = document.createElement('script');
-        s.async = true; s.crossOrigin = 'anonymous';
-        s.setAttribute('data-clerk-publishable-key', mode.publishable_key);
-        s.src = 'https://cdn.jsdelivr.net/npm/@clerk/clerk-js@5/dist/clerk.browser.js';
-        s.onload = resolve; s.onerror = reject;
-        document.head.appendChild(s);
+    // ─── Token helper + authed fetch ────────────────────────────────────
+    const getToken = async () => window.Clerk.session ? await window.Clerk.session.getToken() : null;
+    const authedFetch = async (path, opts = {}) => {
+      const token = await getToken();
+      return fetch(path, {
+        ...opts,
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer ' + token,
+          ...(opts.headers || {}),
+        },
       });
-      try { await window.Clerk.load(); } catch (err) {
-        document.getElementById('plan-grid').innerHTML =
-          '<div class="sub-loading" style="grid-column:1/-1;">Failed to load auth: ' + err.message + '</div>';
-        return;
-      }
-      if (!window.Clerk.user) {
-        window.location.replace('/sign-in?after_url=/subscribe');
-        return;
-      }
+    };
 
-      const getToken = async () => window.Clerk.session ? await window.Clerk.session.getToken() : null;
-      const authedFetch = async (path, opts = {}) => {
-        const token = await getToken();
-        return fetch(path, {
-          ...opts,
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': 'Bearer ' + token,
-            ...(opts.headers || {}),
+    // ─── Load /me ───────────────────────────────────────────────────────
+    let me = null;
+    for (let i = 0; i < 5; i++) {
+      try { const r = await authedFetch('/api/auth/me'); me = await r.json(); break; }
+      catch { await new Promise(r => setTimeout(r, 1500)); }
+    }
+    if (!me) {
+      $('loading').textContent = 'Account is still being set up — please refresh in a moment.';
+      return;
+    }
+    state.user = me.user;
+    $('topbar-user').innerHTML =
+      `Signed in as <strong style="color:var(--text)">${me.user.email}</strong>` +
+      ` <button id="signout-btn">Sign out</button>`;
+    $('signout-btn').onclick = () => window.Clerk.signOut().then(() => window.location.replace('/sign-in'));
+    $('f-email').value = me.user.email;
+    $('f-fullname').value = me.user.full_name || '';
+
+    // ─── If sub already active, send to portal ──────────────────────────
+    try {
+      const r = await authedFetch('/api/billing/subscription');
+      const sub = await r.json();
+      if (sub.is_active) { window.location.replace('/'); return; }
+      const params = new URLSearchParams(window.location.search);
+      if (params.get('stripe') === 'cancelled') {
+        banner('Payment cancelled. Pick a plan to continue.', 'err');
+      } else if (sub.subscription_status === 'past_due') {
+        banner('Your subscription is past due. Renew below to restore access.', 'err');
+      } else if (sub.subscription_status === 'canceled') {
+        banner('Your previous subscription was canceled. Subscribe again to unfreeze your data.', 'info');
+      }
+    } catch { /* show subscribe UI anyway */ }
+
+    // ─── Load plans + render selector ───────────────────────────────────
+    const planResp = await fetch('/api/billing/plans');
+    const { plans } = await planResp.json();
+    state.plans = plans;
+    renderPlans();
+
+    // ─── Init Stripe + Payment Element (mounted but waits for client_secret) ─
+    state.stripe = window.Stripe(state.mode.stripe_publishable_key);
+
+    // Hide loading, show form
+    $('loading').style.display = 'none';
+    $('pay-form').style.display = 'block';
+
+    // ─── Form submit → confirm payment ──────────────────────────────────
+    $('pay-form').addEventListener('submit', async (e) => {
+      e.preventDefault();
+      if (!state.elements || !state.clientSecret) {
+        banner('Pick a plan first.');
+        return;
+      }
+      const btn = $('submit-btn');
+      btn.disabled = true;
+      btn.innerHTML = '<span class="submit-spinner"></span>Processing payment…';
+
+      const returnUrl = window.location.origin + '/?stripe=success';
+      const { error } = await state.stripe.confirmPayment({
+        elements: state.elements,
+        confirmParams: {
+          return_url: returnUrl,
+          payment_method_data: {
+            billing_details: {
+              name:  $('f-fullname').value || state.user.full_name || state.user.email,
+              email: state.user.email,
+            },
           },
-        });
-      };
-
-      // Load /me to get user identity + current subscription
-      try {
-        const r1 = await authedFetch('/api/auth/me');
-        const meData = await r1.json();
-        me = meData.user;
-        document.getElementById('sub-user-info').innerHTML =
-          `Signed in as <strong style="color:var(--text)">${me.email}</strong>` +
-          ` <button onclick="window.Clerk.signOut().then(()=>window.location.replace('/sign-in'))">Sign out</button>`;
-      } catch {
-        // Likely user_not_provisioned, retry once after a moment
-        await new Promise(r => setTimeout(r, 1500));
-        try {
-          const r1 = await authedFetch('/api/auth/me');
-          const meData = await r1.json();
-          me = meData.user;
-        } catch {
-          document.getElementById('plan-grid').innerHTML =
-            '<div class="sub-loading" style="grid-column:1/-1;">Account is still being set up — try again in a moment.</div>';
-          return;
-        }
+        },
+      });
+      if (error) {
+        banner(error.message || 'Payment failed. Please try again.');
+        btn.disabled = false;
+        btn.innerHTML = renderSubmitLabel();
       }
+      // If no error, Stripe redirects to return_url and app bootstrap takes over.
+    });
 
-      // If subscription is already active, redirect to app
-      try {
-        const r2 = await authedFetch('/api/billing/subscription');
-        const sub = await r2.json();
-        if (sub.is_active) {
-          window.location.replace('/');
-          return;
-        }
-        if (sub.subscription_status === 'past_due') {
-          banner = '<div class="sub-banner">Your subscription is past due. Renew below to restore access.</div>';
-        } else if (sub.subscription_status === 'canceled') {
-          banner = '<div class="sub-banner info">Your previous subscription was canceled. Subscribe below to unfreeze your data.</div>';
-        }
-      } catch { /* show subscribe UI anyway */ }
-
-      // Load plans + render
-      const planResp = await fetch('/api/billing/plans');
-      const { plans } = await planResp.json();
-      document.getElementById('sub-banner').innerHTML = banner;
-      renderPlans(plans, authedFetch);
-    })();
-
-    function renderPlans(plans, authedFetch) {
-      const grid = document.getElementById('plan-grid');
-      grid.innerHTML = '';
-      for (const p of plans) {
-        const card = document.createElement('div');
-        card.className = 'plan-card' + (p.highlighted ? ' featured' : '');
-        const features = (p.features || []).map(f => `<li>${f}</li>`).join('');
+    // ─── Render helpers ─────────────────────────────────────────────────
+    function renderPlans() {
+      const stack = $('plans-stack');
+      stack.innerHTML = '';
+      for (const p of state.plans) {
+        const row = document.createElement('div');
+        row.className = 'plan-row';
+        if (!p.stripe_price_id) row.setAttribute('disabled', '');
+        row.dataset.planId = p.id;
         const priceFmt = new Intl.NumberFormat('en-US').format(p.price_qar);
-        const notConfigured = !p.stripe_price_id;
-        card.innerHTML = `
-          ${p.highlighted ? '<div class="plan-badge">Most popular</div>' : ''}
-          <div class="plan-name">${p.name}</div>
-          <div class="plan-price">
-            <span class="currency">QAR</span>${priceFmt}<span class="interval">/${p.interval}</span>
+        row.innerHTML = `
+          <div class="plan-radio"></div>
+          <div>
+            <div class="plan-name">${p.name}${p.highlighted ? '<span class="pill">Most popular</span>' : ''}</div>
+            <div class="plan-tagline">${p.tagline}</div>
           </div>
-          <div class="plan-tagline">${p.tagline}</div>
-          <ul class="plan-features">${features}</ul>
-          <button class="plan-cta${p.highlighted ? '' : ' secondary'}"
-                  data-plan="${p.id}"
-                  ${notConfigured ? 'disabled' : ''}>
-            ${notConfigured ? 'Not yet configured' : 'Subscribe — QAR ' + priceFmt + '/mo'}
-          </button>
+          <div class="plan-price">
+            <div class="plan-price-amount">QAR ${priceFmt}</div>
+            <div class="plan-price-unit">per ${p.interval} · ${p.credits.toLocaleString()} credits</div>
+          </div>
         `;
-        grid.appendChild(card);
+        if (p.stripe_price_id) {
+          row.addEventListener('click', () => selectPlan(p.id));
+        }
+        stack.appendChild(row);
       }
-      // Wire up buttons. Auto-retries on 401 (user_not_provisioned race).
-      // On success, mounts embedded Stripe Checkout in-place.
-      grid.querySelectorAll('.plan-cta[data-plan]').forEach(btn => {
-        const originalLabel = btn.textContent;
-        btn.addEventListener('click', async () => {
-          btn.disabled = true;
-          btn.textContent = 'Preparing checkout…';
-
-          const tryCheckout = async () => {
-            const r = await authedFetch('/api/billing/checkout', {
-              method: 'POST',
-              body: JSON.stringify({ plan_id: btn.dataset.plan }),
-            });
-            const data = await r.json().catch(() => ({}));
-            return { ok: r.ok, status: r.status, data };
-          };
-
-          let result;
-          let retried = 0;
-          while (retried < 6) {
-            result = await tryCheckout();
-            if (result.ok && result.data.client_secret) {
-              // Switch to embedded checkout view
-              await mountStripeCheckout(plans, btn.dataset.plan, result.data.client_secret);
-              return;
-            }
-            // 401 → likely user_not_provisioned race; retry with backoff
-            if (result.status === 401) {
-              retried++;
-              btn.textContent = `Waiting for account setup… (${retried}/6)`;
-              await new Promise(r => setTimeout(r, 2000));
-              continue;
-            }
-            break;
-          }
-
-          btn.disabled = false;
-          const d = result?.data || {};
-          const parts = [d.error || 'unknown'];
-          if (d.reason) parts.push(`(${d.reason})`);
-          if (d.detail) parts.push(`— ${d.detail}`);
-          if (d.hint)   parts.push(`— ${d.hint}`);
-          btn.textContent = 'Checkout failed: ' + parts.join(' ');
-          console.error('[bdi] checkout failed', result);
-          setTimeout(() => { btn.textContent = originalLabel; }, 8000);
-        });
-      });
     }
 
-    // ---------------------------------------------------------------------
-    // Embedded Stripe Checkout — mounts inside #stripe-checkout
-    // ---------------------------------------------------------------------
-    let _stripeInstance = null;
-    let _activeCheckout = null;
+    function renderSubmitLabel() {
+      if (!state.selectedPlan) return 'Select a plan to continue';
+      const p = state.selectedPlan;
+      return `Subscribe — QAR ${new Intl.NumberFormat('en-US').format(p.price_qar)}/${p.interval}`;
+    }
 
-    async function mountStripeCheckout(plans, planId, clientSecret) {
-      // Need Stripe publishable key — fetched once from /api/auth/mode
-      let modeData;
-      try {
-        const r = await fetch('/api/auth/mode');
-        modeData = await r.json();
-      } catch {
-        alert('Could not reach the server.'); return;
+    function renderSummary() {
+      const p = state.selectedPlan;
+      if (!p) {
+        $('summary-content').innerHTML = '<div style="color: var(--text-dim); font-size: 12px;">Pick a plan to see your order.</div>';
+        return;
       }
-      if (!modeData.stripe_publishable_key) {
-        alert('Stripe is not configured (STRIPE_PUBLISHABLE_KEY missing).'); return;
-      }
-      if (!window.Stripe) {
-        alert('Stripe.js failed to load. Refresh and try again.'); return;
-      }
+      const priceFmt = new Intl.NumberFormat('en-US').format(p.price_qar);
+      const featureRows = (p.features || []).map(f => `<div class="summary-feature">${f}</div>`).join('');
+      $('summary-content').innerHTML = `
+        <div class="summary-line">
+          <span><strong>${p.name}</strong> plan</span>
+          <strong>QAR ${priceFmt}</strong>
+        </div>
+        <div class="summary-line">
+          <span>Billing cycle</span>
+          <span>Monthly</span>
+        </div>
+        <div class="summary-line">
+          <span>Credits per cycle</span>
+          <span>${p.credits.toLocaleString()}</span>
+        </div>
+        <div class="summary-divider"></div>
+        <div style="font-size: 11px; color: var(--text-dim); margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0.06em; font-weight: 700;">What's included</div>
+        ${featureRows}
+        <div class="summary-divider"></div>
+        <div class="summary-total">
+          <span class="summary-total-label">Total due today</span>
+          <span class="summary-total-value">QAR ${priceFmt}</span>
+        </div>
+        <div class="summary-foot">
+          Renews automatically each ${p.interval}. Cancel anytime; data stays frozen, not deleted, until you re-subscribe.
+        </div>
+      `;
+    }
 
-      const plan = plans.find(p => p.id === planId);
-      if (!plan) { alert('Plan not found.'); return; }
+    // ─── Plan selection → create subscription + mount Stripe Element ─────
+    async function selectPlan(planId) {
+      const p = state.plans.find(x => x.id === planId);
+      if (!p) return;
+      state.selectedPlan = p;
 
-      // Hide plan grid, show checkout section
-      document.getElementById('plan-grid').style.display = 'none';
-      document.getElementById('checkout-section').style.display = 'block';
-      document.getElementById('checkout-title').textContent =
-        `Subscribe to ${plan.name} — QAR ${new Intl.NumberFormat('en-US').format(plan.price_qar)}/${plan.interval}`;
-      document.getElementById('checkout-sub').textContent =
-        `Your payment is processed securely by Stripe. You stay on Bell throughout.`;
-
-      // Tear down any prior checkout instance
-      if (_activeCheckout) { try { _activeCheckout.destroy(); } catch {} _activeCheckout = null; }
-
-      _stripeInstance = _stripeInstance || window.Stripe(modeData.stripe_publishable_key);
-      _activeCheckout = await _stripeInstance.initEmbeddedCheckout({
-        fetchClientSecret: async () => clientSecret,
+      // Highlight in UI
+      document.querySelectorAll('.plan-row').forEach(r => {
+        r.classList.toggle('selected', r.dataset.planId === planId);
       });
-      _activeCheckout.mount('#stripe-checkout');
+      renderSummary();
 
-      // Wire "Choose a different plan" back-button
-      document.getElementById('checkout-back').onclick = () => {
-        if (_activeCheckout) { try { _activeCheckout.destroy(); } catch {} _activeCheckout = null; }
-        document.getElementById('plan-grid').style.display = '';
-        document.getElementById('checkout-section').style.display = 'none';
-        // Re-enable all subscribe buttons
-        document.querySelectorAll('.plan-cta[data-plan]').forEach(b => {
-          b.disabled = false;
-          b.textContent = `Subscribe — QAR ${new Intl.NumberFormat('en-US').format(plans.find(p => p.id === b.dataset.plan).price_qar)}/mo`;
-        });
+      // Tear down previous element if user is switching plans
+      if (state.paymentElement) {
+        try { state.paymentElement.unmount(); state.paymentElement.destroy(); } catch {}
+        state.paymentElement = null;
+        state.elements = null;
+      }
+
+      $('payment-element').innerHTML = '<div class="pay-elem-loading">Loading secure payment field…</div>';
+      $('submit-btn').disabled = true;
+      $('submit-btn').textContent = 'Loading payment…';
+
+      // Create incomplete subscription, get PaymentIntent client_secret
+      let result;
+      for (let attempt = 0; attempt < 5; attempt++) {
+        try {
+          const r = await authedFetch('/api/billing/checkout', {
+            method: 'POST',
+            body: JSON.stringify({ plan_id: planId }),
+          });
+          result = { ok: r.ok, status: r.status, data: await r.json().catch(() => ({})) };
+          if (result.ok && result.data.client_secret) break;
+          if (result.status !== 401) break;          // non-auth error — give up
+        } catch (err) { result = { ok: false, data: { error: err.message } }; }
+        await new Promise(r => setTimeout(r, 1500));
+      }
+
+      if (!result?.ok || !result.data.client_secret) {
+        const d = result?.data || {};
+        banner('Could not initialize payment: ' +
+          [d.error, d.reason, d.detail].filter(Boolean).join(' — '));
+        $('submit-btn').disabled = true;
+        $('submit-btn').textContent = renderSubmitLabel();
+        return;
+      }
+
+      state.clientSecret = result.data.client_secret;
+      state.subscriptionId = result.data.subscription_id;
+
+      // Stripe Appearance — themed to match BDI
+      const appearance = {
+        theme: 'night',
+        labels: 'above',
+        variables: {
+          colorPrimary: '#5b8cff',
+          colorBackground: 'rgba(255,255,255,0.03)',
+          colorText: '#e6e9ef',
+          colorTextSecondary: '#8a93a6',
+          colorTextPlaceholder: '#5a6275',
+          colorDanger: '#e88ea8',
+          fontFamily: 'ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif',
+          fontSizeBase: '14px',
+          fontSizeSm: '12px',
+          borderRadius: '8px',
+          spacingUnit: '4px',
+        },
+        rules: {
+          '.Input': {
+            backgroundColor: 'rgba(255,255,255,0.03)',
+            border: '1px solid #2b3346',
+            color: '#e6e9ef',
+            padding: '10px 12px',
+          },
+          '.Input:focus': {
+            borderColor: 'rgba(91,140,255,0.5)',
+            boxShadow: '0 0 0 3px rgba(91,140,255,0.12)',
+          },
+          '.Label': {
+            color: '#5a6275',
+            fontSize: '10.5px',
+            fontWeight: '700',
+            textTransform: 'uppercase',
+            letterSpacing: '0.08em',
+            marginBottom: '6px',
+          },
+          '.Tab': {
+            backgroundColor: 'rgba(255,255,255,0.02)',
+            border: '1px solid #2b3346',
+          },
+          '.Tab--selected': {
+            borderColor: 'rgba(91,140,255,0.5)',
+            backgroundColor: 'rgba(91,140,255,0.08)',
+          },
+        },
       };
+
+      state.elements = state.stripe.elements({
+        clientSecret: state.clientSecret,
+        appearance,
+        loader: 'auto',
+      });
+      state.paymentElement = state.elements.create('payment', {
+        layout: { type: 'tabs', defaultCollapsed: false },
+      });
+      $('payment-element').innerHTML = '';
+      state.paymentElement.mount('#payment-element');
+
+      $('submit-btn').disabled = false;
+      $('submit-btn').textContent = renderSubmitLabel();
     }
+  })();
   </script>
 </body>
 </html>
