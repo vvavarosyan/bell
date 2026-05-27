@@ -36,18 +36,23 @@ out/
 
 # ─── Bell local-only data (huge + sensitive) ───────────────────────────────
 # The Data/ folder holds raw scraper output (millions of records). Not for git.
-Data/
+# Leading slashes anchor these to the REPO ROOT so they don't accidentally
+# match nested folders with the same name (e.g. Portal/server/config/).
+/Data/
 **/Data/scans/
 **/Data/raw/
 
 # Run logs from local Portal sessions
-Operations/
+/Operations/
 **/Operations/run_logs/
 **/Operations/credits/
 **/Operations/enrichment_queue/
 
 # Local config — API keys go in macOS Keychain, NOT here, but ignore just in case.
-Config/
+# IMPORTANT: leading slash anchors to repo root only. WITHOUT it, the pattern
+# also matched Portal/server/config/ and silently excluded plans.js (the
+# bug we hit on 2026-05-27).
+/Config/
 **/Config/secrets/
 **/Config/local/
 
