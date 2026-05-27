@@ -35,6 +35,7 @@ import researchRouter          from './routes/research.js';
 import { startPoller as startResearchPoller } from './research/poller.js';
 import openDataRouter          from './routes/open_data.js';
 import { startScheduler as startOpenDataScheduler } from './sources/qatar_open_data/scheduler.js';
+import authRouter              from './routes/auth.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname  = path.dirname(__filename);
@@ -73,6 +74,11 @@ console.log(`[bdi] UI_DIR resolved to: ${UI_DIR} (exists=${fs.existsSync(path.jo
 
 const app = express();
 app.use(cors());
+
+// IMPORTANT: the Clerk webhook needs the RAW request body so Svix can verify
+// the signature against the exact bytes Clerk sent. Mount express.raw FIRST
+// on that one path, then express.json for everything else.
+app.use('/api/auth/clerk-webhook', express.raw({ type: 'application/json', limit: '1mb' }));
 app.use(express.json({ limit: '10mb' }));
 
 // Health
@@ -97,6 +103,7 @@ app.use('/api/assembly',           assemblyRouter);
 app.use('/api/job-runs',           jobRunsRouter);
 app.use('/api/research',           researchRouter);
 app.use('/api/open-data',          openDataRouter);
+app.use('/api/auth',               authRouter);
 app.use('/api/stats',              statsRouter);
 
 // Static UI

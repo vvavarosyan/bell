@@ -4,42 +4,61 @@
 import { useState, useEffect, useRef } from 'react';
 import { html } from '../lib/html.js';
 
+// Role-based visibility per sidebar item.
+//   'all' = visible to every signed-in user (including viewers)
+//   array = visible only to listed roles
+// platform_admin sees EVERYTHING regardless of declared visibility.
+//
+// In local-admin mode (Val's Mac), every item is shown — local user is
+// always treated as platform_admin.
 export const NAV_SECTIONS = [
   {
     label: 'Overview',
     items: [
-      { id: 'market-feed',           label: 'Market Feed',          icon: 'feed',       placeholder: true },
-      { id: 'signals',               label: 'Signals',              icon: 'insights', placeholder: true },
-      { id: 'map',                   label: 'Map',                  icon: 'map',        placeholder: false },
+      { id: 'market-feed',           label: 'Market Feed',          icon: 'feed',       placeholder: true,  visibility: 'all' },
+      { id: 'signals',               label: 'Signals',              icon: 'insights', placeholder: true,  visibility: 'all' },
+      { id: 'map',                   label: 'Map',                  icon: 'map',        placeholder: false, visibility: 'all' },
     ],
   },
   {
     label: 'Data',
     items: [
-      { id: 'companies',  label: 'Companies', icon: 'building',  placeholder: false },
-      { id: 'people',     label: 'People',    icon: 'people',    placeholder: false },
-      { id: 'jobs',       label: 'Jobs',      icon: 'briefcase', placeholder: false },
-      { id: 'deep-data',  label: 'Deep Data', icon: 'database',  placeholder: false },
+      { id: 'companies',  label: 'Companies', icon: 'building',  placeholder: false, visibility: 'all' },
+      { id: 'people',     label: 'People',    icon: 'people',    placeholder: false, visibility: 'all' },
+      { id: 'jobs',       label: 'Jobs',      icon: 'briefcase', placeholder: false, visibility: 'all' },
+      { id: 'deep-data',  label: 'Deep Data', icon: 'database',  placeholder: false, visibility: 'all' },
     ],
   },
   {
     label: 'Workspace',
     items: [
-      { id: 'dedup-queue', label: 'Dedup Queue', icon: 'merge',    placeholder: false },
-      { id: 'crm',         label: 'CRM',         icon: 'crm',      placeholder: true },
-      { id: 'research',    label: 'Research',    icon: 'research', placeholder: false },
-      { id: 'team',        label: 'Team',        icon: 'team',     placeholder: true },
+      // Operational surfaces — visible to tenant members + above
+      { id: 'crm',         label: 'CRM',         icon: 'crm',      placeholder: true,  visibility: ['platform_admin','owner','admin','lead','member','viewer'] },
+      { id: 'research',    label: 'Research',    icon: 'research', placeholder: false, visibility: ['platform_admin','owner','admin','lead','member','viewer'] },
+      { id: 'team',        label: 'Team',        icon: 'team',     placeholder: true,  visibility: ['platform_admin','owner','admin','lead','member','viewer'] },
+      // Admin-only ops within a tenant
+      { id: 'dedup-queue', label: 'Dedup Queue', icon: 'merge',    placeholder: false, visibility: ['platform_admin','owner','admin'] },
     ],
   },
   {
     label: 'System',
     items: [
-      { id: 'sources',     label: 'Sources',     icon: 'sources',  placeholder: false },
-      { id: 'recent-jobs', label: 'Recent Jobs', icon: 'history',  placeholder: false },
-      { id: 'settings',    label: 'Settings',    icon: 'gear',     placeholder: false },
+      // Platform-admin-only (Bell.qa internal staff). Hidden on app.bell.qa
+      // for every customer; visible on admin.bell.qa.
+      { id: 'sources',     label: 'Sources',     icon: 'sources',  placeholder: false, visibility: ['platform_admin'] },
+      { id: 'recent-jobs', label: 'Recent Jobs', icon: 'history',  placeholder: false, visibility: ['platform_admin'] },
+      { id: 'settings',    label: 'Settings',    icon: 'gear',     placeholder: false, visibility: 'all' },
     ],
   },
 ];
+
+/** True if an item should be shown to a user with the given role. */
+export function itemVisibleTo(item, role) {
+  if (!role) return false;
+  if (role === 'platform_admin') return true;            // sees everything
+  if (item.visibility === 'all' || item.visibility === undefined) return true;
+  return Array.isArray(item.visibility) && item.visibility.includes(role);
+}
 
 // All nav ids in a flat lookup
 export const NAV_IDS = NAV_SECTIONS.flatMap(s => s.items.map(i => i.id));
@@ -71,7 +90,7 @@ function compactCount(n) {
   return String(v);
 }
 
-export function Sidebar({ activeId, onSelect, dbStatus, settings, stats }) {
+export function Sidebar({ activeId, onSelect, dbStatus, settings, stats, currentRole = 'platform_admin' }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef(null);
 
@@ -109,10 +128,13 @@ export function Sidebar({ activeId, onSelect, dbStatus, settings, stats }) {
       </div>
 
       <nav class="sidebar-nav">
-        ${NAV_SECTIONS.map(section => html`
+        ${NAV_SECTIONS.map(section => {
+          const visibleItems = section.items.filter(i => itemVisibleTo(i, currentRole));
+          if (visibleItems.length === 0) return null;
+          return html`
           <div class="nav-section" key=${section.label}>
             <div class="nav-section-label">${section.label}</div>
-            ${section.items.map(item => {
+            ${visibleItems.map(item => {
               const count = COUNT_KEY[item.id];
               const compact = count != null ? compactCount(count) : null;
               return html`
@@ -130,7 +152,8 @@ export function Sidebar({ activeId, onSelect, dbStatus, settings, stats }) {
               `;
             })}
           </div>
-        `)}
+        `;
+        })}
       </nav>
 
       <div class="sidebar-foot">

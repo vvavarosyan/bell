@@ -1,11 +1,32 @@
 // Tiny fetch wrapper around the Portal's local JSON API.
+//
+// When the Portal is deployed in user/admin mode (with Clerk auth), every
+// request automatically picks up the current Clerk session token and sends
+// it as Authorization: Bearer ... — this is bridged via window.__bdiAuth.
+// In local-admin mode there's no token; the server doesn't require one.
+
 const BASE = '';
 
+async function authHeaders() {
+  const auth = (typeof window !== 'undefined') ? window.__bdiAuth : null;
+  if (!auth?.getToken) return {};
+  try {
+    const token = await auth.getToken();
+    return token ? { 'Authorization': 'Bearer ' + token } : {};
+  } catch { return {}; }
+}
+
 async function request(path, options = {}) {
+  const auth = await authHeaders();
   const r = await fetch(BASE + path, {
-    headers: { 'Content-Type': 'application/json', ...(options.headers || {}) },
+    headers: { 'Content-Type': 'application/json', ...auth, ...(options.headers || {}) },
     ...options,
   });
+  // 401 in user/admin mode → session is dead; bounce to sign-in.
+  if (r.status === 401 && typeof window !== 'undefined' && window.__bdiAuth?.required) {
+    window.location.replace('/sign-in');
+    throw new Error('Unauthorized');
+  }
   const ct = r.headers.get('content-type') || '';
   const body = ct.includes('application/json') ? await r.json() : await r.text();
   if (!r.ok) {
@@ -93,6 +114,10 @@ export const api = {
   openDataDataset:        (id) => request('/api/open-data/datasets/' + encodeURIComponent(id)),
   openDataChart:          (id) => request('/api/open-data/datasets/' + encodeURIComponent(id) + '/chart'),
   openDataRecords:        (id, q = {}) => request('/api/open-data/datasets/' + encodeURIComponent(id) + '/records?' + new URLSearchParams(q)),
+
+  // Auth (Clerk-backed)
+  authMode:               () => request('/api/auth/mode'),
+  authMe:                 () => request('/api/auth/me'),
   openDataPreview:        (id, q = {}) => request('/api/open-data/datasets/' + encodeURIComponent(id) + '/preview?' + new URLSearchParams(q)),
   openDataRuns:           (limit = 25) => request('/api/open-data/runs?limit=' + limit),
   openDataSyncCatalog:    () => request('/api/open-data/sync/catalog', { method: 'POST', body: '{}' }),
