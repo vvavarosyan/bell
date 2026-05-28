@@ -144,6 +144,26 @@ export async function requireAuth(req, res, next) {
 
   const row = r.rows[0];
 
+ develop
+  // Auto-promote to platform_admin if this user's email is in
+  // BDI_PLATFORM_ADMIN_EMAILS. Handles the case where the env var was set
+  // AFTER the user signed up (their role would still be 'owner' otherwise).
+  // We only promote up — we never auto-demote. To remove platform_admin,
+  // update the DB row manually.
+  const platformAdmins = (process.env.BDI_PLATFORM_ADMIN_EMAILS || '')
+    .split(',').map(s => s.trim().toLowerCase()).filter(Boolean);
+  if (platformAdmins.includes(String(row.email || '').toLowerCase()) && row.role !== 'platform_admin') {
+    try {
+      await query(`UPDATE users SET role = 'platform_admin', updated_at = now() WHERE id = $1`, [row.id]);
+      row.role = 'platform_admin';
+      console.log(`[auth] auto-promoted ${row.email} to platform_admin (matched BDI_PLATFORM_ADMIN_EMAILS)`);
+    } catch (err) {
+      console.error('[auth] platform_admin auto-promote failed:', err.message);
+    }
+  }
+
+
+ main
   // admin mode: extra gate — only platform_admin role allowed
   if (MODE === 'admin' && row.role !== 'platform_admin') {
     return res.status(403).json({
