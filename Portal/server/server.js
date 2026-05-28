@@ -37,6 +37,7 @@ import openDataRouter          from './routes/open_data.js';
 import { startScheduler as startOpenDataScheduler } from './sources/qatar_open_data/scheduler.js';
 import authRouter              from './routes/auth.js';
 import billingRouter           from './routes/billing.js';
+import syncRouter              from './routes/sync.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname  = path.dirname(__filename);
@@ -107,6 +108,7 @@ app.use('/api/research',           researchRouter);
 app.use('/api/open-data',          openDataRouter);
 app.use('/api/auth',               authRouter);
 app.use('/api/billing',            billingRouter);
+app.use('/api/sync',               syncRouter);
 app.use('/api/stats',              statsRouter);
 
 // Static UI

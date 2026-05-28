@@ -132,6 +132,11 @@ export const api = {
   openDataSyncRecords:    () => request('/api/open-data/sync/records', { method: 'POST', body: '{}' }),
   openDataSyncOne:        (id) => request('/api/open-data/sync/records/' + encodeURIComponent(id), { method: 'POST', body: '{}' }),
 
+  // Sync (local engine → Bell.qa)
+  syncStatus:             () => request('/api/sync/status'),
+  syncPush:               () => request('/api/sync/push', { method: 'POST', body: '{}' }),
+  syncFullResync:         () => request('/api/sync/full-resync', { method: 'POST', body: '{}' }),
+
   // Billing (Stripe-backed)
   billingPlans:           () => request('/api/billing/plans'),
   billingSubscription:    () => request('/api/billing/subscription'),
