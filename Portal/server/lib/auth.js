@@ -90,6 +90,7 @@ export async function requireAuth(req, res, next) {
   try {
     claims = await verifyToken(m[1], { secretKey: CLERK_SECRET });
   } catch (err) {
+    console.error('[auth] verifyToken FAILED:', err.message, '— token starts:', m[1].slice(0, 40));
     return res.status(401).json({ error: 'unauthorized', reason: 'invalid_token', detail: err.message });
   }
 
