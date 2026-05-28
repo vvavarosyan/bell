@@ -213,9 +213,40 @@ Every input enriches the DB. Every output feeds a public surface. Designed in fo
 ### Blocking (must do first)
 - 🔴 **Fix JWT verification hang on app.bell.qa** (see ACTIVE BLOCKER)
 
-### Milestone C (next, once auth works)
-- ⏳ Local Mac → Railway data sync (push local DB to production DB regularly)
-- ⏳ Choose mechanism: WAL replication, `pg_dump` cron, or row-level upsert API
+### Milestone C — Local Mac → Railway data sync (✅ BUILT 2026-05-29, pending deploy + token)
+Mechanism chosen: **one-way row-level upsert push** (NOT WAL replication / pg_dump —
+those would clobber the tenants/users/billing tables that ALSO live in prod Postgres).
+- New "Sync to Bell.qa" tab in the local Portal (platform_admin / System section).
+  - **Push now** → incremental: only rows changed since the last push (updated_at watermark).
+  - **Full resync** → every assembled row (button, with confirm).
+- Soft-delete only: `archived=true` is synced and hides the row on the app; prod rows
+  are NEVER hard-deleted by a sync.
+- Syncs ASSEMBLED canonical rows only (bin/pin/jin assigned): companies, people, jobs,
+  company_sources, person_companies. Mid-pipeline rows stay local.
+- Child tables carry the PARENT'S natural key (company bin / person pin); the prod
+  receiver resolves prod ids from those — local integer ids are meaningless on prod.
+- Reveal state (`is_revealed`/`revealed_at`/`revealed_by`) is PROD-OWNED and deliberately
+  NOT synced (a customer reveals on the app; the engine must never overwrite it).
+- Machine-to-machine auth: shared `BDI_SYNC_TOKEN` (Keychain `sync-token` on Mac, env var
+  on Railway). The `/api/sync/ingest` receiver checks Bearer === BDI_SYNC_TOKEN.
+- Upsert SQL validated end-to-end against a real SQL engine (pg-mem): upsert, soft-delete,
+  bin/pin resolution, idempotency, and the person_companies expression-index ON CONFLICT.
+
+**Files:** `Portal/server/sync/{tables,ingest,push}.js`, `Portal/server/routes/sync.js`
+(mounted at `/api/sync` in server.js), `Portal/ui/components/SyncTab.js` (+ Sidebar/app.js
+wiring), `Portal/server/routes/settings.js` (allow `sync-token` key), `Portal/ui/lib/api.js`.
+
+**TO SHIP (click-only + 1 Railway env var):**
+1. Double-click `Push Changes.command` → staging deploys.
+2. On Railway, add env var **`BDI_SYNC_TOKEN`** (a long random secret) to the **portal**
+   service (production). Add it to **portal-staging** too if testing against staging first.
+3. Test: in the local Portal → "Sync to Bell.qa" tab → paste the SAME token + set Target URL
+   (https://app.bell.qa, or the staging app URL) → click "Push now". Watch the per-table counts.
+4. Double-click `Open Production Release.command` → merge develop→main → production deploys.
+
+**Fast-follow (not built yet):** Deep Data tables (od_datasets/od_records) are NOT synced in
+v1 — the framework is table-driven so adding them later is small. Prod doesn't surface Deep
+Data yet, so this wasn't blocking.
 
 ### Deferred features
 - ⏸️ **Research section** — paused until Firecrawl fixes Spark Pro, OR we swap engine to plain scrape + LLM

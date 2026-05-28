@@ -23,6 +23,7 @@ import { DedupQueueTab } from './components/DedupQueueTab.js';
 import { RecentJobsTab } from './components/RecentJobsTab.js';
 import { ResearchTab }   from './components/ResearchTab.js';
 import { DeepDataTab }   from './components/DeepDataTab.js';
+import { SyncTab }       from './components/SyncTab.js';
 
 // Maps a sidebar nav id to a renderable view. Items not listed here fall back
 // to a ComingSoon placeholder with the item's label.
@@ -37,6 +38,7 @@ const VIEWS = {
   'recent-jobs': { Component: RecentJobsTab },
   'research':    { Component: ResearchTab },
   'deep-data':   { Component: DeepDataTab },
+  'sync':        { Component: SyncTab },
   // Archived is reachable via deep-link/sidebar too
   'archived':    { Component: ArchivedCompaniesTab },
 };
@@ -50,6 +52,7 @@ const LABELS = {
   'dedup-queue': 'Dedup Queue',
   'recent-jobs': 'Recent Jobs',
   'deep-data': 'Deep Data',
+  'sync': 'Sync to Bell.qa',
   'crm': 'CRM',
   'research': 'Research',
   'team': 'Team',

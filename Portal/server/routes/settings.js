@@ -55,7 +55,7 @@ router.post('/api-keys/:name', async (req, res, next) => {
     if (typeof value !== 'string' || !value.trim()) {
       return res.status(400).json({ error: 'value_required' });
     }
-    if (!['firecrawl', 'apify', 'mapbox'].includes(name)) {
+    if (!['firecrawl', 'apify', 'mapbox', 'sync-token'].includes(name)) {
       return res.status(400).json({ error: 'unknown_key_name', name });
     }
     await setKey(name, value.trim());
@@ -67,7 +67,7 @@ router.post('/api-keys/:name', async (req, res, next) => {
 router.delete('/api-keys/:name', async (req, res, next) => {
   try {
     const name = req.params.name;
-    if (!['firecrawl', 'apify', 'mapbox'].includes(name)) {
+    if (!['firecrawl', 'apify', 'mapbox', 'sync-token'].includes(name)) {
       return res.status(400).json({ error: 'unknown_key_name', name });
     }
     const removed = await deleteKey(name);
