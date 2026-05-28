@@ -213,14 +213,20 @@ async function bootstrap() {
 
   // 5. Fetch our DB-side user + tenant. May return 401 'user_not_provisioned'
   //    briefly between sign-up and webhook delivery; retry a few times.
-  let me;
+  //    On a final 401 with a different reason (e.g. invalid_token), surface
+  //    the actual reason so the user/operator can see what's wrong instead
+  //    of being redirect-looped.
+  let me, lastErr;
   for (let attempt = 0; attempt < 5; attempt++) {
     try {
       me = await api.authMe();
       break;
     } catch (err) {
+      lastErr = err;
       if (attempt === 4) {
-        renderBootMessage('Account is still being set up — please try again in a moment.');
+        const reason = err?.body?.reason || err?.message || 'unknown';
+        const detail = err?.body?.detail ? ' — ' + err.body.detail : '';
+        renderBootMessage(`Could not verify your session: ${reason}${detail}<br/><br/><a href="/sign-in" style="color: var(--accent-bright)">Try sign in again</a>`);
         return;
       }
       await new Promise(r => setTimeout(r, 1500));

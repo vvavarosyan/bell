@@ -65,17 +65,44 @@ if [ "$CURRENT_BRANCH" != "develop" ]; then
 fi
 
 # -----------------------------------------------------------------------------
-# 3. Pull latest from GitHub first — avoids "rejected: remote contains work
-#    you don't have" errors after GitHub-side merges or other-machine pushes.
+# 3. Pull latest from GitHub. If there are uncommitted local changes, stash
+#    them first so git doesn't refuse the pull, then unstash after.
 # -----------------------------------------------------------------------------
+STASHED=0
+if [ -n "$(git status --porcelain)" ]; then
+  echo "Saving your local edits temporarily so we can pull cleanly..."
+  if git stash push --include-untracked -m "auto-stash-$(date +%s)" >/dev/null 2>&1; then
+    STASHED=1
+  else
+    echo "Could not stash local changes. You may have a merge conflict marker."
+    read -r -p "Press Enter to close..." _
+    exit 1
+  fi
+fi
+
 echo "Pulling latest from GitHub..."
 if ! git pull --no-rebase --no-edit origin develop; then
   echo
-  echo "Pull failed — there are merge conflicts between local and remote."
-  echo "Open the conflicted file(s) in your editor, resolve the <<<<<< / >>>>>> markers,"
-  echo "save, then run this script again. Or paste the conflict to Claude to help."
+  echo "Pull failed — merge conflicts between local and remote."
+  if [ "$STASHED" = "1" ]; then
+    echo "Your local changes are safe in git stash. Run 'git stash list' to see them"
+    echo "or paste this error to Claude to help resolve."
+  fi
   read -r -p "Press Enter to close..." _
   exit 1
+fi
+
+# Restore stashed changes
+if [ "$STASHED" = "1" ]; then
+  echo "Restoring your local edits..."
+  if ! git stash pop; then
+    echo
+    echo "Couldn't auto-apply your stashed changes — there are conflicts between"
+    echo "your edits and the latest from GitHub. Your edits are still saved in"
+    echo "the stash. Run 'git stash show -p' to see them, or paste this to Claude."
+    read -r -p "Press Enter to close..." _
+    exit 1
+  fi
 fi
 echo
 

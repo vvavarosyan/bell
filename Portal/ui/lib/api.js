@@ -22,10 +22,18 @@ async function request(path, options = {}) {
     headers: { 'Content-Type': 'application/json', ...auth, ...(options.headers || {}) },
     ...options,
   });
-  // 401 in user/admin mode → session is dead; bounce to sign-in.
+  // 401 in user/admin mode. Do NOT auto-redirect to /sign-in — that creates
+  // a redirect loop with the sign-in page (which redirects back to / when
+  // Clerk session exists). Instead surface the error to the caller, which
+  // can decide what to do based on context.
   if (r.status === 401 && typeof window !== 'undefined' && window.__bdiAuth?.required) {
-    window.location.replace('/sign-in');
-    throw new Error('Unauthorized');
+    let body = null;
+    try { body = await r.json(); } catch {}
+    console.error('[bdi/api] 401 for', path, body);
+    const err = new Error('Unauthorized: ' + (body?.reason || body?.error || 'no_reason'));
+    err.status = 401;
+    err.body = body;
+    throw err;
   }
   const ct = r.headers.get('content-type') || '';
   const body = ct.includes('application/json') ? await r.json() : await r.text();
