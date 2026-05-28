@@ -84,6 +84,21 @@ export const PERSON_COMPANY_COLS = [
   'start_date', 'end_date', 'is_current', 'source_stage', 'raw_payload',
 ];
 
+// JSONB columns per table. These MUST be JSON.stringify'd before being passed
+// as query parameters: node-postgres serializes a JS array param as a Postgres
+// ARRAY literal ({...}), which a jsonb column rejects with
+// "invalid input syntax for type json". Stringifying makes pg send a JSON text
+// that Postgres casts to jsonb correctly (works for objects, arrays, scalars).
+// NOTE: text[] columns (linkedin_specialties, job_function, industries) are NOT
+// listed here — they must stay JS arrays so pg formats them as array literals.
+export const JSONB_COLS = {
+  companies:        ['linkedin_locations', 'gmaps_hours', 'gmaps_photos', 'extra_fields'],
+  people:           ['languages', 'skills', 'education', 'experience', 'certifications', 'extra_fields'],
+  jobs:             ['extra_fields', 'raw_payload'],
+  company_sources:  ['raw_payload'],
+  person_companies: ['raw_payload'],
+};
+
 // Order matters: parents before children (FK resolution on the prod side).
 export const SYNC_ORDER = [
   'companies',

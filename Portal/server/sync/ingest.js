@@ -15,10 +15,29 @@
 import { withTransaction } from '../db.js';
 import {
   COMPANY_COLS, PEOPLE_COLS, JOB_COLS,
-  COMPANY_SOURCE_COLS, PERSON_COMPANY_COLS,
+  COMPANY_SOURCE_COLS, PERSON_COMPANY_COLS, JSONB_COLS,
 } from './tables.js';
 
 const MAX_REPORTED_ERRORS = 25;
+
+// Return a shallow copy of `row` with this table's jsonb columns JSON-encoded.
+// Required so node-postgres sends valid JSON text (not a PG array literal) for
+// array-valued jsonb fields. Safe for objects, arrays, and scalars; nulls pass
+// through untouched.
+function normalizeJsonb(table, row) {
+  const cols = JSONB_COLS[table];
+  if (!cols || !row) return row;
+  const out = { ...row };
+  for (const c of cols) {
+    // The value is always the parsed JS representation of the jsonb (object,
+    // array, or scalar) — encode it back to JSON text for the driver. Null/
+    // undefined pass through as SQL NULL.
+    if (out[c] !== null && out[c] !== undefined) {
+      out[c] = JSON.stringify(out[c]);
+    }
+  }
+  return out;
+}
 
 // Build "col = EXCLUDED.col" assignment list, skipping the conflict key(s).
 function updateAssignments(cols, skip) {
@@ -146,7 +165,7 @@ export async function applyBatch(table, rows) {
     for (let i = 0; i < rows.length; i++) {
       try {
         await client.query('SAVEPOINT row_sp');
-        await handler(client, rows[i]);
+        await handler(client, normalizeJsonb(table, rows[i]));
         await client.query('RELEASE SAVEPOINT row_sp');
         upserted++;
       } catch (err) {
