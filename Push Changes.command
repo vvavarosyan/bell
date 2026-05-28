@@ -65,7 +65,6 @@ if [ "$CURRENT_BRANCH" != "develop" ]; then
 fi
 
 # -----------------------------------------------------------------------------
- develop
 # 3. Pull latest from GitHub. If there are uncommitted local changes, stash
 #    them first so git doesn't refuse the pull, then unstash after.
 # -----------------------------------------------------------------------------
@@ -106,19 +105,6 @@ if [ "$STASHED" = "1" ]; then
   fi
 fi
 
-# 3. Pull latest from GitHub first — avoids "rejected: remote contains work
-#    you don't have" errors after GitHub-side merges or other-machine pushes.
-# -----------------------------------------------------------------------------
-echo "Pulling latest from GitHub..."
-if ! git pull --no-rebase --no-edit origin develop; then
-  echo
-  echo "Pull failed — there are merge conflicts between local and remote."
-  echo "Open the conflicted file(s) in your editor, resolve the <<<<<< / >>>>>> markers,"
-  echo "save, then run this script again. Or paste the conflict to Claude to help."
-  read -r -p "Press Enter to close..." _
-  exit 1
-fi
- main
 echo
 
 # -----------------------------------------------------------------------------
