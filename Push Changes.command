@@ -65,7 +65,22 @@ if [ "$CURRENT_BRANCH" != "develop" ]; then
 fi
 
 # -----------------------------------------------------------------------------
-# 3. Show what's about to be staged
+# 3. Pull latest from GitHub first — avoids "rejected: remote contains work
+#    you don't have" errors after GitHub-side merges or other-machine pushes.
+# -----------------------------------------------------------------------------
+echo "Pulling latest from GitHub..."
+if ! git pull --no-rebase --no-edit origin develop; then
+  echo
+  echo "Pull failed — there are merge conflicts between local and remote."
+  echo "Open the conflicted file(s) in your editor, resolve the <<<<<< / >>>>>> markers,"
+  echo "save, then run this script again. Or paste the conflict to Claude to help."
+  read -r -p "Press Enter to close..." _
+  exit 1
+fi
+echo
+
+# -----------------------------------------------------------------------------
+# 4. Show what's about to be staged
 # -----------------------------------------------------------------------------
 echo "Changes since last commit:"
 echo
@@ -74,6 +89,22 @@ echo
 
 # Anything to commit?
 if [ -z "$(git status --porcelain)" ]; then
+  # Special case: nothing to commit, but there might be unpushed commits
+  # (e.g. you committed earlier and the push was rejected for fetch-first
+  # reasons; now that we've pulled, just push what's already committed).
+  AHEAD="$(git rev-list --count origin/develop..develop 2>/dev/null || echo 0)"
+  if [ "$AHEAD" -gt 0 ]; then
+    echo "No new file changes, but $AHEAD commit(s) waiting to push..."
+    if git push origin develop; then
+      bar
+      echo "✓ Pushed $AHEAD commit(s) successfully."
+      bar
+    else
+      echo "Push failed."
+    fi
+    read -r -p "Press Enter to close..." _
+    exit 0
+  fi
   echo "No changes to push. Nothing to do."
   read -r -p "Press Enter to close..." _
   exit 0
