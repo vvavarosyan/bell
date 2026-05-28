@@ -160,7 +160,6 @@ export async function requireAuth(req, res, next) {
 
   const row = r.rows[0];
 
- develop
   // Auto-promote to platform_admin if this user's email is in
   // BDI_PLATFORM_ADMIN_EMAILS. Handles the case where the env var was set
   // AFTER the user signed up (their role would still be 'owner' otherwise).
@@ -178,8 +177,6 @@ export async function requireAuth(req, res, next) {
     }
   }
 
-
- main
   // admin mode: extra gate — only platform_admin role allowed
   if (MODE === 'admin' && row.role !== 'platform_admin') {
     return res.status(403).json({
