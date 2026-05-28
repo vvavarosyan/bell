@@ -1,20 +1,18 @@
 # Don't copy these into the Docker image — keeps the image small and avoids
 # stale node_modules from local Mac causing version drift on Railway.
-
 server/node_modules/
 **/node_modules/
-
-# Local-only data + logs (also in .gitignore but belt-and-suspenders)
-../Data/
-../Operations/
-../Config/
-
+# Local-only data + logs.
+# These don't exist inside the build context (Portal/) anyway, but listed for
+# clarity. The build context is Portal/ — Data/Operations/Config sit at the
+# workspace root which Docker doesn't see.
+# Note: NO unanchored `Config/` pattern here — that would also exclude
+# server/config/ which contains plans.js. We hit that bug on 2026-05-27.
 # Editor / OS junk
 .DS_Store
 **/.DS_Store
 .vscode/
 .idea/
-
 # Tests / docs / nothing-the-server-needs
 *.md
 *.log

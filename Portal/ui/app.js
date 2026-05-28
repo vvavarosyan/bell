@@ -1,4 +1,11 @@
 // Bell Data Intelligence — Portal entry. Mounts the React tree at #root.
+//
+// Auth bootstrap (before any React work):
+//   1. Fetch /api/auth/mode to learn whether auth is required
+//   2. local-admin mode → skip Clerk, mount Portal as platform_admin
+//   3. user/admin mode → load Clerk SDK, require a session
+//      • no session → redirect to /sign-in
+//      • session → fetch /api/auth/me, mount Portal with that user's role
 
 import { createElement, useState, useEffect, useCallback } from 'react';
 import { createRoot } from 'react-dom';
@@ -48,7 +55,7 @@ const LABELS = {
   'team': 'Team',
 };
 
-function App() {
+function App({ initialUser, initialTenant, mode }) {
   const parseHash = () => {
     const raw = (window.location.hash || '').replace(/^#/, '').split(':')[0];
     return NAV_IDS.includes(raw) ? raw : 'companies';
@@ -57,6 +64,7 @@ function App() {
   const [stats, setStats] = useState(null);
   const [dbStatus, setDbStatus] = useState('unknown');
   const [settings, setSettings] = useState({});
+  const currentRole = initialUser?.role || 'platform_admin';
 
   useEffect(() => {
     if (!window.location.hash.includes(':')) window.location.hash = tab;
@@ -105,6 +113,7 @@ function App() {
         dbStatus=${dbStatus}
         settings=${settings}
         stats=${stats}
+        currentRole=${currentRole}
       />
       <main class="app-main">
         <div class="page-header">
@@ -127,4 +136,138 @@ function App() {
   `;
 }
 
-createRoot(document.getElementById('root')).render(createElement(App));
+// ---------------------------------------------------------------------------
+// Auth bootstrap — runs before mounting the React tree.
+// ---------------------------------------------------------------------------
+
+const rootEl = document.getElementById('root');
+const renderBootMessage = (msg) => {
+  rootEl.innerHTML = `<div class="boot-loader">${msg}</div>`;
+};
+
+async function bootstrap() {
+  // 1. Ask the server what mode we're in
+  let mode;
+  try {
+    const r = await fetch('/api/auth/mode');
+    mode = await r.json();
+  } catch {
+    renderBootMessage('Could not reach the server. Please refresh.');
+    return;
+  }
+
+  // 2. local-admin mode — no auth, mount immediately
+  if (mode.mode === 'local-admin' || !mode.auth_required) {
+    window.__bdiAuth = { getToken: async () => null, required: false };
+    createRoot(rootEl).render(
+      createElement(App, { initialUser: null, initialTenant: null, mode })
+    );
+    return;
+  }
+
+  // 3. user/admin mode — load Clerk SDK + require a session
+  if (!mode.publishable_key) {
+    renderBootMessage('Authentication is not configured on this deployment.<br/>(CLERK_PUBLISHABLE_KEY missing.)');
+    return;
+  }
+
+  renderBootMessage('Signing you in…');
+
+  // Load Clerk JS SDK from CDN
+  await new Promise((resolve, reject) => {
+    const script = document.createElement('script');
+    script.async = true;
+    script.crossOrigin = 'anonymous';
+    script.setAttribute('data-clerk-publishable-key', mode.publishable_key);
+    script.src = 'https://cdn.jsdelivr.net/npm/@clerk/clerk-js@5/dist/clerk.browser.js';
+    script.onload = resolve;
+    script.onerror = reject;
+    document.head.appendChild(script);
+  });
+
+  try {
+    await window.Clerk.load();
+  } catch (err) {
+    renderBootMessage('Failed to load authentication: ' + (err.message || err));
+    return;
+  }
+
+  if (!window.Clerk.user) {
+    // Not signed in → bounce to sign-in
+    window.location.replace('/sign-in');
+    return;
+  }
+
+  // 4. Hook up token-getter for api.js
+  window.__bdiAuth = {
+    required: true,
+    getToken: async () => {
+      if (!window.Clerk.session) return null;
+      return await window.Clerk.session.getToken();
+    },
+    signOut: async () => {
+      await window.Clerk.signOut();
+      window.location.replace('/sign-in');
+    },
+  };
+
+  // 5. Fetch our DB-side user + tenant. May return 401 'user_not_provisioned'
+  //    briefly between sign-up and webhook delivery; retry a few times.
+  let me;
+  for (let attempt = 0; attempt < 5; attempt++) {
+    try {
+      me = await api.authMe();
+      break;
+    } catch (err) {
+      if (attempt === 4) {
+        renderBootMessage('Account is still being set up — please try again in a moment.');
+        return;
+      }
+      await new Promise(r => setTimeout(r, 1500));
+    }
+  }
+
+  // 6. Subscription gate: non-platform_admin users with no active sub get
+  //    bounced to /subscribe. Bell has no free tier.
+  //
+  // Special case: if returning from Stripe payment (?stripe=success), the
+  // checkout.session.completed webhook may take a few seconds to fire and
+  // flip subscription_status to 'active'. Poll for ~15 seconds before
+  // giving up and sending the user back to /subscribe.
+  if (me.user.role !== 'platform_admin') {
+    const fromStripe = new URLSearchParams(window.location.search).get('stripe') === 'success';
+    const maxAttempts = fromStripe ? 8 : 1;
+    let activated = false;
+
+    if (fromStripe) renderBootMessage('Activating your subscription…');
+
+    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      try {
+        const sub = await api.billingSubscription();
+        if (sub.is_active) { activated = true; break; }
+      } catch { /* keep trying */ }
+      if (attempt < maxAttempts - 1) {
+        await new Promise(r => setTimeout(r, 2000));
+      }
+    }
+
+    if (!activated) {
+      window.location.replace('/subscribe');
+      return;
+    }
+
+    // Clean the ?stripe=success param so it's not preserved in the URL bar
+    if (fromStripe) {
+      const url = new URL(window.location.href);
+      url.searchParams.delete('stripe');
+      url.searchParams.delete('session_id');
+      window.history.replaceState({}, '', url.toString());
+    }
+  }
+
+  createRoot(rootEl).render(
+    createElement(App, { initialUser: me.user, initialTenant: me.tenant, mode })
+  );
+}
+
+bootstrap();

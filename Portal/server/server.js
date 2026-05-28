@@ -35,6 +35,8 @@ import researchRouter          from './routes/research.js';
 import { startPoller as startResearchPoller } from './research/poller.js';
 import openDataRouter          from './routes/open_data.js';
 import { startScheduler as startOpenDataScheduler } from './sources/qatar_open_data/scheduler.js';
+import authRouter              from './routes/auth.js';
+import billingRouter           from './routes/billing.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname  = path.dirname(__filename);
@@ -73,6 +75,12 @@ console.log(`[bdi] UI_DIR resolved to: ${UI_DIR} (exists=${fs.existsSync(path.jo
 
 const app = express();
 app.use(cors());
+
+// IMPORTANT: webhook routes need the RAW request body so signatures verify
+// against the exact bytes the sender used. Mount express.raw FIRST on those
+// specific paths, then express.json for everything else.
+app.use('/api/auth/clerk-webhook',     express.raw({ type: 'application/json', limit: '1mb' }));
+app.use('/api/billing/stripe-webhook', express.raw({ type: 'application/json', limit: '2mb' }));
 app.use(express.json({ limit: '10mb' }));
 
 // Health
@@ -97,6 +105,8 @@ app.use('/api/assembly',           assemblyRouter);
 app.use('/api/job-runs',           jobRunsRouter);
 app.use('/api/research',           researchRouter);
 app.use('/api/open-data',          openDataRouter);
+app.use('/api/auth',               authRouter);
+app.use('/api/billing',            billingRouter);
 app.use('/api/stats',              statsRouter);
 
 // Static UI

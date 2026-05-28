@@ -1,0 +1,143 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Sign in · Bell Data Intelligence</title>
+  <link rel="stylesheet" href="/styles.css" />
+  <style>
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background:
+        radial-gradient(ellipse 60% 50% at 50% 0%, rgba(91,140,255,0.18) 0%, transparent 65%),
+        var(--bg);
+    }
+    .auth-page {
+      width: 100%;
+      max-width: 440px;
+      padding: 32px 24px;
+      text-align: center;
+    }
+    .auth-brand {
+      display: inline-flex; align-items: center; gap: 10px;
+      margin-bottom: 28px;
+    }
+    .auth-brand-mark {
+      width: 36px; height: 36px;
+      border-radius: 8px;
+      background: linear-gradient(135deg, rgb(91 140 255) 0%, rgb(165 195 255) 100%);
+      display: flex; align-items: center; justify-content: center;
+      color: white; font-weight: 700; font-size: 13px;
+      letter-spacing: 0.06em;
+    }
+    .auth-brand-text { color: var(--text); font-weight: 600; font-size: 15px; }
+    .auth-title {
+      font-size: 22px; font-weight: 600; color: var(--text);
+      margin: 0 0 6px;
+    }
+    .auth-subtitle {
+      font-size: 13px; color: var(--text-muted);
+      margin: 0 0 28px;
+    }
+    .auth-mount {
+      background: rgba(19,24,41,0.4);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 8px;
+      min-height: 380px;
+    }
+    .auth-fallback {
+      padding: 40px 20px; color: var(--text-dim); font-size: 13px;
+    }
+    .auth-foot {
+      margin-top: 18px;
+      font-size: 11.5px; color: var(--text-dim);
+    }
+    .auth-foot a { color: var(--accent-bright); text-decoration: none; }
+  </style>
+</head>
+<body>
+  <div class="auth-page">
+    <div class="auth-brand">
+      <div class="auth-brand-mark">BDI</div>
+      <div class="auth-brand-text">Bell Data Intelligence</div>
+    </div>
+    <h1 class="auth-title">Sign in</h1>
+    <p class="auth-subtitle">Welcome back. Sign in to your Bell workspace.</p>
+
+    <div id="clerk-sign-in" class="auth-mount">
+      <div class="auth-fallback">Loading sign-in…</div>
+    </div>
+
+    <p class="auth-foot">
+      New to Bell? <a href="/sign-up">Create an account</a>
+    </p>
+  </div>
+
+  <script>
+    (async function () {
+      // Fetch the publishable key + mode from our own /api/auth/mode endpoint.
+      // The publishable key is safe to expose to the browser — that's what
+      // it's designed for.
+      let mode;
+      try {
+        const r = await fetch('/api/auth/mode');
+        mode = await r.json();
+      } catch (e) {
+        document.getElementById('clerk-sign-in').innerHTML =
+          '<div class="auth-fallback">Could not reach the server. Please refresh.</div>';
+        return;
+      }
+
+      // Local-admin mode: no auth required, redirect straight to the app
+      if (mode.mode === 'local-admin' || !mode.auth_required) {
+        window.location.replace('/');
+        return;
+      }
+
+      if (!mode.publishable_key) {
+        document.getElementById('clerk-sign-in').innerHTML =
+          '<div class="auth-fallback">Sign-in not configured.<br/>(CLERK_PUBLISHABLE_KEY missing.)</div>';
+        return;
+      }
+
+      // Dynamically load Clerk JS SDK from their CDN
+      const pk = mode.publishable_key;
+      // Clerk's recommended frontend domain comes from the publishable key
+      // (it's encoded inside). The clerk-js script auto-discovers it.
+      const script = document.createElement('script');
+      script.async = true;
+      script.crossOrigin = 'anonymous';
+      script.setAttribute('data-clerk-publishable-key', pk);
+      // Stable Clerk JS browser SDK
+      script.src = 'https://cdn.jsdelivr.net/npm/@clerk/clerk-js@5/dist/clerk.browser.js';
+      script.onload = async () => {
+        try {
+          await window.Clerk.load();
+          if (window.Clerk.user) {
+            // Already signed in — go to app
+            window.location.replace('/');
+            return;
+          }
+          window.Clerk.mountSignIn(document.getElementById('clerk-sign-in'), {
+            afterSignInUrl: '/',
+            signUpUrl: '/sign-up',
+          });
+        } catch (err) {
+          document.getElementById('clerk-sign-in').innerHTML =
+            '<div class="auth-fallback">Failed to load sign-in: ' + (err.message || err) + '</div>';
+        }
+      };
+      script.onerror = () => {
+        document.getElementById('clerk-sign-in').innerHTML =
+          '<div class="auth-fallback">Failed to load sign-in (network).</div>';
+      };
+      document.head.appendChild(script);
+    })();
+  </script>
+</body>
+</html>
