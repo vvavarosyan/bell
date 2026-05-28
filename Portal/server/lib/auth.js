@@ -23,6 +23,12 @@ import { query, withTransaction } from '../db.js';
 const MODE = (process.env.BDI_MODE || 'local-admin').toLowerCase();
 const CLERK_SECRET = process.env.CLERK_SECRET_KEY || null;
 const CLERK_PUBLISHABLE = process.env.CLERK_PUBLISHABLE_KEY || null;
+// Optional: the PEM public key for OFFLINE JWT verification. When set,
+// verifyToken skips the network JWKS fetch (which can hang on hosted
+// deployments where the JWKS endpoint at https://clerk.<your-domain>/
+// .well-known/jwks.json is unreachable or slow).
+// Get this from Clerk Dashboard → API Keys → "Show JWT public key" / PEM.
+const CLERK_JWT_KEY = process.env.CLERK_JWT_KEY || null;
 
 // Local-admin mode synthesizes a fake user so downstream handlers don't have
 // to special-case the no-auth path. This row should NOT exist in the DB —
@@ -88,9 +94,18 @@ export async function requireAuth(req, res, next) {
 
   let claims;
   try {
-    claims = await verifyToken(m[1], { secretKey: CLERK_SECRET });
+    // Use offline verification (jwtKey) when CLERK_JWT_KEY env var is set.
+    // Otherwise fall back to network JWKS fetch via secretKey, but with an
+    // explicit 8-second timeout so we fail fast instead of hanging.
+    const verifyOpts = CLERK_JWT_KEY
+      ? { jwtKey: CLERK_JWT_KEY }
+      : { secretKey: CLERK_SECRET };
+    claims = await Promise.race([
+      verifyToken(m[1], verifyOpts),
+      new Promise((_, rej) => setTimeout(() => rej(new Error('verifyToken_timeout_8s')), 8000)),
+    ]);
   } catch (err) {
-    console.error('[auth] verifyToken FAILED:', err.message, '— token starts:', m[1].slice(0, 40));
+    console.error('[auth] verifyToken FAILED:', err.message, '— token starts:', m[1].slice(0, 40), '— offline?', !!CLERK_JWT_KEY);
     return res.status(401).json({ error: 'unauthorized', reason: 'invalid_token', detail: err.message });
   }
 
