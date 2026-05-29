@@ -297,6 +297,7 @@ export function CompaniesTab({ archivedMode: initialArchived = false, mode = 'lo
                 <td class="logo-col"><${CompanyLogo} company=${r} size=${22} /></td>
                 <${EditableCell}
                   value=${r.name}
+                  readOnly=${isUser}
                   onSave=${(v) => update(r.id, 'name', v)}
                   formatter=${(name) => html`
                     <div class="name-cell">
@@ -305,8 +306,8 @@ export function CompaniesTab({ archivedMode: initialArchived = false, mode = 'lo
                     </div>
                   `}
                 />
-                <${EditableCell} value=${r.industry}     onSave=${(v) => update(r.id, 'industry', v)} />
-                <${EditableCell} value=${r.city}         onSave=${(v) => update(r.id, 'city', v)} />
+                <${EditableCell} value=${r.industry} readOnly=${isUser} onSave=${(v) => update(r.id, 'industry', v)} />
+                <${EditableCell} value=${r.city}     readOnly=${isUser} onSave=${(v) => update(r.id, 'city', v)} />
                 <td class="employees">
                   ${r.employee_count != null
                     ? r.employee_count.toLocaleString()
@@ -328,6 +329,7 @@ export function CompaniesTab({ archivedMode: initialArchived = false, mode = 'lo
       <${CompanyDetail}
         companyId=${openedId}
         onMutated=${load}
+        isUser=${isUser}
       />
     </div>
 

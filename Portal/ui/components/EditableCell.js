@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { html } from '../lib/html.js';
 
-export function EditableCell({ value, onSave, type = 'text', className = '', formatter }) {
+export function EditableCell({ value, onSave, type = 'text', className = '', formatter, readOnly = false }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(value ?? '');
   const inputRef = useRef(null);
@@ -10,6 +10,11 @@ export function EditableCell({ value, onSave, type = 'text', className = '', for
   useEffect(() => { if (editing && inputRef.current) inputRef.current.focus(); }, [editing]);
 
   const display = formatter ? formatter(value) : (value ?? html`<span style=${{color:'var(--text-dim)'}}>—</span>`);
+
+  // Read-only (e.g. user portal): plain cell, no double-click-to-edit.
+  if (readOnly) {
+    return html`<td class=${className} title=${value != null && value !== '' ? String(value) : ''}>${display}</td>`;
+  }
 
   if (!editing) {
     const tooltip = (value !== null && value !== undefined && value !== '')

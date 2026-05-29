@@ -5,7 +5,8 @@ import { toast } from '../lib/toast.js';
 import { EditableCell } from './EditableCell.js';
 import { Pagination } from './Pagination.js';
 
-export function JobsTab() {
+export function JobsTab({ mode = 'local-admin' } = {}) {
+  const isUser = mode === 'user';
   const [rows, setRows] = useState([]);
   const [total, setTotal] = useState(0);
   const [limit] = useState(100);
@@ -54,7 +55,6 @@ export function JobsTab() {
       <table class="grid">
         <thead>
           <tr>
-            <th>JIN</th>
             <th>Title</th>
             <th>Company</th>
             <th>Location</th>
@@ -64,13 +64,12 @@ export function JobsTab() {
           </tr>
         </thead>
         <tbody>
-          ${rows.length === 0 && !loading ? html`<tr><td colSpan="7" class="empty">No jobs yet. Jobs appear after Stage 4 enrichment (LinkedIn job postings).</td></tr>` : null}
+          ${rows.length === 0 && !loading ? html`<tr><td colSpan="6" class="empty">No jobs yet. Jobs appear after Stage 4 enrichment (LinkedIn job postings).</td></tr>` : null}
           ${rows.map(r => html`
             <tr key=${r.id}>
-              <td class=${'bin ' + (r.jin ? '' : 'unassembled')}>${r.jin || '— (unassembled)'}</td>
-              <${EditableCell} value=${r.title} onSave=${(v) => update(r.id, 'title', v)} />
+              <${EditableCell} value=${r.title} readOnly=${isUser} onSave=${(v) => update(r.id, 'title', v)} />
               <td>${r.company_name || '—'}${r.company_bin ? html` <span class="bin">${r.company_bin}</span>` : null}</td>
-              <${EditableCell} value=${r.location_text} onSave=${(v) => update(r.id, 'location_text', v)} />
+              <${EditableCell} value=${r.location_text} readOnly=${isUser} onSave=${(v) => update(r.id, 'location_text', v)} />
               <td>${r.employment_type || '—'}</td>
               <td>${r.posted_at ? new Date(r.posted_at).toLocaleDateString() : '—'}</td>
               <td><span class=${'pill ' + (r.is_active ? 'active' : 'inactive')}>${r.is_active ? 'active' : 'expired'}</span></td>
