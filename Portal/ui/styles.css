@@ -301,6 +301,8 @@ html, body {
 
 .user-role-line { font-size: 10.5px; color: var(--text-dim); text-transform: capitalize; }
 
+.locked-value { color: var(--text-muted); font-size: 12px; }
+
 .reveal-banner {
   margin-top: 10px; padding: 10px 12px;
   display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap;
