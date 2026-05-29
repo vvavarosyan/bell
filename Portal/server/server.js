@@ -38,6 +38,7 @@ import { startScheduler as startOpenDataScheduler } from './sources/qatar_open_d
 import authRouter              from './routes/auth.js';
 import billingRouter           from './routes/billing.js';
 import syncRouter              from './routes/sync.js';
+import { requireAuth, requireRole, requireActiveSubscription } from './lib/auth.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname  = path.dirname(__filename);
@@ -94,22 +95,56 @@ app.get('/api/health', async (req, res) => {
   }
 });
 
-// API
-app.use('/api/companies',  companiesRouter);
-app.use('/api/people',     peopleRouter);
-app.use('/api/jobs',       jobsRouter);
-app.use('/api/settings',   settingsRouter);
-app.use('/api/sources',            sourcesRouter);
-app.use('/api/enrichment',         enrichmentRouter);
-app.use('/api/similar-companies',  similarCompaniesRouter);
-app.use('/api/assembly',           assemblyRouter);
-app.use('/api/job-runs',           jobRunsRouter);
-app.use('/api/research',           researchRouter);
-app.use('/api/open-data',          openDataRouter);
+// ---------------------------------------------------------------------------
+// Authorization gates (server-side enforcement — the UI only hides things).
+//
+//   feature   = signed in + active subscription (platform_admin + internal
+//               tenant bypass the subscription check inside the middleware).
+//   adminOnly = admin tools. Available ONLY on the admin deployment
+//               (BDI_MODE=admin → admin.bell.qa) and the local engine
+//               (local-admin). BLOCKED on the user portal (BDI_MODE=user) for
+//               EVERYONE, including platform_admin (Val's decision 2026-05-29).
+//
+// local-admin mode: requireAuth attaches a synthetic platform_admin, the
+// subscription check is bypassed (internal tenant), and adminToolsGate passes —
+// so the local engine is unaffected.
+// ---------------------------------------------------------------------------
+const MODE = (process.env.BDI_MODE || 'local-admin').toLowerCase();
+
+function adminToolsGate(req, res, next) {
+  if (MODE === 'user') {
+    return res.status(403).json({ error: 'forbidden', reason: 'admin_tools_only_on_admin_portal' });
+  }
+  next();
+}
+const feature   = [requireAuth, requireActiveSubscription];
+const adminOnly = [requireAuth, adminToolsGate, requireRole('platform_admin')];
+
+// Product features — signed in + active subscription.
+app.use('/api/companies',  ...feature, companiesRouter);
+app.use('/api/people',     ...feature, peopleRouter);
+app.use('/api/jobs',       ...feature, jobsRouter);
+app.use('/api/research',   ...feature, researchRouter);
+app.use('/api/open-data',  ...feature, openDataRouter);
+// Stats backs the app shell/header — signed in only, no subscription gate so an
+// unsubscribed user still gets a working frame before being routed to /subscribe.
+app.use('/api/stats',      requireAuth, statsRouter);
+
+// Admin-only tools — admin.bell.qa / local engine only.
+app.use('/api/sources',            ...adminOnly, sourcesRouter);
+app.use('/api/enrichment',         ...adminOnly, enrichmentRouter);
+app.use('/api/similar-companies',  ...adminOnly, similarCompaniesRouter);
+app.use('/api/assembly',           ...adminOnly, assemblyRouter);
+app.use('/api/job-runs',           ...adminOnly, jobRunsRouter);
+app.use('/api/settings',           ...adminOnly, settingsRouter);
+
+// Self-gating / public routers (handle their own auth internally):
+//   auth   → /mode is public; /me requires a token
+//   billing→ requires auth but NOT a subscription (users must reach it to pay)
+//   sync   → /ingest + /reset use the BDI_SYNC_TOKEN; push/status/rebuild are localOnly
 app.use('/api/auth',               authRouter);
 app.use('/api/billing',            billingRouter);
 app.use('/api/sync',               syncRouter);
-app.use('/api/stats',              statsRouter);
 
 // Static UI
 app.use(express.static(UI_DIR, { extensions: ['html'] }));

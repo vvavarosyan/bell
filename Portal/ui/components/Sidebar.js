@@ -53,10 +53,20 @@ export const NAV_SECTIONS = [
   },
 ];
 
-/** True if an item should be shown to a user with the given role. */
-export function itemVisibleTo(item, role) {
+// Admin tools live only on the admin deployment (admin.bell.qa) and the local
+// engine. On the user portal (BDI_MODE=user) these are blocked server-side, so
+// we also hide them from the nav to avoid dead 403 links — even for a
+// platform_admin who happens to be on app.bell.qa.
+export const ADMIN_ONLY_NAV_IDS = new Set([
+  'sources', 'recent-jobs', 'sync', 'settings', 'dedup-queue',
+]);
+
+/** True if an item should be shown to a user with the given role, in this mode. */
+export function itemVisibleTo(item, role, mode = 'local-admin') {
   if (!role) return false;
-  if (role === 'platform_admin') return true;            // sees everything
+  // On the user portal, admin tools are unavailable to everyone.
+  if (mode === 'user' && ADMIN_ONLY_NAV_IDS.has(item.id)) return false;
+  if (role === 'platform_admin') return true;            // sees everything (else)
   if (item.visibility === 'all' || item.visibility === undefined) return true;
   return Array.isArray(item.visibility) && item.visibility.includes(role);
 }
@@ -92,7 +102,7 @@ function compactCount(n) {
   return String(v);
 }
 
-export function Sidebar({ activeId, onSelect, dbStatus, settings, stats, currentRole = 'platform_admin' }) {
+export function Sidebar({ activeId, onSelect, dbStatus, settings, stats, currentRole = 'platform_admin', mode = 'local-admin' }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef(null);
 
@@ -131,7 +141,7 @@ export function Sidebar({ activeId, onSelect, dbStatus, settings, stats, current
 
       <nav class="sidebar-nav">
         ${NAV_SECTIONS.map(section => {
-          const visibleItems = section.items.filter(i => itemVisibleTo(i, currentRole));
+          const visibleItems = section.items.filter(i => itemVisibleTo(i, currentRole, mode));
           if (visibleItems.length === 0) return null;
           return html`
           <div class="nav-section" key=${section.label}>
