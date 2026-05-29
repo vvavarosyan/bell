@@ -8,7 +8,8 @@ import { PersonDetail } from './PersonDetail.js';
 import { JobLogPanel } from './JobLogPanel.js';
 import { ContactIcons } from './ContactIcons.js';
 
-export function PeopleTab() {
+export function PeopleTab({ mode = 'local-admin' } = {}) {
+  const isUser = mode === 'user';   // customers reveal contacts instead of editing internals
   const [archiveMode, setArchiveMode] = useState('active');
   const archivedMode = archiveMode === 'archived';
   const [rows, setRows]         = useState([]);
@@ -101,6 +102,31 @@ export function PeopleTab() {
     } catch (err) { toast(err.message, 'error'); }
   };
 
+  const revealRow = async (id) => {
+    try {
+      const res = await api.revealPerson(id);
+      window.dispatchEvent(new Event('bdi:credits-changed'));
+      if (res.insufficient) toast('Not enough credits to reveal', 'error');
+      else { toast('Contact revealed'); load({ silent: true }); }
+    } catch (err) {
+      toast(/insufficient/i.test(err.message) ? 'Not enough credits to reveal' : 'Reveal failed: ' + err.message, 'error');
+    }
+  };
+
+  const runBulkReveal = async () => {
+    const ids = [...selected];
+    if (ids.length === 0) return;
+    try {
+      const r = await api.revealPeopleBulk(ids);
+      window.dispatchEvent(new Event('bdi:credits-changed'));
+      if (r.unlimited) toast(`Revealed ${r.revealed} ${r.revealed === 1 ? 'person' : 'people'}`);
+      else toast(`Revealed ${r.revealed} · ${r.already} already unlocked · ${r.insufficient} need more credits`,
+                 r.insufficient > 0 ? 'error' : 'success');
+      clearSelection();
+      load({ silent: true });
+    } catch (err) { toast('Reveal failed: ' + err.message, 'error'); }
+  };
+
   // Refresh while a deep-enrich job runs so photos/emails appear live
   useEffect(() => {
     if (!activeJob) return;
@@ -141,6 +167,7 @@ export function PeopleTab() {
         <strong>${selected.size}</strong>&nbsp;selected
         <span class="muted small"> · deep-enrich pulls photo, email, full experience per profile · $0.01 each</span>
         <span class="spacer"></span>
+        <button class="accent" onClick=${runBulkReveal} title="Reveal contact details · 1 credit each (already-revealed are free)">Reveal contacts ▶</button>
         <button class="accent" onClick=${runDeepEnrich}>Deep Enrich ▶</button>
         <button onClick=${clearSelection}>Clear</button>
       </div>
@@ -185,7 +212,9 @@ export function PeopleTab() {
                 <td><${PhotoCell} person=${r} /></td>
                 <${EditableCell} value=${r.full_name} onSave=${(v) => update(r.id, 'full_name', v)} />
                 <${EditableCell} value=${r.headline}  onSave=${(v) => update(r.id, 'headline', v)} />
-                <td><${ContactIcons} company=${r} /></td>
+                <td>${isUser && !r.revealed_by_tenant
+                  ? html`<button class="reveal-btn" onClick=${(e) => { e.stopPropagation(); revealRow(r.id); }}>Reveal · 1</button>`
+                  : html`<${ContactIcons} company=${r} />`}</td>
               </tr>
             `)}
           </tbody>

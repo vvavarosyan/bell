@@ -102,7 +102,12 @@ function compactCount(n) {
   return String(v);
 }
 
-export function Sidebar({ activeId, onSelect, dbStatus, settings, stats, currentRole = 'platform_admin', mode = 'local-admin' }) {
+const ROLE_LABELS = {
+  platform_admin: 'Platform Admin',
+  owner: 'Owner', admin: 'Admin', lead: 'Lead', member: 'Member', viewer: 'Viewer',
+};
+
+export function Sidebar({ activeId, onSelect, dbStatus, settings, stats, currentRole = 'platform_admin', currentUser = null, mode = 'local-admin' }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef(null);
 
@@ -124,10 +129,14 @@ export function Sidebar({ activeId, onSelect, dbStatus, settings, stats, current
     return () => window.removeEventListener('mousedown', onClick);
   }, [menuOpen]);
 
-  const adminEmail = settings?.admin_email || 'admin@local';
-  const adminName  = adminEmail.split('@')[0]
-    .replace(/[._-]+/g, ' ')
-    .replace(/\b\w/g, c => c.toUpperCase());
+  // In user/admin mode, show the actual signed-in user (from /api/auth/me).
+  // In local-admin mode there's no Clerk user — fall back to the local setting.
+  const email = currentUser?.email || settings?.admin_email || 'admin@local';
+  const adminName = (currentUser?.full_name && currentUser.full_name.trim())
+    || email.split('@')[0].replace(/[._-]+/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+  const planLabel = currentUser
+    ? (ROLE_LABELS[currentUser.role] || currentUser.role || 'Member')
+    : (mode === 'local-admin' ? 'Local Admin' : 'Admin');
 
   return html`
     <aside class="sidebar">
@@ -177,7 +186,7 @@ export function Sidebar({ activeId, onSelect, dbStatus, settings, stats, current
           <div class="user-avatar">${adminName.charAt(0) || 'A'}</div>
           <div class="user-meta">
             <div class="user-name">${adminName}</div>
-            <div class="user-plan">Admin · Pro</div>
+            <div class="user-plan" title=${email}>${planLabel}</div>
           </div>
           <button class="user-dots" onClick=${() => setMenuOpen(o => !o)} title="Account menu">⋯</button>
           ${menuOpen ? html`

@@ -82,6 +82,8 @@ function App({ initialUser, initialTenant, mode }) {
     return () => window.removeEventListener('hashchange', onHash);
   }, [tab]);
 
+  const [credits, setCredits] = useState(null);
+
   const refreshHeader = useCallback(async () => {
     try {
       const [s, h] = await Promise.all([api.stats(), api.health()]);
@@ -92,11 +94,19 @@ function App({ initialUser, initialTenant, mode }) {
     }
   }, []);
 
+  const refreshCredits = useCallback(async () => {
+    try { setCredits(await api.creditBalance()); } catch { /* ignore */ }
+  }, []);
+
   useEffect(() => {
     refreshHeader();
-    const t = setInterval(refreshHeader, 30_000);
-    return () => clearInterval(t);
-  }, [refreshHeader]);
+    refreshCredits();
+    const t = setInterval(() => { refreshHeader(); refreshCredits(); }, 30_000);
+    // Any reveal dispatches this so the pill updates immediately.
+    const onCredits = () => refreshCredits();
+    window.addEventListener('bdi:credits-changed', onCredits);
+    return () => { clearInterval(t); window.removeEventListener('bdi:credits-changed', onCredits); };
+  }, [refreshHeader, refreshCredits]);
 
   // Load settings once so we can show admin name in the sidebar footer
   useEffect(() => {
@@ -117,6 +127,7 @@ function App({ initialUser, initialTenant, mode }) {
         settings=${settings}
         stats=${stats}
         currentRole=${currentRole}
+        currentUser=${initialUser}
         mode=${mode?.mode || 'local-admin'}
       />
       <main class="app-main">
@@ -130,10 +141,18 @@ function App({ initialUser, initialTenant, mode }) {
               <span><b>$${stats.usd_total.toFixed(2)}</b> spent</span>
             </div>
           ` : null}
+          ${credits ? html`
+            <div class="credit-pill" title=${credits.unlimited ? 'Internal / admin — unlimited credits' : `${credits.plan || ''} plan · ${(credits.monthly_allotment ?? 0).toLocaleString()} credits/month`}>
+              <span class="credit-dot"></span>
+              ${credits.unlimited
+                ? html`<b>Unlimited</b> credits`
+                : html`<b>${(credits.balance ?? 0).toLocaleString()}</b> credits`}
+            </div>
+          ` : null}
         </div>
 
         ${Active
-          ? html`<${Active} />`
+          ? html`<${Active} mode=${mode?.mode || 'local-admin'} />`
           : html`<${ComingSoon} label=${LABELS[tab] || tab} />`}
       </main>
     </div>
