@@ -13,9 +13,15 @@
 //
 // Tables are listed parents-first so foreign-key targets exist before children
 // are inserted. Each table's `watermark` column drives incremental pushes.
+// `selfRef`: a self-referential FK column (a merged-duplicate row points to its
+// canonical row via this column). Rows where it IS NULL (canonical/standalone)
+// must be pushed BEFORE rows where it's set, so the canonical target already
+// exists when the duplicate is inserted — otherwise the FK fails across chunk
+// boundaries. Dedup is one level deep (duplicate → canonical), so a single
+// NULLs-first ordering is sufficient.
 export const MIRROR_TABLES = [
-  { name: 'companies',        watermark: 'updated_at'  },
-  { name: 'people',           watermark: 'updated_at'  },
+  { name: 'companies',        watermark: 'updated_at',   selfRef: 'canonical_id' },
+  { name: 'people',           watermark: 'updated_at',   selfRef: 'canonical_id' },
   { name: 'jobs',             watermark: 'updated_at'  },
   { name: 'company_sources',  watermark: 'last_seen_at' },
   { name: 'person_companies', watermark: 'updated_at'  },

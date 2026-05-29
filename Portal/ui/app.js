@@ -117,6 +117,7 @@ function App({ initialUser, initialTenant, mode }) {
         settings=${settings}
         stats=${stats}
         currentRole=${currentRole}
+        mode=${mode?.mode || 'local-admin'}
       />
       <main class="app-main">
         <div class="page-header">

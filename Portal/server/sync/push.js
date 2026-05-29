@@ -48,10 +48,15 @@ async function postReset(base, token) {
 }
 
 // Pull every row whose watermark column is newer than `wm`. SELECT * mirrors all
-// columns; table/watermark come from the trusted MIRROR_TABLES constant.
-async function selectRows(table, watermarkCol, wm) {
+// columns; table/watermark/selfRef come from the trusted MIRROR_TABLES constant.
+// When a self-referential FK exists, order canonical/standalone rows (selfRef IS
+// NULL) first so a duplicate never references a not-yet-inserted canonical.
+async function selectRows(table, watermarkCol, wm, selfRef) {
+  const order = selfRef
+    ? `("${selfRef}" IS NOT NULL), "${watermarkCol}"`
+    : `"${watermarkCol}"`;
   const r = await query(
-    `SELECT * FROM "${table}" WHERE "${watermarkCol}" > $1 ORDER BY "${watermarkCol}"`,
+    `SELECT * FROM "${table}" WHERE "${watermarkCol}" > $1 ORDER BY ${order}`,
     [wm]
   );
   return r.rows;
@@ -96,8 +101,8 @@ export async function runPush({ full = false, reset = false } = {}) {
     tables: {}, total_upserted: 0, total_skipped: 0, errors: [],
   };
 
-  for (const { name, watermark } of MIRROR_TABLES) {
-    const rows = await selectRows(name, watermark, wm);
+  for (const { name, watermark, selfRef } of MIRROR_TABLES) {
+    const rows = await selectRows(name, watermark, wm, selfRef);
     let upserted = 0, skipped = 0;
     for (let i = 0; i < rows.length; i += CHUNK_SIZE) {
       const chunk = rows.slice(i, i + CHUNK_SIZE);
