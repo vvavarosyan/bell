@@ -224,6 +224,7 @@ export function PeopleTab({ mode = 'local-admin' } = {}) {
       <${PersonDetail}
         personId=${openedId}
         onMutated=${load}
+        isUser=${isUser}
       />
     </div>
 

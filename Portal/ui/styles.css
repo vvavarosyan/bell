@@ -299,6 +299,16 @@ html, body {
 .contact-locked-cell { display: inline-flex; align-items: center; gap: 8px; }
 .contact-icon.locked { opacity: .75; cursor: default; }
 
+.user-role-line { font-size: 10.5px; color: var(--text-dim); text-transform: capitalize; }
+
+.reveal-banner {
+  margin-top: 10px; padding: 10px 12px;
+  display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap;
+  background: var(--bg-elev-2, rgba(255,255,255,0.03));
+  border: 1px dashed var(--border); border-radius: 8px;
+  font-size: 12px; color: var(--text-muted);
+}
+
 /* ComingSoon placeholder */
 .coming-soon {
   display: flex; flex-direction: column;

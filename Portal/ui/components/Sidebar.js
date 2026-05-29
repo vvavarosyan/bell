@@ -200,7 +200,8 @@ export function Sidebar({ activeId, onSelect, dbStatus, settings, stats, current
           <div class="user-avatar">${adminName.charAt(0) || 'A'}</div>
           <div class="user-meta">
             <div class="user-name">${adminName}</div>
-            <div class="user-plan" title=${email}>${planLabel}</div>
+            <div class="user-plan">${email}</div>
+            ${currentUser ? html`<div class="user-role-line">${planLabel}</div>` : null}
           </div>
           <button class="user-dots" onClick=${() => setMenuOpen(o => !o)} title="Account menu">⋯</button>
           ${menuOpen ? html`
