@@ -31,6 +31,7 @@ router.get('/', async (req, res, next) => {
     const companyId = req.query.company_id ? Number(req.query.company_id) : null;
     const onlyRevealed = req.query.revealed;
     const archivedQ = req.query.archived;   // 'true' | 'false' | 'all' | undefined → defaults to 'false'
+    const employment = req.query.employment; // 'with' | 'without' | undefined → no filter
 
     const where = [];
     const params = [];
@@ -53,6 +54,12 @@ router.get('/', async (req, res, next) => {
     if (onlyRevealed === 'true' || onlyRevealed === 'false') {
       params.push(onlyRevealed === 'true');
       where.push(`is_revealed = $${params.length}`);
+    }
+    // Employment-link coverage filter (no params needed — correlated EXISTS).
+    if (employment === 'with') {
+      where.push(`EXISTS (SELECT 1 FROM person_companies pc WHERE pc.person_id = people.id)`);
+    } else if (employment === 'without') {
+      where.push(`NOT EXISTS (SELECT 1 FROM person_companies pc WHERE pc.person_id = people.id)`);
     }
 
     const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';

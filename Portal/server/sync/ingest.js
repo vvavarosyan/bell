@@ -1,275 +1,156 @@
-// Production-side ingest: receive a batch of canonical rows from the local
-// engine and upsert them into the production Postgres.
+// Production-side ingest: receive a batch of rows from the local engine and
+// upsert them into the production Postgres as an EXACT MIRROR.
 //
-// One table per call. Rows are upserted on their stable natural key:
-//   companies        → ON CONFLICT (bin)
-//   people           → ON CONFLICT (pin)            (reveal state never touched)
-//   jobs             → ON CONFLICT (jin)            (company resolved from bin)
-//   company_sources  → ON CONFLICT (source, source_record_id)  (company from bin)
-//   person_companies → ON CONFLICT (expression unique index)    (parents from pin/bin)
-//
-// Performance: each chunk is applied as ONE multi-row statement (batch path).
-// If that statement errors (e.g. one colliding row), we fall back to applying
-// the chunk row-by-row inside a transaction, so a single bad row is recorded in
-// the errors list and skipped rather than aborting the whole batch.
+//   • One table per call. Rows are upserted ON CONFLICT (id) — the same primary
+//     key as local, so the mirror is row-for-row identical and foreign keys
+//     (company_id, person_id, …) line up without any BIN/PIN resolution.
+//   • Columns are discovered from the prod schema (information_schema) and
+//     intersected with the keys present in the payload, so the mirror tolerates
+//     schema drift (a column local has but prod doesn't is simply skipped).
+//   • jsonb columns are JSON-encoded before binding (node-postgres would
+//     otherwise serialize a JS array as a PG array literal → invalid json).
+//   • Performance: one multi-row INSERT per sub-chunk. If a batch statement
+//     errors, we fall back to per-row upserts so one bad row can't sink the
+//     whole batch, and the offending rows are reported.
 
-import { withTransaction } from '../db.js';
-import {
-  COMPANY_COLS, PEOPLE_COLS, JOB_COLS,
-  COMPANY_SOURCE_COLS, PERSON_COMPANY_COLS, JSONB_COLS,
-} from './tables.js';
+import { query, withTransaction } from '../db.js';
+import { MIRROR_TABLE_NAMES } from './tables.js';
 
 const MAX_REPORTED_ERRORS = 25;
-
-// Return a shallow copy of `row` with this table's jsonb columns JSON-encoded.
-// Required so node-postgres sends valid JSON text (not a PG array literal) for
-// array-valued jsonb fields. Safe for objects, arrays, and scalars; nulls pass
-// through untouched.
-function normalizeJsonb(table, row) {
-  const cols = JSONB_COLS[table];
-  if (!cols || !row) return row;
-  const out = { ...row };
-  for (const c of cols) {
-    // The value is always the parsed JS representation of the jsonb (object,
-    // array, or scalar) — encode it back to JSON text for the driver. Null/
-    // undefined pass through as SQL NULL.
-    if (out[c] !== null && out[c] !== undefined) {
-      out[c] = JSON.stringify(out[c]);
-    }
-  }
-  return out;
-}
-
-// Build "col = EXCLUDED.col" assignment list, skipping the conflict key(s).
-function updateAssignments(cols, skip) {
-  return cols
-    .filter((c) => !skip.includes(c))
-    .map((c) => `${c} = EXCLUDED.${c}`)
-    .join(', ');
-}
-
-function placeholders(n, start = 1) {
-  return Array.from({ length: n }, (_, i) => `$${start + i}`).join(', ');
-}
-
-// ---------------------------------------------------------------------------
-// Per-table upsert handlers. Each returns nothing; throws on a row error so the
-// caller can record + continue.
-// ---------------------------------------------------------------------------
-
-async function upsertCompany(client, row) {
-  const cols = COMPANY_COLS;
-  await client.query(
-    `INSERT INTO companies (${cols.join(', ')})
-     VALUES (${placeholders(cols.length)})
-     ON CONFLICT (bin) DO UPDATE SET ${updateAssignments(cols, ['bin'])}`,
-    cols.map((c) => row[c] ?? null)
-  );
-}
-
-async function upsertPerson(client, row) {
-  const cols = PEOPLE_COLS;
-  await client.query(
-    `INSERT INTO people (${cols.join(', ')})
-     VALUES (${placeholders(cols.length)})
-     ON CONFLICT (pin) DO UPDATE SET ${updateAssignments(cols, ['pin'])}`,
-    cols.map((c) => row[c] ?? null)
-  );
-}
-
-async function upsertJob(client, row) {
-  // company_id resolved from company_bin via subselect (nullable).
-  const cols = JOB_COLS;
-  const vals = cols.map((c) => row[c] ?? null);
-  await client.query(
-    `INSERT INTO jobs (${cols.join(', ')}, company_id)
-     VALUES (${placeholders(cols.length)},
-             (SELECT id FROM companies WHERE bin = $${cols.length + 1}))
-     ON CONFLICT (jin) DO UPDATE SET ${updateAssignments(cols, ['jin'])},
-             company_id = EXCLUDED.company_id`,
-    [...vals, row.company_bin ?? null]
-  );
-}
-
-async function upsertCompanySource(client, row) {
-  const cols = COMPANY_SOURCE_COLS;
-  const vals = cols.map((c) => row[c] ?? null);
-  // company_id resolved from company_bin. If the parent isn't on prod yet, the
-  // SELECT yields no row and nothing is inserted (parents are synced first, so
-  // this is rare and self-heals on the next push).
-  const res = await client.query(
-    `INSERT INTO company_sources (company_id, ${cols.join(', ')})
-     SELECT c.id, ${placeholders(cols.length, 2)}
-       FROM companies c WHERE c.bin = $1
-     ON CONFLICT (source, source_record_id) DO UPDATE SET
-       company_id   = EXCLUDED.company_id,
-       source_url   = EXCLUDED.source_url,
-       raw_payload  = EXCLUDED.raw_payload,
-       last_seen_at = EXCLUDED.last_seen_at`,
-    [row.company_bin ?? null, ...vals]
-  );
-  if (res.rowCount === 0) {
-    throw new Error(`parent company bin=${row.company_bin} not found on prod`);
-  }
-}
-
-async function upsertPersonCompany(client, row) {
-  const cols = PERSON_COMPANY_COLS;
-  const vals = cols.map((c) => row[c] ?? null);
-  // person_id from pin, company_id from bin — both required.
-  const res = await client.query(
-    `INSERT INTO person_companies (person_id, company_id, ${cols.join(', ')})
-     SELECT p.id, c.id, ${placeholders(cols.length, 3)}
-       FROM people p, companies c
-      WHERE p.pin = $1 AND c.bin = $2
-     ON CONFLICT (person_id, company_id,
-                  (COALESCE(start_date, '1970-01-01'::date)),
-                  (COALESCE(title, '')))
-     DO UPDATE SET
-       department      = EXCLUDED.department,
-       seniority_level = EXCLUDED.seniority_level,
-       org_chart_level = EXCLUDED.org_chart_level,
-       end_date        = EXCLUDED.end_date,
-       is_current      = EXCLUDED.is_current,
-       source_stage    = EXCLUDED.source_stage,
-       raw_payload     = EXCLUDED.raw_payload,
-       updated_at      = now()`,
-    [row.person_pin ?? null, row.company_bin ?? null, ...vals]
-  );
-  if (res.rowCount === 0) {
-    throw new Error(`parent person_pin=${row.person_pin} or company_bin=${row.company_bin} not found on prod`);
-  }
-}
-
-const HANDLERS = {
-  companies:        upsertCompany,
-  people:           upsertPerson,
-  jobs:             upsertJob,
-  company_sources:  upsertCompanySource,
-  person_companies: upsertPersonCompany,
-};
-
-// ---------------------------------------------------------------------------
-// BATCH fast-path. One multi-row statement per chunk instead of N×(savepoint +
-// insert) round-trips — turns a full resync from many minutes into seconds.
-// If a batch statement errors (e.g. one colliding row), applyBatch falls back
-// to the per-row HANDLERS path for that chunk, so correctness never regresses —
-// only speed. Returns the number of rows upserted by the batch.
-// ---------------------------------------------------------------------------
-
-// companies / people: plain multi-row VALUES upsert on a single conflict key.
-function makeMultiRowBatch(tableName, cols, conflictKey) {
-  return async (client, rows) => {
-    const values = [];
-    const tuples = [];
-    let p = 1;
-    for (const row of rows) {
-      tuples.push(`(${cols.map(() => `$${p++}`).join(', ')})`);
-      for (const c of cols) values.push(row[c] ?? null);
-    }
-    const res = await client.query(
-      `INSERT INTO ${tableName} (${cols.join(', ')})
-       VALUES ${tuples.join(', ')}
-       ON CONFLICT (${conflictKey}) DO UPDATE SET ${updateAssignments(cols, [conflictKey])}`,
-      values
-    );
-    return res.rowCount;
-  };
-}
-
-// company_sources: resolve company_id from bin via unnest()+JOIN. Rows whose
-// company_bin has no match on prod are silently dropped by the JOIN (parent not
-// synced yet — self-heals next push).
-async function batchCompanySources(client, rows) {
-  const binArr = [], srcArr = [], sridArr = [], urlArr = [], rawArr = [], firstArr = [], lastArr = [];
-  for (const r of rows) {
-    binArr.push(r.company_bin ?? null);
-    srcArr.push(r.source ?? null);
-    sridArr.push(r.source_record_id ?? null);
-    urlArr.push(r.source_url ?? null);
-    rawArr.push(r.raw_payload ?? null);            // already JSON text (normalizeJsonb)
-    firstArr.push(r.first_seen_at ?? null);
-    lastArr.push(r.last_seen_at ?? null);
-  }
-  const res = await client.query(
-    `INSERT INTO company_sources (company_id, source, source_record_id, source_url, raw_payload, first_seen_at, last_seen_at)
-     SELECT c.id, x.source, x.source_record_id, x.source_url, x.raw_payload, x.first_seen_at, x.last_seen_at
-       FROM unnest($1::text[], $2::text[], $3::text[], $4::text[], $5::jsonb[], $6::timestamptz[], $7::timestamptz[])
-            AS x(company_bin, source, source_record_id, source_url, raw_payload, first_seen_at, last_seen_at)
-       JOIN companies c ON c.bin = x.company_bin
-     ON CONFLICT (source, source_record_id) DO UPDATE SET
-       company_id   = EXCLUDED.company_id,
-       source_url   = EXCLUDED.source_url,
-       raw_payload  = EXCLUDED.raw_payload,
-       last_seen_at = EXCLUDED.last_seen_at`,
-    [binArr, srcArr, sridArr, urlArr, rawArr, firstArr, lastArr]
-  );
-  return res.rowCount;
-}
-
-const BATCH = {
-  companies:       makeMultiRowBatch('companies', COMPANY_COLS, 'bin'),
-  people:          makeMultiRowBatch('people', PEOPLE_COLS, 'pin'),
-  company_sources: batchCompanySources,
-  // jobs + person_companies use the per-row path (small volumes, FK resolution).
-};
+const MAX_PARAMS = 60000;            // safety margin under Postgres's 65535 limit
 
 /**
- * Apply one batch (one table) of rows. Returns a summary.
- * Tries the batch fast-path first; on any batch error, falls back to per-row
- * (which isolates and reports the offending rows).
- * @param {string} table
- * @param {object[]} rawRows
+ * Wipe the mirror tables on prod so a full push can repopulate them with the
+ * local ids. RESTART IDENTITY resets sequences; CASCADE clears any dependent
+ * non-mirror tables (all empty on a mirror deployment). One row order/statement
+ * handles the FK graph. Use deliberately — it empties the product data tables
+ * until the following full push completes.
  */
-export async function applyBatch(table, rawRows) {
-  const handler = HANDLERS[table];
-  if (!handler) throw new Error(`unknown sync table: ${table}`);
-  if (!Array.isArray(rawRows)) throw new Error('rows must be an array');
-
-  // Normalize jsonb columns once for the whole batch.
-  const rows = rawRows.map((r) => normalizeJsonb(table, r));
-
-  // 1) Fast path.
-  const batchFn = BATCH[table];
-  if (batchFn && rows.length) {
-    try {
-      const upserted = await withTransaction((client) => batchFn(client, rows));
-      return { table, received: rows.length, upserted, skipped: rows.length - upserted, errors: [] };
-    } catch (err) {
-      console.warn(`[sync] batch upsert for ${table} failed (${err.message}); falling back to per-row`);
-    }
-  }
-
-  // 2) Per-row fallback (robust + reports offending rows).
-  let upserted = 0;
-  const errors = [];
-  await withTransaction(async (client) => {
-    for (let i = 0; i < rows.length; i++) {
-      try {
-        await client.query('SAVEPOINT row_sp');
-        await handler(client, rows[i]);
-        await client.query('RELEASE SAVEPOINT row_sp');
-        upserted++;
-      } catch (err) {
-        await client.query('ROLLBACK TO SAVEPOINT row_sp');
-        if (errors.length < MAX_REPORTED_ERRORS) {
-          errors.push({ index: i, key: rowKey(table, rows[i]), error: err.message });
-        }
-      }
-    }
-  });
-
-  return { table, received: rows.length, upserted, skipped: rows.length - upserted, errors };
+export async function applyReset() {
+  await query(
+    `TRUNCATE person_companies, company_sources, jobs, people, companies
+     RESTART IDENTITY CASCADE`
+  );
+  return { reset: true, truncated: ['companies', 'people', 'jobs', 'company_sources', 'person_companies'] };
 }
 
-function rowKey(table, row) {
-  if (!row) return null;
-  switch (table) {
-    case 'companies':        return row.bin;
-    case 'people':           return row.pin;
-    case 'jobs':             return row.jin;
-    case 'company_sources':  return `${row.source}:${row.source_record_id}`;
-    case 'person_companies': return `${row.person_pin}@${row.company_bin}`;
-    default:                 return null;
+// ---- prod column metadata (cached; schema is stable within a process) -------
+const _colCache = new Map();
+async function getColumnMeta(table) {
+  if (_colCache.has(table)) return _colCache.get(table);
+  const r = await query(
+    `SELECT column_name, data_type, udt_name
+       FROM information_schema.columns
+      WHERE table_schema = 'public' AND table_name = $1`,
+    [table]
+  );
+  const meta = {};
+  for (const row of r.rows) meta[row.column_name] = row;
+  _colCache.set(table, meta);
+  return meta;
+}
+
+const q = (id) => `"${String(id).replace(/"/g, '""')}"`;   // safe identifier quote
+
+function isJsonb(metaRow) {
+  return metaRow && (metaRow.data_type === 'jsonb' || metaRow.udt_name === 'jsonb'
+                  || metaRow.data_type === 'json'  || metaRow.udt_name === 'json');
+}
+
+// Encode jsonb values to JSON text (objects, arrays, scalars). Non-jsonb values
+// pass through unchanged so text[] columns stay JS arrays for the driver.
+function bindValue(meta, col, value) {
+  if (value === null || value === undefined) return null;
+  if (isJsonb(meta[col])) return JSON.stringify(value);
+  return value;
+}
+
+function flatten(cols, meta, rows) {
+  const values = [];
+  for (const row of rows) for (const c of cols) values.push(bindValue(meta, c, row[c]));
+  return values;
+}
+
+function buildUpsertSQL(table, cols, rowCount) {
+  const colList = cols.map(q).join(', ');
+  const tuples = [];
+  let p = 1;
+  for (let r = 0; r < rowCount; r++) {
+    tuples.push(`(${cols.map(() => `$${p++}`).join(', ')})`);
   }
+  const setList = cols
+    .filter((c) => c !== 'id')
+    .map((c) => `${q(c)} = EXCLUDED.${q(c)}`)
+    .join(', ');
+  return `INSERT INTO ${q(table)} (${colList}) VALUES ${tuples.join(', ')}
+          ON CONFLICT (id) DO UPDATE SET ${setList}`;
+}
+
+/**
+ * Apply one batch (one table) of rows as a mirror upsert.
+ * @param {string} table
+ * @param {object[]} rows
+ */
+export async function applyBatch(table, rows) {
+  if (!MIRROR_TABLE_NAMES.has(table)) throw new Error(`not a mirror table: ${table}`);
+  if (!Array.isArray(rows)) throw new Error('rows must be an array');
+  if (!rows.length) return { table, received: 0, upserted: 0, skipped: 0, errors: [] };
+
+  const meta = await getColumnMeta(table);
+
+  // Columns = union of payload keys that actually exist on prod. Must include id.
+  const present = new Set();
+  for (const row of rows) for (const k of Object.keys(row)) if (meta[k]) present.add(k);
+  const cols = [...present];
+  if (!cols.includes('id')) throw new Error(`payload for ${table} is missing the id column`);
+
+  // Sub-chunk so (cols × rows) stays under the parameter limit.
+  const maxRowsPerStmt = Math.max(1, Math.floor(MAX_PARAMS / cols.length));
+
+  let upserted = 0;
+  const errors = [];
+
+  for (let off = 0; off < rows.length; off += maxRowsPerStmt) {
+    const slice = rows.slice(off, off + maxRowsPerStmt);
+
+    // 1) Fast path: one multi-row INSERT for the sub-chunk.
+    try {
+      const sql = buildUpsertSQL(table, cols, slice.length);
+      const res = await query(sql, flatten(cols, meta, slice));
+      upserted += res.rowCount;
+      continue;
+    } catch (err) {
+      console.warn(`[sync] batch upsert ${table} sub-chunk failed (${err.message}); per-row fallback`);
+    }
+
+    // 2) Per-row fallback inside a transaction with savepoints.
+    await withTransaction(async (client) => {
+      const single = buildUpsertSQL(table, cols, 1);
+      for (let i = 0; i < slice.length; i++) {
+        try {
+          await client.query('SAVEPOINT row_sp');
+          await client.query(single, flatten(cols, meta, [slice[i]]));
+          await client.query('RELEASE SAVEPOINT row_sp');
+          upserted++;
+        } catch (err) {
+          await client.query('ROLLBACK TO SAVEPOINT row_sp');
+          if (errors.length < MAX_REPORTED_ERRORS) {
+            errors.push({ id: slice[i]?.id, error: err.message });
+          }
+        }
+      }
+    });
+  }
+
+  // Keep the prod id sequence ahead of mirrored ids (defensive; prod should
+  // never originate rows for mirror tables, but this avoids future collisions).
+  try {
+    await query(
+      `SELECT setval(pg_get_serial_sequence($1, 'id'),
+                     GREATEST((SELECT COALESCE(max(id), 1) FROM ${q(table)}), 1))`,
+      [table]
+    );
+  } catch { /* best-effort */ }
+
+  return { table, received: rows.length, upserted, skipped: rows.length - upserted, errors };
 }

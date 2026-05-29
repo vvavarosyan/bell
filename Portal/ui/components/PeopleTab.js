@@ -16,6 +16,7 @@ export function PeopleTab() {
   const [limit]                 = useState(100);
   const [offset, setOffset]     = useState(0);
   const [q, setQ]               = useState('');
+  const [employment, setEmployment] = useState('');   // '' | 'with' | 'without'
   const [loading, setLoading]   = useState(false);
   const [openedId, setOpenedId] = useState(null);
   const [selected, setSelected] = useState(() => new Set());
@@ -26,12 +27,13 @@ export function PeopleTab() {
     try {
       const params = { limit, offset, archived: archivedMode ? 'true' : 'false' };
       if (q.trim()) params.q = q.trim();
+      if (employment) params.employment = employment;
       const r = await api.people(params);
       setRows(r.rows);
       setTotal(r.total);
     } catch (err) { toast('Load failed: ' + err.message, 'error'); }
     finally { if (!silent) setLoading(false); }
-  }, [limit, offset, q, archivedMode]);
+  }, [limit, offset, q, archivedMode, employment]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -117,6 +119,15 @@ export function PeopleTab() {
         type="text" placeholder=${archivedMode ? "Search archived people..." : "Search name, LinkedIn URL, email..."}
         value=${q} onChange=${e => { setQ(e.target.value); setOffset(0); }}
       />
+      <select
+        title="Filter by employment links"
+        value=${employment}
+        onChange=${e => { setEmployment(e.target.value); setOffset(0); }}
+      >
+        <option value="">All people</option>
+        <option value="with">Has employment link</option>
+        <option value="without">No employment link</option>
+      </select>
       ${loading ? html`<span class="count">loading…</span>` : html`<${Pagination} total=${total} limit=${limit} offset=${offset} onChange=${setOffset} />`}
       <span class="spacer"></span>
       <button onClick=${load}>Refresh</button>

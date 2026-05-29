@@ -136,6 +136,7 @@ export const api = {
   syncStatus:             () => request('/api/sync/status'),
   syncPush:               () => request('/api/sync/push', { method: 'POST', body: '{}' }),
   syncFullResync:         () => request('/api/sync/full-resync', { method: 'POST', body: '{}' }),
+  syncRebuild:            () => request('/api/sync/rebuild', { method: 'POST', body: '{}' }),
 
   // Billing (Stripe-backed)
   billingPlans:           () => request('/api/billing/plans'),
