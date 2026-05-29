@@ -108,4 +108,7 @@ export const SYNC_ORDER = [
   'person_companies',
 ];
 
-export const CHUNK_SIZE = 500;
+// 1000 rows/chunk. With the batch upsert path that's one multi-row statement
+// per chunk. Stays well under Postgres's 65535-parameter limit even for the
+// widest table (companies ≈ 44 cols × 1000 = 44k params).
+export const CHUNK_SIZE = 1000;

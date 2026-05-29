@@ -8,9 +8,10 @@
 //   company_sources  → ON CONFLICT (source, source_record_id)  (company from bin)
 //   person_companies → ON CONFLICT (expression unique index)    (parents from pin/bin)
 //
-// Robustness: rows are applied one-by-one inside a transaction. A single bad
-// row (e.g. a unique-constraint collision on linkedin_url) is recorded in the
-// errors list and skipped rather than aborting the whole batch.
+// Performance: each chunk is applied as ONE multi-row statement (batch path).
+// If that statement errors (e.g. one colliding row), we fall back to applying
+// the chunk row-by-row inside a transaction, so a single bad row is recorded in
+// the errors list and skipped rather than aborting the whole batch.
 
 import { withTransaction } from '../db.js';
 import {
@@ -148,24 +149,105 @@ const HANDLERS = {
   person_companies: upsertPersonCompany,
 };
 
+// ---------------------------------------------------------------------------
+// BATCH fast-path. One multi-row statement per chunk instead of N×(savepoint +
+// insert) round-trips — turns a full resync from many minutes into seconds.
+// If a batch statement errors (e.g. one colliding row), applyBatch falls back
+// to the per-row HANDLERS path for that chunk, so correctness never regresses —
+// only speed. Returns the number of rows upserted by the batch.
+// ---------------------------------------------------------------------------
+
+// companies / people: plain multi-row VALUES upsert on a single conflict key.
+function makeMultiRowBatch(tableName, cols, conflictKey) {
+  return async (client, rows) => {
+    const values = [];
+    const tuples = [];
+    let p = 1;
+    for (const row of rows) {
+      tuples.push(`(${cols.map(() => `$${p++}`).join(', ')})`);
+      for (const c of cols) values.push(row[c] ?? null);
+    }
+    const res = await client.query(
+      `INSERT INTO ${tableName} (${cols.join(', ')})
+       VALUES ${tuples.join(', ')}
+       ON CONFLICT (${conflictKey}) DO UPDATE SET ${updateAssignments(cols, [conflictKey])}`,
+      values
+    );
+    return res.rowCount;
+  };
+}
+
+// company_sources: resolve company_id from bin via unnest()+JOIN. Rows whose
+// company_bin has no match on prod are silently dropped by the JOIN (parent not
+// synced yet — self-heals next push).
+async function batchCompanySources(client, rows) {
+  const binArr = [], srcArr = [], sridArr = [], urlArr = [], rawArr = [], firstArr = [], lastArr = [];
+  for (const r of rows) {
+    binArr.push(r.company_bin ?? null);
+    srcArr.push(r.source ?? null);
+    sridArr.push(r.source_record_id ?? null);
+    urlArr.push(r.source_url ?? null);
+    rawArr.push(r.raw_payload ?? null);            // already JSON text (normalizeJsonb)
+    firstArr.push(r.first_seen_at ?? null);
+    lastArr.push(r.last_seen_at ?? null);
+  }
+  const res = await client.query(
+    `INSERT INTO company_sources (company_id, source, source_record_id, source_url, raw_payload, first_seen_at, last_seen_at)
+     SELECT c.id, x.source, x.source_record_id, x.source_url, x.raw_payload, x.first_seen_at, x.last_seen_at
+       FROM unnest($1::text[], $2::text[], $3::text[], $4::text[], $5::jsonb[], $6::timestamptz[], $7::timestamptz[])
+            AS x(company_bin, source, source_record_id, source_url, raw_payload, first_seen_at, last_seen_at)
+       JOIN companies c ON c.bin = x.company_bin
+     ON CONFLICT (source, source_record_id) DO UPDATE SET
+       company_id   = EXCLUDED.company_id,
+       source_url   = EXCLUDED.source_url,
+       raw_payload  = EXCLUDED.raw_payload,
+       last_seen_at = EXCLUDED.last_seen_at`,
+    [binArr, srcArr, sridArr, urlArr, rawArr, firstArr, lastArr]
+  );
+  return res.rowCount;
+}
+
+const BATCH = {
+  companies:       makeMultiRowBatch('companies', COMPANY_COLS, 'bin'),
+  people:          makeMultiRowBatch('people', PEOPLE_COLS, 'pin'),
+  company_sources: batchCompanySources,
+  // jobs + person_companies use the per-row path (small volumes, FK resolution).
+};
+
 /**
  * Apply one batch (one table) of rows. Returns a summary.
+ * Tries the batch fast-path first; on any batch error, falls back to per-row
+ * (which isolates and reports the offending rows).
  * @param {string} table
- * @param {object[]} rows
+ * @param {object[]} rawRows
  */
-export async function applyBatch(table, rows) {
+export async function applyBatch(table, rawRows) {
   const handler = HANDLERS[table];
   if (!handler) throw new Error(`unknown sync table: ${table}`);
-  if (!Array.isArray(rows)) throw new Error('rows must be an array');
+  if (!Array.isArray(rawRows)) throw new Error('rows must be an array');
 
+  // Normalize jsonb columns once for the whole batch.
+  const rows = rawRows.map((r) => normalizeJsonb(table, r));
+
+  // 1) Fast path.
+  const batchFn = BATCH[table];
+  if (batchFn && rows.length) {
+    try {
+      const upserted = await withTransaction((client) => batchFn(client, rows));
+      return { table, received: rows.length, upserted, skipped: rows.length - upserted, errors: [] };
+    } catch (err) {
+      console.warn(`[sync] batch upsert for ${table} failed (${err.message}); falling back to per-row`);
+    }
+  }
+
+  // 2) Per-row fallback (robust + reports offending rows).
   let upserted = 0;
   const errors = [];
-
   await withTransaction(async (client) => {
     for (let i = 0; i < rows.length; i++) {
       try {
         await client.query('SAVEPOINT row_sp');
-        await handler(client, normalizeJsonb(table, rows[i]));
+        await handler(client, rows[i]);
         await client.query('RELEASE SAVEPOINT row_sp');
         upserted++;
       } catch (err) {
