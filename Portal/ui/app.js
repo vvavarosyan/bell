@@ -12,6 +12,7 @@ import { createRoot } from 'react-dom';
 import { html } from './lib/html.js';
 import { api } from './lib/api.js';
 import { Sidebar, NAV_IDS } from './components/Sidebar.js';
+import { currentRoute, navigateTo } from './lib/router.js';
 import { ComingSoon } from './components/ComingSoon.js';
 import { CompaniesTab, ArchivedCompaniesTab } from './components/CompaniesTab.js';
 import { PeopleTab }    from './components/PeopleTab.js';
@@ -59,28 +60,35 @@ const LABELS = {
 };
 
 function App({ initialUser, initialTenant, mode }) {
-  const parseHash = () => {
-    const raw = (window.location.hash || '').replace(/^#/, '').split(':')[0];
-    return NAV_IDS.includes(raw) ? raw : 'companies';
+  const resolveTab = () => {
+    const { tab } = currentRoute();
+    return NAV_IDS.includes(tab) ? tab : 'companies';
   };
-  const [tab, setTab] = useState(parseHash);
+  const [tab, setTab] = useState(resolveTab);
   const [stats, setStats] = useState(null);
   const [dbStatus, setDbStatus] = useState('unknown');
   const [settings, setSettings] = useState({});
   const currentRole = initialUser?.role || 'platform_admin';
 
+  // Normalize the URL on first load (e.g. '/' or an unknown path → /companies).
   useEffect(() => {
-    if (!window.location.hash.includes(':')) window.location.hash = tab;
-  }, [tab]);
+    const { tab: raw } = currentRoute();
+    if (!NAV_IDS.includes(raw)) navigateTo(tab);
+  }, []);
 
+  // Re-sync the active tab on SPA navigation + browser back/forward.
   useEffect(() => {
-    const onHash = () => {
-      const next = parseHash();
-      if (next !== tab) setTab(next);
+    const onNav = () => {
+      const next = resolveTab();
+      setTab(prev => (prev !== next ? next : prev));
     };
-    window.addEventListener('hashchange', onHash);
-    return () => window.removeEventListener('hashchange', onHash);
-  }, [tab]);
+    window.addEventListener('bdi:navigate', onNav);
+    window.addEventListener('popstate', onNav);
+    return () => {
+      window.removeEventListener('bdi:navigate', onNav);
+      window.removeEventListener('popstate', onNav);
+    };
+  }, []);
 
   const [credits, setCredits] = useState(null);
 
@@ -122,7 +130,7 @@ function App({ initialUser, initialTenant, mode }) {
     <div class="app-shell">
       <${Sidebar}
         activeId=${tab}
-        onSelect=${(id) => setTab(id)}
+        onSelect=${(id) => navigateTo(id)}
         dbStatus=${dbStatus}
         settings=${settings}
         stats=${stats}

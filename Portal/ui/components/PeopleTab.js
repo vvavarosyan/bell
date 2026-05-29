@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import { html } from '../lib/html.js';
 import { api } from '../lib/api.js';
 import { toast } from '../lib/toast.js';
+import { currentRoute } from '../lib/router.js';
 import { EditableCell } from './EditableCell.js';
 import { Pagination } from './Pagination.js';
 import { PersonDetail } from './PersonDetail.js';
@@ -43,23 +44,23 @@ export function PeopleTab({ mode = 'local-admin' } = {}) {
     if (!openedId && rows.length > 0) setOpenedId(rows[0].id);
   }, [rows, openedId]);
 
-  // Cross-tab navigation: if user clicks a person from elsewhere, the URL hash
-  // becomes "#people:<id>". Pick that up and open the person.
+  // Cross-tab navigation: opening a person from elsewhere routes to
+  // /people?id=<id>; pick that up and open the person.
   useEffect(() => {
-    const checkHash = () => {
-      const h = window.location.hash || '';
-      const m = h.match(/^#?people:(\d+)/);
-      if (m) {
-        const id = Number(m[1]);
+    const checkRoute = () => {
+      const { tab, id } = currentRoute();
+      if (tab === 'people' && id) {
         setOpenedId(id);
-        // Refresh in case the person was just added
-        load({ silent: true });
-        window.location.hash = 'people';
+        load({ silent: true });   // in case the person was just added
       }
     };
-    checkHash();
-    window.addEventListener('hashchange', checkHash);
-    return () => window.removeEventListener('hashchange', checkHash);
+    checkRoute();
+    window.addEventListener('bdi:navigate', checkRoute);
+    window.addEventListener('popstate', checkRoute);
+    return () => {
+      window.removeEventListener('bdi:navigate', checkRoute);
+      window.removeEventListener('popstate', checkRoute);
+    };
   }, [load]);
 
   const update = async (id, field, value) => {

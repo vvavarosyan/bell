@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { html } from '../lib/html.js';
 import { api } from '../lib/api.js';
 import { toast } from '../lib/toast.js';
+import { navigateTo } from '../lib/router.js';
 
 // Each entry is a separate "page" inside settings — clicking a rail item
 // swaps the body to that section's content. No emoji icons.
@@ -200,7 +201,7 @@ export function SettingsTab() {
         <div class="hint">
           Phase 5 — dedup companies across sources and assign Bell identifiers (BIN / PIN / JIN).
           Auto-merges high-confidence duplicates; queues medium-confidence pairs for review in the
-          <a href="#dedup-queue">Dedup Queue</a> tab.
+          <a href="/dedup-queue" onClick=${(e) => { e.preventDefault(); navigateTo('dedup-queue'); }}>Dedup Queue</a> tab.
         </div>
         <div class="row">
           <label>Run full assembly</label>

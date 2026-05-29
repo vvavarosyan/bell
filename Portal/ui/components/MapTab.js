@@ -780,7 +780,7 @@ function openPopup(map, coords, p, mapboxgl) {
         ${p.industry ? `<div class="map-popup-line">${escapeHtml(p.industry)}</div>` : ''}
         ${p.city ? `<div class="map-popup-line">${escapeHtml(p.city)}</div>` : ''}
         ${p.year ? `<div class="map-popup-line">Founded ${escapeHtml(p.year)}</div>` : ''}
-        <a class="map-popup-link" href="#companies:${p.id}">Open in Companies &rarr;</a>
+        <a class="map-popup-link" href="/companies?id=${p.id}" onclick="window.__bdiNavigate('companies', ${p.id}); return false;">Open in Companies &rarr;</a>
       </div>
     `)
     .addTo(map);

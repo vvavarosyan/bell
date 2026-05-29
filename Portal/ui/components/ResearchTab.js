@@ -7,6 +7,7 @@ import { useCallback, useEffect, useState } from 'react';
 import { html } from '../lib/html.js';
 import { api } from '../lib/api.js';
 import { toast } from '../lib/toast.js';
+import { navigateTo } from '../lib/router.js';
 import { ResearchJobCard } from './ResearchJobCard.js';
 import { NewResearchModal } from './NewResearchModal.js';
 
@@ -886,10 +887,10 @@ function DerivedEntitiesPanel({ derived }) {
 
   const gotoEntity = (d) => {
     if (d.entity_type === 'company' && d.entity_id) {
-      window.location.hash = `companies:${d.entity_id}`;
+      navigateTo('companies', d.entity_id);
     }
     if (d.entity_type === 'person' && d.entity_id) {
-      window.location.hash = `people:${d.entity_id}`;
+      navigateTo('people', d.entity_id);
     }
   };
 

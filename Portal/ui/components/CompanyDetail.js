@@ -5,6 +5,7 @@ import { useState, useEffect } from 'react';
 import { html } from '../lib/html.js';
 import { api } from '../lib/api.js';
 import { toast } from '../lib/toast.js';
+import { navigateTo } from '../lib/router.js';
 import { CompanyLogo } from './CompanyLogo.js';
 import { SourceBadge } from './SourceBadge.js';
 import { ContactsList } from './ContactsList.js';
@@ -556,8 +557,7 @@ function PeopleView({ people }) {
   unknown.sort((a, b) => (a.full_name || '').localeCompare(b.full_name || ''));
 
   const openInPeople = (personId) => {
-    // Cross-tab navigation: set a hash the People tab listens for
-    window.location.hash = 'people:' + personId;
+    navigateTo('people', personId);
   };
 
   const renderRow = (p) => html`

@@ -5,6 +5,7 @@ import { useState, useEffect } from 'react';
 import { html } from '../lib/html.js';
 import { api } from '../lib/api.js';
 import { toast } from '../lib/toast.js';
+import { navigateTo } from '../lib/router.js';
 import { ContactsList } from './ContactsList.js';
 import { EditableKv } from './EditableKv.js';
 
@@ -264,7 +265,7 @@ function CompaniesView({ companies }) {
   }
   const current = companies.filter(c => c.is_current);
   const past    = companies.filter(c => !c.is_current);
-  const openCompany = (companyId) => { window.location.hash = 'companies:' + companyId; };
+  const openCompany = (companyId) => { navigateTo('companies', companyId); };
 
   const renderRow = (c) => html`
     <tr key=${c.id} class="person-row" onClick=${() => openCompany(c.company_id)} title="Open this company in the Companies tab">
