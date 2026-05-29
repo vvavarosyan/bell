@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useMemo } from 'react';
 import { html } from '../lib/html.js';
 import { api } from '../lib/api.js';
 import { toast } from '../lib/toast.js';
+import { currentRoute } from '../lib/router.js';
 import { EditableCell } from './EditableCell.js';
 import { StageBar } from './StageBadge.js';
 import { Pagination } from './Pagination.js';
@@ -101,20 +102,20 @@ export function CompaniesTab({ archivedMode: initialArchived = false, mode = 'lo
   // selection is per visible context, not a global running set.
   useEffect(() => { setSelected(new Set()); }, [q, status, sourceFilter, offset]);
 
-  // Cross-tab navigation. Clicking a company from elsewhere sets the hash to
-  // "#companies:<id>". We pick it up here and open that row in the drawer.
+  // Cross-tab navigation. Opening a company from elsewhere routes to
+  // /companies?id=<id>; we pick that up here and open it in the drawer.
   useEffect(() => {
-    const checkHash = () => {
-      const h = window.location.hash || '';
-      const m = h.match(/^#?companies:(\d+)/);
-      if (m) {
-        setOpenedId(Number(m[1]));
-        window.location.hash = 'companies';
-      }
+    const checkRoute = () => {
+      const { tab, id } = currentRoute();
+      if (tab === 'companies' && id) setOpenedId(id);
     };
-    checkHash();
-    window.addEventListener('hashchange', checkHash);
-    return () => window.removeEventListener('hashchange', checkHash);
+    checkRoute();
+    window.addEventListener('bdi:navigate', checkRoute);
+    window.addEventListener('popstate', checkRoute);
+    return () => {
+      window.removeEventListener('bdi:navigate', checkRoute);
+      window.removeEventListener('popstate', checkRoute);
+    };
   }, []);
 
   const update = async (id, field, value) => {
