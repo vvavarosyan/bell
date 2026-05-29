@@ -134,12 +134,12 @@ function App({ initialUser, initialTenant, mode }) {
       <main class="app-main">
         <div class="page-header">
           <div class="page-title">${LABELS[tab] || tab}</div>
-          ${stats ? html`
+          ${stats && mode?.mode !== 'user' ? html`
             <div class="page-stats-inline">
               <span><b>${stats.companies_total.toLocaleString()}</b> companies</span>
               <span><b>${stats.people_total.toLocaleString()}</b> people</span>
               <span><b>${stats.jobs_total.toLocaleString()}</b> jobs</span>
-              ${mode?.mode !== 'user' ? html`<span><b>$${stats.usd_total.toFixed(2)}</b> spent</span>` : null}
+              <span><b>$${stats.usd_total.toFixed(2)}</b> spent</span>
             </div>
           ` : null}
           ${credits ? html`

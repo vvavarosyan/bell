@@ -48,7 +48,7 @@ function fmtDisplay(value, type) {
   return String(value);
 }
 
-export function EditableKv({ label, value, field, onSave, editable = true, type = 'text' }) {
+export function EditableKv({ label, value, field, onSave, editable = true, type = 'text', locked = false }) {
   const [editing, setEditing] = useState(false);
   const [draft, setDraft] = useState(value ?? '');
   const inputRef = useRef(null);
@@ -75,6 +75,16 @@ export function EditableKv({ label, value, field, onSave, editable = true, type 
     try { await onSave(field, next); }
     catch { /* parent surfaces toast */ }
   };
+
+  // Credit-gated field the tenant hasn't revealed yet — show it EXISTS but lock the value.
+  if (locked) {
+    return html`
+      <div class="kv readonly locked" key=${field}>
+        <dt>${label}</dt>
+        <dd><span class="locked-value">🔒 reveal to view</span></dd>
+      </div>
+    `;
+  }
 
   if (!editable) {
     return html`

@@ -415,6 +415,7 @@ function CompanyTab({ company, extra, similar, contacts, onReload, needsReveal =
           <dl>
             ${g.fields.map(([k, lbl]) => {
               const meta = COMPANY_FIELD_META[k] || {};
+              const locked = needsReveal && ((k === 'email' && company.email_locked) || (k === 'phone' && company.phone_locked));
               return html`<${EditableKv}
                 key=${k}
                 label=${lbl}
@@ -422,6 +423,7 @@ function CompanyTab({ company, extra, similar, contacts, onReload, needsReveal =
                 value=${company[k]}
                 type=${meta.type || 'text'}
                 editable=${meta.editable !== false && !isUser}
+                locked=${locked}
                 onSave=${saveField}
               />`;
             })}
