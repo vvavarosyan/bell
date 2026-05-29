@@ -7,8 +7,37 @@ import {
   upsertContact, setPrimaryContact, deleteContact,
 } from '../lib/contacts.js';
 import { wipeStaleEnrichmentAfterUrlReplace } from '../enrichment/stages/stage1.js';
+import { revealOne, revealBulk, getRevealedSet, bypassesCredits } from '../lib/credits.js';
 
 const router = Router();
+
+const SENSITIVE_CONTACT_TYPES = new Set(['email', 'phone', 'mobile', 'whatsapp', 'telephone', 'tel']);
+
+// Mask email/phone on company rows for tenants that haven't revealed them.
+async function maskCompanies(req, rows) {
+  if (!rows.length) return;
+  if (bypassesCredits(req.user, req.tenant)) {
+    for (const r of rows) r.revealed_by_tenant = true;
+    return;
+  }
+  const revealed = await getRevealedSet(req.tenant.id, 'company', rows.map((r) => Number(r.id)));
+  for (const r of rows) {
+    const ok = revealed.has(Number(r.id));
+    r.revealed_by_tenant = ok;
+    if (!ok) {
+      r.email = null;
+      r.phone = null;
+      if (Array.isArray(r.contacts)) {
+        r.contacts = r.contacts.filter((c) => !SENSITIVE_CONTACT_TYPES.has(String(c.type || '').toLowerCase()));
+      }
+    }
+  }
+}
+
+async function companyContact(id) {
+  const r = await query(`SELECT id, bin, name, email, phone FROM companies WHERE id = $1`, [id]);
+  return r.rows[0] || null;
+}
 
 // Fields the admin is allowed to edit inline. This is a deliberate whitelist —
 // system-managed fields (id, bin, created_at, updated_at, assembled_at,
@@ -121,6 +150,7 @@ router.get('/', async (req, res, next) => {
     for (const row of rowsResult.rows) {
       row.contacts = contactsMap.get(row.id) || [];
     }
+    await maskCompanies(req, rowsResult.rows);
 
     res.json({
       total: countResult.rows[0].total,
@@ -214,12 +244,47 @@ router.get('/:id', async (req, res, next) => {
       listCompanyContacts(id),
     ]);
     if (!company.rows.length) return res.status(404).json({ error: 'not_found' });
+    const row = company.rows[0];
+    row.contacts = contacts;             // gate company + its contacts together
+    await maskCompanies(req, [row]);
+    const maskedContacts = row.contacts;
+    delete row.contacts;
     res.json({
-      company:  company.rows[0],
+      company:  row,
       sources:  sources.rows,
       people:   people.rows,
-      contacts,
+      contacts: maskedContacts,
     });
+  } catch (err) { next(err); }
+});
+
+// POST /api/companies/:id/reveal — unlock company contact details (1 credit).
+router.post('/:id/reveal', async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) return res.status(400).json({ error: 'invalid_id' });
+    const actor = req.user?.email || 'unknown';
+    if (bypassesCredits(req.user, req.tenant)) {
+      return res.json({ revealed: true, charged: 0, unlimited: true, company: await companyContact(id) });
+    }
+    const result = await revealOne(req.tenant.id, 'company', id, actor);
+    if (result.insufficient) {
+      return res.status(402).json({ error: 'insufficient_credits', balance: result.balance });
+    }
+    res.json({ ...result, company: await companyContact(id) });
+  } catch (err) { next(err); }
+});
+
+// POST /api/companies/reveal-bulk  { ids: [...] }
+router.post('/reveal-bulk', async (req, res, next) => {
+  try {
+    const ids = Array.isArray(req.body?.ids) ? req.body.ids : [];
+    if (!ids.length) return res.status(400).json({ error: 'bad_request', reason: 'ids[] required' });
+    const actor = req.user?.email || 'unknown';
+    if (bypassesCredits(req.user, req.tenant)) {
+      return res.json({ unlimited: true, revealed: ids.length, requested: ids.length });
+    }
+    res.json(await revealBulk(req.tenant.id, 'company', ids, actor));
   } catch (err) { next(err); }
 });
 

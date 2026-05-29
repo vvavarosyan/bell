@@ -13,14 +13,14 @@ export const PLANS = [
     price_qar:   2000,
     interval:    'month',
     // Credits granted on each renewal cycle
-    credits:     1000,
+    credits:     2000,
     // Stripe product price id — pasted in via env var
     stripe_price_id_env: 'STRIPE_PRICE_STARTER',
     // Listed features for display on /subscribe
     features: [
       'All 130,000+ Qatar companies',
       '240,000+ decision-makers',
-      'Research reports (1,000 credits / month)',
+      '2,000 credits / month',
       'Map + Signals access',
       'Email support',
     ],
@@ -33,11 +33,11 @@ export const PLANS = [
     tagline:     'For teams that need depth — full enrichment + multi-seat workspace',
     price_qar:   10000,
     interval:    'month',
-    credits:     5000,
+    credits:     15000,
     stripe_price_id_env: 'STRIPE_PRICE_BUSINESS',
     features: [
       'Everything in Starter',
-      'Research reports (5,000 credits / month)',
+      '15,000 credits / month',
       'Team workspace + multiple seats',
       'CRM + activity feed',
       'API access',
@@ -52,11 +52,11 @@ export const PLANS = [
     tagline:     'For sovereign funds, ministries, and large enterprises',
     price_qar:   30000,
     interval:    'month',
-    credits:     20000,
+    credits:     60000,
     stripe_price_id_env: 'STRIPE_PRICE_ENTERPRISE',
     features: [
       'Everything in Business',
-      'Research reports (20,000 credits / month)',
+      '60,000 credits / month',
       'Dedicated instance option (Qatari servers, Qatari law)',
       'Custom integrations',
       'SOC 2 + audit logging',

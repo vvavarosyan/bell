@@ -9,8 +9,35 @@ import {
   listPersonContacts, loadPersonContactsByIds,
   upsertContact, setPrimaryContact, deleteContact,
 } from '../lib/contacts.js';
+import { revealOne, revealBulk, getRevealedSet, bypassesCredits } from '../lib/credits.js';
 
 const router = Router();
+
+// Contact types that are credit-gated (the "valuable details" — emails/numbers).
+const SENSITIVE_CONTACT_TYPES = new Set(['email', 'phone', 'mobile', 'whatsapp', 'telephone', 'tel']);
+
+// Mask email/phone on people rows for tenants that haven't revealed them.
+// platform_admin + internal tenant (bypass) see everything. Adds
+// `revealed_by_tenant` so the UI can show a Reveal button vs the value.
+async function maskPeople(req, rows) {
+  if (!rows.length) return;
+  if (bypassesCredits(req.user, req.tenant)) {
+    for (const r of rows) r.revealed_by_tenant = true;
+    return;
+  }
+  const revealed = await getRevealedSet(req.tenant.id, 'person', rows.map((r) => Number(r.id)));
+  for (const r of rows) {
+    const ok = revealed.has(Number(r.id));
+    r.revealed_by_tenant = ok;
+    if (!ok) {
+      r.email = null;
+      r.phone = null;
+      if (Array.isArray(r.contacts)) {
+        r.contacts = r.contacts.filter((c) => !SENSITIVE_CONTACT_TYPES.has(String(c.type || '').toLowerCase()));
+      }
+    }
+  }
+}
 
 // Whitelist of editable people fields. System fields (id, pin, created_at,
 // updated_at, assembled_at, extra_fields, experience/education/skills jsonb)
@@ -91,6 +118,7 @@ router.get('/', async (req, res, next) => {
     for (const row of rowsResult.rows) {
       row.contacts = contactsMap.get(row.id) || [];
     }
+    await maskPeople(req, rowsResult.rows);
 
     res.json({
       total: countResult.rows[0].total,
@@ -115,10 +143,15 @@ router.get('/:id', async (req, res, next) => {
       listPersonContacts(id),
     ]);
     if (!person.rows.length) return res.status(404).json({ error: 'not_found' });
+    const row = person.rows[0];
+    row.contacts = contacts;             // let maskPeople gate them together
+    await maskPeople(req, [row]);
+    const maskedContacts = row.contacts;
+    delete row.contacts;
     res.json({
-      person:    person.rows[0],
+      person:    row,
       companies: companies.rows,
-      contacts,
+      contacts:  maskedContacts,
     });
   } catch (err) { next(err); }
 });
@@ -208,33 +241,55 @@ router.post('/:id/archive', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-// POST /api/people/:id/reveal — mark as revealed and bill the credit
+// Fetch the now-unlocked contact fields for a person (used in reveal responses).
+async function personContact(id) {
+  const r = await query(`SELECT id, pin, full_name, email, phone FROM people WHERE id = $1`, [id]);
+  return r.rows[0] || null;
+}
+
+// POST /api/people/:id/reveal — unlock contact details.
+//   • Customer tenants (user mode): charge 1 credit per tenant, once per person.
+//   • platform_admin / internal (admin.bell.qa, local): no charge; also flips the
+//     global is_revealed data flag (Bell-side "we have this contact").
 router.post('/:id/reveal', async (req, res, next) => {
   try {
     const id = Number(req.params.id);
-    const adminEmail = req.body?.admin_email || 'unknown@local';
-    const result = await withTransaction(async (client) => {
-      const r = await client.query(
-        `UPDATE people
-            SET is_revealed = true,
-                revealed_at = now(),
-                revealed_by = $2
-          WHERE id = $1
-            AND is_revealed = false
-        RETURNING id, pin, full_name, is_revealed, revealed_at`,
-        [id, adminEmail]
+    const actor = req.user?.email || 'unknown';
+
+    if (bypassesCredits(req.user, req.tenant)) {
+      await query(
+        `UPDATE people SET is_revealed = true, revealed_at = now(), revealed_by = $2
+          WHERE id = $1 AND is_revealed = false`,
+        [id, actor]
       );
-      if (r.rows.length === 0) return null; // already revealed or not found
-      await client.query(
-        `INSERT INTO enrichment_credits (day, stage, tool, credits_used, usd_used, run_count)
-         VALUES (current_date, 3, 'reveal', 1, 0, 1)
-         ON CONFLICT (day, stage, tool) DO UPDATE
-           SET credits_used = enrichment_credits.credits_used + 1,
-               run_count   = enrichment_credits.run_count + 1`
+      return res.json({ revealed: true, charged: 0, unlimited: true, person: await personContact(id) });
+    }
+
+    const result = await revealOne(req.tenant.id, 'person', id, actor);
+    if (result.insufficient) {
+      return res.status(402).json({ error: 'insufficient_credits', balance: result.balance });
+    }
+    res.json({ ...result, person: await personContact(id) });
+  } catch (err) { next(err); }
+});
+
+// POST /api/people/reveal-bulk — reveal many at once. Body: { ids: [...] }.
+// Partial: reveals as many not-yet-revealed as the balance allows.
+router.post('/reveal-bulk', async (req, res, next) => {
+  try {
+    const ids = Array.isArray(req.body?.ids) ? req.body.ids : [];
+    if (!ids.length) return res.status(400).json({ error: 'bad_request', reason: 'ids[] required' });
+    const actor = req.user?.email || 'unknown';
+
+    if (bypassesCredits(req.user, req.tenant)) {
+      await query(
+        `UPDATE people SET is_revealed = true, revealed_at = now(), revealed_by = $2
+          WHERE id = ANY($1::bigint[]) AND is_revealed = false`,
+        [ids.map(Number), actor]
       );
-      return r.rows[0];
-    });
-    if (!result) return res.status(409).json({ error: 'already_revealed_or_missing' });
+      return res.json({ unlimited: true, revealed: ids.length, requested: ids.length });
+    }
+    const result = await revealBulk(req.tenant.id, 'person', ids, actor);
     res.json(result);
   } catch (err) { next(err); }
 });

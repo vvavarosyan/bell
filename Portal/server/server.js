@@ -38,6 +38,7 @@ import { startScheduler as startOpenDataScheduler } from './sources/qatar_open_d
 import authRouter              from './routes/auth.js';
 import billingRouter           from './routes/billing.js';
 import syncRouter              from './routes/sync.js';
+import creditsRouter           from './routes/credits.js';
 import { requireAuth, requireRole, requireActiveSubscription } from './lib/auth.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -129,6 +130,9 @@ app.use('/api/open-data',  ...feature, openDataRouter);
 // Stats backs the app shell/header — signed in only, no subscription gate so an
 // unsubscribed user still gets a working frame before being routed to /subscribe.
 app.use('/api/stats',      requireAuth, statsRouter);
+// Credits — balance/ledger for any signed-in tenant; /adjust is platform_admin
+// (enforced inside the router). No subscription gate so the top-bar pill always loads.
+app.use('/api/credits',    requireAuth, creditsRouter);
 
 // Admin-only tools — admin.bell.qa / local engine only.
 app.use('/api/sources',            ...adminOnly, sourcesRouter);

@@ -270,6 +270,26 @@ html, body {
 }
 .page-stats-inline b { color: var(--text); font-weight: 600; }
 
+.credit-pill {
+  display: inline-flex; align-items: center; gap: 7px;
+  padding: 5px 12px; border-radius: 999px;
+  background: var(--bg); border: 1px solid var(--border);
+  font-size: 12px; color: var(--text-muted); white-space: nowrap;
+}
+.credit-pill b { color: var(--text); font-weight: 700; }
+.credit-pill .credit-dot {
+  width: 7px; height: 7px; border-radius: 50%;
+  background: #2ecc71; box-shadow: 0 0 6px rgba(46,204,113,.6);
+}
+
+.reveal-btn {
+  font-size: 11px; padding: 3px 10px; border-radius: 6px;
+  border: 1px solid var(--accent, #3b82f6); color: var(--accent, #3b82f6);
+  background: transparent; cursor: pointer; white-space: nowrap;
+}
+.reveal-btn:hover { background: var(--accent, #3b82f6); color: #fff; }
+.revealed-badge { font-size: 11px; color: #2ecc71; white-space: nowrap; }
+
 /* ComingSoon placeholder */
 .coming-soon {
   display: flex; flex-direction: column;

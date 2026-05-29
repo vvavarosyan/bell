@@ -47,7 +47,8 @@ const FULL_ENRICHMENT_TOOLTIP =
   'Run all 6 stages in dependency order: Stage 1 + Stage 5 in parallel first, then Stages 2/3/4 once a LinkedIn URL is found, then Stage 6 once a website is known. Companies without LinkedIn after Stage 1 skip 2/3/4 to save credits.';
 
 /** archivedMode=false → Active tab, true → Archived tab (initial state only). */
-export function CompaniesTab({ archivedMode: initialArchived = false } = {}) {
+export function CompaniesTab({ archivedMode: initialArchived = false, mode = 'local-admin' } = {}) {
+  const isUser = mode === 'user';   // customers don't see pipeline stages
   const [archiveMode, setArchiveMode] = useState(initialArchived ? 'archived' : 'active');
   const archivedMode = archiveMode === 'archived';
   const [rows, setRows] = useState([]);
@@ -145,6 +146,31 @@ export function CompaniesTab({ archivedMode: initialArchived = false } = {}) {
   });
   const clearSelection = () => setSelected(new Set());
 
+  const runBulkReveal = async () => {
+    const ids = [...selected];
+    if (ids.length === 0) return;
+    try {
+      const r = await api.revealCompaniesBulk(ids);
+      window.dispatchEvent(new Event('bdi:credits-changed'));
+      if (r.unlimited) toast(`Revealed ${r.revealed} ${r.revealed === 1 ? 'company' : 'companies'}`);
+      else toast(`Revealed ${r.revealed} · ${r.already} already unlocked · ${r.insufficient} need more credits`,
+                 r.insufficient > 0 ? 'error' : 'success');
+      clearSelection();
+      load({ silent: true });
+    } catch (err) { toast('Reveal failed: ' + err.message, 'error'); }
+  };
+
+  const revealRow = async (id) => {
+    try {
+      const res = await api.revealCompany(id);
+      window.dispatchEvent(new Event('bdi:credits-changed'));
+      if (res.insufficient) toast('Not enough credits to reveal', 'error');
+      else { toast('Contact revealed'); load({ silent: true }); }
+    } catch (err) {
+      toast(/insufficient/i.test(err.message) ? 'Not enough credits to reveal' : 'Reveal failed: ' + err.message, 'error');
+    }
+  };
+
   const runEnrich = async ({ mode, stage }) => {
     if (archivedMode) {
       toast('Archived companies cannot be enriched', 'error');
@@ -215,6 +241,7 @@ export function CompaniesTab({ archivedMode: initialArchived = false } = {}) {
             Full Enrichment ▶
           </button>
         ` : null}
+        <button class="accent" onClick=${runBulkReveal} title="Reveal contact details · 1 credit each (already-revealed are free)">Reveal contacts ▶</button>
         <button onClick=${clearSelection}>Clear</button>
       </div>
     ` : null}
@@ -249,7 +276,7 @@ export function CompaniesTab({ archivedMode: initialArchived = false } = {}) {
               <th>Employees</th>
               <th>Contacts</th>
               <th>Bell Score</th>
-              <th>Stages</th>
+              <th>${isUser ? 'Reveal' : 'Stages'}</th>
             </tr>
           </thead>
           <tbody>
@@ -287,7 +314,11 @@ export function CompaniesTab({ archivedMode: initialArchived = false } = {}) {
                 </td>
                 <td><${ContactIcons} company=${r} /></td>
                 <td class="bellscore"><span class="muted">—</span></td>
-                <td><${StageBar} row=${r} /></td>
+                <td>${isUser
+                  ? (r.revealed_by_tenant
+                      ? html`<span class="revealed-badge">✓ revealed</span>`
+                      : html`<button class="reveal-btn" onClick=${(e) => { e.stopPropagation(); revealRow(r.id); }}>Reveal · 1</button>`)
+                  : html`<${StageBar} row=${r} />`}</td>
               </tr>
             `)}
           </tbody>
@@ -310,6 +341,6 @@ export function CompaniesTab({ archivedMode: initialArchived = false } = {}) {
   `;
 }
 
-export function ArchivedCompaniesTab() {
-  return html`<${CompaniesTab} archivedMode=${true} />`;
+export function ArchivedCompaniesTab({ mode = 'local-admin' } = {}) {
+  return html`<${CompaniesTab} archivedMode=${true} mode=${mode} />`;
 }

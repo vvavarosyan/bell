@@ -56,6 +56,8 @@ export const api = {
   updateCompany:          (id, body) => request('/api/companies/' + id, { method: 'PATCH', body: JSON.stringify(body) }),
   archiveCompany:         (id, archived) => request(`/api/companies/${id}/archive`, { method: 'POST', body: JSON.stringify({ archived }) }),
   resetEnrichment:        (id) => request(`/api/companies/${id}/reset-enrichment`, { method: 'POST', body: '{}' }),
+  revealCompany:          (id) => request(`/api/companies/${id}/reveal`, { method: 'POST', body: '{}' }),
+  revealCompaniesBulk:    (ids) => request('/api/companies/reveal-bulk', { method: 'POST', body: JSON.stringify({ ids }) }),
 
   jobRuns:                (params = {}) => request('/api/job-runs?' + new URLSearchParams(params)),
   jobRun:                 (id, since = 0) => request(`/api/job-runs/${id}?since=${since}`),
@@ -69,7 +71,8 @@ export const api = {
   person:                 (id) => request('/api/people/' + id),
   updatePerson:           (id, body) => request('/api/people/' + id, { method: 'PATCH', body: JSON.stringify(body) }),
   archivePerson:          (id, archived) => request(`/api/people/${id}/archive`, { method: 'POST', body: JSON.stringify({ archived }) }),
-  revealPerson:           (id, adminEmail) => request(`/api/people/${id}/reveal`, { method: 'POST', body: JSON.stringify({ admin_email: adminEmail }) }),
+  revealPerson:           (id) => request(`/api/people/${id}/reveal`, { method: 'POST', body: '{}' }),
+  revealPeopleBulk:       (ids) => request('/api/people/reveal-bulk', { method: 'POST', body: JSON.stringify({ ids }) }),
   deepEnrichPeople:       (personIds) => request('/api/people/deep-enrich', { method: 'POST', body: JSON.stringify({ person_ids: personIds }) }),
   recomputeSeniority:     () => request('/api/people/recompute-seniority', { method: 'POST', body: '{}' }),
   addPersonContact:       (id, body) => request(`/api/people/${id}/contacts`, { method: 'POST', body: JSON.stringify(body) }),
@@ -137,6 +140,11 @@ export const api = {
   syncPush:               () => request('/api/sync/push', { method: 'POST', body: '{}' }),
   syncFullResync:         () => request('/api/sync/full-resync', { method: 'POST', body: '{}' }),
   syncRebuild:            () => request('/api/sync/rebuild', { method: 'POST', body: '{}' }),
+
+  // Credits
+  creditBalance:          () => request('/api/credits'),
+  creditLedger:           (limit = 50) => request('/api/credits/ledger?limit=' + limit),
+  creditAdjust:           (tenant_id, delta, note) => request('/api/credits/adjust', { method: 'POST', body: JSON.stringify({ tenant_id, delta, note }) }),
 
   // Billing (Stripe-backed)
   billingPlans:           () => request('/api/billing/plans'),
