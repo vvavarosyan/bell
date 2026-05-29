@@ -11,7 +11,7 @@
 
 import { Router } from 'express';
 import { requireAuth, requireRole } from '../lib/auth.js';
-import { applyBatch } from '../sync/ingest.js';
+import { applyBatch, applyReset } from '../sync/ingest.js';
 import { runPush, getSyncStatus } from '../sync/push.js';
 
 const MODE = (process.env.BDI_MODE || 'local-admin').toLowerCase();
@@ -44,6 +44,16 @@ router.post('/ingest', requireSyncToken, async (req, res, next) => {
   }
 });
 
+// Wipe the mirror tables (prod). Token-auth, machine-to-machine. The local
+// engine calls this at the start of a "Rebuild mirror" before a full push.
+router.post('/reset', requireSyncToken, async (req, res, next) => {
+  try {
+    res.json(await applyReset());
+  } catch (err) {
+    next(err);
+  }
+});
+
 // ---------------------------------------------------------------------------
 // LOCAL engine — trigger a push. Guarded to local-admin mode + platform_admin.
 // ---------------------------------------------------------------------------
@@ -66,6 +76,17 @@ router.post('/push', localOnly, requireAuth, requireRole('platform_admin'), asyn
 router.post('/full-resync', localOnly, requireAuth, requireRole('platform_admin'), async (req, res, next) => {
   try {
     const summary = await runPush({ full: true });
+    res.json(summary);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Rebuild: wipe prod mirror tables, then full push from local. One-time use to
+// migrate to id-keying, or any time prod has drifted and you want a clean copy.
+router.post('/rebuild', localOnly, requireAuth, requireRole('platform_admin'), async (req, res, next) => {
+  try {
+    const summary = await runPush({ full: true, reset: true });
     res.json(summary);
   } catch (err) {
     next(err);

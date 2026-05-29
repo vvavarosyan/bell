@@ -72,11 +72,13 @@ export function SyncTab() {
     } catch (err) { toast('Save failed: ' + err.message, 'error'); }
   };
 
-  const runSync = async (full) => {
-    setRunning(full ? 'full' : 'incremental');
+  const runSync = async (kind) => {
+    setRunning(kind);
     setResult(null);
     try {
-      const summary = full ? await api.syncFullResync() : await api.syncPush();
+      const summary = kind === 'rebuild' ? await api.syncRebuild()
+                    : kind === 'full'    ? await api.syncFullResync()
+                    :                      await api.syncPush();
       setResult(summary);
       const n = summary.total_upserted ?? 0;
       toast(`Sync complete — ${n.toLocaleString()} record${n === 1 ? '' : 's'} pushed to Bell.qa`);
@@ -94,6 +96,7 @@ export function SyncTab() {
   const pending = s.pending || {};
   const pendingTotal = Object.values(pending).reduce((a, b) => a + (b || 0), 0);
   const ready = s.token_configured;
+  const cov = s.people_coverage || null;
 
   return html`
     <div class="settings-shell">
@@ -126,19 +129,41 @@ export function SyncTab() {
             </div>
           </div>
 
+          ${cov ? html`
+            <div class="row">
+              <label>People coverage</label>
+              <div class="actions" style=${{flex:1, flexDirection:'column', alignItems:'flex-start', gap:'2px'}}>
+                <span>${(cov.with_links || 0).toLocaleString()} of ${(cov.total || 0).toLocaleString()} people have employment links</span>
+                <span class="muted small">${(cov.without_links || 0).toLocaleString()} have no employment link yet (org-chart data incomplete)</span>
+              </div>
+            </div>
+          ` : null}
+
           <div class="row">
             <label>Actions</label>
             <div class="actions" style=${{flex:1}}>
               <button
-                onClick=${() => runSync(false)}
+                onClick=${() => runSync('incremental')}
                 disabled=${!ready || running !== null}
               >${running === 'incremental' ? 'Pushing…' : 'Push now'}</button>
               <button
                 class="secondary"
-                onClick=${() => { if (confirm('Full resync sends every assembled record to Bell.qa. Continue?')) runSync(true); }}
+                onClick=${() => { if (confirm('Full resync re-sends every row to Bell.qa. Continue?')) runSync('full'); }}
                 disabled=${!ready || running !== null}
               >${running === 'full' ? 'Resyncing…' : 'Full resync'}</button>
               ${!ready ? html`<span class="muted small">Configure the sync token below first.</span>` : null}
+            </div>
+          </div>
+
+          <div class="row">
+            <label>Rebuild mirror</label>
+            <div class="actions" style=${{flex:1, flexDirection:'column', alignItems:'flex-start', gap:'2px'}}>
+              <button
+                class="danger"
+                onClick=${() => { if (confirm('REBUILD MIRROR\n\nThis WIPES the company/people/jobs data on Bell.qa, then re-copies everything fresh from this Mac. Customers will see no data for the ~minute it takes to reload.\n\nUse this once to switch to id-based mirroring, or to force a clean copy. Continue?')) runSync('rebuild'); }}
+                disabled=${!ready || running !== null}
+              >${running === 'rebuild' ? 'Rebuilding…' : 'Wipe & rebuild Bell.qa from local'}</button>
+              <span class="muted small">Empties the prod data tables and reloads a row-for-row copy of local. Run once when migrating to the mirror; safe to re-run anytime prod has drifted.</span>
             </div>
           </div>
         </div>
