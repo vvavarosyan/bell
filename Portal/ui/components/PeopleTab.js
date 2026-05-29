@@ -105,9 +105,13 @@ export function PeopleTab({ mode = 'local-admin' } = {}) {
   const revealRow = async (id) => {
     try {
       const res = await api.revealPerson(id);
+      if (res.insufficient) { toast('Not enough credits to reveal', 'error'); return; }
       window.dispatchEvent(new Event('bdi:credits-changed'));
-      if (res.insufficient) toast('Not enough credits to reveal', 'error');
-      else { toast('Contact revealed'); load({ silent: true }); }
+      setRows(prev => prev.map(r => r.id === id
+        ? { ...r, revealed_by_tenant: true, email: res.person?.email ?? r.email, phone: res.person?.phone ?? r.phone }
+        : r));
+      toast('Contact revealed');
+      load({ silent: true });
     } catch (err) {
       toast(/insufficient/i.test(err.message) ? 'Not enough credits to reveal' : 'Reveal failed: ' + err.message, 'error');
     }
