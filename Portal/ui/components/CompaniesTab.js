@@ -163,9 +163,14 @@ export function CompaniesTab({ archivedMode: initialArchived = false, mode = 'lo
   const revealRow = async (id) => {
     try {
       const res = await api.revealCompany(id);
+      if (res.insufficient) { toast('Not enough credits to reveal', 'error'); return; }
       window.dispatchEvent(new Event('bdi:credits-changed'));
-      if (res.insufficient) toast('Not enough credits to reveal', 'error');
-      else { toast('Contact revealed'); load({ silent: true }); }
+      // Reflect immediately (no refresh): flip the row + drop in the revealed values.
+      setRows(prev => prev.map(r => r.id === id
+        ? { ...r, revealed_by_tenant: true, email: res.company?.email ?? r.email, phone: res.company?.phone ?? r.phone }
+        : r));
+      toast('Contact revealed');
+      load({ silent: true });
     } catch (err) {
       toast(/insufficient/i.test(err.message) ? 'Not enough credits to reveal' : 'Reveal failed: ' + err.message, 'error');
     }

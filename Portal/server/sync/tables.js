@@ -25,6 +25,11 @@ export const MIRROR_TABLES = [
   { name: 'jobs',             watermark: 'updated_at'  },
   { name: 'company_sources',  watermark: 'last_seen_at' },
   { name: 'person_companies', watermark: 'updated_at'  },
+  // Contact details (emails / phones / socials) live here — without these the
+  // reveal feature unlocks empty records on prod. Parents (companies/people)
+  // are mirrored first so the FK ids resolve.
+  { name: 'company_contacts', watermark: 'updated_at'  },
+  { name: 'person_contacts',  watermark: 'updated_at'  },
 ];
 
 export const MIRROR_TABLE_NAMES = new Set(MIRROR_TABLES.map((t) => t.name));

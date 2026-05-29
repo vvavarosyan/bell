@@ -276,6 +276,7 @@ export function CompanyDetail({ companyId, onMutated, isUser = false }) {
       window.dispatchEvent(new Event('bdi:credits-changed'));
       toast('Contact details revealed');
       reload();
+      onMutated?.();
     } catch (err) {
       toast(/insufficient/i.test(err.message) ? 'Not enough credits to reveal' : 'Reveal failed: ' + err.message, 'error');
     }
