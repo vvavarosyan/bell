@@ -98,6 +98,13 @@ export function DeepDataTab({ mode = 'local-admin' } = {}) {
         ${showRuns ? html`<${RecentRuns} runs=${stats?.recent_runs || []} />` : null}
       ` : null}
 
+      ${isUser ? html`
+        <div style=${{ display: 'flex', gap: '22px', alignItems: 'baseline', margin: '4px 2px 16px', fontSize: '13px', color: 'var(--text-muted)' }}>
+          <span><b style=${{ color: 'var(--text)', fontSize: '15px' }}>${(stats?.total_datasets || 0).toLocaleString()}</b> datasets</span>
+          <span><b style=${{ color: 'var(--text)', fontSize: '15px' }}>${formatBig(stats?.total_records)}</b> records</span>
+        </div>
+      ` : null}
+
       <${FilterBar}
         q=${q} setQ=${setQ}
         theme=${theme} setTheme=${setTheme}

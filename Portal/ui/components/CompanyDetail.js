@@ -268,6 +268,18 @@ export function CompanyDetail({ companyId, onMutated, isUser = false }) {
   const c = data.company;
   const extra = c.extra_fields || {};
   const sources = data.sources || [];
+  const needsReveal = isUser && c.revealed_by_tenant === false;
+
+  const revealContacts = async () => {
+    try {
+      await api.revealCompany(c.id);
+      window.dispatchEvent(new Event('bdi:credits-changed'));
+      toast('Contact details revealed');
+      reload();
+    } catch (err) {
+      toast(/insufficient/i.test(err.message) ? 'Not enough credits to reveal' : 'Reveal failed: ' + err.message, 'error');
+    }
+  };
 
   return html`
     <aside class="detail-side">
@@ -322,7 +334,7 @@ export function CompanyDetail({ companyId, onMutated, isUser = false }) {
       </div>
 
       <div class="detail-body">
-        ${tab === 'company' ? html`<${CompanyTab} company=${c} extra=${extra} similar=${similar} contacts=${data.contacts || []} onReload=${reload} />` : null}
+        ${tab === 'company' ? html`<${CompanyTab} company=${c} extra=${extra} similar=${similar} contacts=${data.contacts || []} onReload=${reload} needsReveal=${needsReveal} onReveal=${revealContacts} isUser=${isUser} />` : null}
         ${tab === 'people'  ? html`<${PeopleView}  people=${data.people} />` : null}
         ${tab === 'legal'   ? html`<${LegalTab}    sources=${sources} extra=${extra} />` : null}
       </div>
@@ -330,7 +342,7 @@ export function CompanyDetail({ companyId, onMutated, isUser = false }) {
   `;
 }
 
-function CompanyTab({ company, extra, similar, contacts, onReload }) {
+function CompanyTab({ company, extra, similar, contacts, onReload, needsReveal = false, onReveal, isUser = false }) {
   const saveField = async (field, value) => {
     try {
       await api.updateCompany(company.id, { [field]: value });
@@ -409,7 +421,7 @@ function CompanyTab({ company, extra, similar, contacts, onReload }) {
                 field=${k}
                 value=${company[k]}
                 type=${meta.type || 'text'}
-                editable=${meta.editable !== false}
+                editable=${meta.editable !== false && !isUser}
                 onSave=${saveField}
               />`;
             })}
@@ -441,7 +453,13 @@ function CompanyTab({ company, extra, similar, contacts, onReload }) {
               </div>
             </div>
           ` : null}
-          ${g.label === 'Contact' ? html`
+          ${g.label === 'Contact' && needsReveal ? html`
+            <div class="reveal-banner">
+              <span>🔒 Email & phone are hidden. Reveal to view this company's contact details.</span>
+              <button class="reveal-btn" onClick=${onReveal}>Reveal · 1 credit</button>
+            </div>
+          ` : null}
+          ${g.label === 'Contact' && !needsReveal ? html`
             <div style=${{marginTop:'10px'}}>
               <${ContactsList} kind="company" refId=${company.id} contacts=${contacts} onChange=${onReload} />
             </div>

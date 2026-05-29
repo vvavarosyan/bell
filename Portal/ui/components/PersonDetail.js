@@ -77,7 +77,7 @@ function logoCircle(person, size = 44) {
   >${initial}</span>`;
 }
 
-export function PersonDetail({ personId, onMutated }) {
+export function PersonDetail({ personId, onMutated, isUser = false }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [tab, setTab] = useState('profile');
@@ -120,6 +120,18 @@ export function PersonDetail({ personId, onMutated }) {
 
   const p = data.person;
   const companies = data.companies || [];
+  const needsReveal = isUser && p.revealed_by_tenant === false;
+
+  const revealContacts = async () => {
+    try {
+      await api.revealPerson(p.id);
+      window.dispatchEvent(new Event('bdi:credits-changed'));
+      toast('Contact details revealed');
+      reload();
+    } catch (err) {
+      toast(/insufficient/i.test(err.message) ? 'Not enough credits to reveal' : 'Reveal failed: ' + err.message, 'error');
+    }
+  };
 
   return html`
     <aside class="detail-side">
@@ -133,7 +145,7 @@ export function PersonDetail({ personId, onMutated }) {
             ${p.archived ? html`<span class="pill" style=${{borderColor:'var(--amber)',color:'var(--amber)'}}>archived</span>` : null}
           </div>
         </div>
-        <button
+        ${!isUser ? html`<button
           class="linkbtn"
           style=${{alignSelf:'flex-start', padding:'4px 10px', borderRadius:'5px',
                   background: p.archived ? 'var(--bg-elev-2)' : 'transparent',
@@ -146,7 +158,7 @@ export function PersonDetail({ personId, onMutated }) {
               reload(); onMutated?.();
             } catch (err) { toast(err.message, 'error'); }
           }}
-        >${p.archived ? 'Unarchive' : 'Archive'}</button>
+        >${p.archived ? 'Unarchive' : 'Archive'}</button>` : null}
       </div>
 
       <div class="detail-tabs">
@@ -156,7 +168,7 @@ export function PersonDetail({ personId, onMutated }) {
       </div>
 
       <div class="detail-body">
-        ${tab === 'profile'    ? html`<${ProfileTab}    person=${p} contacts=${data.contacts || []} onReload=${reload} />` : null}
+        ${tab === 'profile'    ? html`<${ProfileTab}    person=${p} contacts=${data.contacts || []} onReload=${reload} needsReveal=${needsReveal} onReveal=${revealContacts} isUser=${isUser} />` : null}
         ${tab === 'companies'  ? html`<${CompaniesView} companies=${companies} />` : null}
         ${tab === 'experience' ? html`<${ExperienceView} person=${p} />` : null}
       </div>
@@ -164,7 +176,7 @@ export function PersonDetail({ personId, onMutated }) {
   `;
 }
 
-function ProfileTab({ person, contacts, onReload }) {
+function ProfileTab({ person, contacts, onReload, needsReveal = false, onReveal, isUser = false }) {
   const saveField = async (field, value) => {
     try {
       await api.updatePerson(person.id, { [field]: value });
@@ -187,12 +199,18 @@ function ProfileTab({ person, contacts, onReload }) {
                 field=${k}
                 value=${person[k]}
                 type=${meta.type || 'text'}
-                editable=${meta.editable !== false}
+                editable=${meta.editable !== false && !isUser}
                 onSave=${saveField}
               />`;
             })}
           </dl>
-          ${g.label === 'Contact' ? html`
+          ${g.label === 'Contact' && needsReveal ? html`
+            <div class="reveal-banner">
+              <span>🔒 Email & phone are hidden. Reveal to view this person's contact details.</span>
+              <button class="reveal-btn" onClick=${onReveal}>Reveal · 1 credit</button>
+            </div>
+          ` : null}
+          ${g.label === 'Contact' && !needsReveal ? html`
             <div style=${{marginTop:'10px'}}>
               <${ContactsList} kind="person" refId=${person.id} contacts=${contacts} onChange=${onReload} />
             </div>
