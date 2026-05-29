@@ -85,11 +85,16 @@ export function ContactIcons({ company }) {
   const instagram = pickInstagram(company);
   const facebook  = pickFacebook(company);
 
+  // Credit-gated channels can be "available but locked": the data exists for
+  // this record, but the tenant must reveal (spend a credit) to see the value.
+  const emailLocked = !email && (!!company.email_locked || emailCt > 0);
+  const phoneLocked = !phone && (!!company.phone_locked || phoneCt > 0);
+
   const items = [
     { key: 'email',     label: 'Email',     href: email ? 'mailto:' + email : null,
-      has: !!email, count: emailCt, tooltipExtra: email },
+      has: !!email || emailLocked, locked: emailLocked, count: emailCt, tooltipExtra: email },
     { key: 'phone',     label: 'Phone',     href: phone ? 'tel:' + String(phone).replace(/\s+/g, '') : null,
-      has: !!phone, count: phoneCt, tooltipExtra: phone },
+      has: !!phone || phoneLocked, locked: phoneLocked, count: phoneCt, tooltipExtra: phone },
     { key: 'linkedin',  label: 'LinkedIn',  href: company.linkedin_url || null,
       has: !!company.linkedin_url, count: 0, tooltipExtra: company.linkedin_url },
     { key: 'instagram', label: 'Instagram', href: instagram,
@@ -100,12 +105,14 @@ export function ContactIcons({ company }) {
   return html`<span class="contact-icons">
     ${items.map(it => {
       const icon = ICONS[it.key];
-      const cls = 'contact-icon ' + (it.has ? 'on' : 'off');
-      const title = it.has
-        ? `${it.label}${it.count > 1 ? ` (${it.count})` : ''}: ${it.tooltipExtra || ''}`
-        : `${it.label}: not available`;
+      const cls = 'contact-icon ' + (it.has ? 'on' : 'off') + (it.locked ? ' locked' : '');
+      const title = it.locked
+        ? `${it.label} available — reveal to view`
+        : it.has
+          ? `${it.label}${it.count > 1 ? ` (${it.count})` : ''}: ${it.tooltipExtra || ''}`
+          : `${it.label}: not available`;
       const badge = it.count > 1 ? html`<span class="contact-count">${it.count}</span>` : null;
-      if (it.has && it.href) {
+      if (it.has && it.href && !it.locked) {
         return html`<a class=${cls} href=${it.href} target=${it.key==='email'||it.key==='phone'?'_self':'_blank'} rel="noreferrer" title=${title} onClick=${e => e.stopPropagation()}>${icon}${badge}</a>`;
       }
       return html`<span class=${cls} title=${title}>${icon}</span>`;

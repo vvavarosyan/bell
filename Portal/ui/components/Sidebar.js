@@ -107,7 +107,7 @@ const ROLE_LABELS = {
   owner: 'Owner', admin: 'Admin', lead: 'Lead', member: 'Member', viewer: 'Viewer',
 };
 
-export function Sidebar({ activeId, onSelect, dbStatus, settings, stats, currentRole = 'platform_admin', currentUser = null, mode = 'local-admin' }) {
+export function Sidebar({ activeId, onSelect, dbStatus, settings, stats, currentRole = 'platform_admin', currentUser = null, credits = null, mode = 'local-admin' }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef(null);
 
@@ -178,10 +178,24 @@ export function Sidebar({ activeId, onSelect, dbStatus, settings, stats, current
       </nav>
 
       <div class="sidebar-foot">
-        <div class="db-status">
-          <span class=${'dot ' + (dbStatus === 'up' ? '' : 'down')}></span>
-          <span class="muted small">${dbStatus === 'up' ? 'bell_intel · localhost' : 'database offline'}</span>
-        </div>
+        ${mode === 'user'
+          ? html`
+            <div class="plan-status">
+              <div class="plan-line">
+                <span class="plan-name">${credits?.plan_name || credits?.plan || 'Free'} plan</span>
+                ${credits && !credits.unlimited
+                  ? html`<span class="plan-credits"><b>${(credits.balance ?? 0).toLocaleString()}</b> credits</span>`
+                  : (credits?.unlimited ? html`<span class="plan-credits">Unlimited</span>` : null)}
+              </div>
+              ${credits?.renews_at
+                ? html`<div class="muted small">Renews ${new Date(credits.renews_at).toLocaleDateString()}</div>`
+                : null}
+            </div>`
+          : html`
+            <div class="db-status">
+              <span class=${'dot ' + (dbStatus === 'up' ? '' : 'down')}></span>
+              <span class="muted small">${dbStatus === 'up' ? 'bell_intel · localhost' : 'database offline'}</span>
+            </div>`}
         <div class="user-tile" ref=${menuRef}>
           <div class="user-avatar">${adminName.charAt(0) || 'A'}</div>
           <div class="user-meta">

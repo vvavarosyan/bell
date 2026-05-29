@@ -25,11 +25,18 @@ router.get('/', async (req, res, next) => {
       return res.json({ unlimited: true, balance: null, plan: tenant?.plan || null, monthly_allotment: null });
     }
     const balance = await getBalance(tenant.id);
+    const tr = await query(
+      `SELECT plan_expires_at, plan_renewed_at, subscription_status FROM tenants WHERE id = $1`,
+      [tenant.id]
+    );
     res.json({
       unlimited: false,
       balance,
       plan: tenant.plan,
+      plan_name: plan?.name || tenant.plan,
       monthly_allotment: plan?.credits ?? 0,
+      renews_at: tr.rows[0]?.plan_expires_at || null,
+      subscription_status: tr.rows[0]?.subscription_status || null,
     });
   } catch (err) { next(err); }
 });

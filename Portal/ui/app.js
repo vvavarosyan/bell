@@ -128,6 +128,7 @@ function App({ initialUser, initialTenant, mode }) {
         stats=${stats}
         currentRole=${currentRole}
         currentUser=${initialUser}
+        credits=${credits}
         mode=${mode?.mode || 'local-admin'}
       />
       <main class="app-main">
@@ -138,7 +139,7 @@ function App({ initialUser, initialTenant, mode }) {
               <span><b>${stats.companies_total.toLocaleString()}</b> companies</span>
               <span><b>${stats.people_total.toLocaleString()}</b> people</span>
               <span><b>${stats.jobs_total.toLocaleString()}</b> jobs</span>
-              <span><b>$${stats.usd_total.toFixed(2)}</b> spent</span>
+              ${mode?.mode !== 'user' ? html`<span><b>$${stats.usd_total.toFixed(2)}</b> spent</span>` : null}
             </div>
           ` : null}
           ${credits ? html`

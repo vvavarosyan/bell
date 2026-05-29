@@ -12,7 +12,7 @@ import { api } from '../lib/api.js';
 import { toast } from '../lib/toast.js';
 import { RecordsTable } from './RecordsTable.js';
 
-export function DatasetDetail({ datasetId, onClose, onChange }) {
+export function DatasetDetail({ datasetId, onClose, onChange, isUser = false }) {
   const [data, setData]       = useState(null);
   const [loading, setLoading] = useState(true);
   const [busy, setBusy]       = useState(false);
@@ -102,7 +102,8 @@ export function DatasetDetail({ datasetId, onClose, onChange }) {
               </div>` : null}
             </div>
 
-            <!-- Action row -->
+            <!-- Action row — admin only (re-sync, source page, chart/map builders) -->
+            ${!isUser ? html`
             <div style=${{
               display: 'flex', gap: '8px', flexWrap: 'wrap',
               marginBottom: '20px',
@@ -124,6 +125,7 @@ export function DatasetDetail({ datasetId, onClose, onChange }) {
                 Map builder ↗
               </a>
             </div>
+            ` : null}
 
             <!-- Stats grid -->
             <div style=${{

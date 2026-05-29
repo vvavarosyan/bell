@@ -219,6 +219,19 @@ export async function requireAuth(req, res, next) {
  * means req.user.role is always 'platform_admin' — so admin-only routes work
  * transparently on the local Mac.
  */
+/**
+ * Block dataset-mutating routes on the user portal (BDI_MODE=user).
+ * The shared companies/people/jobs dataset is Bell-owned reference data —
+ * customers may read and reveal it, but never edit/archive/re-enrich it.
+ * Admin (admin.bell.qa) and the local engine pass through.
+ */
+export function denyOnUserPortal(req, res, next) {
+  if (MODE === 'user') {
+    return res.status(403).json({ error: 'forbidden', reason: 'read_only_on_user_portal' });
+  }
+  next();
+}
+
 export function requireRole(...allowedRoles) {
   const allowed = new Set(allowedRoles);
   return (req, res, next) => {

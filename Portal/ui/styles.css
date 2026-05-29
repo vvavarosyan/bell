@@ -290,6 +290,15 @@ html, body {
 .reveal-btn:hover { background: var(--accent, #3b82f6); color: #fff; }
 .revealed-badge { font-size: 11px; color: #2ecc71; white-space: nowrap; }
 
+.plan-status { padding: 2px 2px 6px; }
+.plan-line { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.plan-line .plan-name { font-size: 12px; font-weight: 600; color: var(--text); text-transform: capitalize; }
+.plan-line .plan-credits { font-size: 11px; color: var(--text-muted); }
+.plan-line .plan-credits b { color: var(--text); }
+
+.contact-locked-cell { display: inline-flex; align-items: center; gap: 8px; }
+.contact-icon.locked { opacity: .75; cursor: default; }
+
 /* ComingSoon placeholder */
 .coming-soon {
   display: flex; flex-direction: column;

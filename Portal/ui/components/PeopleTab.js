@@ -210,10 +210,10 @@ export function PeopleTab({ mode = 'local-admin' } = {}) {
                   <input type="checkbox" checked=${selected.has(r.id)} onChange=${() => toggleRow(r.id)} />
                 </td>
                 <td><${PhotoCell} person=${r} /></td>
-                <${EditableCell} value=${r.full_name} onSave=${(v) => update(r.id, 'full_name', v)} />
-                <${EditableCell} value=${r.headline}  onSave=${(v) => update(r.id, 'headline', v)} />
+                <${EditableCell} value=${r.full_name} readOnly=${isUser} onSave=${(v) => update(r.id, 'full_name', v)} />
+                <${EditableCell} value=${r.headline}  readOnly=${isUser} onSave=${(v) => update(r.id, 'headline', v)} />
                 <td>${isUser && !r.revealed_by_tenant
-                  ? html`<button class="reveal-btn" onClick=${(e) => { e.stopPropagation(); revealRow(r.id); }}>Reveal · 1</button>`
+                  ? html`<span class="contact-locked-cell"><${ContactIcons} company=${r} /><button class="reveal-btn" onClick=${(e) => { e.stopPropagation(); revealRow(r.id); }}>Reveal · 1</button></span>`
                   : html`<${ContactIcons} company=${r} />`}</td>
               </tr>
             `)}

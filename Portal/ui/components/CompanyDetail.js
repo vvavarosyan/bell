@@ -216,7 +216,7 @@ const LEGAL_GROUPS = [
 
 // ============================================================================
 
-export function CompanyDetail({ companyId, onMutated }) {
+export function CompanyDetail({ companyId, onMutated, isUser = false }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [similar, setSimilar] = useState([]);
@@ -282,7 +282,7 @@ export function CompanyDetail({ companyId, onMutated }) {
             ${c.archived ? html`<span class="pill" style=${{borderColor:'var(--amber)',color:'var(--amber)'}}>archived</span>` : null}
           </div>
         </div>
-        <div style=${{display:'flex', gap:'6px', alignSelf:'flex-start'}}>
+        <div style=${{display:'flex', gap:'6px', alignSelf:'flex-start', display: isUser ? 'none' : 'flex'}}>
           <button
             class="linkbtn"
             style=${{padding:'4px 10px', borderRadius:'5px',

@@ -17,7 +17,8 @@ const PAGE_SIZE = 60;
 
 const LAYOUT_KEY = 'bdi.deep-data.layout';
 
-export function DeepDataTab() {
+export function DeepDataTab({ mode = 'local-admin' } = {}) {
+  const isUser = mode === 'user';   // customers browse datasets; no sync/admin tools
   const [stats,    setStats]    = useState(null);
   const [rows,     setRows]     = useState([]);
   const [total,    setTotal]    = useState(0);
@@ -87,14 +88,15 @@ export function DeepDataTab() {
   return html`
     <div style=${{ padding: '20px 24px', overflowY: 'auto', height: '100%' }}>
 
-      <${HeaderStrip} stats=${stats} busy=${busy}
-        onSyncRecords=${() => triggerSync('records')}
-        onSyncCatalog=${() => triggerSync('catalog')}
-        onToggleRuns=${() => setShowRuns(s => !s)}
-        showRuns=${showRuns}
-      />
-
-      ${showRuns ? html`<${RecentRuns} runs=${stats?.recent_runs || []} />` : null}
+      ${!isUser ? html`
+        <${HeaderStrip} stats=${stats} busy=${busy}
+          onSyncRecords=${() => triggerSync('records')}
+          onSyncCatalog=${() => triggerSync('catalog')}
+          onToggleRuns=${() => setShowRuns(s => !s)}
+          showRuns=${showRuns}
+        />
+        ${showRuns ? html`<${RecentRuns} runs=${stats?.recent_runs || []} />` : null}
+      ` : null}
 
       <${FilterBar}
         q=${q} setQ=${setQ}
@@ -105,6 +107,7 @@ export function DeepDataTab() {
         total=${total}
         offset=${offset} setOffset=${setOffset}
         layout=${layout} setLayout=${setLayout}
+        isUser=${isUser}
       />
 
       ${loading ? html`<div style=${{ color: 'var(--text-dim)', textAlign: 'center', padding: '60px 0', fontSize: '12px' }}>Loading…</div>` :
@@ -123,6 +126,7 @@ export function DeepDataTab() {
         datasetId=${openedId}
         onClose=${() => setOpenedId(null)}
         onChange=${() => { loadStats(); loadRows({ silent: true }); }}
+        isUser=${isUser}
       />` : null}
     </div>
   `;
@@ -270,7 +274,7 @@ function RecentRuns({ runs }) {
 // FilterBar
 // ---------------------------------------------------------------------------
 function FilterBar({ q, setQ, theme, setTheme, publisher, setPublisher, syncStatus, setSyncStatus,
-                    themes, publishers, total, offset, setOffset, layout, setLayout }) {
+                    themes, publishers, total, offset, setOffset, layout, setLayout, isUser = false }) {
   const pageStart = total === 0 ? 0 : offset + 1;
   const pageEnd   = Math.min(offset + PAGE_SIZE, total);
   return html`<div style=${{
@@ -298,14 +302,16 @@ function FilterBar({ q, setQ, theme, setTheme, publisher, setPublisher, syncStat
       <option value="">All sources</option>
       ${publishers.map(p => html`<option key=${p.publisher} value=${p.publisher}>${p.publisher} (${p.n})</option>`)}
     </select>
-    <select value=${syncStatus} onChange=${(e) => setSyncStatus(e.target.value)} style=${selectStyle}>
-      <option value="">All sync states</option>
-      <option value="done">Synced</option>
-      <option value="pending">Pending</option>
-      <option value="running">Running</option>
-      <option value="failed">Failed</option>
-      <option value="no_data">No data</option>
-    </select>
+    ${!isUser ? html`
+      <select value=${syncStatus} onChange=${(e) => setSyncStatus(e.target.value)} style=${selectStyle}>
+        <option value="">All sync states</option>
+        <option value="done">Synced</option>
+        <option value="pending">Pending</option>
+        <option value="running">Running</option>
+        <option value="failed">Failed</option>
+        <option value="no_data">No data</option>
+      </select>
+    ` : null}
 
     <!-- Layout toggle -->
     <div style=${{

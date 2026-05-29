@@ -2,8 +2,15 @@
 
 import { Router } from 'express';
 import { query } from '../db.js';
+import { denyOnUserPortal } from '../lib/auth.js';
 
 const router = Router();
+
+// User portal is READ-ONLY for jobs (no reveal on jobs): allow GET, block writes.
+router.use((req, res, next) => {
+  if (req.method === 'GET') return next();
+  return denyOnUserPortal(req, res, next);
+});
 
 const EDITABLE_FIELDS = new Set([
   'title', 'description',

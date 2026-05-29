@@ -10,8 +10,17 @@ import {
   upsertContact, setPrimaryContact, deleteContact,
 } from '../lib/contacts.js';
 import { revealOne, revealBulk, getRevealedSet, bypassesCredits } from '../lib/credits.js';
+import { denyOnUserPortal } from '../lib/auth.js';
 
 const router = Router();
+
+// User portal is READ-ONLY for the shared dataset: allow GET + reveal, block all
+// other mutations (edit, archive, contacts CRUD, deep-enrich, …).
+router.use((req, res, next) => {
+  if (req.method === 'GET') return next();
+  if (/\/reveal(-bulk)?$/.test(req.path)) return next();
+  return denyOnUserPortal(req, res, next);
+});
 
 // Contact types that are credit-gated (the "valuable details" — emails/numbers).
 const SENSITIVE_CONTACT_TYPES = new Set(['email', 'phone', 'mobile', 'whatsapp', 'telephone', 'tel']);
@@ -30,10 +39,16 @@ async function maskPeople(req, rows) {
     const ok = revealed.has(Number(r.id));
     r.revealed_by_tenant = ok;
     if (!ok) {
+      // Keep AVAILABILITY (so the user sees what exists) but hide the VALUE.
+      r.email_locked = !!r.email;
+      r.phone_locked = !!r.phone;
       r.email = null;
       r.phone = null;
       if (Array.isArray(r.contacts)) {
-        r.contacts = r.contacts.filter((c) => !SENSITIVE_CONTACT_TYPES.has(String(c.type || '').toLowerCase()));
+        r.contacts = r.contacts.map((c) =>
+          SENSITIVE_CONTACT_TYPES.has(String(c.type || '').toLowerCase())
+            ? { ...c, value: null, value_display: null, locked: true }
+            : c);
       }
     }
   }
