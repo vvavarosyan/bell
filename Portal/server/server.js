@@ -35,10 +35,12 @@ import researchRouter          from './routes/research.js';
 import { startPoller as startResearchPoller } from './research/poller.js';
 import openDataRouter          from './routes/open_data.js';
 import { startScheduler as startOpenDataScheduler } from './sources/qatar_open_data/scheduler.js';
+import { startNewsEngine, getNewsState } from './news/engine.js';
 import authRouter              from './routes/auth.js';
 import billingRouter           from './routes/billing.js';
 import syncRouter              from './routes/sync.js';
 import creditsRouter           from './routes/credits.js';
+import feedRouter              from './routes/feed.js';
 import { requireAuth, requireRole, requireActiveSubscription } from './lib/auth.js';
 import { getKey } from './keychain.js';
 
@@ -128,6 +130,7 @@ app.use('/api/people',     ...feature, peopleRouter);
 app.use('/api/jobs',       ...feature, jobsRouter);
 app.use('/api/research',   ...feature, researchRouter);
 app.use('/api/open-data',  ...feature, openDataRouter);
+app.use('/api/feed',       ...feature, feedRouter);
 // Stats backs the app shell/header — signed in only, no subscription gate so an
 // unsubscribed user still gets a working frame before being routed to /subscribe.
 app.use('/api/stats',      requireAuth, statsRouter);
@@ -223,4 +226,8 @@ app.use((err, req, res, next) => {
   // auto-seeds records if od_records is empty, refreshes catalog every 6h,
   // and runs the full daily sync at 15:00 local.
   startOpenDataScheduler();
+
+  // Start the Market Feed engine (news poller + enrichment). No-op unless
+  // BDI_NEWS_ENGINE=1 — enable on exactly one service (the production portal).
+  startNewsEngine();
 })();
