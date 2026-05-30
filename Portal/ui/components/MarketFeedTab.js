@@ -117,6 +117,12 @@ export function MarketFeedTab() {
             <span class="feed-stat"><b>${(stats.linked_today || 0).toLocaleString()}</b> linked to companies</span>
           ` : null}
         </div>
+        ${stats && stats.engine_enabled === false ? html`
+          <div class="feed-warn">News engine is off on this server. Set <code>BDI_NEWS_ENGINE=1</code> on the production portal service.</div>
+        ` : null}
+        ${stats && stats.poller_error ? html`
+          <div class="feed-warn">Last poll error: ${stats.poller_error}</div>
+        ` : null}
 
         <!-- Breaking ticker -->
         ${breaking.length ? html`
