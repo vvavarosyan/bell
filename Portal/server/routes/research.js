@@ -18,6 +18,19 @@ import { runJob, advanceJob } from '../research/orchestrator.js';
 
 const router = Router();
 
+// ---- ownership scoping -----------------------------------------------------
+// Each tenant sees only its OWN research. platform_admin (Bell staff, on
+// admin.bell.qa / local) sees everything.
+const isAdmin = (req) => req.user?.role === 'platform_admin';
+
+// True if the request may touch this job. Admin → always. Otherwise the job
+// must belong to the caller's tenant.
+async function ownsJob(req, id) {
+  if (isAdmin(req)) return true;
+  const r = await query(`SELECT 1 FROM research_jobs WHERE id = $1 AND tenant_id = $2`, [id, req.tenant?.id]);
+  return r.rows.length > 0;
+}
+
 // GET /api/research/types — surface the type catalog to the UI
 router.get('/types', (req, res) => {
   // Strip the brief_template function (not serializable) before returning.
@@ -32,16 +45,18 @@ router.get('/types', (req, res) => {
 // GET /api/research/stats — Console header numbers
 router.get('/stats', async (req, res, next) => {
   try {
+    const scope = isAdmin(req) ? '' : 'WHERE tenant_id = $1';
+    const sp = isAdmin(req) ? [] : [req.tenant?.id];
     const [counts, totals] = await Promise.all([
-      query(`SELECT status, count(*)::int AS n FROM research_jobs GROUP BY status`),
+      query(`SELECT status, count(*)::int AS n FROM research_jobs ${scope} GROUP BY status`, sp),
       query(`
         SELECT
           coalesce(sum(source_count),  0)::int AS sources_total,
           coalesce(sum(citation_count),0)::int AS citations_total,
           coalesce(sum(usd_spent),     0)::numeric AS usd_total,
           count(*)::int                          AS jobs_total
-        FROM research_jobs
-      `),
+        FROM research_jobs ${scope}
+      `, sp),
     ]);
     const byStatus = {};
     for (const r of counts.rows) byStatus[r.status] = r.n;
@@ -63,6 +78,8 @@ router.get('/jobs', async (req, res, next) => {
     const offset = Math.max(Number(req.query.offset ?? 0), 0);
     const where = [];
     const params = [];
+    // Tenant isolation: non-admins only see their own tenant's research.
+    if (!isAdmin(req)) { params.push(req.tenant?.id); where.push(`j.tenant_id = $${params.length}`); }
     if (req.query.status) { params.push(req.query.status); where.push(`j.status = $${params.length}`); }
     if (req.query.type)   { params.push(req.query.type);   where.push(`j.type   = $${params.length}`); }
     const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
@@ -133,8 +150,8 @@ router.post('/jobs', async (req, res, next) => {
     const r = await query(`
       INSERT INTO research_jobs (
         type, brief, target_company_id, target_person_id, target_label,
-        status, agent_count, created_by
-      ) VALUES ($1,$2,$3,$4,$5,'queued',$6,$7)
+        status, agent_count, created_by, tenant_id
+      ) VALUES ($1,$2,$3,$4,$5,'queued',$6,$7,$8)
       RETURNING id
     `, [
       body.type, brief,
@@ -142,7 +159,8 @@ router.post('/jobs', async (req, res, next) => {
       body.target_person_id  || null,
       targetLabel,
       agentCount,
-      body.created_by || null,
+      req.user?.email || null,   // owner from the session, never the client body
+      req.tenant?.id || null,
     ]);
     const jobId = r.rows[0].id;
 
@@ -163,6 +181,7 @@ router.post('/jobs/:id/run', async (req, res, next) => {
   try {
     const id = Number(req.params.id);
     if (!Number.isFinite(id)) return res.status(400).json({ error: 'invalid_id' });
+    if (!(await ownsJob(req, id))) return res.status(404).json({ error: 'not_found' });
     const out = await runJob(id);
     res.json(out);
   } catch (err) { next(err); }
@@ -173,8 +192,20 @@ router.post('/jobs/:id/poll', async (req, res, next) => {
   try {
     const id = Number(req.params.id);
     if (!Number.isFinite(id)) return res.status(400).json({ error: 'invalid_id' });
+    if (!(await ownsJob(req, id))) return res.status(404).json({ error: 'not_found' });
     const out = await advanceJob(id);
     res.json(out);
+  } catch (err) { next(err); }
+});
+
+// DELETE /api/research/jobs/:id — remove a research job (own, or admin).
+router.delete('/jobs/:id', async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) return res.status(400).json({ error: 'invalid_id' });
+    if (!(await ownsJob(req, id))) return res.status(404).json({ error: 'not_found' });
+    await query(`DELETE FROM research_jobs WHERE id = $1`, [id]);  // children cascade
+    res.json({ deleted: id });
   } catch (err) { next(err); }
 });
 
@@ -183,6 +214,7 @@ router.get('/jobs/:id', async (req, res, next) => {
   try {
     const id = Number(req.params.id);
     if (!Number.isFinite(id)) return res.status(400).json({ error: 'invalid_id' });
+    if (!(await ownsJob(req, id))) return res.status(404).json({ error: 'not_found' });
 
     const [jobR, sourcesR, reportR, derivedR] = await Promise.all([
       query(`
@@ -210,7 +242,8 @@ router.get('/jobs/:id', async (req, res, next) => {
       job:     jobR.rows[0],
       sources: sourcesR.rows,
       report:  reportR.rows[0] || null,
-      derived: derivedR.rows,
+      // Snowball "Bell database changes" are an internal/admin view only.
+      derived: isAdmin(req) ? derivedR.rows : [],
     });
   } catch (err) { next(err); }
 });
@@ -219,6 +252,7 @@ router.get('/jobs/:id', async (req, res, next) => {
 router.post('/jobs/:id/cancel', async (req, res, next) => {
   try {
     const id = Number(req.params.id);
+    if (!(await ownsJob(req, id))) return res.status(404).json({ error: 'not_found' });
     const r = await query(`
       UPDATE research_jobs
       SET status = 'cancelled'

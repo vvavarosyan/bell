@@ -96,6 +96,8 @@ router.get('/stats', async (req, res, next) => {
     const r = await query(`
       SELECT
         (SELECT count(*)::int FROM news_sources WHERE active = true) AS active_sources,
+        (SELECT count(*)::int FROM news_items) AS total_items,
+        (SELECT count(*)::int FROM feed_events) AS total_events,
         (SELECT count(*)::int FROM news_items WHERE created_at > now() - interval '24 hours') AS items_today,
         (SELECT count(*)::int FROM feed_events WHERE occurred_at > now() - interval '24 hours') AS events_today,
         (SELECT count(*)::int FROM feed_events WHERE array_length(linked_company_ids,1) > 0

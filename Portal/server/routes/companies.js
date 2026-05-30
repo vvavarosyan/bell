@@ -125,6 +125,10 @@ router.get('/', async (req, res, next) => {
 
     const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
 
+    // Internal research provenance (source like 'research:job-…') is admin-only;
+    // hide it from customers so research-added companies look like any other.
+    const srcFilter = (req.user?.role === 'platform_admin') ? '' : "AND cs.source NOT LIKE 'research:%'";
+
     params.push(limit, offset);
 
     const sql = `
@@ -143,9 +147,9 @@ router.get('/', async (req, res, next) => {
              extra_fields,
              created_at, updated_at, assembled_at, archived,
              (SELECT array_agg(DISTINCT cs.source ORDER BY cs.source)
-              FROM company_sources cs WHERE cs.company_id = companies.id) AS sources,
+              FROM company_sources cs WHERE cs.company_id = companies.id ${srcFilter}) AS sources,
              (SELECT json_agg(json_build_object('source', cs.source, 'record_id', cs.source_record_id) ORDER BY cs.source)
-              FROM company_sources cs WHERE cs.company_id = companies.id) AS source_records
+              FROM company_sources cs WHERE cs.company_id = companies.id ${srcFilter}) AS source_records
       FROM companies
       ${whereSql}
       ORDER BY id DESC
