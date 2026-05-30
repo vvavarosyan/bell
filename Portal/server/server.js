@@ -40,6 +40,7 @@ import billingRouter           from './routes/billing.js';
 import syncRouter              from './routes/sync.js';
 import creditsRouter           from './routes/credits.js';
 import { requireAuth, requireRole, requireActiveSubscription } from './lib/auth.js';
+import { getKey } from './keychain.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname  = path.dirname(__filename);
@@ -140,6 +141,22 @@ app.use('/api/enrichment',         ...adminOnly, enrichmentRouter);
 app.use('/api/similar-companies',  ...adminOnly, similarCompaniesRouter);
 app.use('/api/assembly',           ...adminOnly, assemblyRouter);
 app.use('/api/job-runs',           ...adminOnly, jobRunsRouter);
+
+// Browser-safe public tokens (e.g. the Mapbox pk.* token the Map view needs).
+// ANY signed-in user needs this, so it sits BEFORE the admin-only settings
+// router and is auth-gated (not admin). Whitelist only safe-to-publish keys.
+const PUBLIC_TOKENS = new Set(['mapbox']);
+app.get('/api/settings/public-token/:name', requireAuth, async (req, res, next) => {
+  try {
+    if (!PUBLIC_TOKENS.has(req.params.name)) {
+      return res.status(403).json({ error: 'not_a_public_token' });
+    }
+    const value = await getKey(req.params.name);
+    if (!value) return res.status(404).json({ error: 'not_set' });
+    res.json({ name: req.params.name, value });
+  } catch (err) { next(err); }
+});
+
 app.use('/api/settings',           ...adminOnly, settingsRouter);
 
 // Self-gating / public routers (handle their own auth internally):
