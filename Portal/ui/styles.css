@@ -334,7 +334,7 @@ html, body {
 .feed-chip.active { background: var(--accent, #3b82f6); border-color: var(--accent, #3b82f6); color: #fff; }
 .feed-search { padding: 6px 12px; min-width: 200px; border-radius: 8px; border: 1px solid var(--border); background: rgba(255,255,255,.03); color: var(--text); font-size: 12.5px; }
 
-.feed-stream { flex: 1; overflow-y: auto; padding-right: 6px; display: flex; flex-direction: column; gap: 12px; }
+.feed-stream { display: flex; flex-direction: column; gap: 12px; }
 .feed-card { display: flex; gap: 12px; border: 1px solid var(--border); border-radius: 12px; background: var(--bg-elev); overflow: hidden; transition: border-color .15s; }
 .feed-card:hover { border-color: var(--accent, #3b82f6); }
 .feed-card-img { width: 120px; flex-shrink: 0; background-size: cover; background-position: center; }
@@ -352,7 +352,7 @@ html, body {
 .feed-company-chip:hover { background: var(--accent, #3b82f6); color: #fff; }
 .feed-loadmore { align-self: center; margin: 8px 0 16px; padding: 8px 22px; border-radius: 8px; border: 1px solid var(--border); background: transparent; color: var(--text-muted); cursor: pointer; }
 
-.feed-aside { width: 240px; flex-shrink: 0; border-left: 1px solid var(--border); padding-left: 16px; overflow-y: auto; }
+.feed-aside { width: 240px; flex-shrink: 0; border-left: 1px solid var(--border); padding-left: 16px; position: sticky; top: 0; }
 .feed-aside-title { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; color: var(--text-dim); margin-bottom: 10px; }
 .feed-trend-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; padding: 7px 8px; border-radius: 7px; border: none; background: transparent; color: var(--text); cursor: pointer; text-align: left; }
 .feed-trend-row:hover { background: rgba(255,255,255,.04); }
