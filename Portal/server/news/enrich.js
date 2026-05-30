@@ -48,8 +48,9 @@ export async function enrichBatch() {
 `Classify each numbered news item for a Qatar market-intelligence feed.
 Categories: ${CATEGORIES.join(', ')}.
 For "companies", list ONLY explicitly named companies/organizations (no generic terms like "Qatar" or "the government").
+Also write "summary": one neutral, factual sentence (max 25 words) describing the item.
 Return JSON exactly:
-{"items":[{"i":<index>,"category":"<one category>","sentiment":"positive|negative|neutral","importance":<0..1>,"companies":["..."],"people":["..."]}]}
+{"items":[{"i":<index>,"category":"<one category>","sentiment":"positive|negative|neutral","importance":<0..1>,"summary":"one sentence","companies":["..."],"people":["..."]}]}
 
 Items:
 ${list}`;
@@ -79,19 +80,24 @@ ${list}`;
     const companyIds = await linkCompanies(companies);
     links += companyIds.length;
     const entities = JSON.stringify({ companies, people });
+    // One-line AI summary, used only to FILL items that have none (Google News
+    // carries no real description); real RSS summaries are preserved via COALESCE.
+    const aiSummary = (typeof c.summary === 'string' && c.summary.trim()) ? c.summary.trim().slice(0, 400) : null;
 
     await query(
       `UPDATE news_items
           SET processed = true, category = $2, sentiment = $3, sentiment_score = $4,
-              importance_score = $5, entities = $6::jsonb, linked_company_ids = $7, updated_at = now()
+              importance_score = $5, entities = $6::jsonb, linked_company_ids = $7,
+              summary = COALESCE(summary, $8), updated_at = now()
         WHERE id = $1`,
-      [row.id, category, sentiment, sentScore(sentiment), importance, entities, companyIds]
+      [row.id, category, sentiment, sentScore(sentiment), importance, entities, companyIds, aiSummary]
     );
     await query(
       `UPDATE feed_events
-          SET category = $2, sentiment = $3, importance = $4, entities = $5::jsonb, linked_company_ids = $6
+          SET category = $2, sentiment = $3, importance = $4, entities = $5::jsonb,
+              linked_company_ids = $6, summary = COALESCE(summary, $7)
         WHERE kind = 'news' AND ref_table = 'news_items' AND ref_id = $1`,
-      [row.id, category, sentiment, importance, entities, companyIds]
+      [row.id, category, sentiment, importance, entities, companyIds, aiSummary]
     );
     processed++;
   }

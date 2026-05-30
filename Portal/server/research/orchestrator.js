@@ -99,9 +99,22 @@ export async function runJob(jobId) {
     `, [jobId, fcId, JSON.stringify({ submitted: raw, anchor_urls: urls }), DEFAULT_ETA_SECONDS]);
     return { id: jobId, status: 'gathering', firecrawl_job_id: fcId };
   } catch (err) {
-    await failJob(jobId, 'Firecrawl Agent submit failed: ' + err.message);
-    return { id: jobId, status: 'failed', error: err.message };
+    console.error('[research] submit failed for job', jobId, '—', err.message);
+    const safe = userSafeResearchError(err);
+    await failJob(jobId, safe);
+    return { id: jobId, status: 'failed', error: safe };
   }
+}
+
+// Customer-facing research errors must never reveal the underlying provider
+// (Firecrawl) or admin setup steps. Map everything to a neutral message; the
+// real cause is in the server logs.
+function userSafeResearchError(err) {
+  const m = String(err?.message || err || '');
+  if (/key_missing|api key|not configured|unauthorized|401|403/i.test(m)) {
+    return 'Research is temporarily unavailable. Please try again later.';
+  }
+  return 'We could not complete this research right now. Please try again.';
 }
 
 /**
@@ -134,7 +147,8 @@ export async function advanceJob(jobId) {
   }
 
   if (agentResp.status === 'failed') {
-    await failJob(jobId, 'Firecrawl Agent reported failure: ' + (agentResp.error || 'unknown'));
+    console.error('[research] job', jobId, 'provider reported failure:', agentResp.error || 'unknown');
+    await failJob(jobId, 'We could not complete this research right now. Please try again.');
     return { id: jobId, status: 'failed' };
   }
   if (agentResp.status !== 'completed') {

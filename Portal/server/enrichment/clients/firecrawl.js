@@ -7,7 +7,9 @@ const API_BASE = 'https://api.firecrawl.dev';
 
 async function tokenOrThrow() {
   const t = await getKey('firecrawl');
-  if (!t) throw new Error('No Firecrawl API key set. Go to Settings → Firecrawl and paste your key.');
+  // Internal message only (never shown to customers — research errors are
+  // sanitized in the orchestrator). On Railway set BDI_KEY_FIRECRAWL.
+  if (!t) throw new Error('research_provider_key_missing');
   return t;
 }
 
