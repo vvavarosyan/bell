@@ -136,9 +136,10 @@ export function MarketFeedTab() {
           <span class="feed-scan-label">${stats?.scanning ? 'Bell is scanning Qatar…' : 'Live market intelligence'}</span>
           <span class="spacer"></span>
           ${stats ? html`
+            <span class="feed-stat"><b>${(stats.total_items || 0).toLocaleString()}</b> news total</span>
             <span class="feed-stat"><b>${(stats.active_sources || 0).toLocaleString()}</b> sources</span>
             <span class="feed-stat"><b>${(stats.events_today || 0).toLocaleString()}</b> events / 24h</span>
-            <span class="feed-stat"><b>${(stats.linked_today || 0).toLocaleString()}</b> linked to companies</span>
+            <span class="feed-stat"><b>${(stats.linked_today || 0).toLocaleString()}</b> linked</span>
           ` : null}
         </div>
         ${stats && stats.engine_enabled === false ? html`

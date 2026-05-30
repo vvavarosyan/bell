@@ -42,7 +42,7 @@ function targetLine(job) {
   return job.target_label || '—';
 }
 
-export function ResearchJobCard({ job, onOpen }) {
+export function ResearchJobCard({ job, onOpen, onDelete }) {
   const t = TYPE_META[job.type]   || TYPE_META.company;
   const s = STATUS_META[job.status] || STATUS_META.queued;
 
@@ -88,6 +88,11 @@ export function ResearchJobCard({ job, onOpen }) {
           <span style=${{ width: '5px', height: '5px', borderRadius: '50%', background: s.dot }}></span>
           ${s.label}
         </span>
+        ${onDelete ? html`<button
+          title="Delete this research"
+          onClick=${(e) => { e.stopPropagation(); if (window.confirm('Delete this research permanently?')) onDelete(job); }}
+          style=${{ background: 'transparent', border: 'none', color: 'var(--text-dim)', cursor: 'pointer', fontSize: '15px', lineHeight: 1, padding: '2px 4px' }}
+        >✕</button>` : null}
       </div>
 
       <!-- type label -->

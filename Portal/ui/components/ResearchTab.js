@@ -135,6 +135,14 @@ export function ResearchTab() {
               key=${j.id}
               job=${j}
               onOpen=${(job) => setOpenedJobId(job.id)}
+              onDelete=${async (job) => {
+                try {
+                  await api.deleteResearchJob(job.id);
+                  if (openedJobId === job.id) setOpenedJobId(null);
+                  toast('Research deleted');
+                  load({ silent: true });
+                } catch (err) { toast('Delete failed: ' + err.message, 'error'); }
+              }}
             />
           `)}
         </div>
