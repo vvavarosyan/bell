@@ -102,7 +102,14 @@ router.get('/stats', async (req, res, next) => {
             AND occurred_at > now() - interval '24 hours') AS linked_today
     `);
     const news = getNewsState();
-    res.json({ ...r.rows[0], scanning: !!news.poller?.scanning, engine_enabled: !!news.enabled });
+    res.json({
+      ...r.rows[0],
+      scanning: !!news.poller?.scanning,
+      engine_enabled: !!news.enabled,
+      last_poll_at: news.poller?.last_poll_at || null,
+      poller_error: news.poller?.last_error || null,
+      enrich_skipped: news.enrich?.last_error || null,
+    });
   } catch (err) { next(err); }
 });
 

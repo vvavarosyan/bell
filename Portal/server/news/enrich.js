@@ -9,7 +9,10 @@
 import { query } from '../db.js';
 import { getKey } from '../keychain.js';
 
-const MODEL      = process.env.BDI_NEWS_MODEL || 'gpt-4o-mini';
+// Provider-flexible: prefer Anthropic (Claude Haiku) if a key is set, else
+// OpenAI (gpt-4o-mini). Both are cheap; Claude 3 Haiku is Anthropic's cheapest.
+const ANTHROPIC_MODEL = process.env.BDI_NEWS_ANTHROPIC_MODEL || 'claude-3-haiku-20240307';
+const OPENAI_MODEL    = process.env.BDI_NEWS_OPENAI_MODEL    || 'gpt-4o-mini';
 const BATCH      = 12;
 const DAILY_CAP  = Number(process.env.BDI_NEWS_DAILY_CAP || 4000);  // items/day
 
@@ -29,8 +32,9 @@ export async function enrichBatch() {
   rollDay();
   if (state.processed_today >= DAILY_CAP) return { skipped: 'daily_cap' };
 
-  const key = await getKey('openai');
-  if (!key) return { skipped: 'no_openai_key' };
+  const anthropicKey = await getKey('anthropic');
+  const openaiKey    = anthropicKey ? null : await getKey('openai');
+  if (!anthropicKey && !openaiKey) return { skipped: 'no_llm_key' };
 
   const { rows } = await query(
     `SELECT id, title, summary FROM news_items WHERE processed = false ORDER BY created_at DESC LIMIT $1`,
@@ -52,19 +56,10 @@ ${list}`;
 
   let parsed;
   try {
-    const res = await fetch('https://api.openai.com/v1/chat/completions', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + key },
-      body: JSON.stringify({
-        model: MODEL,
-        temperature: 0.2,
-        response_format: { type: 'json_object' },
-        messages: [{ role: 'system', content: sys }, { role: 'user', content: user }],
-      }),
-    });
-    if (!res.ok) throw new Error('OpenAI HTTP ' + res.status + ': ' + (await res.text()).slice(0, 160));
-    const data = await res.json();
-    parsed = JSON.parse(data.choices?.[0]?.message?.content || '{}');
+    const text = anthropicKey
+      ? await callAnthropic(anthropicKey, sys, user)
+      : await callOpenAI(openaiKey, sys, user);
+    parsed = JSON.parse(extractJson(text));
   } catch (err) {
     state.last_error = err.message;
     return { error: err.message };  // leave items unprocessed; they retry next tick
@@ -105,6 +100,55 @@ ${list}`;
   state.last_run_at = new Date().toISOString();
   state.links_made += links;
   return { processed, links };
+}
+
+// ---- LLM providers ---------------------------------------------------------
+async function callAnthropic(key, system, user) {
+  const res = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'x-api-key': key,
+      'anthropic-version': '2023-06-01',
+    },
+    body: JSON.stringify({
+      model: ANTHROPIC_MODEL,
+      max_tokens: 1500,
+      temperature: 0.2,
+      system: system + ' Respond with ONLY the JSON object, no prose, no markdown fences.',
+      messages: [{ role: 'user', content: user }],
+    }),
+  });
+  if (!res.ok) throw new Error('Anthropic HTTP ' + res.status + ': ' + (await res.text()).slice(0, 160));
+  const data = await res.json();
+  return data.content?.[0]?.text || '{}';
+}
+
+async function callOpenAI(key, system, user) {
+  const res = await fetch('https://api.openai.com/v1/chat/completions', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + key },
+    body: JSON.stringify({
+      model: OPENAI_MODEL,
+      temperature: 0.2,
+      response_format: { type: 'json_object' },
+      messages: [{ role: 'system', content: system }, { role: 'user', content: user }],
+    }),
+  });
+  if (!res.ok) throw new Error('OpenAI HTTP ' + res.status + ': ' + (await res.text()).slice(0, 160));
+  const data = await res.json();
+  return data.choices?.[0]?.message?.content || '{}';
+}
+
+// Tolerate a model that wraps JSON in prose or ```json fences.
+function extractJson(text) {
+  if (!text) return '{}';
+  const fence = text.match(/```(?:json)?\s*([\s\S]*?)```/i);
+  if (fence) return fence[1].trim();
+  const start = text.indexOf('{');
+  const end = text.lastIndexOf('}');
+  if (start >= 0 && end > start) return text.slice(start, end + 1);
+  return text.trim();
 }
 
 function clamp01(n) { return Number.isFinite(n) ? Math.max(0, Math.min(1, n)) : 0; }
