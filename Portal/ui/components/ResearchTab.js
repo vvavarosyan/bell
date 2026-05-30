@@ -320,6 +320,7 @@ function JobDetailDrawer({ jobId, onClose }) {
               }}>
                 <div style=${{ fontWeight: 700, marginBottom: '4px' }}>Research failed</div>
                 <div style=${{ color: 'var(--text-muted)' }}>${job.error_message}</div>
+                ${job.error_detail ? html`<div style=${{ marginTop: '6px', fontSize: '11px', color: 'var(--text-dim)', fontFamily: 'var(--mono, monospace)', whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>admin · ${job.error_detail}</div>` : null}
                 <button
                   onClick=${() => retryJob(job.id, load)}
                   style=${{

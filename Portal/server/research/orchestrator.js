@@ -43,7 +43,7 @@ export async function runJob(jobId) {
 
   const schema = schemaFor(job.type);
   if (!schema) {
-    await failJob(jobId, `No schema for research type '${job.type}'`);
+    await failJob(jobId, SAFE_UNAVAIL, `No schema for research type '${job.type}'`);
     return { id: jobId, status: 'failed' };
   }
 
@@ -51,7 +51,7 @@ export async function runJob(jobId) {
   try {
     prompt = buildPrompt(job.type, job);
   } catch (err) {
-    await failJob(jobId, 'Prompt builder failed: ' + err.message);
+    await failJob(jobId, SAFE_FAIL, 'Prompt builder failed: ' + err.message);
     return { id: jobId, status: 'failed' };
   }
 
@@ -101,7 +101,7 @@ export async function runJob(jobId) {
   } catch (err) {
     console.error('[research] submit failed for job', jobId, '—', err.message);
     const safe = userSafeResearchError(err);
-    await failJob(jobId, safe);
+    await failJob(jobId, safe, 'Submit failed: ' + err.message);
     return { id: jobId, status: 'failed', error: safe };
   }
 }
@@ -134,7 +134,7 @@ export async function advanceJob(jobId) {
     return { id: jobId, status: job.status, skipped: true };
   }
   if (!job.firecrawl_job_id) {
-    await failJob(jobId, 'In gathering/synthesizing with no firecrawl_job_id');
+    await failJob(jobId, SAFE_FAIL, 'In gathering/synthesizing with no firecrawl_job_id');
     return { id: jobId, status: 'failed' };
   }
 
@@ -148,7 +148,7 @@ export async function advanceJob(jobId) {
 
   if (agentResp.status === 'failed') {
     console.error('[research] job', jobId, 'provider reported failure:', agentResp.error || 'unknown');
-    await failJob(jobId, 'We could not complete this research right now. Please try again.');
+    await failJob(jobId, SAFE_FAIL, 'Provider reported failure: ' + (agentResp.error || 'unknown') + ' | raw: ' + JSON.stringify(agentResp.raw || {}).slice(0, 700));
     return { id: jobId, status: 'failed' };
   }
   if (agentResp.status !== 'completed') {
@@ -180,7 +180,7 @@ export async function advanceJob(jobId) {
     const creditsHint = agentResp.raw?.creditsUsed === 0
       ? ' (Firecrawl charged 0 credits — agent likely rejected the request silently; check model + schema).'
       : '';
-    await failJob(jobId, 'Firecrawl Agent returned no data.' + creditsHint);
+    await failJob(jobId, SAFE_FAIL, 'Agent returned no usable data.' + creditsHint);
     return { id: jobId, status: 'failed' };
   }
 
@@ -210,7 +210,7 @@ export async function advanceJob(jobId) {
     });
     return { id: jobId, status: 'ready', ...persisted };
   } catch (err) {
-    await failJob(jobId, 'Parse/ingest failed: ' + err.message);
+    await failJob(jobId, SAFE_FAIL, 'Parse/ingest failed: ' + err.message);
     return { id: jobId, status: 'failed', error: err.message };
   }
 }
@@ -266,15 +266,21 @@ export async function tick() {
 // helpers
 // ---------------------------------------------------------------------------
 
-async function failJob(jobId, message) {
+// message = customer-safe text (shown to everyone). detail = real technical
+// cause (shown to platform_admin only — stripped for users in the route).
+async function failJob(jobId, message, detail = null) {
   await query(`
     UPDATE research_jobs
        SET status = 'failed',
            error_message = $2,
+           error_detail = $3,
            ready_at = now()
      WHERE id = $1
-  `, [jobId, String(message).slice(0, 1000)]);
+  `, [jobId, String(message).slice(0, 1000), detail ? String(detail).slice(0, 2000) : null]);
 }
+
+const SAFE_FAIL = 'We could not complete this research right now. Please try again.';
+const SAFE_UNAVAIL = 'Research is temporarily unavailable. Please try again later.';
 
 async function loadJobForOrchestration(jobId) {
   const r = await query(`

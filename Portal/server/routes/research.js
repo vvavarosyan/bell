@@ -238,8 +238,12 @@ router.get('/jobs/:id', async (req, res, next) => {
     ]);
     if (!jobR.rows.length) return res.status(404).json({ error: 'not_found' });
 
+    const job = jobR.rows[0];
+    // Technical error detail is admin-only (it can name the provider, quotas, …).
+    if (!isAdmin(req)) job.error_detail = null;
+
     res.json({
-      job:     jobR.rows[0],
+      job,
       sources: sourcesR.rows,
       report:  reportR.rows[0] || null,
       // Snowball "Bell database changes" are an internal/admin view only.
