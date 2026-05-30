@@ -41,7 +41,20 @@ export function MarketFeedTab() {
   const [trending, setTrending] = useState([]);
   const [category, setCategory] = useState('');
   const [q, setQ] = useState('');
+  const [openedId, setOpenedId] = useState(null);
+  const [detail, setDetail] = useState(null);
   const maxIdRef = useRef(0);
+
+  // Fetch richer detail for the opened news item (drawer).
+  useEffect(() => {
+    if (!openedId) { setDetail(null); return; }
+    let cancelled = false;
+    (async () => {
+      try { const r = await api.feedItem(openedId); if (!cancelled) setDetail(r.event); }
+      catch { /* keep card fallback */ }
+    })();
+    return () => { cancelled = true; };
+  }, [openedId]);
 
   const filterParams = useCallback(() => {
     const p = {};
@@ -162,7 +175,14 @@ export function MarketFeedTab() {
         <div class="feed-stream">
           ${loading ? html`<div class="empty">Loading the market…</div>` :
             events.length === 0 ? html`<div class="empty">No events yet. Bell is warming up the feed — check back shortly.</div>` :
-            events.map(e => html`<${FeedCard} key=${e.id} e=${e} />`)}
+            events.map(e => html`<${FeedCard} key=${e.id} e=${e} onOpen=${() => {
+              if (e.kind === 'company_registered') {
+                const cid = e.ref_id || (e.companies && e.companies[0] && e.companies[0].id);
+                if (cid) navigateTo('companies', cid);
+              } else {
+                setOpenedId(e.id);
+              }
+            }} />`)}
           ${!loading && cursor ? html`
             <button class="feed-loadmore" onClick=${loadMore} disabled=${loadingMore}>
               ${loadingMore ? 'Loading…' : 'Load more'}
@@ -182,17 +202,62 @@ export function MarketFeedTab() {
           `)}
       </aside>
      </div>
+     ${openedId ? html`<${NewsDetail}
+        event=${detail || events.find(e => e.id === openedId)}
+        onClose=${() => setOpenedId(null)} />` : null}
     </div>
   `;
 }
 
-function FeedCard({ e }) {
+function NewsDetail({ event, onClose }) {
+  if (!event) return null;
+  const cat = event.category || 'other';
+  const catColor = CAT_COLOR[cat] || CAT_COLOR.other;
+  const fullSummary = event.detail?.summary || event.summary;
+  const author = event.detail?.author;
+  const published = event.detail?.published_at || event.occurred_at;
+  return html`
+    <div class="news-overlay" onClick=${onClose}>
+      <aside class="news-drawer" onClick=${e => e.stopPropagation()}>
+        <button class="news-close" onClick=${onClose} title="Close">✕</button>
+        ${event.image_url ? html`<div class="news-hero" style=${{ backgroundImage: `url(${event.image_url})` }}></div>` : null}
+        <div class="news-drawer-body">
+          <div class="feed-card-meta">
+            <span class="feed-kind">${KIND_LABEL[event.kind] || event.kind}</span>
+            <span class="feed-cat" style=${{ color: catColor, borderColor: catColor }}>${cat.replace('_', ' ')}</span>
+            ${event.sentiment ? html`<span class="feed-sent" style=${{ background: SENT_COLOR[event.sentiment] || SENT_COLOR.neutral }}></span>` : null}
+          </div>
+          <h2 class="news-title">${event.title}</h2>
+          <div class="news-sub">
+            ${event.source_name ? html`<span>${cleanSource(event.source_name)}</span>` : null}
+            ${author ? html`<span>· ${author}</span>` : null}
+            <span>· ${new Date(published).toLocaleString()}</span>
+          </div>
+          ${fullSummary ? html`<p class="news-summary">${fullSummary}</p>` : html`<p class="muted small">No summary available — read the full story at the source.</p>`}
+          ${(event.companies && event.companies.length) ? html`
+            <div class="news-section-label">Mentioned companies</div>
+            <div class="feed-card-chips">
+              ${event.companies.map(c => html`
+                <button key=${c.id} class="feed-company-chip" onClick=${() => navigateTo('companies', c.id)}>${c.name}</button>
+              `)}
+            </div>` : null}
+          ${event.url ? html`<a class="news-source-link" href=${event.url} target="_blank" rel="noopener">Read full story at source ↗</a>` : null}
+        </div>
+      </aside>
+    </div>
+  `;
+}
+
+function cleanSource(name) {
+  return String(name || '').split(/\s[—–-]\s/)[0].trim() || name;
+}
+
+function FeedCard({ e, onOpen }) {
   const cat = e.category || 'other';
   const catColor = CAT_COLOR[cat] || CAT_COLOR.other;
-  const openSource = () => { if (e.url) window.open(e.url, '_blank', 'noopener'); };
 
   return html`
-    <article class="feed-card">
+    <article class="feed-card" onClick=${onOpen} style=${{ cursor: 'pointer' }}>
       ${e.image_url ? html`<div class="feed-card-img" style=${{ backgroundImage: `url(${e.image_url})` }}></div>` : null}
       <div class="feed-card-body">
         <div class="feed-card-meta">
@@ -200,15 +265,15 @@ function FeedCard({ e }) {
           <span class="feed-cat" style=${{ color: catColor, borderColor: catColor }}>${cat.replace('_', ' ')}</span>
           ${e.sentiment ? html`<span class="feed-sent" title=${e.sentiment} style=${{ background: SENT_COLOR[e.sentiment] || SENT_COLOR.neutral }}></span>` : null}
           <span class="spacer"></span>
-          ${e.source_name ? html`<span class="muted small">${e.source_name}</span>` : null}
+          ${e.source_name ? html`<span class="muted small">${cleanSource(e.source_name)}</span>` : null}
           <span class="muted small">· ${timeAgo(e.occurred_at)}</span>
         </div>
-        <div class="feed-card-title" onClick=${openSource} style=${{ cursor: e.url ? 'pointer' : 'default' }}>${e.title}</div>
+        <div class="feed-card-title">${e.title}</div>
         ${e.summary ? html`<div class="feed-card-summary">${e.summary}</div>` : null}
         ${(e.companies && e.companies.length) ? html`
           <div class="feed-card-chips">
             ${e.companies.map(c => html`
-              <button key=${c.id} class="feed-company-chip" onClick=${() => navigateTo('companies', c.id)}>
+              <button key=${c.id} class="feed-company-chip" onClick=${(ev) => { ev.stopPropagation(); navigateTo('companies', c.id); }}>
                 ${c.name}
               </button>
             `)}

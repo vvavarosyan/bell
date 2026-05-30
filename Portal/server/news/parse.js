@@ -34,7 +34,14 @@ function stripTags(s) {
 }
 function clean(s, { keepLength = 600 } = {}) {
   if (s == null) return null;
-  let out = decodeEntities(stripTags(stripCdata(String(s)))).trim();
+  // Order matters: Google News encodes its HTML as entities (&lt;a&gt;…), so we
+  // must DECODE first (revealing real tags) BEFORE stripping tags — otherwise
+  // the tags survive as literal text. CDATA is unwrapped first.
+  let out = stripCdata(String(s));
+  out = decodeEntities(out);   // &lt;a&gt; → <a>, &amp; → &
+  out = stripTags(out);        // remove the now-real tags
+  out = decodeEntities(out);   // any entities left inside the text
+  out = out.replace(/\s+/g, ' ').trim();
   if (out.length > keepLength) out = out.slice(0, keepLength).trim() + '…';
   return out || null;
 }
@@ -100,13 +107,15 @@ export function parseFeed(xml) {
     const published_at = toDate(tag(block, 'pubDate') || tag(block, 'published') || tag(block, 'updated') || tag(block, 'date'));
     const author = clean(tag(block, 'creator') || tag(block, 'author'), { keepLength: 120 });
     const image_url = pickImage(block);
+    // Google News items carry the real publisher in <source>.
+    const publisher = clean(tag(block, 'source'), { keepLength: 80 });
 
     // GUID: explicit <guid>/<id>, else the link, else a hash of title+link.
     let guid = (stripCdata(tag(block, 'guid') || tag(block, 'id') || '') || '').trim();
     if (!guid) guid = (link || '').trim();
     if (!guid) guid = hash((title || '') + '|' + (summary || ''));
 
-    items.push({ title: title || '(untitled)', link, summary, published_at, guid, image_url, author });
+    items.push({ title: title || '(untitled)', link, summary, published_at, guid, image_url, author, publisher });
   }
   return items;
 }

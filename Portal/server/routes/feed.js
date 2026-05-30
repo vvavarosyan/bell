@@ -129,6 +129,28 @@ router.get('/trending', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+// GET /api/feed/:id — one event with richer detail (for the news drawer).
+// Declared AFTER the literal routes (/stats, /trending, /sources) so it doesn't
+// shadow them.
+router.get('/:id(\\d+)', async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    const r = await query(`SELECT * FROM feed_events WHERE id = $1`, [id]);
+    if (!r.rows.length) return res.status(404).json({ error: 'not_found' });
+    const ev = r.rows[0];
+    if (ev.kind === 'news' && ev.ref_id) {
+      const ni = await query(
+        `SELECT title, summary, author, published_at, image_url, url, source_name
+           FROM news_items WHERE id = $1`,
+        [ev.ref_id]
+      );
+      if (ni.rows.length) ev.detail = ni.rows[0];
+    }
+    await attachCompanies([ev]);
+    res.json({ event: ev });
+  } catch (err) { next(err); }
+});
+
 // ---- Admin: source registry + manual poll (admin.bell.qa / local engine) ----
 router.get('/sources', requireRole('platform_admin'), async (req, res, next) => {
   try {

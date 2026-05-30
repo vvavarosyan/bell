@@ -143,6 +143,7 @@ export const api = {
 
   // Market Feed
   feed:                   (q = {}) => request('/api/feed?' + new URLSearchParams(q)),
+  feedItem:               (id) => request('/api/feed/' + id),
   feedStats:              () => request('/api/feed/stats'),
   feedTrending:           () => request('/api/feed/trending'),
 
