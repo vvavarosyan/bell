@@ -25,10 +25,12 @@ import { RecentJobsTab } from './components/RecentJobsTab.js';
 import { ResearchTab }   from './components/ResearchTab.js';
 import { DeepDataTab }   from './components/DeepDataTab.js';
 import { SyncTab }       from './components/SyncTab.js';
+import { MarketFeedTab } from './components/MarketFeedTab.js';
 
 // Maps a sidebar nav id to a renderable view. Items not listed here fall back
 // to a ComingSoon placeholder with the item's label.
 const VIEWS = {
+  'market-feed': { Component: MarketFeedTab },
   'companies':   { Component: CompaniesTab },
   'people':      { Component: PeopleTab },
   'jobs':        { Component: JobsTab },

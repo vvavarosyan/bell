@@ -303,6 +303,59 @@ html, body {
 
 .locked-value { color: var(--text-muted); font-size: 12px; }
 
+/* ── Market Feed ─────────────────────────────────────────────────────────── */
+.feed-scanbar {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 14px; margin-bottom: 12px;
+  border: 1px solid var(--border); border-radius: 10px;
+  background: linear-gradient(180deg, rgba(59,130,246,.08), rgba(59,130,246,.02));
+  font-size: 12px; color: var(--text-muted);
+}
+.feed-scanbar .spacer { flex: 1; }
+.feed-scan-label { font-weight: 600; color: var(--text); letter-spacing: .2px; }
+.feed-stat { white-space: nowrap; }
+.feed-stat b { color: var(--text); }
+.feed-pulse { width: 9px; height: 9px; border-radius: 50%; background: #94a3b8; }
+.feed-pulse[data-on="1"] { background: #22c55e; animation: feedpulse 1.6s infinite; }
+@keyframes feedpulse { 0% { box-shadow: 0 0 0 0 rgba(34,197,94,.6);} 70%{box-shadow:0 0 0 7px rgba(34,197,94,0);} 100%{box-shadow:0 0 0 0 rgba(34,197,94,0);} }
+
+.feed-ticker { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; overflow: hidden; }
+.feed-ticker-tag { font-size: 10px; font-weight: 800; letter-spacing: .1em; color: #fff; background: #ef4444; padding: 3px 8px; border-radius: 5px; white-space: nowrap; }
+.feed-ticker-track { display: flex; gap: 28px; overflow: hidden; white-space: nowrap; mask-image: linear-gradient(90deg, transparent, #000 5%, #000 95%, transparent); }
+.feed-ticker-item { font-size: 12.5px; color: var(--text-muted); white-space: nowrap; }
+.feed-ticker-item::before { content: '•'; margin-right: 10px; color: var(--text-dim); }
+
+.feed-filters { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
+.feed-filters .spacer { flex: 1; }
+.feed-chip { font-size: 12px; padding: 5px 11px; border-radius: 999px; border: 1px solid var(--border); background: transparent; color: var(--text-muted); cursor: pointer; white-space: nowrap; }
+.feed-chip.active { background: var(--accent, #3b82f6); border-color: var(--accent, #3b82f6); color: #fff; }
+.feed-search { padding: 6px 12px; min-width: 200px; border-radius: 8px; border: 1px solid var(--border); background: rgba(255,255,255,.03); color: var(--text); font-size: 12.5px; }
+
+.feed-stream { flex: 1; overflow-y: auto; padding-right: 6px; display: flex; flex-direction: column; gap: 12px; }
+.feed-card { display: flex; gap: 12px; border: 1px solid var(--border); border-radius: 12px; background: var(--bg-elev); overflow: hidden; transition: border-color .15s; }
+.feed-card:hover { border-color: var(--accent, #3b82f6); }
+.feed-card-img { width: 120px; flex-shrink: 0; background-size: cover; background-position: center; }
+.feed-card-body { flex: 1; min-width: 0; padding: 12px 14px; }
+.feed-card-meta { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+.feed-card-meta .spacer { flex: 1; }
+.feed-kind { font-size: 9.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; color: var(--text-dim); }
+.feed-cat { font-size: 10px; font-weight: 600; text-transform: capitalize; border: 1px solid; border-radius: 4px; padding: 1px 7px; }
+.feed-sent { width: 8px; height: 8px; border-radius: 50%; display: inline-block; }
+.feed-card-title { font-size: 14px; font-weight: 600; color: var(--text); line-height: 1.35; }
+.feed-card-title:hover { color: var(--accent, #3b82f6); }
+.feed-card-summary { font-size: 12.5px; color: var(--text-muted); margin-top: 5px; line-height: 1.45; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+.feed-card-chips { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 9px; }
+.feed-company-chip { font-size: 11px; padding: 3px 9px; border-radius: 6px; border: 1px solid var(--accent, #3b82f6); color: var(--accent, #3b82f6); background: transparent; cursor: pointer; }
+.feed-company-chip:hover { background: var(--accent, #3b82f6); color: #fff; }
+.feed-loadmore { align-self: center; margin: 8px 0 16px; padding: 8px 22px; border-radius: 8px; border: 1px solid var(--border); background: transparent; color: var(--text-muted); cursor: pointer; }
+
+.feed-aside { width: 240px; flex-shrink: 0; border-left: 1px solid var(--border); padding-left: 16px; overflow-y: auto; }
+.feed-aside-title { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; color: var(--text-dim); margin-bottom: 10px; }
+.feed-trend-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; padding: 7px 8px; border-radius: 7px; border: none; background: transparent; color: var(--text); cursor: pointer; text-align: left; }
+.feed-trend-row:hover { background: rgba(255,255,255,.04); }
+.feed-trend-name { font-size: 12.5px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.feed-trend-count { font-size: 11px; font-weight: 700; color: var(--accent, #3b82f6); background: rgba(59,130,246,.12); border-radius: 999px; padding: 1px 8px; }
+
 .reveal-banner {
   margin-top: 10px; padding: 10px 12px;
   display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-wrap: wrap;

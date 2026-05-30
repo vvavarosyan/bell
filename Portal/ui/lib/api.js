@@ -141,6 +141,11 @@ export const api = {
   syncFullResync:         () => request('/api/sync/full-resync', { method: 'POST', body: '{}' }),
   syncRebuild:            () => request('/api/sync/rebuild', { method: 'POST', body: '{}' }),
 
+  // Market Feed
+  feed:                   (q = {}) => request('/api/feed?' + new URLSearchParams(q)),
+  feedStats:              () => request('/api/feed/stats'),
+  feedTrending:           () => request('/api/feed/trending'),
+
   // Credits
   creditBalance:          () => request('/api/credits'),
   creditLedger:           (limit = 50) => request('/api/credits/ledger?limit=' + limit),
