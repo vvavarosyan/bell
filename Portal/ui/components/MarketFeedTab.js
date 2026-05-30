@@ -50,13 +50,16 @@ export function MarketFeedTab() {
     return p;
   }, [category, q]);
 
+  const maxId = (arr) => arr.reduce((m, e) => Math.max(m, Number(e.id) || 0), 0);
+
   const load = useCallback(async () => {
     setLoading(true);
     try {
       const r = await api.feed({ ...filterParams(), limit: 30 });
-      setEvents(r.events || []);
+      const evs = r.events || [];
+      setEvents(evs);
       setCursor(r.next_cursor || null);
-      maxIdRef.current = (r.events && r.events[0]) ? r.events[0].id : 0;
+      maxIdRef.current = maxId(evs);
     } catch (err) { toast('Feed load failed: ' + err.message, 'error'); }
     finally { setLoading(false); }
   }, [filterParams]);
@@ -66,7 +69,10 @@ export function MarketFeedTab() {
     setLoadingMore(true);
     try {
       const r = await api.feed({ ...filterParams(), cursor, limit: 30 });
-      setEvents(prev => [...prev, ...(r.events || [])]);
+      setEvents(prev => {
+        const seen = new Set(prev.map(e => e.id));
+        return [...prev, ...(r.events || []).filter(e => !seen.has(e.id))];
+      });
       setCursor(r.next_cursor || null);
     } catch (err) { toast('Load more failed: ' + err.message, 'error'); }
     finally { setLoadingMore(false); }
@@ -91,8 +97,12 @@ export function MarketFeedTab() {
       try {
         const r = await api.feed({ ...filterParams(), after_id: maxIdRef.current, limit: 30 });
         if (r.events && r.events.length) {
-          maxIdRef.current = r.events[0].id;
-          setEvents(prev => [...r.events, ...prev]);
+          maxIdRef.current = Math.max(maxIdRef.current, maxId(r.events));
+          setEvents(prev => {
+            const seen = new Set(prev.map(e => e.id));
+            const fresh = r.events.filter(e => !seen.has(e.id));
+            return fresh.length ? [...fresh, ...prev] : prev;
+          });
         }
       } catch { /* ignore */ }
     }, 20_000);
@@ -120,8 +130,8 @@ export function MarketFeedTab() {
         ${stats && stats.engine_enabled === false ? html`
           <div class="feed-warn">News engine is off on this server. Set <code>BDI_NEWS_ENGINE=1</code> on the production portal service.</div>
         ` : null}
-        ${stats && stats.poller_error ? html`
-          <div class="feed-warn">Last poll error: ${stats.poller_error}</div>
+        ${stats && stats.engine_enabled && (stats.events_today || 0) === 0 && stats.poller_error ? html`
+          <div class="feed-warn">No items ingested yet — last poll error: ${stats.poller_error}</div>
         ` : null}
 
         <!-- Breaking ticker -->
