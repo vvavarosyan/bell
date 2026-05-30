@@ -112,9 +112,10 @@ export function MarketFeedTab() {
   const breaking = events.filter(e => (e.importance || 0) >= 0.7).slice(0, 8);
 
   return html`
-    <div style=${{ display: 'flex', gap: '18px', padding: '18px 22px', height: '100%', overflow: 'hidden' }}>
+    <div style=${{ padding: '18px 22px', height: '100%', overflowY: 'auto' }}>
+     <div style=${{ display: 'flex', gap: '18px', alignItems: 'flex-start' }}>
       <!-- Main column -->
-      <div style=${{ flex: 1, display: 'flex', flexDirection: 'column', minWidth: 0 }}>
+      <div style=${{ flex: 1, minWidth: 0 }}>
 
         <!-- Scanning / live stats bar -->
         <div class="feed-scanbar">
@@ -180,6 +181,7 @@ export function MarketFeedTab() {
             </button>
           `)}
       </aside>
+     </div>
     </div>
   `;
 }
