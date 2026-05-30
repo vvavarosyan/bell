@@ -67,6 +67,12 @@ async function tick() {
   }
 }
 
+// "Al Jazeera — All" → "Al Jazeera"; "Google News — Qatar Economy" → "Google News".
+function cleanSourceName(name) {
+  return String(name || '').split(/\s[—–-]\s/)[0].trim() || name;
+}
+function escapeRe(s) { return String(s).replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
+
 async function fetchFeed(url) {
   const ctrl = new AbortController();
   const t = setTimeout(() => ctrl.abort(), FETCH_TIMEOUT_MS);
@@ -89,11 +95,24 @@ async function pollOne(src) {
     const items = parseFeed(xml);
     const cutoff = Date.now() - MAX_AGE_DAYS * 86_400_000;
 
+    const isGoogle = src.kind === 'google_news';
     let added = 0;
     for (const it of items) {
       if (!it.guid) continue;
       // Skip very old items on first sight (keeps the feed fresh).
       if (it.published_at && new Date(it.published_at).getTime() < cutoff) continue;
+
+      // Display publisher: Google News carries the real outlet in <source>;
+      // otherwise use the registry name with its "— suffix" trimmed.
+      const sourceName = it.publisher || cleanSourceName(src.name);
+      // Strip the redundant " - Publisher" tail Google News appends to titles.
+      let title = it.title;
+      if (isGoogle && it.publisher) {
+        title = title.replace(new RegExp('\\s*[\\-–—]\\s*' + escapeRe(it.publisher) + '\\s*$'), '').trim() || title;
+      }
+      // Google News "descriptions" are just relinks, not summaries — drop them.
+      const summary = isGoogle ? null : it.summary;
+      const category = src.category_hint || 'other';
 
       const r = await query(
         `INSERT INTO news_items
@@ -102,22 +121,18 @@ async function pollOne(src) {
          ON CONFLICT (guid) DO NOTHING
          RETURNING id`,
         [
-          src.id, src.name, it.guid.slice(0, 480), it.link, it.title,
-          it.summary, it.image_url, it.author, it.published_at, src.language,
-          src.category_hint || 'other',
+          src.id, sourceName, it.guid.slice(0, 480), it.link, title,
+          summary, it.image_url, it.author, it.published_at, src.language, category,
         ]
       );
       if (r.rowCount > 0) {
         added++;
-        // Show it in the feed immediately (category = source hint); the LLM pass
-        // later upgrades category/sentiment/companies/importance.
         await query(
           `INSERT INTO feed_events
              (kind, ref_table, ref_id, title, summary, url, image_url, category, source_name, occurred_at)
            VALUES ('news','news_items',$1,$2,$3,$4,$5,$6,$7, COALESCE($8, now()))
            ON CONFLICT (kind, ref_table, ref_id) DO NOTHING`,
-          [r.rows[0].id, it.title, it.summary, it.link, it.image_url,
-           src.category_hint || 'other', src.name, it.published_at]
+          [r.rows[0].id, title, summary, it.link, it.image_url, category, sourceName, it.published_at]
         );
       }
     }
