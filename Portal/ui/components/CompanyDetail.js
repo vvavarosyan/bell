@@ -217,7 +217,7 @@ const LEGAL_GROUPS = [
 
 // ============================================================================
 
-export function CompanyDetail({ companyId, onMutated, isUser = false }) {
+export function CompanyDetail({ companyId, onMutated, onDeleted, canHardDelete = false, isUser = false }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [similar, setSimilar] = useState([]);
@@ -326,6 +326,23 @@ export function CompanyDetail({ companyId, onMutated, isUser = false }) {
               } catch (err) { toast(err.message, 'error'); }
             }}
           >${c.archived ? 'Unarchive' : 'Archive'}</button>
+          ${canHardDelete ? html`<button
+            class="linkbtn"
+            style=${{padding:'4px 10px', borderRadius:'5px',
+                    background:'transparent',
+                    border:'1px solid rgba(232,142,168,0.45)', color:'rgb(232 142 168)', fontSize:'11px'}}
+            title="Permanently delete this company and all its child records (contacts, sources, people links, jobs). This cannot be undone. Use for wrong/non-Qatar/expired records."
+            onClick=${async () => {
+              if (!window.confirm(`PERMANENTLY DELETE "${c.name}"?\n\nThis removes the company and ALL of its data:\n• Contacts, sources, people links, jobs\n• Dedup + similarity records\n\nThis is NOT archive — the row is gone for good and will sync the deletion to production on the next push.\n\nThis cannot be undone.`)) return;
+              try {
+                await api.deleteCompany(c.id);
+                toast(`Deleted "${c.name}" permanently`);
+                onDeleted?.();
+              } catch (err) {
+                toast(/admin_only/i.test(err.message) ? 'Only admins can permanently delete' : 'Delete failed: ' + err.message, 'error');
+              }
+            }}
+          >Delete permanently</button>` : null}
         </div>
       </div>
 

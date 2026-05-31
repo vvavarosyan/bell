@@ -11,7 +11,7 @@
 
 import { Router } from 'express';
 import { requireAuth, requireRole } from '../lib/auth.js';
-import { applyBatch, applyReset } from '../sync/ingest.js';
+import { applyBatch, applyReset, applyDeletions } from '../sync/ingest.js';
 import { runPush, getSyncStatus } from '../sync/push.js';
 
 const MODE = (process.env.BDI_MODE || 'local-admin').toLowerCase();
@@ -38,6 +38,19 @@ router.post('/ingest', requireSyncToken, async (req, res, next) => {
     const { table, rows } = req.body || {};
     if (!table) return res.status(400).json({ error: 'bad_request', reason: 'missing table' });
     const result = await applyBatch(table, rows || []);
+    res.json(result);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Apply deletions (PRODUCTION receiver). Mirrors hard-deletes that happened on
+// the local engine so prod stays an exact row-for-row copy. Token-auth.
+router.post('/delete', requireSyncToken, async (req, res, next) => {
+  try {
+    const { table, ids } = req.body || {};
+    if (!table) return res.status(400).json({ error: 'bad_request', reason: 'missing table' });
+    const result = await applyDeletions(table, ids || []);
     res.json(result);
   } catch (err) {
     next(err);

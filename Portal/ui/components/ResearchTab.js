@@ -11,7 +11,11 @@ import { navigateTo } from '../lib/router.js';
 import { ResearchJobCard } from './ResearchJobCard.js';
 import { NewResearchModal } from './NewResearchModal.js';
 
-export function ResearchTab() {
+export function ResearchTab({ mode } = {}) {
+  // Admin surfaces (admin.bell.qa + local) may see who requested each job.
+  // The user portal must never see other tenants' jobs anyway, so the
+  // requester line is only meaningful (and only shown) for admins.
+  const isAdmin = mode !== 'user';
   const [jobs,        setJobs]        = useState([]);
   const [stats,       setStats]       = useState(null);
   const [loading,     setLoading]     = useState(true);
@@ -134,6 +138,7 @@ export function ResearchTab() {
             <${ResearchJobCard}
               key=${j.id}
               job=${j}
+              isAdmin=${isAdmin}
               onOpen=${(job) => setOpenedJobId(job.id)}
               onDelete=${async (job) => {
                 try {
@@ -151,6 +156,7 @@ export function ResearchTab() {
       <!-- Job detail drawer (R1 placeholder — R2 will fill in) -->
       ${openedJobId ? html`<${JobDetailDrawer}
         jobId=${openedJobId}
+        isAdmin=${isAdmin}
         onClose=${() => setOpenedJobId(null)}
       />` : null}
 
@@ -233,7 +239,7 @@ function EmptyState({ onStart }) {
 // Job detail drawer — R2 live report viewer. Polls while in flight and
 // renders the structured report + sources + derived entities once ready.
 // ---------------------------------------------------------------------------
-function JobDetailDrawer({ jobId, onClose }) {
+function JobDetailDrawer({ jobId, isAdmin, onClose }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
 
@@ -303,7 +309,7 @@ function JobDetailDrawer({ jobId, onClose }) {
             !job ? html`<div style=${{ color: 'var(--text-dim)', fontSize: '12px' }}>Not found.</div>` : html`
 
             <!-- Brief + target panel -->
-            <${BriefPanel} job=${job} />
+            <${BriefPanel} job=${job} isAdmin=${isAdmin} />
 
             <!-- Live counters strip -->
             <${CountersStrip} job=${job} sourcesLen=${sources.length} />
@@ -386,12 +392,15 @@ function StatusPill({ status, eta }) {
   </span>`;
 }
 
-function BriefPanel({ job }) {
+function BriefPanel({ job, isAdmin }) {
   return html`<div style=${{ marginBottom: '18px' }}>
     <div style=${{
       fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.08em',
       color: 'var(--text-dim)', fontWeight: 700, marginBottom: '6px',
     }}>${job.type} · target</div>
+    ${isAdmin && job.created_by ? html`<div style=${{
+      fontSize: '11px', color: 'var(--text-dim)', marginBottom: '8px',
+    }}>requested by <span style=${{ color: 'var(--text-muted)', fontWeight: 600 }}>${job.created_by}</span></div>` : null}
     <div style=${{ fontSize: '14px', color: 'var(--text)', marginBottom: '12px' }}>
       ${job.target_company_name || job.target_person_name || job.target_label || '—'}
       ${job.target_company_bin ? html` <span style=${{ color: 'var(--text-dim)', fontSize: '11.5px', marginLeft: '6px' }}>${job.target_company_bin}</span>` : null}
