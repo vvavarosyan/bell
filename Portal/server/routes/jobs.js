@@ -2,14 +2,15 @@
 
 import { Router } from 'express';
 import { query } from '../db.js';
-import { denyOnUserPortal } from '../lib/auth.js';
+import { denyUnlessLocalEngine } from '../lib/auth.js';
 
 const router = Router();
 
-// User portal is READ-ONLY for jobs (no reveal on jobs): allow GET, block writes.
+// Jobs are canonical data — mutated ONLY on the local engine: allow GET, block
+// writes off-local (no reveal on jobs).
 router.use((req, res, next) => {
   if (req.method === 'GET') return next();
-  return denyOnUserPortal(req, res, next);
+  return denyUnlessLocalEngine(req, res, next);
 });
 
 const EDITABLE_FIELDS = new Set([

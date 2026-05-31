@@ -337,6 +337,7 @@ export function CompaniesTab({ archivedMode: initialArchived = false, mode = 'lo
         onMutated=${load}
         onDeleted=${() => { setOpenedId(null); load(); }}
         canHardDelete=${mode === 'local-admin'}
+        isLocalEngine=${mode === 'local-admin'}
         isUser=${isUser}
       />
     </div>

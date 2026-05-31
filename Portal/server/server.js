@@ -121,8 +121,19 @@ function adminToolsGate(req, res, next) {
   }
   next();
 }
-const feature   = [requireAuth, requireActiveSubscription];
-const adminOnly = [requireAuth, adminToolsGate, requireRole('platform_admin')];
+// Local-engine-only operations (directory ingest, enrichment, assembly, job
+// logs). These read local files and/or originate canonical data, so they must
+// run ONLY where the source-of-truth DB lives. Blocked on app AND admin.
+// See lib/capabilities.js for the catalog that also drives UI hiding.
+function localEngineGate(req, res, next) {
+  if (MODE !== 'local-admin') {
+    return res.status(403).json({ error: 'forbidden', reason: 'local_engine_only' });
+  }
+  next();
+}
+const feature    = [requireAuth, requireActiveSubscription];
+const adminOnly  = [requireAuth, adminToolsGate, requireRole('platform_admin')];
+const localTools = [requireAuth, localEngineGate, requireRole('platform_admin')];
 
 // Product features — signed in + active subscription.
 app.use('/api/companies',  ...feature, companiesRouter);
@@ -138,12 +149,15 @@ app.use('/api/stats',      requireAuth, statsRouter);
 // (enforced inside the router). No subscription gate so the top-bar pill always loads.
 app.use('/api/credits',    requireAuth, creditsRouter);
 
-// Admin-only tools — admin.bell.qa / local engine only.
-app.use('/api/sources',            ...adminOnly, sourcesRouter);
-app.use('/api/enrichment',         ...adminOnly, enrichmentRouter);
+// Local-engine-only tools — these read local directory files and/or originate
+// canonical data, so they run ONLY on Val's Mac (blocked on app AND admin).
+app.use('/api/sources',            ...localTools, sourcesRouter);
+app.use('/api/enrichment',         ...localTools, enrichmentRouter);
+app.use('/api/assembly',           ...localTools, assemblyRouter);
+app.use('/api/job-runs',           ...localTools, jobRunsRouter);
+
+// Admin tools — admin.bell.qa + local engine (read/observe prod).
 app.use('/api/similar-companies',  ...adminOnly, similarCompaniesRouter);
-app.use('/api/assembly',           ...adminOnly, assemblyRouter);
-app.use('/api/job-runs',           ...adminOnly, jobRunsRouter);
 
 // Browser-safe public tokens (e.g. the Mapbox pk.* token the Map view needs).
 // ANY signed-in user needs this, so it sits BEFORE the admin-only settings

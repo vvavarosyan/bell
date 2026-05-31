@@ -217,7 +217,7 @@ const LEGAL_GROUPS = [
 
 // ============================================================================
 
-export function CompanyDetail({ companyId, onMutated, onDeleted, canHardDelete = false, isUser = false }) {
+export function CompanyDetail({ companyId, onMutated, onDeleted, canHardDelete = false, isLocalEngine = false, isUser = false }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [similar, setSimilar] = useState([]);
@@ -296,7 +296,7 @@ export function CompanyDetail({ companyId, onMutated, onDeleted, canHardDelete =
             ${c.archived ? html`<span class="pill" style=${{borderColor:'var(--amber)',color:'var(--amber)'}}>archived</span>` : null}
           </div>
         </div>
-        <div style=${{display:'flex', gap:'6px', alignSelf:'flex-start', display: isUser ? 'none' : 'flex'}}>
+        <div style=${{gap:'6px', alignSelf:'flex-start', display: isLocalEngine ? 'flex' : 'none'}}>
           <button
             class="linkbtn"
             style=${{padding:'4px 10px', borderRadius:'5px',
@@ -353,7 +353,7 @@ export function CompanyDetail({ companyId, onMutated, onDeleted, canHardDelete =
       </div>
 
       <div class="detail-body">
-        ${tab === 'company' ? html`<${CompanyTab} company=${c} extra=${extra} similar=${similar} contacts=${data.contacts || []} onReload=${reload} needsReveal=${needsReveal} onReveal=${revealContacts} isUser=${isUser} />` : null}
+        ${tab === 'company' ? html`<${CompanyTab} company=${c} extra=${extra} similar=${similar} contacts=${data.contacts || []} onReload=${reload} needsReveal=${needsReveal} onReveal=${revealContacts} isUser=${isUser} isLocalEngine=${isLocalEngine} />` : null}
         ${tab === 'people'  ? html`<${PeopleView}  people=${data.people} />` : null}
         ${tab === 'legal'   ? html`<${LegalTab}    sources=${sources} extra=${extra} />` : null}
       </div>
@@ -361,7 +361,7 @@ export function CompanyDetail({ companyId, onMutated, onDeleted, canHardDelete =
   `;
 }
 
-function CompanyTab({ company, extra, similar, contacts, onReload, needsReveal = false, onReveal, isUser = false }) {
+function CompanyTab({ company, extra, similar, contacts, onReload, needsReveal = false, onReveal, isUser = false, isLocalEngine = false }) {
   const saveField = async (field, value) => {
     try {
       await api.updateCompany(company.id, { [field]: value });
@@ -441,7 +441,7 @@ function CompanyTab({ company, extra, similar, contacts, onReload, needsReveal =
                 field=${k}
                 value=${company[k]}
                 type=${meta.type || 'text'}
-                editable=${meta.editable !== false && !isUser}
+                editable=${meta.editable !== false && !isUser && isLocalEngine}
                 locked=${locked}
                 onSave=${saveField}
               />`;
