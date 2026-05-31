@@ -14,6 +14,14 @@
 
 import { normalizeName } from '../ingest/normalize.js';
 
+// Research can run on any deployment. On a prod-backed deployment (anything that
+// is NOT the local engine) a newly-created entity must take its id from the
+// high band so it can never collide with a local-originated id when the mirror
+// later syncs. On the local engine, research-created rows are ordinary local
+// rows (normal low-id sequence) and mirror up the usual way.
+const MODE = (process.env.BDI_MODE || 'local-admin').toLowerCase();
+const PROD_ORIGIN = MODE !== 'local-admin';
+
 /**
  * Run the snowball ingestion for one job. Caller passes a pg client in a
  * transaction. Returns counts.
@@ -100,16 +108,20 @@ async function processCompany(client, jobId, c) {
   }
 
   // CREATE: new Qatar company seeded by research. Goes through normal
-  // enrichment pipeline from Stage 1 onward.
+  // enrichment pipeline from Stage 1 onward. On prod, the id comes from the
+  // high band (research_entity_id_seq) so it can be pulled back to local
+  // without colliding with local-originated ids; on local, the normal sequence.
   try {
+    const idExpr = PROD_ORIGIN ? `nextval('research_entity_id_seq'),` : '';
     const r = await client.query(`
       INSERT INTO companies (
+        ${PROD_ORIGIN ? 'id,' : ''}
         name, name_normalized,
         is_active, status_normalized,
         primary_registration_no, website, linkedin_url, city, country,
         industry,
         extra_fields
-      ) VALUES ($1,$2,true,'unknown',$3,$4,$5,$6,$7,$8,$9::jsonb)
+      ) VALUES (${idExpr}$1,$2,true,'unknown',$3,$4,$5,$6,$7,$8,$9::jsonb)
       RETURNING id
     `, [
       name, normalized,
@@ -182,9 +194,10 @@ async function processPerson(client, jobId, p) {
   }
 
   try {
+    const idExpr = PROD_ORIGIN ? `nextval('research_entity_id_seq'),` : '';
     const r = await client.query(`
-      INSERT INTO people (full_name, headline, linkedin_url, country, extra_fields)
-      VALUES ($1, $2, $3, 'Qatar', $4::jsonb)
+      INSERT INTO people (${PROD_ORIGIN ? 'id,' : ''}full_name, headline, linkedin_url, country, extra_fields)
+      VALUES (${idExpr}$1, $2, $3, 'Qatar', $4::jsonb)
       RETURNING id
     `, [
       fullName,

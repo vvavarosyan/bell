@@ -11,7 +11,7 @@
 
 import { Router } from 'express';
 import { requireAuth, requireRole } from '../lib/auth.js';
-import { applyBatch, applyReset, applyDeletions } from '../sync/ingest.js';
+import { applyBatch, applyReset, applyDeletions, collectResearchPull } from '../sync/ingest.js';
 import { runPush, getSyncStatus } from '../sync/push.js';
 
 const MODE = (process.env.BDI_MODE || 'local-admin').toLowerCase();
@@ -52,6 +52,18 @@ router.post('/delete', requireSyncToken, async (req, res, next) => {
     if (!table) return res.status(400).json({ error: 'bad_request', reason: 'missing table' });
     const result = await applyDeletions(table, ids || []);
     res.json(result);
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Research pull-source (PRODUCTION). Returns companies/people that research
+// created or enriched on prod since the given watermark, so the local engine
+// can pull them back and keep the two databases identical. Token-auth.
+router.post('/research-pull', requireSyncToken, async (req, res, next) => {
+  try {
+    const since = (req.body && req.body.since) || '1970-01-01T00:00:00Z';
+    res.json(await collectResearchPull(since));
   } catch (err) {
     next(err);
   }

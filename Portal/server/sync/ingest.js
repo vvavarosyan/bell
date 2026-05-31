@@ -50,6 +50,43 @@ export async function applyDeletions(table, ids) {
   return { table, requested: clean.length, deleted: res.rowCount };
 }
 
+/**
+ * PROD pull-source. Return every company/person that research touched (created
+ * or enriched) since `since`, driven by the prod-only research_derived_entities
+ * audit log. The local engine calls this to pull prod-originated research data
+ * back down so the two databases converge.
+ * @param {string} since ISO timestamp; rows with derived_at > since
+ */
+export async function collectResearchPull(since) {
+  const watermark = new Date().toISOString();
+
+  const companies = await query(
+    `SELECT c.* FROM companies c
+      WHERE c.id IN (
+        SELECT DISTINCT entity_id FROM research_derived_entities
+         WHERE entity_type = 'company'
+           AND action IN ('created','enriched')
+           AND entity_id <> 0
+           AND derived_at > $1
+      )`,
+    [since]
+  );
+
+  const people = await query(
+    `SELECT p.* FROM people p
+      WHERE p.id IN (
+        SELECT DISTINCT entity_id FROM research_derived_entities
+         WHERE entity_type = 'person'
+           AND action IN ('created','enriched')
+           AND entity_id <> 0
+           AND derived_at > $1
+      )`,
+    [since]
+  );
+
+  return { since, watermark, companies: companies.rows, people: people.rows };
+}
+
 // ---- prod column metadata (cached; schema is stable within a process) -------
 const _colCache = new Map();
 async function getColumnMeta(table) {

@@ -12,6 +12,7 @@
 import { query } from '../db.js';
 import { getKey } from '../keychain.js';
 import { MIRROR_TABLES, CHUNK_SIZE } from './tables.js';
+import { runPull } from './pull.js';
 
 const EPOCH = '1970-01-01T00:00:00Z';
 const SETTINGS_WATERMARK = 'sync_last_sync_at';
@@ -143,8 +144,22 @@ export async function runPush({ full = false, reset = false } = {}) {
   const summary = {
     mode, reset, target: ingestUrl, watermark_from: wm, started_at: startedAt,
     tables: {}, total_upserted: 0, total_skipped: 0,
-    deletions: {}, total_deleted: 0, errors: [],
+    deletions: {}, total_deleted: 0, pull: null, errors: [],
   };
+
+  // PULL FIRST: absorb research entities that were created/enriched on prod so
+  // local holds them before we re-assert local→prod below. Skipped on a reset
+  // (rebuild) since the subsequent full push already makes prod exact, and the
+  // pulled rows are part of local. Non-fatal — a pull failure doesn't block the
+  // push (the data is still safe on prod; we retry the window next time).
+  if (!reset) {
+    try {
+      summary.pull = await runPull();
+    } catch (err) {
+      summary.pull = { error: err.message };
+      if (summary.errors.length < 50) summary.errors.push({ phase: 'pull', error: err.message });
+    }
+  }
 
   for (const { name, watermark, selfRef } of MIRROR_TABLES) {
     const rows = await selectRows(name, watermark, wm, selfRef);
