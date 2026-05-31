@@ -47,6 +47,50 @@ async function postReset(base, token) {
   if (!res.ok) throw new Error(`reset HTTP ${res.status}: ${text.slice(0, 200)}`);
 }
 
+// Tell prod to delete a set of ids from one mirror table.
+async function postDeletions(base, token, table, ids) {
+  const res = await fetch(base + '/api/sync/delete', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ table, ids }),
+  });
+  const text = await res.text();
+  let body;
+  try { body = JSON.parse(text); } catch { body = { raw: text }; }
+  if (!res.ok) throw new Error(`delete ${table} HTTP ${res.status}: ${body.error || text.slice(0, 200)}`);
+  return body;
+}
+
+// Drain the local tombstone table: send each table's pending deletions to prod,
+// then remove the tombstone rows we successfully processed. Runs every push so
+// hard-deletes propagate without a full rebuild.
+async function pushDeletions(base, token, summary) {
+  const pending = await query(
+    `SELECT id, table_name, row_id FROM sync_deletions ORDER BY table_name, id`
+  ).catch(() => ({ rows: [] }));   // table may not exist on very old DBs
+  if (!pending.rows.length) return;
+
+  const byTable = new Map();
+  for (const r of pending.rows) {
+    if (!byTable.has(r.table_name)) byTable.set(r.table_name, { ids: [], tombstones: [] });
+    const g = byTable.get(r.table_name);
+    g.ids.push(Number(r.row_id));
+    g.tombstones.push(r.id);
+  }
+
+  for (const [table, g] of byTable) {
+    try {
+      const res = await postDeletions(base, token, table, g.ids);
+      summary.deletions[table] = { requested: g.ids.length, deleted: res.deleted || 0 };
+      summary.total_deleted += res.deleted || 0;
+      // Clear the tombstones we just applied.
+      await query(`DELETE FROM sync_deletions WHERE id = ANY($1::bigint[])`, [g.tombstones]);
+    } catch (err) {
+      if (summary.errors.length < 50) summary.errors.push({ table, phase: 'delete', error: err.message });
+    }
+  }
+}
+
 // Pull every row whose watermark column is newer than `wm`. SELECT * mirrors all
 // columns; table/watermark/selfRef come from the trusted MIRROR_TABLES constant.
 // When a self-referential FK exists, order canonical/standalone rows (selfRef IS
@@ -98,7 +142,8 @@ export async function runPush({ full = false, reset = false } = {}) {
 
   const summary = {
     mode, reset, target: ingestUrl, watermark_from: wm, started_at: startedAt,
-    tables: {}, total_upserted: 0, total_skipped: 0, errors: [],
+    tables: {}, total_upserted: 0, total_skipped: 0,
+    deletions: {}, total_deleted: 0, errors: [],
   };
 
   for (const { name, watermark, selfRef } of MIRROR_TABLES) {
@@ -116,6 +161,14 @@ export async function runPush({ full = false, reset = false } = {}) {
     summary.tables[name] = { selected: rows.length, upserted, skipped };
     summary.total_upserted += upserted;
     summary.total_skipped  += skipped;
+  }
+
+  // Propagate hard-deletes. A full rebuild already wiped + repopulated prod, so
+  // the tombstones are moot then — just clear them. Otherwise apply them.
+  if (reset) {
+    await query(`DELETE FROM sync_deletions`).catch(() => {});
+  } else {
+    await pushDeletions(base, token, summary);
   }
 
   await setSetting(SETTINGS_WATERMARK, startedAt);

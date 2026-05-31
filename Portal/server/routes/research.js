@@ -89,7 +89,7 @@ router.get('/jobs', async (req, res, next) => {
         j.id, j.type, j.brief, j.status,
         j.target_company_id, j.target_person_id, j.target_label,
         j.agent_count, j.source_count, j.section_count, j.citation_count,
-        j.usd_spent, j.eta_seconds, j.error_message,
+        j.usd_spent, j.eta_seconds, j.error_message, j.created_by,
         j.created_at, j.started_at, j.ready_at,
         c.name AS target_company_name, c.bin AS target_company_bin,
         p.full_name AS target_person_name, p.pin AS target_person_pin

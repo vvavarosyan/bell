@@ -55,6 +55,7 @@ export const api = {
   company:                (id) => request('/api/companies/' + id),
   updateCompany:          (id, body) => request('/api/companies/' + id, { method: 'PATCH', body: JSON.stringify(body) }),
   archiveCompany:         (id, archived) => request(`/api/companies/${id}/archive`, { method: 'POST', body: JSON.stringify({ archived }) }),
+  deleteCompany:          (id) => request('/api/companies/' + id, { method: 'DELETE' }),
   resetEnrichment:        (id) => request(`/api/companies/${id}/reset-enrichment`, { method: 'POST', body: '{}' }),
   revealCompany:          (id) => request(`/api/companies/${id}/reveal`, { method: 'POST', body: '{}' }),
   revealCompaniesBulk:    (ids) => request('/api/companies/reveal-bulk', { method: 'POST', body: JSON.stringify({ ids }) }),

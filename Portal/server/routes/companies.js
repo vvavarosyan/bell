@@ -12,6 +12,11 @@ import { denyOnUserPortal } from '../lib/auth.js';
 
 const router = Router();
 
+// Hard deletes may ONLY originate on the local engine — it is the source of
+// truth for the mirror. A delete on a prod-backed deployment would be clobbered
+// by the next push (which re-upserts every local row), so we forbid it there.
+const MODE = (process.env.BDI_MODE || 'local-admin').toLowerCase();
+
 // User portal is READ-ONLY for the shared dataset: allow GET + reveal, block all
 // other mutations (edit, archive, reset-enrichment, contacts CRUD, …).
 router.use((req, res, next) => {
@@ -468,6 +473,46 @@ router.post('/:id/archive', async (req, res, next) => {
     const result = await query('UPDATE companies SET archived = $1 WHERE id = $2 RETURNING id, archived', [archived, id]);
     if (!result.rows.length) return res.status(404).json({ error: 'not_found' });
     res.json(result.rows[0]);
+  } catch (err) { next(err); }
+});
+
+// DELETE /api/companies/:id  — PERMANENT hard delete (platform_admin only).
+//
+// Used to purge bad records: non-Qatar companies wrongly ingested, expired
+// companies, or wrong/duplicate rows. This is intentionally NOT archive —
+// Val wants the row gone so a future legitimate re-ingest of the same company
+// starts clean rather than colliding with a stale archived row.
+//
+// FK children clean up automatically:
+//   • company_contacts / company_sources / person_companies / company_similar /
+//     company_dedup_candidates → ON DELETE CASCADE
+//   • research_jobs.target_company_id / jobs.company_id / canonical_id → SET NULL
+// (feed_items/feed_events store company ids in a bigint[] with no FK, so a
+// deleted id simply stops resolving to a chip — harmless.)
+//
+// The local→Railway mirror sync propagates the deletion on the next push.
+router.delete('/:id', async (req, res, next) => {
+  try {
+    if (MODE !== 'local-admin') {
+      // Curate data on the local engine; the deletion mirrors to prod on push.
+      return res.status(403).json({ error: 'delete_local_only' });
+    }
+    if (req.user?.role !== 'platform_admin') {
+      return res.status(403).json({ error: 'admin_only' });
+    }
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) return res.status(400).json({ error: 'invalid_id' });
+    const result = await query(
+      'DELETE FROM companies WHERE id = $1 RETURNING id, name',
+      [id]
+    );
+    if (!result.rows.length) return res.status(404).json({ error: 'not_found' });
+    // Tombstone so the next mirror push removes the row from prod too.
+    await query(
+      `INSERT INTO sync_deletions (table_name, row_id) VALUES ('companies', $1)`,
+      [id]
+    ).catch((e) => console.warn('[companies] tombstone insert failed for', id, '—', e.message));
+    res.json({ deleted: result.rows[0].id, name: result.rows[0].name });
   } catch (err) { next(err); }
 });
 

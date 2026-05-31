@@ -34,6 +34,22 @@ export async function applyReset() {
   return { reset: true, truncated: ['companies', 'people', 'jobs', 'company_sources', 'person_companies'] };
 }
 
+/**
+ * Apply a batch of deletions (one table) on prod. Mirrors hard-deletes that
+ * happened on the local engine. Child rows fall away via ON DELETE CASCADE,
+ * exactly as they did locally, so the mirror stays row-for-row identical.
+ * @param {string} table
+ * @param {(number|string)[]} ids
+ */
+export async function applyDeletions(table, ids) {
+  if (!MIRROR_TABLE_NAMES.has(table)) throw new Error(`not a mirror table: ${table}`);
+  if (!Array.isArray(ids)) throw new Error('ids must be an array');
+  const clean = ids.map(Number).filter(Number.isFinite);
+  if (!clean.length) return { table, requested: 0, deleted: 0 };
+  const res = await query(`DELETE FROM ${q(table)} WHERE id = ANY($1::bigint[])`, [clean]);
+  return { table, requested: clean.length, deleted: res.rowCount };
+}
+
 // ---- prod column metadata (cached; schema is stable within a process) -------
 const _colCache = new Map();
 async function getColumnMeta(table) {

@@ -42,7 +42,7 @@ function targetLine(job) {
   return job.target_label || '—';
 }
 
-export function ResearchJobCard({ job, onOpen, onDelete }) {
+export function ResearchJobCard({ job, onOpen, onDelete, isAdmin }) {
   const t = TYPE_META[job.type]   || TYPE_META.company;
   const s = STATUS_META[job.status] || STATUS_META.queued;
 
@@ -113,6 +113,18 @@ export function ResearchJobCard({ job, onOpen, onDelete }) {
       <div style=${{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '12px' }}>
         ${targetLine(job)}
       </div>
+
+      <!-- requester (admin-only) -->
+      ${isAdmin && job.created_by ? html`
+        <div style=${{
+          display: 'flex', alignItems: 'center', gap: '5px',
+          fontSize: '10px', color: 'var(--text-dim)', marginBottom: '12px',
+          marginTop: '-4px',
+        }}>
+          <span style=${{ opacity: 0.7 }}>requested by</span>
+          <span style=${{ color: 'var(--text-muted)', fontWeight: 600 }}>${job.created_by}</span>
+        </div>
+      ` : null}
 
       <!-- counter strip -->
       <div style=${{ display: 'grid', gridTemplateColumns: '1fr 1fr 1fr', gap: '6px', marginBottom: 'auto' }}>
