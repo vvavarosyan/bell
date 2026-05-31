@@ -10,16 +10,17 @@ import {
   upsertContact, setPrimaryContact, deleteContact,
 } from '../lib/contacts.js';
 import { revealOne, revealBulk, getRevealedSet, bypassesCredits } from '../lib/credits.js';
-import { denyOnUserPortal } from '../lib/auth.js';
+import { denyUnlessLocalEngine } from '../lib/auth.js';
 
 const router = Router();
 
-// User portal is READ-ONLY for the shared dataset: allow GET + reveal, block all
-// other mutations (edit, archive, contacts CRUD, deep-enrich, …).
+// Canonical people data is mutated ONLY on the local engine (source of truth);
+// app/admin are read-only for it. Allow GET + reveal everywhere, block all other
+// mutations (edit, archive, contacts CRUD, deep-enrich, …) off-local.
 router.use((req, res, next) => {
   if (req.method === 'GET') return next();
   if (/\/reveal(-bulk)?$/.test(req.path)) return next();
-  return denyOnUserPortal(req, res, next);
+  return denyUnlessLocalEngine(req, res, next);
 });
 
 // Contact types that are credit-gated (the "valuable details" — emails/numbers).

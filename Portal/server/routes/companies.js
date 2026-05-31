@@ -8,7 +8,7 @@ import {
 } from '../lib/contacts.js';
 import { wipeStaleEnrichmentAfterUrlReplace } from '../enrichment/stages/stage1.js';
 import { revealOne, revealBulk, getRevealedSet, bypassesCredits } from '../lib/credits.js';
-import { denyOnUserPortal } from '../lib/auth.js';
+import { denyUnlessLocalEngine } from '../lib/auth.js';
 
 const router = Router();
 
@@ -17,12 +17,13 @@ const router = Router();
 // by the next push (which re-upserts every local row), so we forbid it there.
 const MODE = (process.env.BDI_MODE || 'local-admin').toLowerCase();
 
-// User portal is READ-ONLY for the shared dataset: allow GET + reveal, block all
-// other mutations (edit, archive, reset-enrichment, contacts CRUD, …).
+// Canonical company data is mutated ONLY on the local engine (source of truth);
+// app/admin are read-only for it. Allow GET + reveal everywhere, block all other
+// mutations (edit, archive, reset-enrichment, delete, contacts CRUD, …) off-local.
 router.use((req, res, next) => {
   if (req.method === 'GET') return next();
   if (/\/reveal(-bulk)?$/.test(req.path)) return next();
-  return denyOnUserPortal(req, res, next);
+  return denyUnlessLocalEngine(req, res, next);
 });
 
 const SENSITIVE_CONTACT_TYPES = new Set(['email', 'phone', 'mobile', 'whatsapp', 'telephone', 'tel']);

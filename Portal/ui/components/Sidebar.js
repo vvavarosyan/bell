@@ -61,11 +61,22 @@ export const ADMIN_ONLY_NAV_IDS = new Set([
   'sources', 'recent-jobs', 'sync', 'settings', 'dedup-queue',
 ]);
 
+// LOCAL-ENGINE-ONLY tools. These read local directory files and/or originate
+// canonical data (ingest, enrichment, assembly/dedup, mirror push). They are
+// blocked server-side everywhere except the local Mac, so we hide them on BOTH
+// app.bell.qa AND admin.bell.qa to avoid dead 403 links. Mirrors the 'local'
+// tier in server/lib/capabilities.js.
+export const LOCAL_ENGINE_NAV_IDS = new Set([
+  'sources', 'recent-jobs', 'sync', 'dedup-queue',
+]);
+
 /** True if an item should be shown to a user with the given role, in this mode. */
 export function itemVisibleTo(item, role, mode = 'local-admin') {
   if (!role) return false;
   // On the user portal, admin tools are unavailable to everyone.
   if (mode === 'user' && ADMIN_ONLY_NAV_IDS.has(item.id)) return false;
+  // Off the local engine, local-only tools are hidden for everyone (incl. admin).
+  if (mode !== 'local-admin' && LOCAL_ENGINE_NAV_IDS.has(item.id)) return false;
   if (role === 'platform_admin') return true;            // sees everything (else)
   if (item.visibility === 'all' || item.visibility === undefined) return true;
   return Array.isArray(item.visibility) && item.visibility.includes(role);

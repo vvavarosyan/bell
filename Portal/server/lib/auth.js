@@ -19,6 +19,7 @@
 
 import { verifyToken, createClerkClient } from '@clerk/backend';
 import { query, withTransaction } from '../db.js';
+import { capabilitiesForMode } from './capabilities.js';
 
 const MODE = (process.env.BDI_MODE || 'local-admin').toLowerCase();
 const CLERK_SECRET = process.env.CLERK_SECRET_KEY || null;
@@ -59,6 +60,9 @@ export function getModeInfo() {
     publishable_key: CLERK_PUBLISHABLE,
     // Browser-safe Stripe publishable key — needed for Stripe.js
     stripe_publishable_key: process.env.STRIPE_PUBLISHABLE_KEY || null,
+    // What this deployment is allowed to do — drives UI hiding so a local-only
+    // operation never appears on app/admin. Single source of truth: capabilities.js
+    capabilities: capabilitiesForMode(),
   };
 }
 
@@ -220,14 +224,20 @@ export async function requireAuth(req, res, next) {
  * transparently on the local Mac.
  */
 /**
- * Block dataset-mutating routes on the user portal (BDI_MODE=user).
- * The shared companies/people/jobs dataset is Bell-owned reference data —
- * customers may read and reveal it, but never edit/archive/re-enrich it.
- * Admin (admin.bell.qa) and the local engine pass through.
+ * Block canonical-data mutations anywhere EXCEPT the local engine.
+ *
+ * companies/people/jobs are Bell-owned reference data and PROD is an exact
+ * mirror of local — so a write on app.bell.qa (customers) OR admin.bell.qa
+ * (staff) would be clobbered by the next mirror push. All edits/archives/
+ * re-enrichment therefore happen on the local engine (source of truth) and
+ * flow up. Callers carve out GET + reveal before invoking this.
+ *
+ * (Formerly denyOnUserPortal, which only blocked the user portal; tightened
+ * 2026-05-31 so admin.bell.qa is also read-only for canonical data.)
  */
-export function denyOnUserPortal(req, res, next) {
-  if (MODE === 'user') {
-    return res.status(403).json({ error: 'forbidden', reason: 'read_only_on_user_portal' });
+export function denyUnlessLocalEngine(req, res, next) {
+  if (MODE !== 'local-admin') {
+    return res.status(403).json({ error: 'forbidden', reason: 'canonical_mutation_local_engine_only' });
   }
   next();
 }
