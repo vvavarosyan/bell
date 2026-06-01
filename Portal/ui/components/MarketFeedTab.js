@@ -40,6 +40,7 @@ export function MarketFeedTab() {
   const [stats, setStats]     = useState(null);
   const [trending, setTrending] = useState([]);
   const [category, setCategory] = useState('');
+  const [kind, setKind] = useState('');
   const [q, setQ] = useState('');
   const [openedId, setOpenedId] = useState(null);
   const [detail, setDetail] = useState(null);
@@ -59,9 +60,10 @@ export function MarketFeedTab() {
   const filterParams = useCallback(() => {
     const p = {};
     if (category) p.category = category;
+    if (kind) p.kind = kind;
     if (q.trim()) p.q = q.trim();
     return p;
-  }, [category, q]);
+  }, [category, kind, q]);
 
   const maxId = (arr) => arr.reduce((m, e) => Math.max(m, Number(e.id) || 0), 0);
 
@@ -159,7 +161,17 @@ export function MarketFeedTab() {
           </div>
         ` : null}
 
-        <!-- Filters -->
+        <!-- Type filter (News vs Research vs …) -->
+        <div class="feed-filters" style=${{ marginBottom: '6px' }}>
+          ${[['', 'All types'], ['news', 'News'], ['research', 'Research'], ['company_registered', 'New companies']].map(([val, label]) => html`
+            <button key=${val || 'alltypes'}
+              class=${'feed-chip ' + (kind === val ? 'active' : '')}
+              style=${val === 'research' ? { borderColor: 'rgba(111,207,151,0.5)', color: kind === val ? '#fff' : 'rgb(111 207 151)' } : null}
+              onClick=${() => setKind(val)}>${label}</button>
+          `)}
+        </div>
+
+        <!-- Category filters -->
         <div class="feed-filters">
           ${CATEGORIES.map(([val, label]) => html`
             <button key=${val || 'all'}
@@ -176,14 +188,19 @@ export function MarketFeedTab() {
         <div class="feed-stream">
           ${loading ? html`<div class="empty">Loading the market…</div>` :
             events.length === 0 ? html`<div class="empty">No events yet. Bell is warming up the feed — check back shortly.</div>` :
-            events.map(e => html`<${FeedCard} key=${e.id} e=${e} onOpen=${() => {
-              if (e.kind === 'company_registered') {
-                const cid = e.ref_id || (e.companies && e.companies[0] && e.companies[0].id);
-                if (cid) navigateTo('companies', cid);
-              } else {
-                setOpenedId(e.id);
-              }
-            }} />`)}
+            events.map(e => {
+              const onOpen = () => {
+                if (e.kind === 'company_registered') {
+                  const cid = e.ref_id || (e.companies && e.companies[0] && e.companies[0].id);
+                  if (cid) navigateTo('companies', cid);
+                } else {
+                  setOpenedId(e.id);
+                }
+              };
+              return e.kind === 'research'
+                ? html`<${ResearchFeedCard} key=${e.id} e=${e} onOpen=${onOpen} />`
+                : html`<${FeedCard} key=${e.id} e=${e} onOpen=${onOpen} />`;
+            })}
           ${!loading && cursor ? html`
             <button class="feed-loadmore" onClick=${loadMore} disabled=${loadingMore}>
               ${loadingMore ? 'Loading…' : 'Load more'}
@@ -203,9 +220,12 @@ export function MarketFeedTab() {
           `)}
       </aside>
      </div>
-     ${openedId ? html`<${NewsDetail}
-        event=${detail || events.find(e => e.id === openedId)}
-        onClose=${() => setOpenedId(null)} />` : null}
+     ${openedId ? (() => {
+        const ev = detail || events.find(e => e.id === openedId);
+        return ev && ev.kind === 'research'
+          ? html`<${ResearchReport} event=${ev} onClose=${() => setOpenedId(null)} />`
+          : html`<${NewsDetail} event=${ev} onClose=${() => setOpenedId(null)} />`;
+      })() : null}
     </div>
   `;
 }
@@ -234,19 +254,7 @@ function NewsDetail({ event, onClose }) {
             ${author ? html`<span>· ${author}</span>` : null}
             <span>· ${new Date(published).toLocaleString()}</span>
           </div>
-          ${fullSummary ? html`<p class="news-summary">${fullSummary}</p>` : (event.kind !== 'research' ? html`<p class="muted small">No summary available — read the full story at the source.</p>` : null)}
-          ${event.kind === 'research' && Array.isArray(event.payload?.sections) && event.payload.sections.length ? html`
-            <div style=${{ marginTop: '8px' }}>
-              ${event.payload.sections.map((sec, i) => html`
-                <div key=${sec.number ?? i} style=${{ marginBottom: '18px' }}>
-                  ${sec.title ? html`<h3 style=${{ margin: '0 0 8px', fontSize: '15px', fontWeight: 600, color: 'var(--text)' }}>${sec.title}</h3>` : null}
-                  ${String(sec.body_markdown || '').split(/\n{2,}/).filter(Boolean).map((para, j) => html`
-                    <p key=${j} style=${{ margin: '0 0 10px', fontSize: '13px', lineHeight: 1.65, color: 'var(--text)' }}>${para}</p>
-                  `)}
-                </div>
-              `)}
-            </div>
-          ` : null}
+          ${fullSummary ? html`<p class="news-summary">${fullSummary}</p>` : html`<p class="muted small">No summary available — read the full story at the source.</p>`}
           ${(event.companies && event.companies.length) ? html`
             <div class="news-section-label">Mentioned companies</div>
             <div class="feed-card-chips">
@@ -293,5 +301,115 @@ function FeedCard({ e, onOpen }) {
           </div>` : null}
       </div>
     </article>
+  `;
+}
+
+// Distinct, branded card for a research report — deliberately unlike a news card.
+const RESEARCH_TINT = 'rgb(111 207 151)';
+function ResearchFeedCard({ e, onOpen }) {
+  return html`
+    <article onClick=${onOpen} style=${{
+      cursor: 'pointer', position: 'relative',
+      display: 'flex', gap: '14px',
+      padding: '16px 18px 16px 16px', marginBottom: '10px',
+      background: 'linear-gradient(180deg, rgba(111,207,151,0.07) 0%, rgba(13,18,35,0.5) 100%)',
+      border: '1px solid rgba(111,207,151,0.28)',
+      borderLeft: '3px solid ' + RESEARCH_TINT,
+      borderRadius: '12px',
+    }}>
+      <div style=${{
+        flexShrink: 0, width: '40px', height: '40px', borderRadius: '9px',
+        background: 'rgba(111,207,151,0.14)', color: RESEARCH_TINT,
+        display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '18px',
+      }}>◎</div>
+      <div style=${{ minWidth: 0, flex: 1 }}>
+        <div style=${{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '4px' }}>
+          <span style=${{
+            fontSize: '9.5px', fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase',
+            color: RESEARCH_TINT,
+          }}>Bell Research · Report</span>
+          <span class="spacer" style=${{ flex: 1 }}></span>
+          <span class="muted small">${timeAgo(e.occurred_at)}</span>
+        </div>
+        <div style=${{ fontSize: '15px', fontWeight: 600, color: 'var(--text)', lineHeight: 1.35, marginBottom: '5px' }}>
+          ${e.title}
+        </div>
+        ${e.summary ? html`<div style=${{
+          fontSize: '12.5px', color: 'var(--text-muted)', lineHeight: 1.55,
+          display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden',
+        }}>${e.summary}</div>` : null}
+        <div style=${{ display: 'flex', alignItems: 'center', gap: '10px', marginTop: '9px', flexWrap: 'wrap' }}>
+          ${(e.companies && e.companies.length) ? e.companies.map(c => html`
+            <button key=${c.id} class="feed-company-chip" onClick=${(ev) => { ev.stopPropagation(); navigateTo('companies', c.id); }}>${c.name}</button>
+          `) : null}
+          <span class="spacer" style=${{ flex: 1 }}></span>
+          <span style=${{ fontSize: '11.5px', fontWeight: 600, color: RESEARCH_TINT }}>Read full report →</span>
+        </div>
+      </div>
+    </article>
+  `;
+}
+
+// Professional report reader — opens in the same drawer shell as news but
+// renders like a document: title, attribution, summary callout, numbered
+// sections with headings.
+function ResearchReport({ event, onClose }) {
+  if (!event) return null;
+  const sections = Array.isArray(event.payload?.sections) ? event.payload.sections : [];
+  const published = event.occurred_at;
+  return html`
+    <div class="news-overlay" onClick=${onClose}>
+      <aside class="news-drawer" onClick=${e => e.stopPropagation()}>
+        <button class="news-close" onClick=${onClose} title="Close">✕</button>
+        <div class="news-drawer-body">
+          <div style=${{
+            fontSize: '10px', fontWeight: 700, letterSpacing: '0.12em', textTransform: 'uppercase',
+            color: RESEARCH_TINT, marginBottom: '10px',
+            display: 'flex', alignItems: 'center', gap: '8px',
+          }}>
+            <span>◎ Bell Research</span>
+            <span style=${{ color: 'var(--text-dim)' }}>·</span>
+            <span style=${{ color: 'var(--text-dim)', letterSpacing: '0.04em' }}>Intelligence Report</span>
+          </div>
+          <h1 style=${{ margin: '0 0 10px', fontSize: '23px', fontWeight: 700, color: 'var(--text)', lineHeight: 1.25 }}>
+            ${event.title}
+          </h1>
+          <div style=${{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap', marginBottom: '18px' }}>
+            ${published ? html`<span class="muted small">${new Date(published).toLocaleDateString(undefined, { year: 'numeric', month: 'long', day: 'numeric' })}</span>` : null}
+            ${(event.companies && event.companies.length) ? html`
+              <span style=${{ color: 'var(--text-dim)' }}>·</span>
+              ${event.companies.map(c => html`<button key=${c.id} class="feed-company-chip" onClick=${() => navigateTo('companies', c.id)}>${c.name}</button>`)}
+            ` : null}
+          </div>
+
+          ${event.summary ? html`
+            <div style=${{
+              padding: '14px 16px', marginBottom: '22px',
+              background: 'rgba(111,207,151,0.07)',
+              borderLeft: '3px solid ' + RESEARCH_TINT, borderRadius: '8px',
+              fontSize: '14px', color: 'var(--text)', lineHeight: 1.6,
+            }}>${event.summary}</div>
+          ` : null}
+
+          ${sections.length ? sections.map((sec, i) => html`
+            <section key=${sec.number ?? i} style=${{ marginBottom: '24px' }}>
+              <div style=${{
+                fontSize: '9.5px', fontWeight: 700, letterSpacing: '0.1em', textTransform: 'uppercase',
+                color: 'var(--text-dim)', marginBottom: '5px',
+              }}>Section ${String(sec.number ?? (i + 1)).padStart(2, '0')}</div>
+              ${sec.title ? html`<h2 style=${{ margin: '0 0 10px', fontSize: '17px', fontWeight: 600, color: 'var(--text)' }}>${sec.title}</h2>` : null}
+              ${String(sec.body_markdown || '').split(/\n{2,}/).map(s => s.trim()).filter(Boolean).map((para, j) => html`
+                <p key=${j} style=${{ margin: '0 0 11px', fontSize: '13.5px', lineHeight: 1.7, color: 'var(--text)' }}>${para}</p>
+              `)}
+            </section>
+          `) : html`<p class="muted small">The full report is being prepared.</p>`}
+
+          <div style=${{
+            marginTop: '12px', paddingTop: '14px', borderTop: '1px solid var(--border)',
+            fontSize: '11px', color: 'var(--text-dim)',
+          }}>Researched and synthesized by Bell · Qatar market intelligence</div>
+        </div>
+      </aside>
+    </div>
   `;
 }
