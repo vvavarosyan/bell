@@ -57,6 +57,11 @@ export const api = {
   archiveCompany:         (id, archived) => request(`/api/companies/${id}/archive`, { method: 'POST', body: JSON.stringify({ archived }) }),
   deleteCompany:          (id) => request('/api/companies/' + id, { method: 'DELETE' }),
   keepCompany:            (id) => request(`/api/companies/${id}/keep`, { method: 'POST', body: '{}' }),
+  // Research approval queue (local engine only)
+  researchCandidates:     (params = {}) => request('/api/research-candidates?' + new URLSearchParams(params)),
+  approveCandidate:       (id) => request(`/api/research-candidates/${id}/approve`, { method: 'POST', body: '{}' }),
+  rejectCandidate:        (id) => request(`/api/research-candidates/${id}/reject`, { method: 'POST', body: '{}' }),
+  restoreCandidate:       (id) => request(`/api/research-candidates/${id}/restore`, { method: 'POST', body: '{}' }),
   resetEnrichment:        (id) => request(`/api/companies/${id}/reset-enrichment`, { method: 'POST', body: '{}' }),
   revealCompany:          (id) => request(`/api/companies/${id}/reveal`, { method: 'POST', body: '{}' }),
   revealCompaniesBulk:    (ids) => request('/api/companies/reveal-bulk', { method: 'POST', body: JSON.stringify({ ids }) }),

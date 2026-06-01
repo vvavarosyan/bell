@@ -32,6 +32,7 @@ import similarCompaniesRouter  from './routes/similar_companies.js';
 import assemblyRouter          from './routes/assembly.js';
 import jobRunsRouter           from './routes/job_runs.js';
 import researchRouter          from './routes/research.js';
+import researchCandidatesRouter from './routes/research_candidates.js';
 import { startPoller as startResearchPoller } from './research/poller.js';
 import openDataRouter          from './routes/open_data.js';
 import { startScheduler as startOpenDataScheduler } from './sources/qatar_open_data/scheduler.js';
@@ -151,10 +152,12 @@ app.use('/api/credits',    requireAuth, creditsRouter);
 
 // Local-engine-only tools — these read local directory files and/or originate
 // canonical data, so they run ONLY on Val's Mac (blocked on app AND admin).
-app.use('/api/sources',            ...localTools, sourcesRouter);
-app.use('/api/enrichment',         ...localTools, enrichmentRouter);
-app.use('/api/assembly',           ...localTools, assemblyRouter);
-app.use('/api/job-runs',           ...localTools, jobRunsRouter);
+app.use('/api/sources',             ...localTools, sourcesRouter);
+app.use('/api/enrichment',          ...localTools, enrichmentRouter);
+app.use('/api/assembly',            ...localTools, assemblyRouter);
+app.use('/api/job-runs',            ...localTools, jobRunsRouter);
+// Research approval queue — promoting discoveries is canonical curation.
+app.use('/api/research-candidates', ...localTools, researchCandidatesRouter);
 
 // Admin tools — admin.bell.qa + local engine (read/observe prod).
 app.use('/api/similar-companies',  ...adminOnly, similarCompaniesRouter);

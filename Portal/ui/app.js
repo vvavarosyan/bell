@@ -23,6 +23,7 @@ import { MapTab }       from './components/MapTab.js';
 import { DedupQueueTab } from './components/DedupQueueTab.js';
 import { RecentJobsTab } from './components/RecentJobsTab.js';
 import { ResearchTab }   from './components/ResearchTab.js';
+import { ResearchApprovalsTab } from './components/ResearchApprovalsTab.js';
 import { DeepDataTab }   from './components/DeepDataTab.js';
 import { SyncTab }       from './components/SyncTab.js';
 import { MarketFeedTab } from './components/MarketFeedTab.js';
@@ -40,6 +41,7 @@ const VIEWS = {
   'dedup-queue': { Component: DedupQueueTab },
   'recent-jobs': { Component: RecentJobsTab },
   'research':    { Component: ResearchTab },
+  'approvals':   { Component: ResearchApprovalsTab },
   'deep-data':   { Component: DeepDataTab },
   'sync':        { Component: SyncTab },
   // Archived is reachable via deep-link/sidebar too
@@ -58,6 +60,7 @@ const LABELS = {
   'sync': 'Sync to Bell.qa',
   'crm': 'CRM',
   'research': 'Research',
+  'approvals': 'Research Approvals',
   'team': 'Team',
 };
 

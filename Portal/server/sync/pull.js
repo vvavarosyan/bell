@@ -66,10 +66,13 @@ function isJsonb(m) {
             || m.data_type === 'json'  || m.udt_name === 'json');
 }
 
-// Upsert a set of full rows (CREATED high-id entities) into a local table,
-// preserving their ids. Columns are intersected with the local schema so the
-// upsert tolerates any column prod has that local doesn't (and vice-versa).
-async function upsertFullRows(table, rows) {
+// Upsert a set of full rows into a local table, preserving their ids. Columns
+// are intersected with the local schema so the upsert tolerates any column prod
+// has that local doesn't (and vice-versa). `conflict`:
+//   'update' → ON CONFLICT (id) DO UPDATE (mirror prod's values)
+//   'ignore' → ON CONFLICT (id) DO NOTHING (keep local — used for candidates so
+//              a local approve/reject decision is never reverted by a re-pull)
+async function upsertFullRows(table, rows, conflict = 'update') {
   if (!rows.length) return 0;
   const meta = await getLocalColumnMeta(table);
   let done = 0;
@@ -78,11 +81,12 @@ async function upsertFullRows(table, rows) {
     if (!cols.includes('id')) continue;
     const vals = cols.map((c) => (row[c] != null && isJsonb(meta[c])) ? JSON.stringify(row[c]) : row[c]);
     const placeholders = cols.map((_, i) => `$${i + 1}`).join(', ');
-    const setList = cols.filter((c) => c !== 'id').map((c) => `${q(c)} = EXCLUDED.${q(c)}`).join(', ');
+    const tail = conflict === 'ignore'
+      ? 'ON CONFLICT (id) DO NOTHING'
+      : 'ON CONFLICT (id) DO UPDATE SET ' + cols.filter((c) => c !== 'id').map((c) => `${q(c)} = EXCLUDED.${q(c)}`).join(', ');
     try {
       await query(
-        `INSERT INTO ${q(table)} (${cols.map(q).join(', ')}) VALUES (${placeholders})
-         ON CONFLICT (id) DO UPDATE SET ${setList}`,
+        `INSERT INTO ${q(table)} (${cols.map(q).join(', ')}) VALUES (${placeholders}) ${tail}`,
         vals
       );
       done++;
@@ -90,9 +94,8 @@ async function upsertFullRows(table, rows) {
       console.warn(`[pull] upsert ${table} id=${row.id} failed: ${err.message}`);
     }
   }
-  // Keep the local id sequence clear of the high band (it should never reach it,
-  // but this is defensive). We do NOT advance it to the high id — local must
-  // keep issuing LOW ids — so nothing to do here.
+  // We do NOT advance the local id sequence to the high band — local must keep
+  // issuing LOW ids — so nothing to do here.
   return done;
 }
 
@@ -158,6 +161,9 @@ export async function runPull() {
     companies_enriched: await mergeResearchDerived('companies', companies.enriched),
     people_created:     await upsertFullRows('people', people.created),
     people_enriched:    await mergeResearchDerived('people', people.enriched),
+    // Approval candidates: insert new ones; NEVER overwrite a candidate the local
+    // admin has already decided on (approve/reject) — hence DO NOTHING on id.
+    candidates:         await upsertFullRows('research_candidates', body.candidates || [], 'ignore'),
   };
 
   // Advance the pull watermark only after a clean apply, so a mid-pull failure
