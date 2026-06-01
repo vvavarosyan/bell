@@ -355,6 +355,9 @@ function JobDetailDrawer({ jobId, isAdmin, onClose }) {
               ? html`<${ReportViewer} report=${report} sources=${sources} />`
               : (job.status === 'ready' ? html`<${EmptyReportDebug} job=${job} report=${report} onRetry=${() => retryJob(job.id, load)} />` : null)}
 
+            <!-- Market Feed release (ready jobs only) -->
+            ${job.status === 'ready' ? html`<${FeedReleasePanel} job=${job} reload=${load} />` : null}
+
             <!-- Snowball: what got fed back into Bell -->
             ${derived.length > 0 ? html`<${DerivedEntitiesPanel} derived=${derived} />` : null}
           `}
@@ -895,6 +898,72 @@ function EmptyReportDebug({ job, report, onRetry }) {
       }}
     >Retry research</button>
   </div>`;
+}
+
+// Market Feed release controls for a ready report. The report is exclusive to
+// the commissioning tenant until it releases (auto after the exclusivity window,
+// or manually here), then it appears — anonymized — in the public Market Feed.
+function FeedReleasePanel({ job, reload }) {
+  const released = !!job.feed_released_at;
+  const optedOut = !!job.feed_optout;
+
+  const doRelease = async () => {
+    try {
+      const r = await api.releaseResearch(job.id);
+      if (!r.released) { toast(`Not released — ${r.reason || 'unavailable'}`, 'error'); return; }
+      toast('Released to the Market Feed');
+      reload && reload();
+    } catch (err) { toast('Release failed: ' + (err.message || err), 'error'); }
+  };
+  const toggleOptout = async (next) => {
+    try {
+      await api.setResearchFeedOptout(job.id, next);
+      toast(next ? 'Kept private — won’t be shared to the feed' : 'Private hold removed');
+      reload && reload();
+    } catch (err) { toast('Update failed: ' + (err.message || err), 'error'); }
+  };
+
+  return html`<div style=${{
+    marginBottom: '22px', padding: '14px 16px',
+    background: 'rgba(111,207,151,0.06)',
+    border: '1px solid rgba(111,207,151,0.28)',
+    borderRadius: '10px',
+  }}>
+    <div style=${{
+      fontSize: '10.5px', textTransform: 'uppercase', letterSpacing: '0.1em',
+      color: 'rgb(111 207 151)', fontWeight: 700, marginBottom: '8px',
+    }}>Market Feed</div>
+
+    ${released ? html`
+      <div style=${{ fontSize: '12.5px', color: 'var(--text)' }}>
+        Released to the public Market Feed${job.feed_released_at ? ` · ${new Date(job.feed_released_at).toLocaleDateString()}` : ''}.
+        The full report is public.
+      </div>
+    ` : optedOut ? html`
+      <div style=${{ fontSize: '12.5px', color: 'var(--text-muted)', marginBottom: '10px' }}>
+        Private hold is ON — this report will not be shared to the Market Feed.
+      </div>
+      <button onClick=${() => toggleOptout(false)} style=${btn()}>Allow feed release</button>
+    ` : html`
+      <div style=${{ fontSize: '12.5px', color: 'var(--text-muted)', marginBottom: '10px', lineHeight: 1.5 }}>
+        This report is exclusive to you. It will release to the public Market Feed (anonymized — your
+        identity is never shown) after the exclusivity window, or you can release it now.
+      </div>
+      <div style=${{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+        <button onClick=${doRelease} style=${btn(true)}>Release to Market Feed now</button>
+        <button onClick=${() => toggleOptout(true)} style=${btn()}>Keep private</button>
+      </div>
+    `}
+  </div>`;
+}
+
+function btn(accent = false) {
+  return {
+    padding: '7px 14px', borderRadius: '6px', fontSize: '12px', fontWeight: 600, cursor: 'pointer',
+    border: '1px solid ' + (accent ? 'var(--accent)' : 'var(--border)'),
+    background: accent ? 'var(--accent)' : 'transparent',
+    color: accent ? '#fff' : 'var(--text-muted)',
+  };
 }
 
 function DerivedEntitiesPanel({ derived }) {

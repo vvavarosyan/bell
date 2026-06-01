@@ -234,7 +234,19 @@ function NewsDetail({ event, onClose }) {
             ${author ? html`<span>· ${author}</span>` : null}
             <span>· ${new Date(published).toLocaleString()}</span>
           </div>
-          ${fullSummary ? html`<p class="news-summary">${fullSummary}</p>` : html`<p class="muted small">No summary available — read the full story at the source.</p>`}
+          ${fullSummary ? html`<p class="news-summary">${fullSummary}</p>` : (event.kind !== 'research' ? html`<p class="muted small">No summary available — read the full story at the source.</p>` : null)}
+          ${event.kind === 'research' && Array.isArray(event.payload?.sections) && event.payload.sections.length ? html`
+            <div style=${{ marginTop: '8px' }}>
+              ${event.payload.sections.map((sec, i) => html`
+                <div key=${sec.number ?? i} style=${{ marginBottom: '18px' }}>
+                  ${sec.title ? html`<h3 style=${{ margin: '0 0 8px', fontSize: '15px', fontWeight: 600, color: 'var(--text)' }}>${sec.title}</h3>` : null}
+                  ${String(sec.body_markdown || '').split(/\n{2,}/).filter(Boolean).map((para, j) => html`
+                    <p key=${j} style=${{ margin: '0 0 10px', fontSize: '13px', lineHeight: 1.65, color: 'var(--text)' }}>${para}</p>
+                  `)}
+                </div>
+              `)}
+            </div>
+          ` : null}
           ${(event.companies && event.companies.length) ? html`
             <div class="news-section-label">Mentioned companies</div>
             <div class="feed-card-chips">

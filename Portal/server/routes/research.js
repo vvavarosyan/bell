@@ -15,6 +15,7 @@ import { Router } from 'express';
 import { query } from '../db.js';
 import { RESEARCH_TYPES, typeInfo } from '../research/types.js';
 import { runJob, advanceJob } from '../research/orchestrator.js';
+import { releaseResearchToFeed } from '../research/publish.js';
 
 const router = Router();
 
@@ -264,6 +265,38 @@ router.post('/jobs/:id/cancel', async (req, res, next) => {
       RETURNING id, status
     `, [id]);
     if (!r.rows.length) return res.status(404).json({ error: 'not_found_or_already_terminal' });
+    res.json(r.rows[0]);
+  } catch (err) { next(err); }
+});
+
+// POST /api/research/jobs/:id/release — release this report to the public Market
+// Feed now (skip the exclusivity wait). Owner of the job, or admin.
+router.post('/jobs/:id/release', async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) return res.status(400).json({ error: 'invalid_id' });
+    if (!(await ownsJob(req, id))) return res.status(404).json({ error: 'not_found' });
+    const out = await releaseResearchToFeed(id);
+    if (!out.released) return res.status(409).json(out);
+    res.json(out);
+  } catch (err) { next(err); }
+});
+
+// POST /api/research/jobs/:id/feed-optout  body: { optout: true|false }
+// Keep this research private (suppress feed release) or re-enable it. While
+// opted out it will never auto-release. (Free toggle today; becomes the paid
+// lever when research consumes credits.)
+router.post('/jobs/:id/feed-optout', async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) return res.status(400).json({ error: 'invalid_id' });
+    if (!(await ownsJob(req, id))) return res.status(404).json({ error: 'not_found' });
+    const optout = req.body?.optout !== false;
+    const r = await query(
+      `UPDATE research_jobs SET feed_optout = $2 WHERE id = $1 RETURNING id, feed_optout, feed_released_at`,
+      [id, optout],
+    );
+    if (!r.rows.length) return res.status(404).json({ error: 'not_found' });
     res.json(r.rows[0]);
   } catch (err) { next(err); }
 });
