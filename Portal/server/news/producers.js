@@ -8,6 +8,7 @@
 // UNIQUE (kind, ref_table, ref_id), so re-runs never duplicate.
 
 import { query } from '../db.js';
+import { emitResearchEvents } from '../research/publish.js';
 
 /**
  * Emit "New company registered" events for companies that have recently arrived
@@ -46,5 +47,7 @@ export async function runProducers() {
   const out = {};
   try { out.company_registrations = (await emitCompanyRegistrations()).emitted; }
   catch (e) { out.error = e.message; }
+  try { out.research_released = (await emitResearchEvents()).emitted; }
+  catch (e) { out.research_error = e.message; }
   return out;
 }

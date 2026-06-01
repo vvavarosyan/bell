@@ -125,6 +125,8 @@ export const api = {
   cancelResearchJob:      (id) => request(`/api/research/jobs/${id}/cancel`, { method: 'POST', body: '{}' }),
   deleteResearchJob:      (id) => request(`/api/research/jobs/${id}`, { method: 'DELETE' }),
   runResearchJob:         (id) => request(`/api/research/jobs/${id}/run`, { method: 'POST', body: '{}' }),
+  releaseResearch:        (id) => request(`/api/research/jobs/${id}/release`, { method: 'POST', body: '{}' }),
+  setResearchFeedOptout:  (id, optout) => request(`/api/research/jobs/${id}/feed-optout`, { method: 'POST', body: JSON.stringify({ optout }) }),
   pollResearchJob:        (id) => request(`/api/research/jobs/${id}/poll`, { method: 'POST', body: '{}' }),
 
   // Deep Data (Qatar Open Data)
