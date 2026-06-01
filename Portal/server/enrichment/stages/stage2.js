@@ -6,6 +6,7 @@
 
 import * as apify from '../clients/apify.js';
 import { query, withTransaction } from '../../db.js';
+import { normalizeName } from '../../ingest/normalize.js';
 
 const ACTOR_ID = 'dev_fusion/Linkedin-Company-Scraper';
 export const STAGE_LABEL = 'LinkedIn Company Profile';
@@ -314,6 +315,32 @@ async function applyProfile(companyId, item) {
           nz(so.industry) || nz(so.industryV2Taxonomy),
           buildEmployeeRange(so.employeeCountRange),
         ]);
+
+        // Retain the non-Qatar similar company in the International holding pen
+        // (research_candidates, LOCAL-ONLY) for future expansion — instead of
+        // discarding it. Deduped by linkedin_url so repeated Stage 2 runs and
+        // other sources don't pile up duplicates. Never enters the live
+        // companies table, so it never grows the online DB.
+        const candName = nz(so.name) || ('LinkedIn ' + url.split('/company/').pop());
+        const existsCand = await query(
+          `SELECT id FROM research_candidates WHERE linkedin_url = $1 LIMIT 1`,
+          [url],
+        );
+        if (!existsCand.rows.length) {
+          await query(`
+            INSERT INTO research_candidates
+              (kind, name, name_normalized, country, website, linkedin_url, industry, raw, notes)
+            VALUES ('non_qatar', $1, $2, $3, NULL, $4, $5, $6::jsonb, $7)
+          `, [
+            candName,
+            normalizeName(candName),
+            country,
+            url,
+            nz(so.industry) || nz(so.industryV2Taxonomy),
+            JSON.stringify(so),
+            'similar company of #' + companyId + ' (Stage 2)',
+          ]);
+        }
       }
     }
   }

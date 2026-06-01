@@ -10,6 +10,7 @@
 // local-admin); the ingest route only makes sense on prod. Each guards itself.
 
 import { Router } from 'express';
+import { query } from '../db.js';
 import { requireAuth, requireRole } from '../lib/auth.js';
 import { applyBatch, applyReset, applyDeletions, collectResearchPull } from '../sync/ingest.js';
 import { runPush, getSyncStatus } from '../sync/push.js';
@@ -64,6 +65,25 @@ router.post('/research-pull', requireSyncToken, async (req, res, next) => {
   try {
     const since = (req.body && req.body.since) || '1970-01-01T00:00:00Z';
     res.json(await collectResearchPull(since));
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Drain research candidates from PROD after the local engine has absorbed them.
+// Non-displayed companies (pending/non-Qatar) must NOT accumulate in the online
+// DB — they live only locally. Token-auth, machine-to-machine.
+router.post('/research-candidates-drain', requireSyncToken, async (req, res, next) => {
+  try {
+    const ids = Array.isArray(req.body?.ids) ? req.body.ids.map(Number).filter(Number.isFinite) : [];
+    if (!ids.length) return res.json({ deleted: 0 });
+    // Only drain rows still awaiting a decision — never touch an 'approved' one
+    // (whose promoted company is part of the mirror).
+    const r = await query(
+      `DELETE FROM research_candidates WHERE id = ANY($1::bigint[]) AND kind IN ('pending','non_qatar','rejected')`,
+      [ids],
+    );
+    res.json({ deleted: r.rowCount });
   } catch (err) {
     next(err);
   }
