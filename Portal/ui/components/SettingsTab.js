@@ -21,6 +21,7 @@ export function SettingsTab() {
   const [drafts, setDrafts] = useState({ firecrawl: '', apify: '', mapbox: '' });
   const [loading, setLoading] = useState(true);
   const [activeSection, setActiveSection] = useState('api-keys');
+  const [busy, setBusy] = useState('');   // which maintenance action is running
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -237,25 +238,29 @@ export function SettingsTab() {
         <div class="row">
           <label>Recompute seniority</label>
           <div class="actions" style=${{flex:1}}>
-            <button onClick=${async () => {
+            <button disabled=${busy === 'seniority'} onClick=${async () => {
+              setBusy('seniority');
               try {
                 const r = await api.recomputeSeniority();
                 toast(`Recomputed seniority — updated ${r.updated} of ${r.scanned} links`);
               } catch (err) { toast('Recompute failed: ' + err.message, 'error'); }
-            }}>Run recompute</button>
+              finally { setBusy(''); }
+            }}>${busy === 'seniority' ? 'Running…' : 'Run recompute'}</button>
             <span class="muted small">Re-evaluates every person's org-chart level using the latest rule set.</span>
           </div>
         </div>
         <div class="row">
           <label>Reclassify statuses</label>
           <div class="actions" style=${{flex:1}}>
-            <button onClick=${async () => {
+            <button disabled=${busy === 'reclassify'} onClick=${async () => {
+              setBusy('reclassify');
               try {
                 const r = await api.reclassifyStatuses();
-                toast(`Reclassified statuses on ${r.scanned} companies`);
+                toast(`Reclassify done — ${(r.updated ?? r.scanned ?? 0).toLocaleString()} companies changed`, 'success');
               } catch (err) { toast('Reclassify failed: ' + err.message, 'error'); }
-            }}>Run reclassify</button>
-            <span class="muted small">Recomputes is_active + archived per company using the multi-source OR rule.</span>
+              finally { setBusy(''); }
+            }}>${busy === 'reclassify' ? 'Running…' : 'Run reclassify'}</button>
+            <span class="muted small">Recomputes is_active + archived for every company (current-source rule; respects manual decisions). Runs in one pass.</span>
           </div>
         </div>
       </div>

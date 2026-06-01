@@ -372,19 +372,53 @@ router.delete('/:id/contacts/:cid', async (req, res, next) => {
 });
 
 // POST /api/companies/reclassify-statuses
-// Re-evaluate is_active + archived for ALL existing companies using the
-// multi-source OR rule (any active source → company active). Use after a
-// status rule change, to avoid re-ingesting all JSON files.
+// Re-evaluate is_active + archived (and archive_reason) for ALL companies in a
+// SINGLE set-based statement — fast enough to run synchronously on 100k+ rows.
+// Mirrors recompute_status.js exactly:
+//   • a source link counts toward "active" if it is CURRENT or NOT QFZ
+//   • QFC active iff license/licence_status ∈ the active whitelist
+//   • MOCI active iff cr_status = 'Active'
+//   • every other source (QFZ/QSTP/research/…) is active when it counts
+//   • manual_status_override rows are skipped (admin decisions stick)
+//   • archived = NOT is_active; reason 'qfz_disappeared' if a QFZ listing
+//     vanished and nothing else keeps it active, else 'inactive'
+// status_normalized/status_raw are left to per-ingest (which sets the precise
+// per-source label); this maintenance pass only fixes is_active + archived.
 router.post('/reclassify-statuses', async (req, res, next) => {
   try {
-    const { recomputeCompanyStatus } = await import('../ingest/recompute_status.js');
-    const allIds = await query(`SELECT DISTINCT company_id FROM company_sources`);
-    let scanned = 0;
-    for (const row of allIds.rows) {
-      await recomputeCompanyStatus(row.company_id);
-      scanned++;
-    }
-    res.json({ scanned });
+    const result = await query(`
+      WITH agg AS (
+        SELECT cs.company_id,
+          COALESCE(bool_or(
+            (cs.is_current OR cs.source <> 'QFZ')
+            AND CASE
+              WHEN cs.source = 'QFC'  THEN COALESCE(cs.raw_payload->>'license_status', cs.raw_payload->>'licence_status')
+                                            IN ('Licensed','Frozen Under Court Order','Licensed - not yet commenced regulated activities')
+              WHEN cs.source = 'MOCI' THEN (cs.raw_payload->>'cr_status') = 'Active'
+              ELSE true
+            END
+          ), false) AS any_active,
+          bool_or(cs.source = 'QFZ' AND cs.is_current = false) AS qfz_gone
+        FROM company_sources cs
+        GROUP BY cs.company_id
+      )
+      UPDATE companies c
+         SET is_active      = agg.any_active,
+             archived       = NOT agg.any_active,
+             archive_reason = CASE WHEN agg.any_active THEN NULL
+                                   WHEN agg.qfz_gone   THEN 'qfz_disappeared'
+                                   ELSE 'inactive' END,
+             archived_at    = CASE WHEN NOT agg.any_active AND c.archived_at IS NULL THEN now()
+                                   WHEN agg.any_active THEN NULL
+                                   ELSE c.archived_at END,
+             updated_at     = now()
+        FROM agg
+       WHERE c.id = agg.company_id
+         AND c.manual_status_override = false
+         AND (c.is_active IS DISTINCT FROM agg.any_active
+              OR c.archived IS DISTINCT FROM NOT agg.any_active)
+    `);
+    res.json({ scanned: result.rowCount, updated: result.rowCount });
   } catch (err) { next(err); }
 });
 
