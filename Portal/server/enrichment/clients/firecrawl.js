@@ -55,12 +55,11 @@ async function call(path, body, timeoutMs = 120_000) {
 export async function agent(prompt, schema, opts = {}) {
   const body = {
     prompt,
-    // Spark 1 Mini = "complex research queries" (Firecrawl docs). Pro is
-    // for known-URL extraction tasks and silently returns data:null with
-    // creditsUsed:0 when handed a research-style prompt without anchor URLs.
-    // For Bell research jobs (multi-source discovery + synthesis) Mini is
-    // the correct tier.
-    model: opts.model || 'spark-1-mini',
+    // ALL Bell research uses Spark PRO (Val's directive 2026-05-31) — every
+    // research job, whether started on the user portal or admin, runs on the
+    // Pro agent. The orchestrator passes anchor URLs (buildAnchorUrls) so Pro
+    // has concrete starting points and doesn't fall back to data:null.
+    model: opts.model || 'spark-1-pro',
   };
   if (schema) body.schema = schema;
   if (Array.isArray(opts.urls) && opts.urls.length) body.urls = opts.urls;
