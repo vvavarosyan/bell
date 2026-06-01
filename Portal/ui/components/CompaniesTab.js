@@ -50,8 +50,12 @@ const FULL_ENRICHMENT_TOOLTIP =
 /** archivedMode=false → Active tab, true → Archived tab (initial state only). */
 export function CompaniesTab({ archivedMode: initialArchived = false, mode = 'local-admin' } = {}) {
   const isUser = mode === 'user';   // customers don't see pipeline stages
+  const isLocalEngine = mode === 'local-admin';   // reconciliation/review is local-only
+  // view: 'active' | 'archived' | 'review'
   const [archiveMode, setArchiveMode] = useState(initialArchived ? 'archived' : 'active');
   const archivedMode = archiveMode === 'archived';
+  const reviewMode = archiveMode === 'review';
+  const [reviewCount, setReviewCount] = useState(0);
   const [rows, setRows] = useState([]);
   const [total, setTotal] = useState(0);
   const [limit] = useState(100);
@@ -70,7 +74,9 @@ export function CompaniesTab({ archivedMode: initialArchived = false, mode = 'lo
   const load = useCallback(async ({ silent = false } = {}) => {
     if (!silent) setLoading(true);
     try {
-      const params = { limit, offset, archived: archivedMode ? 'true' : 'false' };
+      const params = { limit, offset };
+      if (reviewMode) params.review = 'true';
+      else            params.archived = archivedMode ? 'true' : 'false';
       if (q.trim())     params.q = q.trim();
       if (status)       params.status = status;
       if (sourceFilter) params.source = sourceFilter;
@@ -79,7 +85,17 @@ export function CompaniesTab({ archivedMode: initialArchived = false, mode = 'lo
       setTotal(r.total);
     } catch (err) { toast('Load failed: ' + err.message, 'error'); }
     finally { if (!silent) setLoading(false); }
-  }, [limit, offset, q, status, sourceFilter, archivedMode]);
+  }, [limit, offset, q, status, sourceFilter, archivedMode, reviewMode]);
+
+  // Keep a live count of the review queue for the tab badge (local engine only).
+  const refreshReviewCount = useCallback(async () => {
+    if (!isLocalEngine) return;
+    try {
+      const r = await api.companies({ review: 'true', limit: 1 });
+      setReviewCount(r.total || 0);
+    } catch { /* non-fatal */ }
+  }, [isLocalEngine]);
+  useEffect(() => { refreshReviewCount(); }, [refreshReviewCount, rows]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -96,7 +112,7 @@ export function CompaniesTab({ archivedMode: initialArchived = false, mode = 'lo
     return () => clearInterval(t);
   }, [activeJob, load]);
 
-  useEffect(() => { setSelected(new Set()); setOffset(0); setOpenedId(null); }, [archivedMode]);
+  useEffect(() => { setSelected(new Set()); setOffset(0); setOpenedId(null); }, [archiveMode]);
 
   // Also clear selection whenever the user changes search/filters/page —
   // selection is per visible context, not a global running set.
@@ -214,9 +230,21 @@ export function CompaniesTab({ archivedMode: initialArchived = false, mode = 'lo
       ${loading ? html`<span class="count">loading…</span>` : html`<${Pagination} total=${total} limit=${limit} offset=${offset} onChange=${setOffset} />`}
       <span class="spacer"></span>
       <button onClick=${load}>Refresh</button>
-      <button class="toolbar-toggle" onClick=${toggleArchiveView} title=${archivedMode ? 'Back to active companies' : 'See archived companies'}>
-        ${archivedMode ? 'View Active' : 'View Archived'}
-      </button>
+      <div class="seg-toggle" style=${{ display: 'inline-flex', gap: '4px' }}>
+        ${[
+          { key: 'active',   label: 'Active' },
+          { key: 'archived', label: 'Archived' },
+          // Review queue is a local-engine reconciliation surface only.
+          ...(isLocalEngine ? [{ key: 'review', label: reviewCount > 0 ? `Review (${reviewCount})` : 'Review' }] : []),
+        ].map(t => html`
+          <button
+            key=${t.key}
+            class=${'toolbar-toggle' + (archiveMode === t.key ? ' accent' : '')}
+            onClick=${() => { setArchiveMode(t.key); setOffset(0); setSelected(new Set()); setOpenedId(null); }}
+            title=${t.key === 'review' ? 'Companies that disappeared from a non-QFZ source — decide per company' : ''}
+          >${t.label}</button>
+        `)}
+      </div>
     </div>
 
     ${selected.size > 0 ? html`
@@ -286,7 +314,7 @@ export function CompaniesTab({ archivedMode: initialArchived = false, mode = 'lo
             </tr>
           </thead>
           <tbody>
-            ${rows.length === 0 && !loading ? html`<tr><td colSpan="9" class="empty">${archivedMode ? 'No archived companies.' : 'No active companies yet.'}</td></tr>` : null}
+            ${rows.length === 0 && !loading ? html`<tr><td colSpan="9" class="empty">${reviewMode ? 'Nothing to review — no companies have disappeared from a directory.' : archivedMode ? 'No archived companies.' : 'No active companies yet.'}</td></tr>` : null}
             ${rows.map(r => html`
               <tr
                 key=${r.id}

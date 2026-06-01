@@ -95,6 +95,7 @@ router.get('/', async (req, res, next) => {
     const status = req.query.status;
     const isActive = req.query.is_active;
     const archivedQ = req.query.archived;   // 'true' | 'false' | undefined | 'all'
+    const reviewQ = req.query.review;       // 'true' → the Review queue
 
     const where = [];
     const params = [];
@@ -111,8 +112,12 @@ router.get('/', async (req, res, next) => {
       params.push(isActive === 'true');
       where.push(`is_active = $${params.length}`);
     }
-    // archived filter — default is "only show active" (archived=false)
-    if (archivedQ !== 'all') {
+    // Review queue: companies that disappeared from a non-QFZ source and await
+    // an admin decision. Shown regardless of archived state.
+    if (reviewQ === 'true') {
+      where.push(`needs_review = true`);
+    } else if (archivedQ !== 'all') {
+      // archived filter — default is "only show active" (archived=false)
       const wantArchived = archivedQ === 'true';
       params.push(wantArchived);
       where.push(`archived = $${params.length}`);
@@ -152,6 +157,7 @@ router.get('/', async (req, res, next) => {
              stage6_status, stage6_at,
              extra_fields,
              created_at, updated_at, assembled_at, archived,
+             archive_reason, needs_review, review_reason, manual_status_override,
              (SELECT array_agg(DISTINCT cs.source ORDER BY cs.source)
               FROM company_sources cs WHERE cs.company_id = companies.id ${srcFilter}) AS sources,
              (SELECT json_agg(json_build_object('source', cs.source, 'record_id', cs.source_record_id) ORDER BY cs.source)
@@ -471,7 +477,40 @@ router.post('/:id/archive', async (req, res, next) => {
   try {
     const id = Number(req.params.id);
     const archived = req.body?.archived !== false;
-    const result = await query('UPDATE companies SET archived = $1 WHERE id = $2 RETURNING id, archived', [archived, id]);
+    // A manual archive/unarchive is a DELIBERATE admin decision: set the override
+    // flag so automatic status recomputation never reverts it, stamp the reason,
+    // and clear any pending review (the admin has acted).
+    const result = await query(
+      `UPDATE companies
+          SET archived               = $1,
+              manual_status_override = true,
+              archive_reason         = CASE WHEN $1 THEN 'admin' ELSE NULL END,
+              archived_at            = CASE WHEN $1 THEN now() ELSE NULL END,
+              needs_review           = false,
+              review_reason          = NULL
+        WHERE id = $2
+      RETURNING id, archived`,
+      [archived, id],
+    );
+    if (!result.rows.length) return res.status(404).json({ error: 'not_found' });
+    res.json(result.rows[0]);
+  } catch (err) { next(err); }
+});
+
+// POST /api/companies/:id/keep — resolve a review by KEEPING the company as-is.
+// Marks it admin-decided (sticky) and clears the review flag so future uploads
+// won't keep re-flagging the same disappearance.
+router.post('/:id/keep', async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) return res.status(400).json({ error: 'invalid_id' });
+    const result = await query(
+      `UPDATE companies
+          SET needs_review = false, review_reason = NULL, manual_status_override = true
+        WHERE id = $1
+      RETURNING id, is_active, archived`,
+      [id],
+    );
     if (!result.rows.length) return res.status(404).json({ error: 'not_found' });
     res.json(result.rows[0]);
   } catch (err) { next(err); }

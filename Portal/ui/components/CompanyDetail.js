@@ -11,6 +11,19 @@ import { SourceBadge } from './SourceBadge.js';
 import { ContactsList } from './ContactsList.js';
 import { EditableKv } from './EditableKv.js';
 
+// Human labels for the archive/reconciliation reason codes set by the engine.
+const ARCHIVE_REASON_LABEL = {
+  inactive:        'inactive',
+  qfz_disappeared: 'left QFZ',
+  admin:           'by admin',
+  legacy:          'legacy',
+};
+// 'disappeared_from_MOCI' → 'MOCI'
+function REVIEW_REASON_LABEL(reason) {
+  const m = /^disappeared_from_(.+)$/.exec(reason || '');
+  return m ? m[1] : (reason || 'a source');
+}
+
 // Per-field type + editability override map. Default: type='text', editable=true.
 // System fields (timestamps, IDs, JSON aggregates) are explicitly read-only.
 const COMPANY_FIELD_META = {
@@ -293,7 +306,8 @@ export function CompanyDetail({ companyId, onMutated, onDeleted, canHardDelete =
           <div class="detail-status-row">
             ${sources.map(s => html`<${SourceBadge} key=${s.source} source=${s.source} compact=${true} />`)}
             <span class=${'pill ' + (c.is_active ? 'active' : 'inactive')}>${c.status_normalized || (c.is_active ? 'active' : 'inactive')}</span>
-            ${c.archived ? html`<span class="pill" style=${{borderColor:'var(--amber)',color:'var(--amber)'}}>archived</span>` : null}
+            ${c.archived ? html`<span class="pill" style=${{borderColor:'var(--amber)',color:'var(--amber)'}} title=${'Archived' + (c.archive_reason ? ' · ' + (ARCHIVE_REASON_LABEL[c.archive_reason] || c.archive_reason) : '')}>archived${c.archive_reason ? ' · ' + (ARCHIVE_REASON_LABEL[c.archive_reason] || c.archive_reason) : ''}</span>` : null}
+            ${c.needs_review ? html`<span class="pill" style=${{borderColor:'rgb(91 140 255)',color:'rgb(91 140 255)'}} title="Disappeared from a source — needs an admin decision">needs review</span>` : null}
           </div>
         </div>
         <div style=${{gap:'6px', alignSelf:'flex-start', display: isLocalEngine ? 'flex' : 'none'}}>
@@ -345,6 +359,36 @@ export function CompanyDetail({ companyId, onMutated, onDeleted, canHardDelete =
           >Delete permanently</button>` : null}
         </div>
       </div>
+
+      ${isLocalEngine && c.needs_review ? html`
+        <div style=${{
+          margin: '0 0 4px', padding: '12px 14px',
+          background: 'rgba(91,140,255,0.08)',
+          border: '1px solid rgba(91,140,255,0.32)',
+          borderRadius: '10px',
+        }}>
+          <div style=${{ fontSize: '12.5px', fontWeight: 700, color: 'rgb(91 140 255)', marginBottom: '4px' }}>
+            Needs your decision
+          </div>
+          <div style=${{ fontSize: '12px', color: 'var(--text-muted)', lineHeight: 1.5, marginBottom: '10px' }}>
+            This company ${c.review_reason ? `disappeared from ${REVIEW_REASON_LABEL(c.review_reason)}` : 'disappeared from a source'} in the latest upload. It was NOT changed automatically — decide what to do:
+          </div>
+          <div style=${{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+            <button
+              class="linkbtn"
+              style=${{ padding:'5px 12px', borderRadius:'6px', background:'rgb(91 140 255)', border:'1px solid rgb(91 140 255)', color:'#fff', fontSize:'11.5px', fontWeight:600 }}
+              title="Keep this company as-is. It stays active and won't be flagged again."
+              onClick=${async () => {
+                try { await api.keepCompany(c.id); toast('Kept — review cleared'); reload(); onMutated?.(); }
+                catch (err) { toast('Keep failed: ' + err.message, 'error'); }
+              }}
+            >Keep as-is</button>
+            <span style=${{ fontSize:'11px', color:'var(--text-dim)', alignSelf:'center' }}>
+              …or use <strong>Archive</strong> / <strong>Delete permanently</strong> above.
+            </span>
+          </div>
+        </div>
+      ` : null}
 
       <div class="detail-tabs">
         <button class=${tab==='company'?'active':''} onClick=${()=>setTab('company')}>Company</button>

@@ -8,7 +8,7 @@
 import fs from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'url';
-import { withTransaction } from '../db.js';
+import { query, withTransaction } from '../db.js';
 import { MAPPERS } from './mappers.js';
 import { recomputeCompanyStatus } from './recompute_status.js';
 
@@ -30,6 +30,11 @@ const BATCH_SIZE = 200;
 export async function ingestSource(source, jobProgress) {
   if (!MAPPERS[source]) throw new Error('Unknown source: ' + source);
   const file = path.join(DIR_ROOT, LATEST_FILE[source]);
+
+  // Capture a DB-clock run-start BEFORE any upsert. Present rows get
+  // last_seen_at = now() (after this), so afterwards we can tell which links
+  // were NOT refreshed by this upload (last_seen_at < runStart → disappeared).
+  const { rows: [{ now: runStart }] } = await query('SELECT now() AS now');
 
   jobProgress?.(`Reading ${LATEST_FILE[source]} ...`);
   const buf = await fs.readFile(file, 'utf-8');
@@ -61,6 +66,20 @@ export async function ingestSource(source, jobProgress) {
     }
   }
 
+  // Reconcile companies that DISAPPEARED from this upload (present last time,
+  // absent now). QFZ → auto-archive (if not active elsewhere); other sources →
+  // flag for admin review, never auto-delete.
+  jobProgress?.('Reconciling disappearances …');
+  const recon = await reconcileDisappearances(source, runStart);
+  jobProgress?.(`  Disappeared: ${recon.missing.toLocaleString()} · archived ${recon.archived} · flagged for review ${recon.flagged}`);
+
+  // Remember when this source was last ingested (UI/debug).
+  await query(
+    `INSERT INTO settings (key, value) VALUES ($1, $2::jsonb)
+     ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value, updated_at = now()`,
+    [`ingest_last_run_${source}`, JSON.stringify(runStart)],
+  );
+
   return {
     source,
     raw_rows:   rawRows.length,
@@ -68,7 +87,63 @@ export async function ingestSource(source, jobProgress) {
     normalized: normalized.length,
     inserted,
     updated,
+    disappeared: recon.missing,
+    archived:    recon.archived,
+    flagged_for_review: recon.flagged,
   };
+}
+
+// After a source's upload is applied, find links of that source NOT refreshed by
+// this run and act per policy:
+//   • QFZ: the listing is gone → recompute (archives the company if no other
+//     current source still lists it active). reason 'qfz_disappeared'.
+//   • everything else: do NOT auto-archive/delete — set needs_review so the admin
+//     decides per company (keep / archive / remove). Status quo is preserved.
+async function reconcileDisappearances(source, runStart) {
+  // 1. Mark which links are CURRENT for this source (present in this upload).
+  await query(
+    `UPDATE company_sources SET is_current = (last_seen_at >= $2) WHERE source = $1`,
+    [source, runStart],
+  );
+
+  // 1b. A company that REAPPEARED in this source clears its prior review flag.
+  await query(
+    `UPDATE companies c
+        SET needs_review = false, review_reason = NULL
+      WHERE c.review_reason = $2
+        AND EXISTS (
+          SELECT 1 FROM company_sources cs
+           WHERE cs.company_id = c.id AND cs.source = $1 AND cs.is_current = true
+        )`,
+    [source, 'disappeared_from_' + source],
+  );
+
+  // 2. Companies whose link to THIS source just went missing.
+  const missing = await query(
+    `SELECT DISTINCT company_id FROM company_sources WHERE source = $1 AND is_current = false`,
+    [source],
+  );
+
+  let archived = 0, flagged = 0;
+  for (const row of missing.rows) {
+    const cid = row.company_id;
+    if (source === 'QFZ') {
+      const res = await recomputeCompanyStatus(cid);
+      if (res && res.archived) archived++;
+    } else {
+      // Don't touch is_active/archived — just surface it to the admin. Skip rows
+      // the admin has already taken ownership of (manual_status_override).
+      const r = await query(
+        `UPDATE companies
+            SET needs_review = true, review_reason = $2
+          WHERE id = $1 AND manual_status_override = false AND needs_review = false
+          RETURNING id`,
+        [cid, 'disappeared_from_' + source],
+      );
+      if (r.rows.length) flagged++;
+    }
+  }
+  return { source, missing: missing.rows.length, archived, flagged };
 }
 
 function collectRows(source, json) {
