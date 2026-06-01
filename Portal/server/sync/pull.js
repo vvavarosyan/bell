@@ -131,6 +131,67 @@ function split(rows) {
   return { created, enriched };
 }
 
+// Absorb prod-discovered approval candidates into the LOCAL holding pen. We
+// dedupe by NATURAL key (linkedin → name_normalized → reg) and assign a fresh
+// LOCAL id (candidates aren't id-mirrored), so re-discovery on prod never
+// duplicates a candidate locally, and a local approve/reject decision is never
+// overwritten. Returns the prod ids we absorbed so the caller can drain them
+// from prod (non-displayed companies must not accumulate in the online DB).
+async function absorbCandidates(rows) {
+  let inserted = 0;
+  const absorbedProdIds = [];
+  for (const c of rows) {
+    absorbedProdIds.push(Number(c.id));
+    // Already known locally? (by linkedin / name_normalized / reg)
+    let match = null;
+    if (c.linkedin_url) {
+      const r = await query(`SELECT id FROM research_candidates WHERE linkedin_url = $1 LIMIT 1`, [c.linkedin_url]);
+      if (r.rows.length) match = r.rows[0];
+    }
+    if (!match && c.name_normalized) {
+      const r = await query(`SELECT id FROM research_candidates WHERE name_normalized = $1 LIMIT 1`, [c.name_normalized]);
+      if (r.rows.length) match = r.rows[0];
+    }
+    if (!match && c.primary_registration_no) {
+      const r = await query(`SELECT id FROM research_candidates WHERE primary_registration_no = $1 LIMIT 1`, [c.primary_registration_no]);
+      if (r.rows.length) match = r.rows[0];
+    }
+    if (match) continue;   // already in the local pen — keep local decision/state
+
+    try {
+      await query(`
+        INSERT INTO research_candidates
+          (kind, name, name_normalized, country, primary_registration_no, website,
+           linkedin_url, city, industry, relation_to_target, raw,
+           discovered_from_job_id, discovered_at, notes)
+        VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb,$12,$13,$14)
+      `, [
+        ['pending','non_qatar','rejected','approved'].includes(c.kind) ? c.kind : 'pending',
+        c.name, c.name_normalized, c.country, c.primary_registration_no, c.website,
+        c.linkedin_url, c.city, c.industry, c.relation_to_target,
+        JSON.stringify(c.raw || {}), c.discovered_from_job_id, c.discovered_at || new Date().toISOString(),
+        c.notes || null,
+      ]);
+      inserted++;
+    } catch (err) {
+      console.warn(`[pull] candidate insert failed (prod id=${c.id}): ${err.message}`);
+    }
+  }
+  return { inserted, absorbedProdIds };
+}
+
+async function drainProdCandidates(base, token, ids) {
+  if (!ids.length) return 0;
+  const res = await fetch(base + '/api/sync/research-candidates-drain', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ ids }),
+  });
+  if (!res.ok) throw new Error(`drain HTTP ${res.status}`);
+  const body = await res.json().catch(() => ({}));
+  return body.deleted || 0;
+}
+
 /**
  * Pull research-originated entities from prod into local. Returns a summary.
  * Safe to call with no token / unreachable prod — it just reports an error and
@@ -161,10 +222,18 @@ export async function runPull() {
     companies_enriched: await mergeResearchDerived('companies', companies.enriched),
     people_created:     await upsertFullRows('people', people.created),
     people_enriched:    await mergeResearchDerived('people', people.enriched),
-    // Approval candidates: insert new ones; NEVER overwrite a candidate the local
-    // admin has already decided on (approve/reject) — hence DO NOTHING on id.
-    candidates:         await upsertFullRows('research_candidates', body.candidates || [], 'ignore'),
   };
+
+  // Approval candidates: absorb into the LOCAL pen (dedupe by natural key), then
+  // DRAIN them from prod so non-displayed companies never accumulate online.
+  const cand = await absorbCandidates(body.candidates || []);
+  summary.candidates_absorbed = cand.inserted;
+  try {
+    summary.candidates_drained = await drainProdCandidates(base, token, cand.absorbedProdIds);
+  } catch (err) {
+    summary.candidates_drained = 0;
+    summary.candidate_drain_error = err.message;
+  }
 
   // Advance the pull watermark only after a clean apply, so a mid-pull failure
   // re-pulls the same window next time (the applies are idempotent).
