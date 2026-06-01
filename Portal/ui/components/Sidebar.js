@@ -46,6 +46,7 @@ export const NAV_SECTIONS = [
       // Platform-admin-only (Bell.qa internal staff). Hidden on app.bell.qa
       // for every customer; visible on admin.bell.qa.
       { id: 'sources',     label: 'Sources',     icon: 'sources',  placeholder: false, visibility: ['platform_admin'] },
+      { id: 'approvals',   label: 'Research Approvals', icon: 'research', placeholder: false, visibility: ['platform_admin'] },
       { id: 'recent-jobs', label: 'Recent Jobs', icon: 'history',  placeholder: false, visibility: ['platform_admin'] },
       { id: 'sync',        label: 'Sync to Bell.qa', icon: 'sync', placeholder: false, visibility: ['platform_admin'] },
       { id: 'settings',    label: 'Settings',    icon: 'gear',     placeholder: false, visibility: 'all' },
@@ -67,7 +68,7 @@ export const ADMIN_ONLY_NAV_IDS = new Set([
 // app.bell.qa AND admin.bell.qa to avoid dead 403 links. Mirrors the 'local'
 // tier in server/lib/capabilities.js.
 export const LOCAL_ENGINE_NAV_IDS = new Set([
-  'sources', 'recent-jobs', 'sync', 'dedup-queue',
+  'sources', 'recent-jobs', 'sync', 'dedup-queue', 'approvals',
 ]);
 
 /** True if an item should be shown to a user with the given role, in this mode. */

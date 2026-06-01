@@ -84,7 +84,18 @@ export async function collectResearchPull(since) {
     [since]
   );
 
-  return { since, watermark, companies: companies.rows, people: people.rows };
+  // Research approval candidates discovered/updated on prod since the watermark.
+  // The local engine pulls these so the admin reviews ALL discoveries in one
+  // place. (Table may not exist on a not-yet-migrated prod — tolerate that.)
+  let candidates = { rows: [] };
+  try {
+    candidates = await query(
+      `SELECT * FROM research_candidates WHERE updated_at > $1`,
+      [since]
+    );
+  } catch { /* research_candidates not present yet */ }
+
+  return { since, watermark, companies: companies.rows, people: people.rows, candidates: candidates.rows };
 }
 
 // ---- prod column metadata (cached; schema is stable within a process) -------

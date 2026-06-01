@@ -60,9 +60,7 @@ async function processCompany(client, jobId, c) {
   if (!name) return audit(client, jobId, 'company', null, 'skipped', null, 'missing name');
 
   const country = String(c?.country || 'Qatar').trim();
-  if (country && country.toLowerCase() !== 'qatar') {
-    return audit(client, jobId, 'company', null, 'skipped', null, 'non-Qatar entity');
-  }
+  const isQatar = !country || country.toLowerCase() === 'qatar';
 
   const normalized = normalizeName(name);
   const linkedinUrl    = clean(c.linkedin_url);
@@ -82,6 +80,16 @@ async function processCompany(client, jobId, c) {
   if (!existing && registrationNo) {
     const r = await client.query(`SELECT id, extra_fields FROM companies WHERE primary_registration_no = $1 LIMIT 1`, [registrationNo]);
     if (r.rows.length) existing = r.rows[0];
+  }
+
+  // NEW discovery (not already a live company) → goes to the approval holding pen
+  // instead of straight into `companies`. Qatar → pending; non-Qatar → kept in
+  // the admin-only international store. Dedupe against prior candidates so a
+  // rejected / non-Qatar / already-queued company isn't re-added.
+  if (!existing) {
+    return processCandidate(client, jobId, c, {
+      name, normalized, linkedinUrl, website, registrationNo, country, isQatar,
+    });
   }
 
   if (existing) {
@@ -107,52 +115,65 @@ async function processCompany(client, jobId, c) {
       'merged into extra_fields.research_derived');
   }
 
-  // CREATE: new Qatar company seeded by research. Goes through normal
-  // enrichment pipeline from Stage 1 onward. On prod, the id comes from the
-  // high band (research_entity_id_seq) so it can be pulled back to local
-  // without colliding with local-originated ids; on local, the normal sequence.
-  try {
-    const idExpr = PROD_ORIGIN ? `nextval('research_entity_id_seq'),` : '';
-    const r = await client.query(`
-      INSERT INTO companies (
-        ${PROD_ORIGIN ? 'id,' : ''}
-        name, name_normalized,
-        is_active, status_normalized,
-        primary_registration_no, website, linkedin_url, city, country,
-        industry,
-        extra_fields
-      ) VALUES (${idExpr}$1,$2,true,'unknown',$3,$4,$5,$6,$7,$8,$9::jsonb)
-      RETURNING id
-    `, [
-      name, normalized,
-      registrationNo, website, linkedinUrl,
-      clean(c.city) || 'Doha', 'Qatar',
-      clean(c.industry),
-      JSON.stringify({
-        seed_source: 'research',
-        seed_job_id: jobId,
-        relation_to_target: clean(c.relation_to_target),
-      }),
-    ]);
-    const companyId = Number(r.rows[0].id);
+  // (unreachable — !existing returns via processCandidate above)
+}
 
-    // Provenance row — same shape ingest runner uses
-    await client.query(`
-      INSERT INTO company_sources (company_id, source, source_record_id, source_url, raw_payload)
-      VALUES ($1, 'research', $2, NULL, $3::jsonb)
-      ON CONFLICT DO NOTHING
-    `, [companyId, `research:job-${jobId}:` + (normalized || name).slice(0, 60), JSON.stringify(c)]);
+// A newly-discovered company → the approval holding pen (research_candidates),
+// NOT the live companies table. Qatar → 'pending' (awaits approval); non-Qatar →
+// 'non_qatar' (kept admin-only for future expansion). If a matching candidate
+// already exists we DON'T duplicate or re-open a decided one (remember rejection).
+async function processCandidate(client, jobId, c, f) {
+  const { name, normalized, linkedinUrl, website, registrationNo, country, isQatar } = f;
 
-    return audit(client, jobId, 'company', companyId, 'created',
-      { name, registration_no: registrationNo, website, linkedin_url: linkedinUrl, city: clean(c.city) },
-      null);
-  } catch (err) {
-    // Unique violation on linkedin_url race — treat as a soft enrichment
-    if (err && err.code === '23505') {
-      return audit(client, jobId, 'company', null, 'skipped', null, 'unique violation: ' + err.constraint);
-    }
-    return audit(client, jobId, 'company', null, 'skipped', null, 'insert error: ' + err.message);
+  // Dedupe against existing candidates (linkedin → name_normalized → reg).
+  let cand = null;
+  if (linkedinUrl) {
+    const r = await client.query(`SELECT id, kind FROM research_candidates WHERE linkedin_url = $1 LIMIT 1`, [linkedinUrl]);
+    if (r.rows.length) cand = r.rows[0];
   }
+  if (!cand && normalized) {
+    const r = await client.query(`SELECT id, kind FROM research_candidates WHERE name_normalized = $1 LIMIT 1`, [normalized]);
+    if (r.rows.length) cand = r.rows[0];
+  }
+  if (!cand && registrationNo) {
+    const r = await client.query(`SELECT id, kind FROM research_candidates WHERE primary_registration_no = $1 LIMIT 1`, [registrationNo]);
+    if (r.rows.length) cand = r.rows[0];
+  }
+
+  if (cand) {
+    // Already known. Don't re-open a decided one; just refresh the raw snapshot
+    // on a still-pending/non-Qatar candidate so the queue shows latest findings.
+    if (cand.kind === 'pending' || cand.kind === 'non_qatar') {
+      await client.query(
+        `UPDATE research_candidates SET raw = $2::jsonb, updated_at = now() WHERE id = $1`,
+        [cand.id, JSON.stringify(c)],
+      );
+    }
+    return audit(client, jobId, 'company', null, 'skipped', null,
+      `already a ${cand.kind} candidate (#${cand.id})`);
+  }
+
+  // Insert a fresh candidate. On prod, id comes from the high band so it can be
+  // pulled to local without colliding with local-originated candidate ids.
+  const kind = isQatar ? 'pending' : 'non_qatar';
+  const idExpr = PROD_ORIGIN ? `nextval('research_entity_id_seq'),` : '';
+  const r = await client.query(`
+    INSERT INTO research_candidates (
+      ${PROD_ORIGIN ? 'id,' : ''}
+      kind, name, name_normalized, country,
+      primary_registration_no, website, linkedin_url, city, industry,
+      relation_to_target, raw, discovered_from_job_id
+    ) VALUES (${idExpr}$1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11::jsonb,$12)
+    RETURNING id
+  `, [
+    kind, name, normalized, country || (isQatar ? 'Qatar' : null),
+    registrationNo, website, linkedinUrl, clean(c.city), clean(c.industry),
+    clean(c.relation_to_target), JSON.stringify(c), jobId,
+  ]);
+  const candId = Number(r.rows[0].id);
+  return audit(client, jobId, 'company', null, 'skipped',
+    { name, registration_no: registrationNo, website, linkedin_url: linkedinUrl, city: clean(c.city) },
+    isQatar ? `queued for approval (pending #${candId})` : `stored — non-Qatar (#${candId})`);
 }
 
 // ---------------------------------------------------------------------------
