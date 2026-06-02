@@ -62,7 +62,7 @@ Citations are mandatory. Use [1], [2], [3] inline in body_markdown — the brack
 
 Structured facts — in addition to the prose sections, populate the financials, shareholders, and partnerships arrays with any concrete figures and relationships you find about ${name} (revenue/valuation/funding, owners and their stakes, JV/partner/supplier/investor relationships). Leave an array empty if the evidence isn't there — do not invent.
 
-Snowball — fill derived_companies and derived_people with OTHER entities you encountered while researching: subsidiaries, parents, JV partners, suppliers, customers, competitors, board members, executives, investors. Include entities from ANY country, not only Qatar — for each company set its "country" so it can be classified. For each entity set "relation" describing how it connects to the target. Do not include "${name}" itself.
+Snowball — fill derived_companies and derived_people with OTHER entities you encountered while researching: subsidiaries, parents, JV partners, suppliers, customers, competitors, board members, executives, investors. Include entities from ANY country, not only Qatar — for each company set its "country" so it can be classified. For each entity set "relation" describing how it connects to the target. Do not include "${name}" itself. IMPORTANT: every company you name as a partner, shareholder, subsidiary, parent, or competitor (including those in the partnerships/shareholders arrays) MUST also appear here in derived_companies with its country, so Bell can add and classify it.
 
 Write in clear analytical English. No speculation; if uncertain, say so.`;
 }

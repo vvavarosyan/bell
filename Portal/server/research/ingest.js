@@ -306,22 +306,61 @@ export async function ingestCompanyFacts(client, jobId, facts) {
     ).then(() => sh++).catch((e) => console.warn('[research] shareholder insert:', e.message));
   }
 
+  // Target company name — needed to write the RECIPROCAL partnership row on a
+  // partner that resolves to a real company in Bell.
+  const tname = (await client.query(`SELECT name FROM companies WHERE id = $1`, [companyId])).rows[0]?.name || null;
+
   for (const p of (Array.isArray(facts.partnerships) ? facts.partnerships : [])) {
     const partner = clean(p.partner_name);
     if (!partner) continue;
     const rel = clean(p.relationship);
-    const exists = await client.query(
-      `SELECT 1 FROM company_partnerships WHERE company_id=$1 AND lower(partner_name)=lower($2) AND coalesce(lower(relationship),'')=coalesce(lower($3),'') LIMIT 1`,
-      [companyId, partner, rel]);
-    if (exists.rows.length) continue;
-    await client.query(
-      `INSERT INTO company_partnerships (${idCol}company_id, partner_name, relationship, description, since, source)
-       VALUES (${idVal}$1,$2,$3,$4,$5,$6)`,
-      [companyId, partner, rel, clean(p.description), clean(p.since), source]
-    ).then(() => pa++).catch((e) => console.warn('[research] partnership insert:', e.message));
+    // Resolve the partner to an EXISTING Bell company (if any) so the two
+    // records actually reference each other. New partners surface as candidates
+    // via derived_companies and get cross-linked when approved (see approve route).
+    const partnerCompanyId = await resolveCompanyId(client, partner);
+
+    pa += await upsertPartnership(client, {
+      companyId, partnerName: partner, partnerCompanyId, rel,
+      description: clean(p.description), since: clean(p.since), source, idCol, idVal,
+    });
+
+    // Reciprocal — the partner company now shows the relationship back to the target.
+    if (partnerCompanyId && tname) {
+      await upsertPartnership(client, {
+        companyId: partnerCompanyId, partnerName: tname, partnerCompanyId: companyId, rel,
+        description: clean(p.description), since: clean(p.since), source, idCol, idVal,
+      });
+    }
   }
 
   return { financials: fin, shareholders: sh, partnerships: pa };
+}
+
+// Insert one partnership row (deduped on company_id + partner_name + relationship).
+// If the row already exists but we've since learned the partner's company id,
+// backfill it. Returns 1 if a new row was inserted, else 0.
+async function upsertPartnership(client, o) {
+  const exists = await client.query(
+    `SELECT 1 FROM company_partnerships
+      WHERE company_id=$1 AND lower(partner_name)=lower($2)
+        AND coalesce(lower(relationship),'')=coalesce(lower($3),'') LIMIT 1`,
+    [o.companyId, o.partnerName, o.rel]);
+  if (exists.rows.length) {
+    if (o.partnerCompanyId) {
+      await client.query(
+        `UPDATE company_partnerships SET partner_company_id=$3, updated_at=now()
+          WHERE company_id=$1 AND lower(partner_name)=lower($2) AND partner_company_id IS NULL`,
+        [o.companyId, o.partnerName, o.partnerCompanyId]);
+    }
+    return 0;
+  }
+  try {
+    await client.query(
+      `INSERT INTO company_partnerships (${o.idCol}company_id, partner_name, partner_company_id, relationship, description, since, source)
+       VALUES (${o.idVal}$1,$2,$3,$4,$5,$6,$7)`,
+      [o.companyId, o.partnerName, o.partnerCompanyId || null, o.rel, o.description, o.since, o.source]);
+    return 1;
+  } catch (e) { console.warn('[research] partnership insert:', e.message); return 0; }
 }
 
 // Best-effort numeric parse from a reported string ("QAR 1.2 billion" → 1.2e9,
