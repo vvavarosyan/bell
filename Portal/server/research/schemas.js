@@ -58,12 +58,13 @@ export const companySchema = {
     // for the agent to fill). Both fields are optional.
     derived_companies: {
       type: 'array',
-      description: 'Other Qatar-based companies you discovered that connect to the target — subsidiaries, parents, JV partners, suppliers, competitors. Do not include the target itself.',
+      description: 'Other companies you discovered that connect to the target — subsidiaries, parents, JV partners, suppliers, customers, competitors. Include companies from ANY country (not only Qatar); Bell classifies them by country. Do not include the target itself.',
       items: {
         type: 'object',
         required: ['name'],
         properties: {
           name:             { type: 'string' },
+          country:          { type: 'string', description: 'Country the company is based in (e.g. Qatar, UAE, USA). Important — Bell uses this to classify Qatar vs international.' },
           website:          { type: 'string' },
           linkedin_url:     { type: 'string' },
           registration_no:  { type: 'string' },

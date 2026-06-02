@@ -86,6 +86,10 @@ async function processCompany(client, jobId, c) {
   // instead of straight into `companies`. Qatar → pending; non-Qatar → kept in
   // the admin-only international store. Dedupe against prior candidates so a
   // rejected / non-Qatar / already-queued company isn't re-added.
+  // Schema field is `relation`; older payloads / callers used `relation_to_target`.
+  // Accept either so the relationship to the target is never silently dropped.
+  c.relation_to_target = clean(c.relation) || clean(c.relation_to_target);
+
   if (!existing) {
     return processCandidate(client, jobId, c, {
       name, normalized, linkedinUrl, website, registrationNo, country, isQatar,
@@ -182,6 +186,9 @@ async function processCandidate(client, jobId, c, f) {
 async function processPerson(client, jobId, p) {
   const fullName = String(p?.full_name || '').trim();
   if (!fullName) return audit(client, jobId, 'person', null, 'skipped', null, 'missing full_name');
+
+  // Schema field is `relation`; older payloads used `role_at_target`. Accept either.
+  p.role_at_target = clean(p.relation) || clean(p.role_at_target);
 
   const linkedinUrl = clean(p.linkedin_url);
   // people.linkedin_url is UNIQUE NOT NULL — without it we cannot insert.
