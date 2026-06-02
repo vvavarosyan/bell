@@ -200,13 +200,43 @@ async function absorbPersonLinks(rows) {
         [l.person_id, l.company_id]
       );
       if (dup.rows.length) continue;
+      // Preserve the prod (high-band) id so a later local push re-asserts the
+      // SAME prod row instead of colliding with a local low id.
       await query(`
-        INSERT INTO person_companies (person_id, company_id, title, is_current, source_stage, raw_payload)
-        VALUES ($1, $2, $3, COALESCE($4, true), COALESCE($5, 0), $6::jsonb)
-      `, [l.person_id, l.company_id, l.title, l.is_current, l.source_stage, JSON.stringify(l.raw_payload || {})]);
+        INSERT INTO person_companies (id, person_id, company_id, title, is_current, source_stage, raw_payload)
+        VALUES ($1, $2, $3, $4, COALESCE($5, true), COALESCE($6, 0), $7::jsonb)
+        ON CONFLICT (id) DO NOTHING
+      `, [l.id, l.person_id, l.company_id, l.title, l.is_current, l.source_stage, JSON.stringify(l.raw_payload || {})]);
       inserted++;
     } catch (err) {
       console.warn(`[pull] person_link insert failed (${l.person_id}->${l.company_id}): ${err.message}`);
+    }
+  }
+  return inserted;
+}
+
+// Absorb research-created company facts into local, preserving the prod
+// (high-band) id so a later push re-asserts the same prod row. Skips rows whose
+// company isn't present locally (FK safety). ON CONFLICT (id) handles re-pulls.
+async function absorbFacts(table, rows) {
+  if (!rows.length) return 0;
+  const meta = await getLocalColumnMeta(table);
+  let inserted = 0;
+  for (const row of rows) {
+    try {
+      const has = await query(`SELECT 1 FROM companies WHERE id = $1`, [row.company_id]);
+      if (!has.rows.length) continue;
+      const cols = Object.keys(row).filter((k) => meta[k]);
+      if (!cols.includes('id')) continue;
+      const vals = cols.map((c) => (row[c] != null && isJsonb(meta[c])) ? JSON.stringify(row[c]) : row[c]);
+      const placeholders = cols.map((_, i) => `$${i + 1}`).join(', ');
+      await query(
+        `INSERT INTO ${q(table)} (${cols.map(q).join(', ')}) VALUES (${placeholders}) ON CONFLICT (id) DO NOTHING`,
+        vals
+      );
+      inserted++;
+    } catch (err) {
+      console.warn(`[pull] ${table} insert failed (id=${row.id}): ${err.message}`);
     }
   }
   return inserted;
@@ -258,6 +288,12 @@ export async function runPull() {
 
   // Research-created employment links → keep people connected to companies locally.
   summary.person_links = await absorbPersonLinks(body.person_links || []);
+
+  // Rich research facts (financials / shareholders / partnerships).
+  const f = body.facts || {};
+  summary.financials   = await absorbFacts('company_financials',   f.company_financials   || []);
+  summary.shareholders = await absorbFacts('company_shareholders', f.company_shareholders || []);
+  summary.partnerships = await absorbFacts('company_partnerships', f.company_partnerships || []);
 
   // Approval candidates: absorb into the LOCAL pen (dedupe by natural key), then
   // DRAIN them from prod so non-displayed companies never accumulate online.

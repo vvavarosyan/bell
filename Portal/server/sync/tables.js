@@ -30,6 +30,10 @@ export const MIRROR_TABLES = [
   // are mirrored first so the FK ids resolve.
   { name: 'company_contacts', watermark: 'updated_at'  },
   { name: 'person_contacts',  watermark: 'updated_at'  },
+  // Rich research data — structured facts attached to companies.
+  { name: 'company_financials',   watermark: 'updated_at' },
+  { name: 'company_shareholders', watermark: 'updated_at' },
+  { name: 'company_partnerships', watermark: 'updated_at' },
 ];
 
 export const MIRROR_TABLE_NAMES = new Set(MIRROR_TABLES.map((t) => t.name));

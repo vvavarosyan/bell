@@ -54,6 +54,50 @@ export const companySchema = {
         },
       },
     },
+    // Structured facts about the TARGET company (optional — fill what the
+    // evidence supports). Kept flat with minimal required fields so Spark
+    // doesn't bail to data:null. Bell stores these as queryable rows.
+    financials: {
+      type: 'array',
+      description: 'Financial facts about the target: revenue, net profit, valuation, funding raised, assets, employee count, etc. One entry per figure.',
+      items: {
+        type: 'object',
+        required: ['metric'],
+        properties: {
+          metric:   { type: 'string', description: 'e.g. revenue, net_profit, valuation, funding_raised, assets, employees.' },
+          value:    { type: 'string', description: 'The figure as reported, e.g. "QAR 1.2 billion".' },
+          currency: { type: 'string' },
+          period:   { type: 'string', description: 'e.g. FY2023, 2024-Q1.' },
+        },
+      },
+    },
+    shareholders: {
+      type: 'array',
+      description: 'Known shareholders / owners of the target and their stake.',
+      items: {
+        type: 'object',
+        required: ['holder_name'],
+        properties: {
+          holder_name: { type: 'string' },
+          holder_type: { type: 'string', description: 'person, company, government, fund, other.' },
+          stake:       { type: 'string', description: 'Ownership stake as reported, e.g. "30%".' },
+        },
+      },
+    },
+    partnerships: {
+      type: 'array',
+      description: 'Partnerships, JVs, major suppliers/customers, or investor relationships of the target.',
+      items: {
+        type: 'object',
+        required: ['partner_name'],
+        properties: {
+          partner_name: { type: 'string' },
+          relationship: { type: 'string', description: 'partner, jv, supplier, customer, investor, subsidiary, parent.' },
+          description:  { type: 'string' },
+          since:        { type: 'string' },
+        },
+      },
+    },
     // Flat at the top level (was nested in derived_entities — flatter is easier
     // for the agent to fill). Both fields are optional.
     derived_companies: {

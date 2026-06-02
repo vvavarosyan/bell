@@ -16,7 +16,7 @@ import { agent, agentStatus } from '../enrichment/clients/firecrawl.js';
 import { schemaFor } from './schemas.js';
 import { buildPrompt, buildAnchorUrls } from './prompts.js';
 import { persistReport } from './parser.js';
-import { ingestDerivedEntities } from './ingest.js';
+import { ingestDerivedEntities, ingestCompanyFacts } from './ingest.js';
 
 // Soft estimate so the UI can show "ETA ~X min". Firecrawl Agent typically
 // completes in 2-5 minutes; we round to 4.
@@ -197,6 +197,7 @@ export async function advanceJob(jobId) {
     const persisted = await withTransaction(async (client) => {
       const result = await persistReport(client, jobId, agentResp.data);
       const snowball = await ingestDerivedEntities(client, jobId, result.derived_entities);
+      const facts = await ingestCompanyFacts(client, jobId, result.facts);
 
       // Update job counters + status
       await client.query(`
@@ -213,9 +214,9 @@ export async function advanceJob(jobId) {
         result.source_count,
         result.section_count,
         result.citation_count,
-        JSON.stringify({ completed_at: new Date().toISOString(), snowball }),
+        JSON.stringify({ completed_at: new Date().toISOString(), snowball, facts }),
       ]);
-      return { ...result, snowball };
+      return { ...result, snowball, facts };
     });
     return { id: jobId, status: 'ready', ...persisted };
   } catch (err) {
