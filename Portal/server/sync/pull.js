@@ -180,6 +180,38 @@ async function absorbCandidates(rows) {
   return { inserted, absorbedProdIds };
 }
 
+// Absorb research-created employment links into local, keyed by the natural
+// (person_id, company_id) pair so re-pulls don't duplicate. The link's ids
+// reference mirrored entities, but we skip any whose person or company isn't
+// present locally yet (FK safety).
+async function absorbPersonLinks(rows) {
+  let inserted = 0;
+  for (const l of rows) {
+    try {
+      const ok = await query(
+        `SELECT
+            EXISTS(SELECT 1 FROM people    WHERE id = $1) AS has_person,
+            EXISTS(SELECT 1 FROM companies WHERE id = $2) AS has_company`,
+        [l.person_id, l.company_id]
+      );
+      if (!ok.rows[0].has_person || !ok.rows[0].has_company) continue;
+      const dup = await query(
+        `SELECT 1 FROM person_companies WHERE person_id = $1 AND company_id = $2 LIMIT 1`,
+        [l.person_id, l.company_id]
+      );
+      if (dup.rows.length) continue;
+      await query(`
+        INSERT INTO person_companies (person_id, company_id, title, is_current, source_stage, raw_payload)
+        VALUES ($1, $2, $3, COALESCE($4, true), COALESCE($5, 0), $6::jsonb)
+      `, [l.person_id, l.company_id, l.title, l.is_current, l.source_stage, JSON.stringify(l.raw_payload || {})]);
+      inserted++;
+    } catch (err) {
+      console.warn(`[pull] person_link insert failed (${l.person_id}->${l.company_id}): ${err.message}`);
+    }
+  }
+  return inserted;
+}
+
 async function drainProdCandidates(base, token, ids) {
   if (!ids.length) return 0;
   const res = await fetch(base + '/api/sync/research-candidates-drain', {
@@ -223,6 +255,9 @@ export async function runPull() {
     people_created:     await upsertFullRows('people', people.created),
     people_enriched:    await mergeResearchDerived('people', people.enriched),
   };
+
+  // Research-created employment links → keep people connected to companies locally.
+  summary.person_links = await absorbPersonLinks(body.person_links || []);
 
   // Approval candidates: absorb into the LOCAL pen (dedupe by natural key), then
   // DRAIN them from prod so non-displayed companies never accumulate online.
