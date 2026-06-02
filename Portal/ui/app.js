@@ -27,11 +27,13 @@ import { ResearchApprovalsTab } from './components/ResearchApprovalsTab.js';
 import { DeepDataTab }   from './components/DeepDataTab.js';
 import { SyncTab }       from './components/SyncTab.js';
 import { MarketFeedTab } from './components/MarketFeedTab.js';
+import { CrmTab }        from './components/CrmTab.js';
 
 // Maps a sidebar nav id to a renderable view. Items not listed here fall back
 // to a ComingSoon placeholder with the item's label.
 const VIEWS = {
   'market-feed': { Component: MarketFeedTab },
+  'crm':         { Component: CrmTab },
   'companies':   { Component: CompaniesTab },
   'people':      { Component: PeopleTab },
   'jobs':        { Component: JobsTab },

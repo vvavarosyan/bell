@@ -129,6 +129,17 @@ export const api = {
   setResearchFeedOptout:  (id, optout) => request(`/api/research/jobs/${id}/feed-optout`, { method: 'POST', body: JSON.stringify({ optout }) }),
   pollResearchJob:        (id) => request(`/api/research/jobs/${id}/poll`, { method: 'POST', body: '{}' }),
 
+  // CRM (per-tenant action layer)
+  crmStats:               () => request('/api/crm/stats'),
+  crmRecords:             (q = {}) => request('/api/crm/records?' + new URLSearchParams(q)),
+  crmRecord:              (id) => request('/api/crm/records/' + id),
+  crmAddRecord:           (entity_type, entity_id) => request('/api/crm/records', { method: 'POST', body: JSON.stringify({ entity_type, entity_id }) }),
+  crmUpdateRecord:        (id, body) => request('/api/crm/records/' + id, { method: 'PATCH', body: JSON.stringify(body) }),
+  crmAddNote:             (id, body) => request(`/api/crm/records/${id}/notes`, { method: 'POST', body: JSON.stringify({ body }) }),
+  crmAddTask:             (id, body) => request(`/api/crm/records/${id}/tasks`, { method: 'POST', body: JSON.stringify(body) }),
+  crmTasks:               (q = {}) => request('/api/crm/tasks?' + new URLSearchParams(q)),
+  crmUpdateTask:          (id, body) => request('/api/crm/tasks/' + id, { method: 'PATCH', body: JSON.stringify(body) }),
+
   // Deep Data (Qatar Open Data)
   openDataStats:          () => request('/api/open-data/stats'),
   openDataDatasets:       (q = {}) => request('/api/open-data/datasets?' + new URLSearchParams(q)),
