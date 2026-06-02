@@ -1,3 +1,4 @@
+// redeploy nonce: 2026-06-02 (re-trigger build after Railway registry-push hiccup on #39)
 /** @type {import('next').NextConfig} */
 const nextConfig = {
   reactStrictMode: true,

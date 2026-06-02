@@ -1,5 +1,6 @@
 // Bell Data Intelligence — Portal HTTP server.
 // Serves the UI from ../ui/ and the JSON API under /api/*.
+// redeploy nonce: 2026-06-02 (re-trigger build after Railway registry-push hiccup on #39)
 
 // Safety net: never let an unhandled promise rejection or uncaught exception
 // crash the Portal. Node 22+ kills the process on unhandled rejections by
