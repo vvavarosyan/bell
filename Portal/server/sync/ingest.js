@@ -110,12 +110,26 @@ export async function collectResearchPull(since) {
     );
   }
 
+  // Rich research facts created on prod since the watermark (provenance
+  // source='research:%'). High-band ids, so they pull back without collision.
+  const facts = {};
+  for (const tbl of ['company_financials', 'company_shareholders', 'company_partnerships']) {
+    try {
+      const r = await query(
+        `SELECT * FROM ${tbl} WHERE source LIKE 'research:%' AND created_at > $1`,
+        [since]
+      );
+      facts[tbl] = r.rows;
+    } catch { facts[tbl] = []; }
+  }
+
   return {
     since, watermark,
     companies: companies.rows,
     people: people.rows,
     candidates: candidates.rows,
     person_links: personLinks.rows,
+    facts,
   };
 }
 

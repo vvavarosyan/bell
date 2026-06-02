@@ -283,6 +283,7 @@ export function CompanyDetail({ companyId, onMutated, onDeleted, canHardDelete =
   const extra = c.extra_fields || {};
   const sources = data.sources || [];
   const needsReveal = isUser && c.revealed_by_tenant === false;
+  const intelCount = (data.financials?.length || 0) + (data.shareholders?.length || 0) + (data.partnerships?.length || 0);
 
   const revealContacts = async () => {
     try {
@@ -393,12 +394,14 @@ export function CompanyDetail({ companyId, onMutated, onDeleted, canHardDelete =
       <div class="detail-tabs">
         <button class=${tab==='company'?'active':''} onClick=${()=>setTab('company')}>Company</button>
         <button class=${tab==='people'?'active':''}  onClick=${()=>setTab('people')}>People (${data.people.length})</button>
+        <button class=${tab==='intel'?'active':''}   onClick=${()=>setTab('intel')}>Intel${intelCount ? ` (${intelCount})` : ''}</button>
         <button class=${tab==='legal'?'active':''}   onClick=${()=>setTab('legal')}>Legal (${sources.length})</button>
       </div>
 
       <div class="detail-body">
         ${tab === 'company' ? html`<${CompanyTab} company=${c} extra=${extra} similar=${similar} contacts=${data.contacts || []} onReload=${reload} needsReveal=${needsReveal} onReveal=${revealContacts} isUser=${isUser} isLocalEngine=${isLocalEngine} />` : null}
         ${tab === 'people'  ? html`<${PeopleView}  people=${data.people} />` : null}
+        ${tab === 'intel'   ? html`<${IntelTab} financials=${data.financials || []} shareholders=${data.shareholders || []} partnerships=${data.partnerships || []} />` : null}
         ${tab === 'legal'   ? html`<${LegalTab}    sources=${sources} extra=${extra} />` : null}
       </div>
     </aside>
@@ -674,6 +677,57 @@ function PeopleView({ people }) {
       ` : null}
     </div>
   `;
+}
+
+// Rich research data — financials, ownership, partnerships gathered by research.
+function IntelTab({ financials, shareholders, partnerships }) {
+  const empty = !financials.length && !shareholders.length && !partnerships.length;
+  if (empty) {
+    return html`<div class="overview"><div class="muted small" style=${{ padding: '16px' }}>
+      No research intelligence yet. Run a company deep-dive research job and its findings — financials, ownership, and partnerships — will appear here.
+    </div></div>`;
+  }
+  const sectionHead = (label, n) => html`<div style=${{
+    fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 700,
+    color: 'var(--text-dim)', margin: '18px 0 8px',
+  }}>${label}${n ? ` · ${n}` : ''}</div>`;
+  const cellStyle = { padding: '7px 10px', fontSize: '12.5px', color: 'var(--text)', borderBottom: '1px solid rgba(255,255,255,0.05)' };
+  const srcChip = (s) => s ? html`<span style=${{ fontSize: '9.5px', color: 'var(--text-dim)' }}>${String(s).replace('research:job-', 'research #')}</span>` : null;
+
+  return html`<div class="overview" style=${{ padding: '4px 14px 16px' }}>
+    ${financials.length ? html`
+      ${sectionHead('Financials', financials.length)}
+      <div>
+        ${financials.map(f => html`<div key=${f.id} style=${{ display: 'flex', justifyContent: 'space-between', gap: '10px', ...cellStyle }}>
+          <span><strong style=${{ textTransform: 'capitalize' }}>${String(f.metric).replace(/_/g, ' ')}</strong>${f.period ? html` <span class="muted small">· ${f.period}</span>` : null}</span>
+          <span style=${{ textAlign: 'right' }}>${f.value_text || (f.value_num != null ? Number(f.value_num).toLocaleString() : '—')}${f.currency ? ' ' + f.currency : ''} ${srcChip(f.source)}</span>
+        </div>`)}
+      </div>
+    ` : null}
+
+    ${shareholders.length ? html`
+      ${sectionHead('Ownership & shareholders', shareholders.length)}
+      <div>
+        ${shareholders.map(s => html`<div key=${s.id} style=${{ display: 'flex', justifyContent: 'space-between', gap: '10px', ...cellStyle }}>
+          <span>${s.holder_name}${s.holder_type ? html` <span class="muted small">· ${s.holder_type}</span>` : null}</span>
+          <span style=${{ textAlign: 'right' }}>${s.stake_text || (s.stake_pct != null ? s.stake_pct + '%' : '—')} ${srcChip(s.source)}</span>
+        </div>`)}
+      </div>
+    ` : null}
+
+    ${partnerships.length ? html`
+      ${sectionHead('Partnerships & relationships', partnerships.length)}
+      <div>
+        ${partnerships.map(p => html`<div key=${p.id} style=${{ ...cellStyle }}>
+          <div style=${{ display: 'flex', justifyContent: 'space-between', gap: '10px' }}>
+            <strong>${p.partner_name}</strong>
+            <span style=${{ textAlign: 'right' }}>${p.relationship ? html`<span class="muted small" style=${{ textTransform: 'capitalize' }}>${p.relationship}</span>` : null} ${srcChip(p.source)}</span>
+          </div>
+          ${p.description ? html`<div class="muted small" style=${{ marginTop: '3px' }}>${p.description}</div>` : null}
+        </div>`)}
+      </div>
+    ` : null}
+  </div>`;
 }
 
 function LegalTab({ sources, extra }) {

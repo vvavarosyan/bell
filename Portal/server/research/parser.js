@@ -100,6 +100,12 @@ export async function persistReport(client, jobId, payload) {
       people: Array.isArray(obj.derived_people) ? obj.derived_people
         : (obj.derived_entities?.people || []),
     },
+    // Structured facts about the target company (rich research data model).
+    facts: {
+      financials:   Array.isArray(obj.financials)   ? obj.financials   : [],
+      shareholders: Array.isArray(obj.shareholders) ? obj.shareholders : [],
+      partnerships: Array.isArray(obj.partnerships) ? obj.partnerships : [],
+    },
   };
 }
 

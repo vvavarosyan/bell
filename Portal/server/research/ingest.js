@@ -261,6 +261,85 @@ async function processPerson(client, jobId, p, targetCompanyId = null) {
 }
 
 // ---------------------------------------------------------------------------
+// Rich research data — structured facts about the TARGET company
+// ---------------------------------------------------------------------------
+// Writes financials / shareholders / partnerships rows for the research target.
+// Deduped on natural keys so re-runs don't pile up. On prod, ids come from the
+// high band so the rows pull back to local without mirror collisions.
+export async function ingestCompanyFacts(client, jobId, facts) {
+  if (!facts) return { financials: 0, shareholders: 0, partnerships: 0 };
+  const t = await client.query(`SELECT target_company_id FROM research_jobs WHERE id = $1`, [jobId]);
+  const companyId = t.rows[0]?.target_company_id ? Number(t.rows[0].target_company_id) : null;
+  if (!companyId) return { financials: 0, shareholders: 0, partnerships: 0 };
+
+  const source = 'research:job-' + jobId;
+  const idCol  = PROD_ORIGIN ? 'id, ' : '';
+  const idVal  = PROD_ORIGIN ? `nextval('research_entity_id_seq'), ` : '';
+  let fin = 0, sh = 0, pa = 0;
+
+  for (const f of (Array.isArray(facts.financials) ? facts.financials : [])) {
+    const metric = clean(f.metric);
+    if (!metric) continue;
+    const period = clean(f.period);
+    const exists = await client.query(
+      `SELECT 1 FROM company_financials WHERE company_id=$1 AND lower(metric)=lower($2) AND coalesce(period,'')=coalesce($3,'') LIMIT 1`,
+      [companyId, metric, period]);
+    if (exists.rows.length) continue;
+    await client.query(
+      `INSERT INTO company_financials (${idCol}company_id, metric, value_text, value_num, currency, period, source)
+       VALUES (${idVal}$1,$2,$3,$4,$5,$6,$7)`,
+      [companyId, metric, clean(f.value), parseNum(f.value), clean(f.currency), period, source]
+    ).then(() => fin++).catch((e) => console.warn('[research] financial insert:', e.message));
+  }
+
+  for (const s of (Array.isArray(facts.shareholders) ? facts.shareholders : [])) {
+    const holder = clean(s.holder_name);
+    if (!holder) continue;
+    const exists = await client.query(
+      `SELECT 1 FROM company_shareholders WHERE company_id=$1 AND lower(holder_name)=lower($2) LIMIT 1`,
+      [companyId, holder]);
+    if (exists.rows.length) continue;
+    await client.query(
+      `INSERT INTO company_shareholders (${idCol}company_id, holder_name, holder_type, stake_pct, stake_text, source)
+       VALUES (${idVal}$1,$2,$3,$4,$5,$6)`,
+      [companyId, holder, clean(s.holder_type), parseNum(s.stake), clean(s.stake), source]
+    ).then(() => sh++).catch((e) => console.warn('[research] shareholder insert:', e.message));
+  }
+
+  for (const p of (Array.isArray(facts.partnerships) ? facts.partnerships : [])) {
+    const partner = clean(p.partner_name);
+    if (!partner) continue;
+    const rel = clean(p.relationship);
+    const exists = await client.query(
+      `SELECT 1 FROM company_partnerships WHERE company_id=$1 AND lower(partner_name)=lower($2) AND coalesce(lower(relationship),'')=coalesce(lower($3),'') LIMIT 1`,
+      [companyId, partner, rel]);
+    if (exists.rows.length) continue;
+    await client.query(
+      `INSERT INTO company_partnerships (${idCol}company_id, partner_name, relationship, description, since, source)
+       VALUES (${idVal}$1,$2,$3,$4,$5,$6)`,
+      [companyId, partner, rel, clean(p.description), clean(p.since), source]
+    ).then(() => pa++).catch((e) => console.warn('[research] partnership insert:', e.message));
+  }
+
+  return { financials: fin, shareholders: sh, partnerships: pa };
+}
+
+// Best-effort numeric parse from a reported string ("QAR 1.2 billion" → 1.2e9,
+// "30%" → 30). Returns null when nothing sensible is found.
+function parseNum(v) {
+  if (v === null || v === undefined) return null;
+  const s = String(v).toLowerCase().replace(/,/g, '');
+  const m = s.match(/-?\d+(\.\d+)?/);
+  if (!m) return null;
+  let n = parseFloat(m[0]);
+  if (!Number.isFinite(n)) return null;
+  if (/\bbillion\b|\bbn\b/.test(s)) n *= 1e9;
+  else if (/\bmillion\b|\bmn\b|\bm\b/.test(s)) n *= 1e6;
+  else if (/\bthousand\b|\bk\b/.test(s)) n *= 1e3;
+  return n;
+}
+
+// ---------------------------------------------------------------------------
 // Audit log helper
 // ---------------------------------------------------------------------------
 async function audit(client, jobId, entityType, entityId, action, fieldsChanged, notes) {
@@ -311,9 +390,12 @@ async function linkPersonToCompany(client, personId, p, jobId, targetCompanyId) 
   );
   if (exists.rows.length) return;
 
+  // On prod, take the id from the high band so the link can be pulled to local
+  // without colliding with a local-originated id when the mirror pushes.
+  const idExpr = PROD_ORIGIN ? `nextval('research_entity_id_seq'),` : '';
   await client.query(`
-    INSERT INTO person_companies (person_id, company_id, title, is_current, source_stage, raw_payload)
-    VALUES ($1, $2, $3, true, 0, $4::jsonb)
+    INSERT INTO person_companies (${PROD_ORIGIN ? 'id,' : ''}person_id, company_id, title, is_current, source_stage, raw_payload)
+    VALUES (${idExpr}$1, $2, $3, true, 0, $4::jsonb)
   `, [
     personId, companyId, clean(p.title),
     JSON.stringify({ via: 'research', job_id: jobId, relation: clean(p.role_at_target) }),
