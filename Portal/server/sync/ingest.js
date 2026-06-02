@@ -95,7 +95,28 @@ export async function collectResearchPull(since) {
     );
   } catch { /* research_candidates not present yet */ }
 
-  return { since, watermark, companies: companies.rows, people: people.rows, candidates: candidates.rows };
+  // Research-created employment links (person_companies) for the pulled people,
+  // so people stay connected to their companies on local too. Only research-
+  // origin links (raw_payload.via='research') — enrichment links originate on
+  // local already. Both ids reference mirrored entities, so they resolve locally.
+  const peopleIds = people.rows.map((r) => Number(r.id));
+  let personLinks = { rows: [] };
+  if (peopleIds.length) {
+    personLinks = await query(
+      `SELECT * FROM person_companies
+        WHERE person_id = ANY($1::bigint[])
+          AND raw_payload->>'via' = 'research'`,
+      [peopleIds]
+    );
+  }
+
+  return {
+    since, watermark,
+    companies: companies.rows,
+    people: people.rows,
+    candidates: candidates.rows,
+    person_links: personLinks.rows,
+  };
 }
 
 // ---- prod column metadata (cached; schema is stable within a process) -------

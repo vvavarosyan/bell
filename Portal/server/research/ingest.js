@@ -30,6 +30,14 @@ export async function ingestDerivedEntities(client, jobId, derived) {
   const companies = Array.isArray(derived?.companies) ? derived.companies : [];
   const people    = Array.isArray(derived?.people)    ? derived.people    : [];
 
+  // The research target company — derived people are connected to it, so we link
+  // them here when we can't resolve a more specific employer from company_name.
+  let targetCompanyId = null;
+  try {
+    const t = await client.query(`SELECT target_company_id FROM research_jobs WHERE id = $1`, [jobId]);
+    targetCompanyId = t.rows[0]?.target_company_id ? Number(t.rows[0].target_company_id) : null;
+  } catch { /* non-fatal */ }
+
   let createdCompanies = 0, enrichedCompanies = 0, skippedCompanies = 0;
   let createdPeople    = 0, enrichedPeople    = 0, skippedPeople    = 0;
 
@@ -40,7 +48,7 @@ export async function ingestDerivedEntities(client, jobId, derived) {
     else                                    skippedCompanies++;
   }
   for (const p of people) {
-    const result = await processPerson(client, jobId, p);
+    const result = await processPerson(client, jobId, p, targetCompanyId);
     if      (result.action === 'created')   createdPeople++;
     else if (result.action === 'enriched')  enrichedPeople++;
     else                                    skippedPeople++;
@@ -183,7 +191,7 @@ async function processCandidate(client, jobId, c, f) {
 // ---------------------------------------------------------------------------
 // People
 // ---------------------------------------------------------------------------
-async function processPerson(client, jobId, p) {
+async function processPerson(client, jobId, p, targetCompanyId = null) {
   const fullName = String(p?.full_name || '').trim();
   if (!fullName) return audit(client, jobId, 'person', null, 'skipped', null, 'missing full_name');
 
@@ -216,6 +224,7 @@ async function processPerson(client, jobId, p) {
     };
     await client.query(`UPDATE people SET extra_fields = extra_fields || $2::jsonb WHERE id = $1`,
       [row.id, JSON.stringify(newExtras)]);
+    await linkPersonToCompany(client, row.id, p, jobId, targetCompanyId);
     return audit(client, jobId, 'person', row.id, 'enriched',
       { research_derived: newExtras.research_derived[`from_job_${jobId}`] },
       'merged into extra_fields.research_derived');
@@ -238,7 +247,9 @@ async function processPerson(client, jobId, p) {
         role_at_target: clean(p.role_at_target),
       }),
     ]);
-    return audit(client, jobId, 'person', Number(r.rows[0].id), 'created',
+    const personId = Number(r.rows[0].id);
+    await linkPersonToCompany(client, personId, p, jobId, targetCompanyId);
+    return audit(client, jobId, 'person', personId, 'created',
       { full_name: fullName, title: clean(p.title), linkedin_url: linkedinUrl, company_name: clean(p.company_name) },
       null);
   } catch (err) {
@@ -270,4 +281,41 @@ function clean(v) {
   if (v === null || v === undefined) return null;
   const s = String(v).trim();
   return s === '' ? null : s;
+}
+
+// Resolve a free-text company name to an existing companies.id (by normalized
+// name). Only matches REAL companies — derived companies live in the candidate
+// holding pen until approved, so they can't be linked yet.
+async function resolveCompanyId(client, companyName) {
+  const norm = normalizeName(companyName || '');
+  if (!norm) return null;
+  const r = await client.query(`SELECT id FROM companies WHERE name_normalized = $1 LIMIT 1`, [norm]);
+  return r.rows.length ? Number(r.rows[0].id) : null;
+}
+
+// Connect a derived person to a company via person_companies so people and
+// companies actually reference each other. Priority: the person's stated
+// employer (company_name) if it resolves to a real company; otherwise the
+// research target company (these people were found in its orbit). Deduped on
+// (person_id, company_id). person_companies is a mirror table, so the link
+// syncs to prod on push.
+async function linkPersonToCompany(client, personId, p, jobId, targetCompanyId) {
+  if (!personId) return;
+  let companyId = await resolveCompanyId(client, clean(p.company_name));
+  if (!companyId) companyId = targetCompanyId || null;
+  if (!companyId) return;
+
+  const exists = await client.query(
+    `SELECT 1 FROM person_companies WHERE person_id = $1 AND company_id = $2 LIMIT 1`,
+    [personId, companyId],
+  );
+  if (exists.rows.length) return;
+
+  await client.query(`
+    INSERT INTO person_companies (person_id, company_id, title, is_current, source_stage, raw_payload)
+    VALUES ($1, $2, $3, true, 0, $4::jsonb)
+  `, [
+    personId, companyId, clean(p.title),
+    JSON.stringify({ via: 'research', job_id: jobId, relation: clean(p.role_at_target) }),
+  ]).catch((e) => console.warn('[research] person link failed', personId, '→', companyId, '—', e.message));
 }

@@ -55,10 +55,34 @@ export async function runJob(jobId) {
     return { id: jobId, status: 'failed' };
   }
 
-  // If this is a re-run over a completed/failed attempt, wipe the old report,
-  // sources, citations, derived-entities audit so the new run starts clean.
-  // research_reports has ON CONFLICT (job_id) DO UPDATE so it'd overwrite, but
-  // the other tables would accumulate ghosts. Single transaction for atomicity.
+  // ATOMIC CLAIM — flip queued/failed/ready → gathering in ONE conditional
+  // UPDATE before we touch Firecrawl. Two callers race for every job: the
+  // POST /jobs immediate fire-and-forget AND the background poller tick. Without
+  // an atomic guard both could pass the status check and submit the SAME job to
+  // Firecrawl twice — two paid agent runs. Here only the first UPDATE matches
+  // (the row flips to 'gathering'); the loser sees status='gathering', updates 0
+  // rows, and aborts without submitting.
+  const claim = await query(`
+    UPDATE research_jobs
+       SET status = 'gathering',
+           started_at = now(),
+           error_message = NULL,
+           error_detail = NULL,
+           firecrawl_job_id = NULL,
+           ready_at = NULL,
+           source_count = 0,
+           section_count = 0,
+           citation_count = 0
+     WHERE id = $1 AND status IN ('queued','failed','ready')
+     RETURNING id
+  `, [jobId]);
+  if (!claim.rows.length) {
+    return { id: jobId, status: 'gathering', skipped: true, reason: 'already_claimed' };
+  }
+
+  // Re-run cleanup — only the winner reaches here. Wipe the old report, sources,
+  // citations, derived-entities audit so the new run starts clean. Uses the
+  // status we loaded before claiming.
   if (job.status === 'ready' || job.status === 'failed') {
     await withTransaction(async (client) => {
       // Delete in FK-safe order
@@ -69,19 +93,6 @@ export async function runJob(jobId) {
     });
   }
 
-  // Reset error state + drop any stale firecrawl_job_id from a previous run,
-  // so the poller doesn't keep querying a dead handle. Also zero counters.
-  await query(`
-    UPDATE research_jobs
-       SET error_message = NULL,
-           firecrawl_job_id = NULL,
-           ready_at = NULL,
-           source_count = 0,
-           section_count = 0,
-           citation_count = 0
-     WHERE id = $1
-  `, [jobId]);
-
   // Anchor URLs give the agent concrete starting points. Without these,
   // Firecrawl Spark agents often return data:null on open-ended prompts.
   const urls = buildAnchorUrls(job.type, job);
@@ -90,10 +101,8 @@ export async function runJob(jobId) {
     const { id: fcId, raw } = await agent(prompt, schema, { urls });
     await query(`
       UPDATE research_jobs
-         SET status = 'gathering',
-             firecrawl_job_id = $2,
+         SET firecrawl_job_id = $2,
              firecrawl_payload = $3::jsonb,
-             started_at = now(),
              eta_seconds = $4
        WHERE id = $1
     `, [jobId, fcId, JSON.stringify({ submitted: raw, anchor_urls: urls }), DEFAULT_ETA_SECONDS]);
