@@ -118,6 +118,31 @@ router.post('/:id/approve', async (req, res, next) => {
       `, [id, companyId, req.user?.email || null]);
 
       await recomputeCompanyStatus(companyId, client);
+
+      // Cross-link partnerships: any partnership row that named this company by
+      // text (before it existed) now resolves to it, and we add the reciprocal
+      // row so BOTH companies show the relationship.
+      await client.query(
+        `UPDATE company_partnerships SET partner_company_id = $1, updated_at = now()
+          WHERE partner_company_id IS NULL AND lower(partner_name) = lower($2)`,
+        [companyId, cand.name]);
+      const refs = await client.query(
+        `SELECT company_id, relationship, description, since, source
+           FROM company_partnerships WHERE partner_company_id = $1 AND company_id <> $1`,
+        [companyId]);
+      for (const r of refs.rows) {
+        const dup = await client.query(
+          `SELECT 1 FROM company_partnerships WHERE company_id = $1 AND partner_company_id = $2 LIMIT 1`,
+          [companyId, r.company_id]);
+        if (dup.rows.length) continue;
+        const owner = await client.query(`SELECT name FROM companies WHERE id = $1`, [r.company_id]);
+        if (!owner.rows.length) continue;
+        await client.query(
+          `INSERT INTO company_partnerships (company_id, partner_name, partner_company_id, relationship, description, since, source)
+           VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+          [companyId, owner.rows[0].name, r.company_id, r.relationship, r.description, r.since, r.source]);
+      }
+
       return { approved: id, company_id: companyId };
     });
 
