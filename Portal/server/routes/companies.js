@@ -9,6 +9,7 @@ import {
 import { wipeStaleEnrichmentAfterUrlReplace } from '../enrichment/stages/stage1.js';
 import { revealOne, revealBulk, getRevealedSet, bypassesCredits } from '../lib/credits.js';
 import { denyUnlessLocalEngine } from '../lib/auth.js';
+import { addRevealedToCrm } from '../lib/crm.js';
 
 const router = Router();
 
@@ -305,12 +306,14 @@ router.post('/:id/reveal', async (req, res, next) => {
     if (!Number.isFinite(id)) return res.status(400).json({ error: 'invalid_id' });
     const actor = req.user?.email || 'unknown';
     if (bypassesCredits(req.user, req.tenant)) {
+      await addRevealedToCrm(req.tenant?.id, 'company', [id], actor);
       return res.json({ revealed: true, charged: 0, unlimited: true, company: await companyContact(id) });
     }
     const result = await revealOne(req.tenant.id, 'company', id, actor);
     if (result.insufficient) {
       return res.status(402).json({ error: 'insufficient_credits', balance: result.balance });
     }
+    await addRevealedToCrm(req.tenant.id, 'company', [id], actor);
     res.json({ ...result, company: await companyContact(id) });
   } catch (err) { next(err); }
 });
@@ -322,9 +325,12 @@ router.post('/reveal-bulk', async (req, res, next) => {
     if (!ids.length) return res.status(400).json({ error: 'bad_request', reason: 'ids[] required' });
     const actor = req.user?.email || 'unknown';
     if (bypassesCredits(req.user, req.tenant)) {
+      await addRevealedToCrm(req.tenant?.id, 'company', ids, actor);
       return res.json({ unlimited: true, revealed: ids.length, requested: ids.length });
     }
-    res.json(await revealBulk(req.tenant.id, 'company', ids, actor));
+    const out = await revealBulk(req.tenant.id, 'company', ids, actor);
+    await addRevealedToCrm(req.tenant.id, 'company', ids, actor);
+    res.json(out);
   } catch (err) { next(err); }
 });
 

@@ -11,6 +11,7 @@ import {
 } from '../lib/contacts.js';
 import { revealOne, revealBulk, getRevealedSet, bypassesCredits } from '../lib/credits.js';
 import { denyUnlessLocalEngine } from '../lib/auth.js';
+import { addRevealedToCrm } from '../lib/crm.js';
 
 const router = Router();
 
@@ -278,6 +279,7 @@ router.post('/:id/reveal', async (req, res, next) => {
           WHERE id = $1 AND is_revealed = false`,
         [id, actor]
       );
+      await addRevealedToCrm(req.tenant?.id, 'person', [id], actor);
       return res.json({ revealed: true, charged: 0, unlimited: true, person: await personContact(id) });
     }
 
@@ -285,6 +287,7 @@ router.post('/:id/reveal', async (req, res, next) => {
     if (result.insufficient) {
       return res.status(402).json({ error: 'insufficient_credits', balance: result.balance });
     }
+    await addRevealedToCrm(req.tenant.id, 'person', [id], actor);
     res.json({ ...result, person: await personContact(id) });
   } catch (err) { next(err); }
 });
@@ -303,9 +306,11 @@ router.post('/reveal-bulk', async (req, res, next) => {
           WHERE id = ANY($1::bigint[]) AND is_revealed = false`,
         [ids.map(Number), actor]
       );
+      await addRevealedToCrm(req.tenant?.id, 'person', ids, actor);
       return res.json({ unlimited: true, revealed: ids.length, requested: ids.length });
     }
     const result = await revealBulk(req.tenant.id, 'person', ids, actor);
+    await addRevealedToCrm(req.tenant.id, 'person', ids, actor);
     res.json(result);
   } catch (err) { next(err); }
 });

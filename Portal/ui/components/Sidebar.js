@@ -33,7 +33,7 @@ export const NAV_SECTIONS = [
     label: 'Workspace',
     items: [
       // Operational surfaces — visible to tenant members + above
-      { id: 'crm',         label: 'CRM',         icon: 'crm',      placeholder: true,  visibility: ['platform_admin','owner','admin','lead','member','viewer'] },
+      { id: 'crm',         label: 'CRM',         icon: 'crm',      placeholder: false, visibility: ['platform_admin','owner','admin','lead','member','viewer'] },
       { id: 'research',    label: 'Research',    icon: 'research', placeholder: false, visibility: ['platform_admin','owner','admin','lead','member','viewer'] },
       { id: 'team',        label: 'Team',        icon: 'team',     placeholder: true,  visibility: ['platform_admin','owner','admin','lead','member','viewer'] },
       // Admin-only ops within a tenant

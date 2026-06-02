@@ -43,6 +43,7 @@ import billingRouter           from './routes/billing.js';
 import syncRouter              from './routes/sync.js';
 import creditsRouter           from './routes/credits.js';
 import feedRouter              from './routes/feed.js';
+import crmRouter               from './routes/crm.js';
 import { requireAuth, requireRole, requireActiveSubscription } from './lib/auth.js';
 import { getKey } from './keychain.js';
 
@@ -144,6 +145,7 @@ app.use('/api/jobs',       ...feature, jobsRouter);
 app.use('/api/research',   ...feature, researchRouter);
 app.use('/api/open-data',  ...feature, openDataRouter);
 app.use('/api/feed',       ...feature, feedRouter);
+app.use('/api/crm',        ...feature, crmRouter);
 // Stats backs the app shell/header — signed in only, no subscription gate so an
 // unsubscribed user still gets a working frame before being routed to /subscribe.
 app.use('/api/stats',      requireAuth, statsRouter);
