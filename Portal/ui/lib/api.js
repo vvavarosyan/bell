@@ -142,6 +142,11 @@ export const api = {
   crmSendEmail:           (id, body) => request(`/api/crm/records/${id}/email`, { method: 'POST', body: JSON.stringify(body) }),
   crmTemplates:           () => request('/api/crm/templates'),
   crmSaveTemplate:        (body) => request('/api/crm/templates', { method: 'POST', body: JSON.stringify(body) }),
+  crmSequences:           () => request('/api/crm/sequences'),
+  crmSequence:            (id) => request('/api/crm/sequences/' + id),
+  crmCreateSequence:      (body) => request('/api/crm/sequences', { method: 'POST', body: JSON.stringify(body) }),
+  crmEnroll:              (recordId, sequence_id) => request(`/api/crm/records/${recordId}/enroll`, { method: 'POST', body: JSON.stringify({ sequence_id }) }),
+  crmStopEnrollment:      (id) => request(`/api/crm/enrollments/${id}/stop`, { method: 'POST', body: '{}' }),
 
   // Deep Data (Qatar Open Data)
   openDataStats:          () => request('/api/open-data/stats'),

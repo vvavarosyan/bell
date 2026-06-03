@@ -1,0 +1,145 @@
+// CRM sequence engine — sends automated multi-step email follow-ups.
+//
+// A background scheduler (started in server.js, gated by BDI_CRM_SCHEDULER=1 so
+// it runs on exactly ONE prod service — the app.bell.qa user portal, where the
+// CRM data + Resend key live) processes enrollments whose next step is due.
+//
+// Per due enrollment: send the current step, log it to crm_emails + the activity
+// timeline, advance to the next step (scheduling next_run_at = now + delay), or
+// complete. Stops if the record is won/lost, has no email, or a send fails.
+
+import { query } from '../db.js';
+import { sendEmail, getFromAddress } from '../lib/email.js';
+import { logActivity, markContacted } from '../lib/crm.js';
+
+const TICK_MS = 60_000;
+let timer = null;
+let running = false;
+
+export function startCrmScheduler() {
+  if (process.env.BDI_CRM_SCHEDULER !== '1') {
+    console.log('[crm] sequence scheduler disabled (set BDI_CRM_SCHEDULER=1 on ONE service to enable)');
+    return;
+  }
+  // First sweep shortly after boot, then every minute. Single-flight guarded.
+  setTimeout(() => safeRun(), 8_000);
+  timer = setInterval(safeRun, TICK_MS);
+  console.log('[crm] sequence scheduler online (every ' + TICK_MS / 1000 + 's)');
+}
+
+async function safeRun() {
+  if (running) return;
+  running = true;
+  try { await runDue(); }
+  catch (e) { console.error('[crm] sequence tick error:', e.message); }
+  finally { running = false; }
+}
+
+/** Process all enrollments whose next step is due. Returns a small summary. */
+export async function runDue(limit = 25) {
+  const due = await query(
+    `SELECT * FROM crm_sequence_enrollments
+      WHERE status = 'active' AND next_run_at IS NOT NULL AND next_run_at <= now()
+      ORDER BY next_run_at LIMIT $1`,
+    [limit]
+  );
+  let sent = 0, completed = 0, stopped = 0, errored = 0;
+  for (const enr of due.rows) {
+    try {
+      const r = await processEnrollment(enr);
+      if (r === 'sent') sent++;
+      else if (r === 'completed') completed++;
+      else if (r === 'stopped') stopped++;
+      else if (r === 'errored') errored++;
+    } catch (e) {
+      console.error('[crm] enrollment', enr.id, 'failed:', e.message);
+      await query(`UPDATE crm_sequence_enrollments SET status='errored', error=$2 WHERE id=$1`,
+        [enr.id, String(e.message).slice(0, 400)]).catch(() => {});
+      errored++;
+    }
+  }
+  return { due: due.rows.length, sent, completed, stopped, errored };
+}
+
+async function processEnrollment(enr) {
+  // The step to send now.
+  const stepR = await query(
+    `SELECT step_no, delay_days, subject, body FROM crm_sequence_steps
+      WHERE sequence_id=$1 AND step_no=$2`,
+    [enr.sequence_id, enr.current_step]
+  );
+  if (!stepR.rows.length) {
+    await query(`UPDATE crm_sequence_enrollments SET status='completed', completed_at=now() WHERE id=$1`, [enr.id]);
+    return 'completed';
+  }
+  const step = stepR.rows[0];
+
+  // Resolve the record, recipient email, and stop conditions.
+  const recR = await query(
+    `SELECT r.status, r.entity_type, r.entity_id,
+            c.email AS company_email, p.email AS person_email
+       FROM crm_records r
+       LEFT JOIN companies c ON r.entity_type='company' AND c.id=r.entity_id
+       LEFT JOIN people    p ON r.entity_type='person'  AND p.id=r.entity_id
+      WHERE r.id=$1`, [enr.record_id]);
+  if (!recR.rows.length) {
+    await query(`UPDATE crm_sequence_enrollments SET status='stopped', error='record removed' WHERE id=$1`, [enr.id]);
+    return 'stopped';
+  }
+  const rec = recR.rows[0];
+  if (rec.status === 'won' || rec.status === 'lost') {
+    await query(`UPDATE crm_sequence_enrollments SET status='stopped', error='record ${rec.status}' WHERE id=$1`, [enr.id]);
+    return 'stopped';
+  }
+  const to = (rec.entity_type === 'company' ? rec.company_email : rec.person_email) || null;
+  if (!to) {
+    await query(`UPDATE crm_sequence_enrollments SET status='errored', error='no recipient email' WHERE id=$1`, [enr.id]);
+    return 'errored';
+  }
+
+  // Send the step.
+  const replyTo = enr.enrolled_by || null;
+  const ins = await query(
+    `INSERT INTO crm_emails (tenant_id, record_id, direction, to_email, reply_to, subject, body_text, status, sent_by)
+     VALUES ($1,$2,'out',$3,$4,$5,$6,'queued',$7) RETURNING id`,
+    [enr.tenant_id, enr.record_id, to, replyTo, step.subject, step.body, replyTo]
+  );
+  const emailId = Number(ins.rows[0].id);
+  let from;
+  try {
+    from = await getFromAddress();
+    const res = await sendEmail({ from, to, replyTo, subject: step.subject, text: step.body });
+    await query(`UPDATE crm_emails SET status='sent', provider_message_id=$2, from_email=$3, sent_at=now() WHERE id=$1`,
+      [emailId, res.id, from]);
+  } catch (e) {
+    await query(`UPDATE crm_emails SET status='failed', error=$2 WHERE id=$1`, [emailId, String(e.message).slice(0, 400)]);
+    await query(`UPDATE crm_sequence_enrollments SET status='errored', error=$2 WHERE id=$1`, [enr.id, String(e.message).slice(0, 400)]);
+    return 'errored';
+  }
+
+  await logActivity(null, enr.tenant_id, enr.record_id, 'email_out', {
+    actorEmail: replyTo,
+    summary: `Sequence email (step ${step.step_no}): ${step.subject || '(no subject)'}`,
+    payload: { sequence_id: enr.sequence_id, step_no: step.step_no, email_id: emailId, to },
+  });
+  await markContacted(null, enr.tenant_id, enr.record_id, replyTo);
+
+  // Advance to the next step, or complete.
+  const nextR = await query(
+    `SELECT step_no, delay_days FROM crm_sequence_steps WHERE sequence_id=$1 AND step_no=$2`,
+    [enr.sequence_id, enr.current_step + 1]
+  );
+  if (!nextR.rows.length) {
+    await query(`UPDATE crm_sequence_enrollments SET status='completed', completed_at=now(), last_sent_at=now() WHERE id=$1`, [enr.id]);
+  } else {
+    const delay = Math.max(0, Number(nextR.rows[0].delay_days) || 0);
+    await query(
+      `UPDATE crm_sequence_enrollments
+          SET current_step = current_step + 1, last_sent_at = now(),
+              next_run_at = now() + ($2 || ' days')::interval
+        WHERE id = $1`,
+      [enr.id, String(delay)]
+    );
+  }
+  return 'sent';
+}
