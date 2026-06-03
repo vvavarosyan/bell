@@ -39,6 +39,7 @@ import openDataRouter          from './routes/open_data.js';
 import { startScheduler as startOpenDataScheduler } from './sources/qatar_open_data/scheduler.js';
 import { startNewsEngine, getNewsState } from './news/engine.js';
 import { startCrmScheduler } from './crm/sequences.js';
+import { startInboundPoller } from './crm/inbound_poller.js';
 import authRouter              from './routes/auth.js';
 import billingRouter           from './routes/billing.js';
 import syncRouter              from './routes/sync.js';
@@ -258,4 +259,8 @@ app.use((err, req, res, next) => {
   // CRM sequence follow-up scheduler (gated by BDI_CRM_SCHEDULER=1 → one prod
   // service, the app.bell.qa user portal where CRM data + the Resend key live).
   startCrmScheduler();
+
+  // CRM inbound reply reader (IMAP). Enabled only where BDI_CRM_IMAP_* are set
+  // (one service). Reads the reply mailbox and threads replies into the CRM.
+  startInboundPoller();
 })();
