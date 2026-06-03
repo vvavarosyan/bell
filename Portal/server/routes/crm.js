@@ -15,7 +15,7 @@
 
 import { Router } from 'express';
 import { query } from '../db.js';
-import { ensureCrmRecord, logActivity, markContacted } from '../lib/crm.js';
+import { ensureCrmRecord, logActivity, markContacted, buildMergeVars, applyMerge } from '../lib/crm.js';
 import { sendEmail, getFromAddress } from '../lib/email.js';
 
 const router = Router();
@@ -106,7 +106,7 @@ router.get('/records/:id', async (req, res, next) => {
     const r = await query(`${RECORD_SELECT} WHERE r.id = $1 AND r.tenant_id = $2`, [id, tenantId(req)]);
     if (!r.rows.length) return res.status(404).json({ error: 'not_found' });
 
-    const [notes, activities, tasks, emails, enrollments] = await Promise.all([
+    const [notes, activities, tasks, emails, enrollments, deals] = await Promise.all([
       query(`SELECT id, author_email, body, created_at FROM crm_notes WHERE record_id=$1 ORDER BY created_at DESC`, [id]),
       query(`SELECT id, type, actor_email, summary, payload, occurred_at FROM crm_activities WHERE record_id=$1 ORDER BY occurred_at DESC LIMIT 200`, [id]),
       query(`SELECT t.id, t.title, t.description, t.due_at, t.status, t.assignee_user_id, u.email AS assignee_email, t.created_by, t.created_at, t.completed_at
@@ -117,6 +117,9 @@ router.get('/records/:id', async (req, res, next) => {
                     (SELECT count(*)::int FROM crm_sequence_steps st WHERE st.sequence_id=e.sequence_id) AS total_steps
                FROM crm_sequence_enrollments e JOIN crm_sequences s ON s.id=e.sequence_id
               WHERE e.record_id=$1 ORDER BY e.enrolled_at DESC`, [id]),
+      query(`SELECT d.id, d.title, d.value_num, d.currency, d.status, d.stage_id, st.name AS stage_name
+               FROM crm_deals d LEFT JOIN crm_stages st ON st.id=d.stage_id
+              WHERE d.record_id=$1 ORDER BY d.created_at DESC`, [id]),
     ]);
     const rec = r.rows[0];
     // Only expose the recipient email + send capability to admins (who can send).
@@ -131,7 +134,7 @@ router.get('/records/:id', async (req, res, next) => {
     }
     res.json({
       record: rec, notes: notes.rows, activities: activities.rows, tasks: tasks.rows,
-      emails: emails.rows, enrollments: enrollments.rows,
+      emails: emails.rows, enrollments: enrollments.rows, deals: deals.rows,
       can_send: canSendEmail(req), suggested_to: suggestedTo,
     });
   } catch (err) { next(err); }
@@ -277,7 +280,9 @@ router.post('/records/:id/email', async (req, res, next) => {
     const id = Number(req.params.id);
     const rec = await query(
       `SELECT r.entity_type, r.entity_id,
-              c.email AS company_email, p.email AS person_email
+              c.email AS company_email, p.email AS person_email,
+              c.name AS company_name, c.industry AS company_industry, c.city AS company_city, c.website AS company_website,
+              p.full_name AS person_name, p.headline AS person_headline
          FROM crm_records r
          LEFT JOIN companies c ON r.entity_type='company' AND c.id=r.entity_id
          LEFT JOIN people    p ON r.entity_type='person'  AND p.id=r.entity_id
@@ -287,8 +292,10 @@ router.post('/records/:id/email', async (req, res, next) => {
 
     const to = String(req.body?.to || (r0.entity_type === 'company' ? r0.company_email : r0.person_email) || '').trim();
     if (!to) return res.status(400).json({ error: 'no_recipient', reason: 'No email address on file — enter one.' });
-    const subject  = String(req.body?.subject || '').trim();
-    const bodyText = String(req.body?.body || '').trim();
+    // Personalize {tokens} for this recipient.
+    const vars = buildMergeVars(r0);
+    const subject  = applyMerge(String(req.body?.subject || '').trim(), vars);
+    const bodyText = applyMerge(String(req.body?.body || '').trim(), vars);
     if (!subject && !bodyText) return res.status(400).json({ error: 'empty_email' });
     const replyTo = actorEmail(req);
 
@@ -333,6 +340,95 @@ router.post('/templates', async (req, res, next) => {
       `INSERT INTO crm_email_templates (tenant_id, name, subject, body, created_by)
        VALUES ($1,$2,$3,$4,$5) RETURNING id, name, subject, body, created_at`,
       [tenantId(req), name, req.body?.subject || null, req.body?.body || null, actorEmail(req)]);
+    res.json(r.rows[0]);
+  } catch (err) { next(err); }
+});
+
+// ── Deal pipeline ───────────────────────────────────────────────────────────
+
+// Ensure the tenant has a default pipeline with stages; return its id.
+async function ensurePipeline(tid) {
+  const ex = await query(`SELECT id FROM crm_pipelines WHERE tenant_id=$1 ORDER BY is_default DESC, id LIMIT 1`, [tid]);
+  if (ex.rows.length) return Number(ex.rows[0].id);
+  const p = await query(`INSERT INTO crm_pipelines (tenant_id, name, is_default) VALUES ($1,'Sales Pipeline',true) RETURNING id`, [tid]);
+  const pid = Number(p.rows[0].id);
+  const stages = [['Lead', 0, false, false], ['Qualified', 1, false, false], ['Proposal', 2, false, false], ['Negotiation', 3, false, false], ['Won', 4, true, false], ['Lost', 5, false, true]];
+  for (const [name, pos, won, lost] of stages) {
+    await query(`INSERT INTO crm_stages (tenant_id, pipeline_id, name, position, is_won, is_lost) VALUES ($1,$2,$3,$4,$5,$6)`, [tid, pid, name, pos, won, lost]);
+  }
+  return pid;
+}
+
+// GET /api/crm/pipeline — default pipeline with its stages + deals
+router.get('/pipeline', async (req, res, next) => {
+  try {
+    const pid = await ensurePipeline(tenantId(req));
+    const [stages, deals] = await Promise.all([
+      query(`SELECT id, name, position, is_won, is_lost FROM crm_stages WHERE pipeline_id=$1 ORDER BY position`, [pid]),
+      query(`SELECT d.id, d.title, d.value_num, d.currency, d.stage_id, d.status, d.record_id, d.expected_close,
+                    r.entity_type, c.name AS company_name, p.full_name AS person_name
+               FROM crm_deals d
+               LEFT JOIN crm_records r ON r.id = d.record_id
+               LEFT JOIN companies c ON r.entity_type='company' AND c.id=r.entity_id
+               LEFT JOIN people    p ON r.entity_type='person'  AND p.id=r.entity_id
+              WHERE d.tenant_id=$1 AND d.pipeline_id=$2 ORDER BY d.created_at DESC`, [tenantId(req), pid]),
+    ]);
+    res.json({ pipeline_id: pid, stages: stages.rows, deals: deals.rows });
+  } catch (err) { next(err); }
+});
+
+// POST /api/crm/deals  { title, value_num?, currency?, stage_id?, record_id?, expected_close? }
+router.post('/deals', async (req, res, next) => {
+  try {
+    const title = String(req.body?.title || '').trim();
+    if (!title) return res.status(400).json({ error: 'title_required' });
+    const pid = await ensurePipeline(tenantId(req));
+    let stageId = req.body?.stage_id ? Number(req.body.stage_id) : null;
+    if (!stageId) {
+      const f = await query(`SELECT id FROM crm_stages WHERE pipeline_id=$1 ORDER BY position LIMIT 1`, [pid]);
+      stageId = f.rows[0]?.id || null;
+    }
+    const r = await query(
+      `INSERT INTO crm_deals (tenant_id, record_id, pipeline_id, stage_id, title, value_num, currency, expected_close, created_by)
+       VALUES ($1,$2,$3,$4,$5,$6,COALESCE($7,'QAR'),$8,$9) RETURNING id`,
+      [tenantId(req), req.body?.record_id || null, pid, stageId, title,
+       req.body?.value_num != null ? Number(req.body.value_num) : null, req.body?.currency || null,
+       req.body?.expected_close || null, actorEmail(req)]);
+    if (req.body?.record_id) {
+      await logActivity(null, tenantId(req), Number(req.body.record_id), 'deal', {
+        actorUserId: actorUserId(req), actorEmail: actorEmail(req), summary: 'Deal created: ' + title,
+      });
+    }
+    res.json({ id: r.rows[0].id });
+  } catch (err) { next(err); }
+});
+
+// PATCH /api/crm/deals/:id  { stage_id?, title?, value_num?, currency?, expected_close?, owner_user_id? }
+// Moving to a won/lost stage sets the deal status accordingly.
+router.patch('/deals/:id', async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    const cur = await query(`SELECT record_id FROM crm_deals WHERE id=$1 AND tenant_id=$2`, [id, tenantId(req)]);
+    if (!cur.rows.length) return res.status(404).json({ error: 'not_found' });
+    const b = req.body || {};
+    const sets = [], params = [];
+    if (b.stage_id !== undefined) {
+      params.push(Number(b.stage_id)); sets.push(`stage_id = $${params.length}`);
+      const st = await query(`SELECT is_won, is_lost FROM crm_stages WHERE id=$1`, [Number(b.stage_id)]);
+      const status = st.rows[0]?.is_won ? 'won' : st.rows[0]?.is_lost ? 'lost' : 'open';
+      params.push(status); sets.push(`status = $${params.length}`);
+    }
+    if (b.title !== undefined)          { params.push(b.title); sets.push(`title = $${params.length}`); }
+    if (b.value_num !== undefined)      { params.push(b.value_num === null ? null : Number(b.value_num)); sets.push(`value_num = $${params.length}`); }
+    if (b.currency !== undefined)       { params.push(b.currency); sets.push(`currency = $${params.length}`); }
+    if (b.expected_close !== undefined) { params.push(b.expected_close || null); sets.push(`expected_close = $${params.length}`); }
+    if (b.owner_user_id !== undefined)  { params.push(b.owner_user_id || null); sets.push(`owner_user_id = $${params.length}`); }
+    if (!sets.length) return res.status(400).json({ error: 'nothing_to_update' });
+    sets.push(`updated_at = now()`);
+    params.push(id, tenantId(req));
+    const r = await query(
+      `UPDATE crm_deals SET ${sets.join(', ')} WHERE id=$${params.length-1} AND tenant_id=$${params.length}
+       RETURNING id, stage_id, status, value_num`, params);
     res.json(r.rows[0]);
   } catch (err) { next(err); }
 });

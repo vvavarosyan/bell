@@ -85,14 +85,16 @@ export function CrmTab() {
         </div>` : null}
       </div>
 
-      <!-- View toggle: Records | Sequences -->
+      <!-- View toggle: Records | Pipeline | Sequences -->
       <div style=${{ display: 'inline-flex', gap: '4px', marginBottom: '14px' }}>
-        ${[['records', 'Records'], ['sequences', 'Sequences']].map(([k, lbl]) => html`
+        ${[['records', 'Records'], ['pipeline', 'Pipeline'], ['sequences', 'Sequences']].map(([k, lbl]) => html`
           <button key=${k} class=${'toolbar-toggle' + (view === k ? ' accent' : '')}
             onClick=${() => { setView(k); setOpenedId(null); }}>${lbl}</button>`)}
       </div>
 
-      ${view === 'sequences' ? html`<${SequencesView} />` : html`
+      ${view === 'sequences' ? html`<${SequencesView} />`
+        : view === 'pipeline' ? html`<${PipelineView} />`
+        : html`
       <!-- Toolbar -->
       <div style=${{ display: 'flex', gap: '8px', alignItems: 'center', marginBottom: '14px', flexWrap: 'wrap' }}>
         <div style=${{ display: 'inline-flex', gap: '4px' }}>
@@ -194,7 +196,8 @@ function SequencesView() {
 
       ${building ? html`<div style=${{ border: '1px solid var(--border)', borderRadius: '12px', padding: '16px', marginBottom: '16px', background: 'rgba(255,255,255,0.02)' }}>
         <input type="text" placeholder="Sequence name (e.g. Cold outreach — 3 touches)" value=${name} onChange=${e => setName(e.target.value)}
-          style=${{ width: '100%', marginBottom: '12px', background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border)', color: 'var(--text)', padding: '8px 10px', borderRadius: '6px', fontSize: '13px', boxSizing: 'border-box' }} />
+          style=${{ width: '100%', marginBottom: '6px', background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border)', color: 'var(--text)', padding: '8px 10px', borderRadius: '6px', fontSize: '13px', boxSizing: 'border-box' }} />
+        <div style=${{ fontSize: '11px', color: 'var(--text-dim)', marginBottom: '12px' }}>Personalize each step with ${'{name}'}, ${'{first_name}'}, ${'{company}'}, ${'{industry}'}, ${'{city}'}, ${'{title}'} — filled in per enrolled record when it sends.</div>
         ${steps.map((st, i) => html`<div key=${i} style=${{ border: '1px solid var(--border)', borderRadius: '8px', padding: '10px', marginBottom: '8px' }}>
           <div style=${{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
             <span style=${{ fontSize: '11px', fontWeight: 700, color: 'var(--text-dim)' }}>STEP ${i + 1}</span>
@@ -233,6 +236,93 @@ function SequencesView() {
   `;
 }
 
+// ── Pipeline (Kanban) ───────────────────────────────────────────────────────
+function money(v, cur) {
+  if (v == null) return '';
+  const n = Number(v);
+  const s = n >= 1e6 ? (n / 1e6).toFixed(n < 1e7 ? 1 : 0) + 'M' : n >= 1e3 ? (n / 1e3).toFixed(0) + 'K' : String(n);
+  return (cur || 'QAR') + ' ' + s;
+}
+function PipelineView() {
+  const [stages, setStages] = useState([]);
+  const [deals, setDeals] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [adding, setAdding] = useState(false);
+  const [title, setTitle] = useState('');
+  const [value, setValue] = useState('');
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try { const r = await api.crmPipeline(); setStages(r.stages || []); setDeals(r.deals || []); }
+    catch (err) { toast('Load failed: ' + err.message, 'error'); }
+    finally { setLoading(false); }
+  }, []);
+  useEffect(() => { load(); }, [load]);
+
+  const move = async (deal, stageId) => {
+    try { await api.crmUpdateDeal(deal.id, { stage_id: Number(stageId) }); await load(); }
+    catch (err) { toast('Move failed: ' + err.message, 'error'); }
+  };
+  const addDeal = async () => {
+    if (!title.trim()) { toast('Name the deal', 'error'); return; }
+    try {
+      await api.crmCreateDeal({ title: title.trim(), value_num: value ? Number(value) : null });
+      setTitle(''); setValue(''); setAdding(false); await load();
+    } catch (err) { toast('Create failed: ' + err.message, 'error'); }
+  };
+
+  if (loading) return html`<div style=${{ color: 'var(--text-dim)', padding: '30px 0', textAlign: 'center', fontSize: '12px' }}>Loading pipeline…</div>`;
+
+  const dealName = (d) => d.entity_type === 'company' ? d.company_name : d.entity_type === 'person' ? d.person_name : null;
+
+  return html`
+    <div>
+      <div style=${{ display: 'flex', alignItems: 'center', marginBottom: '12px' }}>
+        <div style=${{ fontSize: '12.5px', color: 'var(--text-muted)' }}>Drag deals through your stages. Move with the selector on each card.</div>
+        <span style=${{ flex: 1 }}></span>
+        ${adding ? html`<div style=${{ display: 'flex', gap: '6px' }}>
+          <input type="text" placeholder="Deal title" value=${title} onChange=${e => setTitle(e.target.value)}
+            style=${{ background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border)', color: 'var(--text)', padding: '6px 9px', borderRadius: '6px', fontSize: '12px' }} />
+          <input type="number" placeholder="Value" value=${value} onChange=${e => setValue(e.target.value)}
+            style=${{ width: '90px', background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border)', color: 'var(--text)', padding: '6px 9px', borderRadius: '6px', fontSize: '12px' }} />
+          <button onClick=${addDeal} style=${{ background: 'var(--accent)', border: '1px solid var(--accent)', color: '#fff', borderRadius: '6px', padding: '6px 12px', fontSize: '12px', fontWeight: 600, cursor: 'pointer' }}>Add</button>
+          <button onClick=${() => setAdding(false)} style=${{ background: 'transparent', border: '1px solid var(--border)', color: 'var(--text-muted)', borderRadius: '6px', padding: '6px 10px', fontSize: '12px', cursor: 'pointer' }}>✕</button>
+        </div>` : html`<button onClick=${() => setAdding(true)} style=${{ background: 'var(--accent)', border: '1px solid var(--accent)', color: '#fff', borderRadius: '6px', padding: '7px 14px', fontSize: '12px', fontWeight: 600, cursor: 'pointer' }}>+ New deal</button>`}
+      </div>
+
+      <div style=${{ display: 'flex', gap: '12px', overflowX: 'auto', paddingBottom: '8px' }}>
+        ${stages.map(st => {
+          const col = deals.filter(d => d.stage_id === st.id);
+          const sum = col.reduce((a, d) => a + (Number(d.value_num) || 0), 0);
+          return html`<div key=${st.id} style=${{ minWidth: '230px', width: '230px', flexShrink: 0 }}>
+            <div style=${{ display: 'flex', alignItems: 'center', gap: '6px', marginBottom: '8px', padding: '0 2px' }}>
+              <span style=${{ fontSize: '11.5px', fontWeight: 700, color: st.is_won ? 'rgb(111 207 151)' : st.is_lost ? 'rgb(232 142 168)' : 'var(--text)' }}>${st.name}</span>
+              <span style=${{ fontSize: '10.5px', color: 'var(--text-dim)' }}>${col.length}</span>
+              <span style=${{ flex: 1 }}></span>
+              ${sum > 0 ? html`<span style=${{ fontSize: '10.5px', color: 'var(--text-muted)' }}>${money(sum, col[0]?.currency)}</span>` : null}
+            </div>
+            <div style=${{ background: 'rgba(255,255,255,0.02)', border: '1px solid var(--border)', borderRadius: '10px', padding: '8px', minHeight: '120px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+              ${col.length === 0 ? html`<div style=${{ color: 'var(--text-dim)', fontSize: '11px', textAlign: 'center', padding: '14px 0' }}>—</div>`
+                : col.map(d => html`<div key=${d.id} style=${{ background: 'linear-gradient(180deg, rgba(19,24,41,.9), rgba(13,18,35,.9))', border: '1px solid var(--border)', borderRadius: '8px', padding: '9px 10px' }}>
+                  <div style=${{ fontSize: '12.5px', fontWeight: 600, color: 'var(--text)', marginBottom: '3px' }}>${d.title}</div>
+                  ${dealName(d) ? html`<div style=${{ fontSize: '10.5px', color: 'var(--text-muted)', marginBottom: '4px' }}>${dealName(d)}</div>` : null}
+                  <div style=${{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    ${d.value_num != null ? html`<span style=${{ fontSize: '11px', fontWeight: 700, color: 'var(--accent-bright)' }}>${money(d.value_num, d.currency)}</span>` : null}
+                    <span style=${{ flex: 1 }}></span>
+                    <select value=${d.stage_id} onChange=${e => move(d, e.target.value)}
+                      style=${{ background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border)', color: 'var(--text-muted)', borderRadius: '5px', fontSize: '10.5px', padding: '2px 4px' }}>
+                      ${stages.map(s2 => html`<option key=${s2.id} value=${s2.id}>${s2.name}</option>`)}
+                    </select>
+                  </div>
+                </div>`)}
+            </div>
+          </div>`;
+        })}
+      </div>
+    </div>
+  `;
+}
+
 // ── Record drawer ───────────────────────────────────────────────────────────
 function RecordDrawer({ recordId, onClose, onChanged }) {
   const [data, setData] = useState(null);
@@ -267,6 +357,14 @@ function RecordDrawer({ recordId, onClose, onChanged }) {
   const stopEnroll = async (id) => {
     try { await api.crmStopEnrollment(id); toast('Sequence stopped'); await load(); onChanged?.(); }
     catch (err) { toast('Stop failed: ' + err.message, 'error'); }
+  };
+  const addDeal = async () => {
+    try {
+      const t = (data?.record ? recName(data.record) : 'New') + ' — opportunity';
+      await api.crmCreateDeal({ title: t, record_id: recordId });
+      toast('Deal created — set its value & stage in Pipeline');
+      await load(); onChanged?.();
+    } catch (err) { toast('Create deal failed: ' + err.message, 'error'); }
   };
 
   const rec = data?.record;
@@ -362,8 +460,9 @@ function RecordDrawer({ recordId, onClose, onChanged }) {
                     style=${{ width: '100%', marginBottom: '8px', background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border)', color: 'var(--text)', padding: '7px 9px', borderRadius: '6px', fontSize: '12.5px', boxSizing: 'border-box' }} />
                   <input type="text" placeholder="Subject" value=${emSubject} onChange=${e => setEmSubject(e.target.value)}
                     style=${{ width: '100%', marginBottom: '8px', background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border)', color: 'var(--text)', padding: '7px 9px', borderRadius: '6px', fontSize: '12.5px', boxSizing: 'border-box' }} />
-                  <textarea placeholder="Write your message…" value=${emBody} onChange=${e => setEmBody(e.target.value)}
+                  <textarea placeholder="Write your message…  Use {name}, {company}… to personalize." value=${emBody} onChange=${e => setEmBody(e.target.value)}
                     style=${{ width: '100%', minHeight: '120px', background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border)', color: 'var(--text)', padding: '8px 9px', borderRadius: '6px', fontSize: '12.5px', resize: 'vertical', fontFamily: 'inherit', boxSizing: 'border-box' }}></textarea>
+                  <div style=${{ fontSize: '10.5px', color: 'var(--text-dim)', marginTop: '4px' }}>Personalize: ${'{name}'} ${'{first_name}'} ${'{company}'} ${'{industry}'} ${'{city}'} ${'{title}'}</div>
                   <div style=${{ display: 'flex', gap: '8px', marginTop: '8px' }}>
                     <button onClick=${sendEmail} disabled=${sending}
                       style=${{ background: 'var(--accent)', border: '1px solid var(--accent)', color: '#fff', borderRadius: '6px', padding: '7px 16px', fontSize: '12px', fontWeight: 600, cursor: 'pointer' }}>
@@ -401,6 +500,16 @@ function RecordDrawer({ recordId, onClose, onChanged }) {
               </select>
               <button onClick=${enroll} disabled=${!selSeq} style=${{ background: 'var(--accent)', border: '1px solid var(--accent)', color: '#fff', borderRadius: '6px', padding: '6px 14px', fontSize: '12px', fontWeight: 600, cursor: selSeq ? 'pointer' : 'not-allowed' }}>Enroll</button>
             </div>` : html`<div class="muted small">Automated sequences run from your own domain — coming soon.</div>`}
+
+            <!-- Deals -->
+            ${sectionLabel('Deals')}
+            ${(data.deals || []).length === 0 ? html`<div class="muted small" style=${{ marginBottom: '8px' }}>No deals yet.</div>`
+              : data.deals.map(d => html`<div key=${d.id} style=${{ display: 'flex', alignItems: 'center', gap: '8px', padding: '7px 0', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+                  <span style=${{ flex: 1, fontSize: '12.5px', color: 'var(--text)' }}>${d.title}</span>
+                  ${d.value_num != null ? html`<span style=${{ fontSize: '11px', color: 'var(--accent-bright)' }}>${money(d.value_num, d.currency)}</span>` : null}
+                  <span style=${{ fontSize: '10.5px', color: d.status === 'won' ? 'rgb(111 207 151)' : d.status === 'lost' ? 'rgb(232 142 168)' : 'var(--text-dim)' }}>${d.stage_name || d.status}</span>
+                </div>`)}
+            <button onClick=${addDeal} style=${{ marginTop: '8px', background: 'transparent', border: '1px solid var(--border)', color: 'var(--text-muted)', borderRadius: '6px', padding: '6px 12px', fontSize: '12px', cursor: 'pointer' }}>+ New deal</button>
 
             <!-- Tasks -->
             ${sectionLabel('Tasks')}

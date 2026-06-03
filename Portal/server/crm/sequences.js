@@ -10,7 +10,7 @@
 
 import { query } from '../db.js';
 import { sendEmail, getFromAddress } from '../lib/email.js';
-import { logActivity, markContacted } from '../lib/crm.js';
+import { logActivity, markContacted, buildMergeVars, applyMerge } from '../lib/crm.js';
 
 const TICK_MS = 60_000;
 let timer = null;
@@ -77,7 +77,9 @@ async function processEnrollment(enr) {
   // Resolve the record, recipient email, and stop conditions.
   const recR = await query(
     `SELECT r.status, r.entity_type, r.entity_id,
-            c.email AS company_email, p.email AS person_email
+            c.email AS company_email, p.email AS person_email,
+            c.name AS company_name, c.industry AS company_industry, c.city AS company_city, c.website AS company_website,
+            p.full_name AS person_name, p.headline AS person_headline
        FROM crm_records r
        LEFT JOIN companies c ON r.entity_type='company' AND c.id=r.entity_id
        LEFT JOIN people    p ON r.entity_type='person'  AND p.id=r.entity_id
@@ -97,18 +99,21 @@ async function processEnrollment(enr) {
     return 'errored';
   }
 
-  // Send the step.
+  // Personalize {tokens} for this recipient, then send the step.
+  const vars = buildMergeVars(rec);
+  const subject = applyMerge(step.subject, vars);
+  const bodyText = applyMerge(step.body, vars);
   const replyTo = enr.enrolled_by || null;
   const ins = await query(
     `INSERT INTO crm_emails (tenant_id, record_id, direction, to_email, reply_to, subject, body_text, status, sent_by)
      VALUES ($1,$2,'out',$3,$4,$5,$6,'queued',$7) RETURNING id`,
-    [enr.tenant_id, enr.record_id, to, replyTo, step.subject, step.body, replyTo]
+    [enr.tenant_id, enr.record_id, to, replyTo, subject, bodyText, replyTo]
   );
   const emailId = Number(ins.rows[0].id);
   let from;
   try {
     from = await getFromAddress();
-    const res = await sendEmail({ from, to, replyTo, subject: step.subject, text: step.body });
+    const res = await sendEmail({ from, to, replyTo, subject, text: bodyText });
     await query(`UPDATE crm_emails SET status='sent', provider_message_id=$2, from_email=$3, sent_at=now() WHERE id=$1`,
       [emailId, res.id, from]);
   } catch (e) {

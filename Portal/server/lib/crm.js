@@ -61,6 +61,39 @@ export async function markContacted(client, tenantId, recordId, actorEmail = nul
   }
 }
 
+// ── Email personalization (merge tokens) ────────────────────────────────────
+// Available tokens, substituted per recipient at send time:
+//   {name} {first_name} {company} {industry} {city} {title} {website}
+export const MERGE_TOKENS = ['name', 'first_name', 'company', 'industry', 'city', 'title', 'website'];
+
+// Build the merge variables for a record. `row` must include entity_type plus
+// the aliased joins: company_name/company_industry/company_city/company_website
+// and person_name/person_headline (+ optional company_name_hint for people).
+export function buildMergeVars(row) {
+  const isCompany = row.entity_type === 'company';
+  const name = isCompany ? (row.company_name || '') : (row.person_name || '');
+  const first = isCompany ? name : (String(name).trim().split(/\s+/)[0] || name);
+  return {
+    name,
+    first_name: first,
+    company: isCompany ? (row.company_name || '') : (row.company_name_hint || ''),
+    industry: row.company_industry || '',
+    city: row.company_city || '',
+    title: isCompany ? '' : (row.person_headline || ''),
+    website: row.company_website || '',
+  };
+}
+
+// Replace {token} with its value. Known tokens with no value → empty string;
+// unknown tokens are left untouched so typos are visible rather than silently dropped.
+export function applyMerge(text, vars) {
+  if (!text) return text;
+  return String(text).replace(/\{(\w+)\}/g, (m, key) => {
+    const k = key.toLowerCase();
+    return Object.prototype.hasOwnProperty.call(vars, k) ? (vars[k] || '') : m;
+  });
+}
+
 /** Append a timeline activity + bump the record's last_activity_at. */
 export async function logActivity(client, tenantId, recordId, type, { actorUserId = null, actorEmail = null, summary = null, payload = {} } = {}) {
   const r = runnerOf(client);
