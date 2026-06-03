@@ -146,6 +146,12 @@ function RecordDrawer({ recordId, onClose, onChanged }) {
   const [loading, setLoading] = useState(true);
   const [noteText, setNoteText] = useState('');
   const [taskTitle, setTaskTitle] = useState('');
+  const [composing, setComposing] = useState(false);
+  const [emTo, setEmTo] = useState('');
+  const [emSubject, setEmSubject] = useState('');
+  const [emBody, setEmBody] = useState('');
+  const [templates, setTemplates] = useState([]);
+  const [sending, setSending] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -173,6 +179,27 @@ function RecordDrawer({ recordId, onClose, onChanged }) {
   const toggleTask = async (t) => {
     try { await api.crmUpdateTask(t.id, { status: t.status === 'done' ? 'open' : 'done' }); await load(); onChanged?.(); }
     catch (err) { toast('Task update failed: ' + err.message, 'error'); }
+  };
+  const openCompose = async () => {
+    setEmTo(data?.suggested_to || '');
+    setComposing(true);
+    try { const r = await api.crmTemplates(); setTemplates(r.rows || []); } catch { /* ignore */ }
+  };
+  const applyTemplate = (id) => {
+    const t = templates.find(x => String(x.id) === String(id));
+    if (t) { if (t.subject) setEmSubject(t.subject); if (t.body) setEmBody(t.body); }
+  };
+  const sendEmail = async () => {
+    if (!emSubject.trim() && !emBody.trim()) { toast('Write a subject or message', 'error'); return; }
+    setSending(true);
+    try {
+      await api.crmSendEmail(recordId, { to: emTo.trim(), subject: emSubject, body: emBody });
+      toast('Email sent');
+      setComposing(false); setEmSubject(''); setEmBody('');
+      await load(); onChanged?.();
+    } catch (err) {
+      toast(/admin_only/i.test(err.message) ? 'Email sending is admin-only for now' : (err.message || 'Send failed'), 'error');
+    } finally { setSending(false); }
   };
 
   const sectionLabel = (t) => html`<div style=${{ fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 700, color: 'var(--text-dim)', margin: '20px 0 8px' }}>${t}</div>`;
@@ -208,6 +235,48 @@ function RecordDrawer({ recordId, onClose, onChanged }) {
           </div>
 
           <div style=${{ padding: '4px 22px 28px' }}>
+            <!-- Email -->
+            ${sectionLabel('Email')}
+            ${data.can_send ? html`
+              ${!composing ? html`
+                <button onClick=${openCompose}
+                  style=${{ background: 'var(--accent)', border: '1px solid var(--accent)', color: '#fff', borderRadius: '6px', padding: '8px 14px', fontSize: '12.5px', fontWeight: 600, cursor: 'pointer' }}>
+                  ✉ Compose email
+                </button>
+              ` : html`
+                <div style=${{ border: '1px solid var(--border)', borderRadius: '10px', padding: '12px', background: 'rgba(255,255,255,0.02)' }}>
+                  ${templates.length ? html`<select onChange=${e => applyTemplate(e.target.value)}
+                    style=${{ width: '100%', marginBottom: '8px', background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border)', color: 'var(--text)', padding: '6px 8px', borderRadius: '6px', fontSize: '12px' }}>
+                    <option value="">Use a template…</option>
+                    ${templates.map(t => html`<option key=${t.id} value=${t.id}>${t.name}</option>`)}
+                  </select>` : null}
+                  <input type="text" placeholder="To" value=${emTo} onChange=${e => setEmTo(e.target.value)}
+                    style=${{ width: '100%', marginBottom: '8px', background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border)', color: 'var(--text)', padding: '7px 9px', borderRadius: '6px', fontSize: '12.5px', boxSizing: 'border-box' }} />
+                  <input type="text" placeholder="Subject" value=${emSubject} onChange=${e => setEmSubject(e.target.value)}
+                    style=${{ width: '100%', marginBottom: '8px', background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border)', color: 'var(--text)', padding: '7px 9px', borderRadius: '6px', fontSize: '12.5px', boxSizing: 'border-box' }} />
+                  <textarea placeholder="Write your message…" value=${emBody} onChange=${e => setEmBody(e.target.value)}
+                    style=${{ width: '100%', minHeight: '120px', background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border)', color: 'var(--text)', padding: '8px 9px', borderRadius: '6px', fontSize: '12.5px', resize: 'vertical', fontFamily: 'inherit', boxSizing: 'border-box' }}></textarea>
+                  <div style=${{ display: 'flex', gap: '8px', marginTop: '8px' }}>
+                    <button onClick=${sendEmail} disabled=${sending}
+                      style=${{ background: 'var(--accent)', border: '1px solid var(--accent)', color: '#fff', borderRadius: '6px', padding: '7px 16px', fontSize: '12px', fontWeight: 600, cursor: 'pointer' }}>
+                      ${sending ? 'Sending…' : 'Send'}</button>
+                    <button onClick=${() => setComposing(false)}
+                      style=${{ background: 'transparent', border: '1px solid var(--border)', color: 'var(--text-muted)', borderRadius: '6px', padding: '7px 14px', fontSize: '12px', cursor: 'pointer' }}>Cancel</button>
+                    <span style=${{ flex: 1 }}></span>
+                    <span style=${{ fontSize: '10.5px', color: 'var(--text-dim)', alignSelf: 'center' }}>from bell.qa · replies → you</span>
+                  </div>
+                </div>
+              `}
+            ` : html`<div class="muted small">Email outreach from your own domain is coming soon.</div>`}
+
+            ${(data.emails || []).length ? html`<div style=${{ marginTop: '10px' }}>
+              ${data.emails.map(e => html`<div key=${e.id} style=${{ display: 'flex', alignItems: 'center', gap: '8px', padding: '6px 0', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+                <span style=${{ fontSize: '11px', color: e.status === 'sent' ? 'rgb(111 207 151)' : e.status === 'failed' ? 'rgb(232 142 168)' : 'var(--text-dim)' }}>${e.status === 'sent' ? '✓' : e.status === 'failed' ? '✕' : '•'}</span>
+                <span style=${{ flex: 1, minWidth: 0, fontSize: '12px', color: 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>${e.subject || '(no subject)'}</span>
+                <span style=${{ fontSize: '10.5px', color: 'var(--text-dim)' }}>${timeAgo(e.created_at)}</span>
+              </div>`)}
+            </div>` : null}
+
             <!-- Tasks -->
             ${sectionLabel('Tasks')}
             <div style=${{ display: 'flex', gap: '8px', marginBottom: '8px' }}>
