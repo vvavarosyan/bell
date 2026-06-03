@@ -9,7 +9,7 @@
 // complete. Stops if the record is won/lost, has no email, or a send fails.
 
 import { query } from '../db.js';
-import { sendEmail, getFromAddress } from '../lib/email.js';
+import { sendEmail, getFromAddress, inboundReplyTo } from '../lib/email.js';
 import { logActivity, markContacted, buildMergeVars, applyMerge } from '../lib/crm.js';
 
 const TICK_MS = 60_000;
@@ -110,12 +110,13 @@ async function processEnrollment(enr) {
     [enr.tenant_id, enr.record_id, to, replyTo, subject, bodyText, replyTo]
   );
   const emailId = Number(ins.rows[0].id);
+  const effReplyTo = inboundReplyTo(emailId) || replyTo;
   let from;
   try {
     from = await getFromAddress();
-    const res = await sendEmail({ from, to, replyTo, subject, text: bodyText });
-    await query(`UPDATE crm_emails SET status='sent', provider_message_id=$2, from_email=$3, sent_at=now() WHERE id=$1`,
-      [emailId, res.id, from]);
+    const res = await sendEmail({ from, to, replyTo: effReplyTo, subject, text: bodyText });
+    await query(`UPDATE crm_emails SET status='sent', provider_message_id=$2, from_email=$3, reply_to=$4, sent_at=now() WHERE id=$1`,
+      [emailId, res.id, from, effReplyTo]);
   } catch (e) {
     await query(`UPDATE crm_emails SET status='failed', error=$2 WHERE id=$1`, [emailId, String(e.message).slice(0, 400)]);
     await query(`UPDATE crm_sequence_enrollments SET status='errored', error=$2 WHERE id=$1`, [enr.id, String(e.message).slice(0, 400)]);

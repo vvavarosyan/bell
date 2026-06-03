@@ -139,13 +139,14 @@ export function CrmTab() {
 
       <!-- View toggle: Records | Pipeline | Sequences -->
       <div style=${{ display: 'inline-flex', gap: '4px', marginBottom: '14px' }}>
-        ${[['records', 'Records'], ['pipeline', 'Pipeline'], ['sequences', 'Sequences']].map(([k, lbl]) => html`
+        ${[['records', 'Records'], ['pipeline', 'Pipeline'], ['sequences', 'Sequences'], ['timeline', 'Timeline']].map(([k, lbl]) => html`
           <button key=${k} class=${'toolbar-toggle' + (view === k ? ' accent' : '')}
             onClick=${() => { setView(k); setOpenedId(null); }}>${lbl}</button>`)}
       </div>
 
       ${view === 'sequences' ? html`<${SequencesView} />`
         : view === 'pipeline' ? html`<${PipelineView} />`
+        : view === 'timeline' ? html`<${TimelineView} />`
         : html`
       <!-- Toolbar -->
       <div style=${{ display: 'flex', gap: '8px', alignItems: 'center', marginBottom: '14px', flexWrap: 'wrap' }}>
@@ -319,6 +320,76 @@ function SequencesView() {
   `;
 }
 
+// ── Timeline / Gantt (tasks by due date) ────────────────────────────────────
+function TimelineView() {
+  const [tasks, setTasks] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try { const r = await api.crmTasks({ status: 'open' }); setTasks(r.rows || []); }
+    catch (err) { toast('Load failed: ' + err.message, 'error'); }
+    finally { setLoading(false); }
+  }, []);
+  useEffect(() => { load(); }, [load]);
+
+  const complete = async (t) => {
+    setTasks(ts => ts.filter(x => x.id !== t.id));
+    try { await api.crmUpdateTask(t.id, { status: 'done' }); } catch (err) { toast('Update failed: ' + err.message, 'error'); load(); }
+  };
+
+  if (loading) return html`<div style=${{ color: 'var(--text-dim)', padding: '30px 0', textAlign: 'center', fontSize: '12px' }}>Loading timeline…</div>`;
+
+  // Build buckets: Overdue, then the next 21 days, then Someday (no due date).
+  const startOfDay = (d) => { const x = new Date(d); x.setHours(0, 0, 0, 0); return x; };
+  const today = startOfDay(new Date());
+  const DAYS = 21;
+  const cols = [];
+  cols.push({ key: 'overdue', label: 'Overdue', tasks: [], overdue: true });
+  for (let i = 0; i < DAYS; i++) {
+    const d = new Date(today); d.setDate(today.getDate() + i);
+    cols.push({ key: 'd' + i, label: i === 0 ? 'Today' : i === 1 ? 'Tomorrow' : d.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' }), date: d, tasks: [] });
+  }
+  const someday = { key: 'someday', label: 'No due date', tasks: [] };
+
+  for (const t of tasks) {
+    if (!t.due_at) { someday.tasks.push(t); continue; }
+    const due = startOfDay(t.due_at);
+    if (due < today) { cols[0].tasks.push(t); continue; }
+    const diff = Math.round((due - today) / 86400000);
+    if (diff >= 0 && diff < DAYS) cols[diff + 1].tasks.push(t);
+    else someday.tasks.push(t);   // beyond the window → Someday lane
+  }
+  const allCols = [...cols, someday].filter(c => c.tasks.length > 0 || c.key === 'overdue' || c.key.startsWith('d'));
+
+  const taskName = (t) => t.entity_type === 'company' ? t.company_name : t.entity_type === 'person' ? t.person_name : null;
+
+  return html`
+    <div>
+      <div style=${{ fontSize: '12.5px', color: 'var(--text-muted)', marginBottom: '12px' }}>Open tasks across your CRM, by due date. Tick to complete.</div>
+      <div style=${{ display: 'flex', gap: '10px', overflowX: 'auto', paddingBottom: '8px' }}>
+        ${allCols.map(c => html`<div key=${c.key} style=${{ minWidth: '180px', width: '180px', flexShrink: 0 }}>
+          <div style=${{ fontSize: '11px', fontWeight: 700, marginBottom: '8px', color: c.overdue ? 'rgb(232 142 168)' : c.key === 'd0' ? 'var(--accent-bright)' : 'var(--text-muted)' }}>
+            ${c.label} <span style=${{ color: 'var(--text-dim)', fontWeight: 400 }}>${c.tasks.length || ''}</span>
+          </div>
+          <div style=${{ display: 'flex', flexDirection: 'column', gap: '6px', minHeight: '40px' }}>
+            ${c.tasks.map(t => html`<div key=${t.id} style=${{ background: 'linear-gradient(180deg, rgba(19,24,41,.8), rgba(13,18,35,.8))', border: '1px solid ' + (c.overdue ? 'rgba(232,142,168,0.4)' : 'var(--border)'), borderRadius: '8px', padding: '8px 9px' }}>
+              <div style=${{ display: 'flex', alignItems: 'flex-start', gap: '7px' }}>
+                <input type="checkbox" onChange=${() => complete(t)} style=${{ marginTop: '2px' }} />
+                <div style=${{ minWidth: 0 }}>
+                  <div style=${{ fontSize: '12px', color: 'var(--text)', lineHeight: 1.3 }}>${t.title}</div>
+                  ${taskName(t) ? html`<div style=${{ fontSize: '10.5px', color: 'var(--text-muted)', marginTop: '2px' }}>${taskName(t)}</div>` : null}
+                  ${t.assignee_email ? html`<div style=${{ fontSize: '10px', color: 'var(--text-dim)', marginTop: '1px' }}>${t.assignee_email}</div>` : null}
+                </div>
+              </div>
+            </div>`)}
+          </div>
+        </div>`)}
+      </div>
+    </div>
+  `;
+}
+
 // ── Pipeline (Kanban) ───────────────────────────────────────────────────────
 function money(v, cur) {
   if (v == null) return '';
@@ -333,6 +404,8 @@ function PipelineView() {
   const [adding, setAdding] = useState(false);
   const [title, setTitle] = useState('');
   const [value, setValue] = useState('');
+  const [dragId, setDragId] = useState(null);
+  const [overStage, setOverStage] = useState(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -342,10 +415,15 @@ function PipelineView() {
   }, []);
   useEffect(() => { load(); }, [load]);
 
-  const move = async (deal, stageId) => {
-    try { await api.crmUpdateDeal(deal.id, { stage_id: Number(stageId) }); await load(); }
-    catch (err) { toast('Move failed: ' + err.message, 'error'); }
+  const move = async (dealId, stageId) => {
+    const deal = deals.find(d => d.id === dealId);
+    if (deal && Number(deal.stage_id) === Number(stageId)) return;
+    // optimistic
+    setDeals(ds => ds.map(d => d.id === dealId ? { ...d, stage_id: Number(stageId) } : d));
+    try { await api.crmUpdateDeal(dealId, { stage_id: Number(stageId) }); await load(); }
+    catch (err) { toast('Move failed: ' + err.message, 'error'); await load(); }
   };
+  const onDrop = (stageId) => { const id = dragId; setDragId(null); setOverStage(null); if (id != null) move(id, stageId); };
   const addDeal = async () => {
     if (!title.trim()) { toast('Name the deal', 'error'); return; }
     try {
@@ -384,15 +462,23 @@ function PipelineView() {
               <span style=${{ flex: 1 }}></span>
               ${sum > 0 ? html`<span style=${{ fontSize: '10.5px', color: 'var(--text-muted)' }}>${money(sum, col[0]?.currency)}</span>` : null}
             </div>
-            <div style=${{ background: 'rgba(255,255,255,0.02)', border: '1px solid var(--border)', borderRadius: '10px', padding: '8px', minHeight: '120px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+            <div
+              onDragOver=${e => { e.preventDefault(); setOverStage(st.id); }}
+              onDragLeave=${() => setOverStage(s => s === st.id ? null : s)}
+              onDrop=${() => onDrop(st.id)}
+              style=${{ background: overStage === st.id ? 'rgba(91,140,255,0.1)' : 'rgba(255,255,255,0.02)', border: '1px solid ' + (overStage === st.id ? 'rgba(91,140,255,0.5)' : 'var(--border)'), borderRadius: '10px', padding: '8px', minHeight: '120px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
               ${col.length === 0 ? html`<div style=${{ color: 'var(--text-dim)', fontSize: '11px', textAlign: 'center', padding: '14px 0' }}>—</div>`
-                : col.map(d => html`<div key=${d.id} style=${{ background: 'linear-gradient(180deg, rgba(19,24,41,.9), rgba(13,18,35,.9))', border: '1px solid var(--border)', borderRadius: '8px', padding: '9px 10px' }}>
+                : col.map(d => html`<div key=${d.id}
+                    draggable=${true}
+                    onDragStart=${() => setDragId(d.id)}
+                    onDragEnd=${() => { setDragId(null); setOverStage(null); }}
+                    style=${{ background: 'linear-gradient(180deg, rgba(19,24,41,.9), rgba(13,18,35,.9))', border: '1px solid var(--border)', borderRadius: '8px', padding: '9px 10px', cursor: 'grab', opacity: dragId === d.id ? 0.4 : 1 }}>
                   <div style=${{ fontSize: '12.5px', fontWeight: 600, color: 'var(--text)', marginBottom: '3px' }}>${d.title}</div>
                   ${dealName(d) ? html`<div style=${{ fontSize: '10.5px', color: 'var(--text-muted)', marginBottom: '4px' }}>${dealName(d)}</div>` : null}
                   <div style=${{ display: 'flex', alignItems: 'center', gap: '6px' }}>
                     ${d.value_num != null ? html`<span style=${{ fontSize: '11px', fontWeight: 700, color: 'var(--accent-bright)' }}>${money(d.value_num, d.currency)}</span>` : null}
                     <span style=${{ flex: 1 }}></span>
-                    <select value=${d.stage_id} onChange=${e => move(d, e.target.value)}
+                    <select value=${d.stage_id} onClick=${e => e.stopPropagation()} onChange=${e => move(d.id, e.target.value)}
                       style=${{ background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border)', color: 'var(--text-muted)', borderRadius: '5px', fontSize: '10.5px', padding: '2px 4px' }}>
                       ${stages.map(s2 => html`<option key=${s2.id} value=${s2.id}>${s2.name}</option>`)}
                     </select>

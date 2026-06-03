@@ -24,6 +24,15 @@ export function emailProviderConfigured() {
   return getKey('resend').then((k) => !!k).catch(() => false);
 }
 
+// When an inbound domain is configured (BDI_CRM_INBOUND_DOMAIN, e.g.
+// "inbound.bell.qa"), outbound CRM mail uses a plus-addressed reply-to that
+// routes replies back to Bell's inbound webhook, keyed by the crm_emails id.
+// Until then this returns null and callers keep replies going to the human sender.
+export function inboundReplyTo(emailId) {
+  const dom = (process.env.BDI_CRM_INBOUND_DOMAIN || '').trim();
+  return dom ? `reply+${emailId}@${dom}` : null;
+}
+
 /**
  * Send one email through Resend.
  * @returns {Promise<{id:string, raw:object}>}  the provider message id

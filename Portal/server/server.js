@@ -45,6 +45,7 @@ import syncRouter              from './routes/sync.js';
 import creditsRouter           from './routes/credits.js';
 import feedRouter              from './routes/feed.js';
 import crmRouter               from './routes/crm.js';
+import crmInboundRouter        from './routes/crm_inbound.js';
 import { requireAuth, requireRole, requireActiveSubscription } from './lib/auth.js';
 import { getKey } from './keychain.js';
 
@@ -190,6 +191,8 @@ app.use('/api/settings',           ...adminOnly, settingsRouter);
 app.use('/api/auth',               authRouter);
 app.use('/api/billing',            billingRouter);
 app.use('/api/sync',               syncRouter);
+// Inbound email webhook — machine-to-machine, self-gated by BDI_CRM_INBOUND_TOKEN.
+app.use('/api/crm-inbound',        crmInboundRouter);
 
 // Static UI
 app.use(express.static(UI_DIR, { extensions: ['html'] }));
