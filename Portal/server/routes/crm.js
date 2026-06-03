@@ -16,7 +16,7 @@
 import { Router } from 'express';
 import { query } from '../db.js';
 import { ensureCrmRecord, logActivity, markContacted, buildMergeVars, applyMerge } from '../lib/crm.js';
-import { sendEmail, getFromAddress } from '../lib/email.js';
+import { sendEmail, getFromAddress, inboundReplyTo } from '../lib/email.js';
 
 const router = Router();
 
@@ -304,12 +304,15 @@ router.post('/records/:id/email', async (req, res, next) => {
        VALUES ($1,$2,'out',$3,$4,$5,$6,'queued',$7) RETURNING id`,
       [tenantId(req), id, to, replyTo, subject, bodyText, replyTo]);
     const emailId = Number(ins.rows[0].id);
+    // If inbound is configured, route replies through Bell (so they thread + stop
+    // sequences); otherwise replies go straight to the human sender.
+    const effReplyTo = inboundReplyTo(emailId) || replyTo;
 
     try {
       const from = await getFromAddress();
-      const sent = await sendEmail({ from, to, replyTo, subject, text: bodyText });
-      await query(`UPDATE crm_emails SET status='sent', provider_message_id=$2, from_email=$3, sent_at=now() WHERE id=$1`,
-        [emailId, sent.id, from]);
+      const sent = await sendEmail({ from, to, replyTo: effReplyTo, subject, text: bodyText });
+      await query(`UPDATE crm_emails SET status='sent', provider_message_id=$2, from_email=$3, reply_to=$4, sent_at=now() WHERE id=$1`,
+        [emailId, sent.id, from, effReplyTo]);
       await logActivity(null, tenantId(req), id, 'email_out', {
         actorUserId: actorUserId(req), actorEmail: replyTo,
         summary: 'Email sent: ' + (subject || '(no subject)'), payload: { to, email_id: emailId },
