@@ -38,6 +38,7 @@ import { startPoller as startResearchPoller } from './research/poller.js';
 import openDataRouter          from './routes/open_data.js';
 import { startScheduler as startOpenDataScheduler } from './sources/qatar_open_data/scheduler.js';
 import { startNewsEngine, getNewsState } from './news/engine.js';
+import { startCrmScheduler } from './crm/sequences.js';
 import authRouter              from './routes/auth.js';
 import billingRouter           from './routes/billing.js';
 import syncRouter              from './routes/sync.js';
@@ -250,4 +251,8 @@ app.use((err, req, res, next) => {
   // Start the Market Feed engine (news poller + enrichment). No-op unless
   // BDI_NEWS_ENGINE=1 — enable on exactly one service (the production portal).
   startNewsEngine();
+
+  // CRM sequence follow-up scheduler (gated by BDI_CRM_SCHEDULER=1 → one prod
+  // service, the app.bell.qa user portal where CRM data + the Resend key live).
+  startCrmScheduler();
 })();

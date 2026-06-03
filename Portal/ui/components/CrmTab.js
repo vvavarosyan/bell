@@ -49,6 +49,7 @@ export function CrmTab() {
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
   const [openedId, setOpenedId] = useState(null);
+  const [view, setView] = useState('records');   // records | sequences
 
   const load = useCallback(async ({ silent = false } = {}) => {
     if (!silent) setLoading(true);
@@ -84,6 +85,14 @@ export function CrmTab() {
         </div>` : null}
       </div>
 
+      <!-- View toggle: Records | Sequences -->
+      <div style=${{ display: 'inline-flex', gap: '4px', marginBottom: '14px' }}>
+        ${[['records', 'Records'], ['sequences', 'Sequences']].map(([k, lbl]) => html`
+          <button key=${k} class=${'toolbar-toggle' + (view === k ? ' accent' : '')}
+            onClick=${() => { setView(k); setOpenedId(null); }}>${lbl}</button>`)}
+      </div>
+
+      ${view === 'sequences' ? html`<${SequencesView} />` : html`
       <!-- Toolbar -->
       <div style=${{ display: 'flex', gap: '8px', alignItems: 'center', marginBottom: '14px', flexWrap: 'wrap' }}>
         <div style=${{ display: 'inline-flex', gap: '4px' }}>
@@ -136,6 +145,90 @@ export function CrmTab() {
           </div>`}
 
       ${openedId ? html`<${RecordDrawer} recordId=${openedId} onClose=${() => setOpenedId(null)} onChanged=${() => load({ silent: true })} />` : null}
+      `}
+    </div>
+  `;
+}
+
+// ── Sequences view (list + builder) ─────────────────────────────────────────
+function SequencesView() {
+  const [rows, setRows] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [building, setBuilding] = useState(false);
+  const [name, setName] = useState('');
+  const [steps, setSteps] = useState([{ delay_days: 0, subject: '', body: '' }]);
+  const [saving, setSaving] = useState(false);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try { const r = await api.crmSequences(); setRows(r.rows || []); }
+    catch (err) { toast('Load failed: ' + err.message, 'error'); }
+    finally { setLoading(false); }
+  }, []);
+  useEffect(() => { load(); }, [load]);
+
+  const setStep = (i, key, val) => setSteps(s => s.map((st, j) => j === i ? { ...st, [key]: val } : st));
+  const addStep = () => setSteps(s => [...s, { delay_days: 3, subject: '', body: '' }]);
+  const removeStep = (i) => setSteps(s => s.filter((_, j) => j !== i));
+  const save = async () => {
+    if (!name.trim()) { toast('Name the sequence', 'error'); return; }
+    if (!steps.some(s => (s.subject || '').trim() || (s.body || '').trim())) { toast('Add at least one step with content', 'error'); return; }
+    setSaving(true);
+    try {
+      await api.crmCreateSequence({ name: name.trim(), steps: steps.map(s => ({ delay_days: Number(s.delay_days) || 0, subject: s.subject, body: s.body })) });
+      toast('Sequence created');
+      setBuilding(false); setName(''); setSteps([{ delay_days: 0, subject: '', body: '' }]);
+      await load();
+    } catch (err) { toast('Create failed: ' + err.message, 'error'); }
+    finally { setSaving(false); }
+  };
+
+  return html`
+    <div>
+      <div style=${{ display: 'flex', alignItems: 'center', marginBottom: '12px' }}>
+        <div style=${{ fontSize: '12.5px', color: 'var(--text-muted)' }}>Automated multi-step email follow-ups. Enroll a record from its drawer.</div>
+        <span style=${{ flex: 1 }}></span>
+        ${!building ? html`<button onClick=${() => setBuilding(true)}
+          style=${{ background: 'var(--accent)', border: '1px solid var(--accent)', color: '#fff', borderRadius: '6px', padding: '7px 14px', fontSize: '12px', fontWeight: 600, cursor: 'pointer' }}>+ New sequence</button>` : null}
+      </div>
+
+      ${building ? html`<div style=${{ border: '1px solid var(--border)', borderRadius: '12px', padding: '16px', marginBottom: '16px', background: 'rgba(255,255,255,0.02)' }}>
+        <input type="text" placeholder="Sequence name (e.g. Cold outreach — 3 touches)" value=${name} onChange=${e => setName(e.target.value)}
+          style=${{ width: '100%', marginBottom: '12px', background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border)', color: 'var(--text)', padding: '8px 10px', borderRadius: '6px', fontSize: '13px', boxSizing: 'border-box' }} />
+        ${steps.map((st, i) => html`<div key=${i} style=${{ border: '1px solid var(--border)', borderRadius: '8px', padding: '10px', marginBottom: '8px' }}>
+          <div style=${{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+            <span style=${{ fontSize: '11px', fontWeight: 700, color: 'var(--text-dim)' }}>STEP ${i + 1}</span>
+            <span style=${{ fontSize: '11px', color: 'var(--text-muted)' }}>send after</span>
+            <input type="number" min="0" value=${st.delay_days} onChange=${e => setStep(i, 'delay_days', e.target.value)}
+              style=${{ width: '56px', background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border)', color: 'var(--text)', padding: '4px 6px', borderRadius: '5px', fontSize: '12px' }} />
+            <span style=${{ fontSize: '11px', color: 'var(--text-muted)' }}>days ${i === 0 ? '(0 = immediately)' : ''}</span>
+            <span style=${{ flex: 1 }}></span>
+            ${steps.length > 1 ? html`<button onClick=${() => removeStep(i)} style=${{ background: 'transparent', border: 'none', color: 'var(--text-dim)', cursor: 'pointer', fontSize: '14px' }}>✕</button>` : null}
+          </div>
+          <input type="text" placeholder="Subject" value=${st.subject} onChange=${e => setStep(i, 'subject', e.target.value)}
+            style=${{ width: '100%', marginBottom: '6px', background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border)', color: 'var(--text)', padding: '6px 9px', borderRadius: '6px', fontSize: '12.5px', boxSizing: 'border-box' }} />
+          <textarea placeholder="Message…" value=${st.body} onChange=${e => setStep(i, 'body', e.target.value)}
+            style=${{ width: '100%', minHeight: '70px', background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border)', color: 'var(--text)', padding: '7px 9px', borderRadius: '6px', fontSize: '12.5px', resize: 'vertical', fontFamily: 'inherit', boxSizing: 'border-box' }}></textarea>
+        </div>`)}
+        <div style=${{ display: 'flex', gap: '8px', marginTop: '4px' }}>
+          <button onClick=${addStep} style=${{ background: 'transparent', border: '1px dashed var(--border)', color: 'var(--text-muted)', borderRadius: '6px', padding: '6px 12px', fontSize: '12px', cursor: 'pointer' }}>+ Add step</button>
+          <span style=${{ flex: 1 }}></span>
+          <button onClick=${save} disabled=${saving} style=${{ background: 'var(--accent)', border: '1px solid var(--accent)', color: '#fff', borderRadius: '6px', padding: '7px 16px', fontSize: '12px', fontWeight: 600, cursor: 'pointer' }}>${saving ? 'Saving…' : 'Create sequence'}</button>
+          <button onClick=${() => setBuilding(false)} style=${{ background: 'transparent', border: '1px solid var(--border)', color: 'var(--text-muted)', borderRadius: '6px', padding: '7px 14px', fontSize: '12px', cursor: 'pointer' }}>Cancel</button>
+        </div>
+      </div>` : null}
+
+      ${loading ? html`<div style=${{ color: 'var(--text-dim)', padding: '30px 0', textAlign: 'center', fontSize: '12px' }}>Loading…</div>`
+        : rows.length === 0 ? html`<div style=${{ color: 'var(--text-dim)', padding: '30px 0', textAlign: 'center', fontSize: '12.5px' }}>No sequences yet. Create one to start automating follow-ups.</div>`
+        : html`<div style=${{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+            ${rows.map(s => html`<div key=${s.id} style=${{ display: 'flex', alignItems: 'center', gap: '12px', padding: '12px 14px', background: 'linear-gradient(180deg, rgba(19,24,41,.6), rgba(13,18,35,.6))', border: '1px solid var(--border)', borderRadius: '10px' }}>
+              <div style=${{ flex: 1 }}>
+                <div style=${{ fontSize: '13.5px', fontWeight: 600, color: 'var(--text)' }}>${s.name}</div>
+                <div style=${{ fontSize: '11px', color: 'var(--text-muted)' }}>${s.step_count} step${s.step_count === 1 ? '' : 's'} · ${s.active_enrollments} active</div>
+              </div>
+              <span style=${{ fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.05em', color: s.status === 'active' ? 'rgb(111 207 151)' : 'var(--text-dim)' }}>${s.status}</span>
+            </div>`)}
+          </div>`}
     </div>
   `;
 }
@@ -152,6 +245,8 @@ function RecordDrawer({ recordId, onClose, onChanged }) {
   const [emBody, setEmBody] = useState('');
   const [templates, setTemplates] = useState([]);
   const [sending, setSending] = useState(false);
+  const [seqList, setSeqList] = useState([]);
+  const [selSeq, setSelSeq] = useState('');
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -160,6 +255,19 @@ function RecordDrawer({ recordId, onClose, onChanged }) {
     finally { setLoading(false); }
   }, [recordId]);
   useEffect(() => { load(); }, [load]);
+  useEffect(() => {
+    (async () => { try { const r = await api.crmSequences(); setSeqList((r.rows || []).filter(s => s.status === 'active' && s.step_count > 0)); } catch { /* ignore */ } })();
+  }, []);
+
+  const enroll = async () => {
+    if (!selSeq) return;
+    try { await api.crmEnroll(recordId, Number(selSeq)); toast('Enrolled in sequence'); setSelSeq(''); await load(); onChanged?.(); }
+    catch (err) { toast(/already_enrolled/i.test(err.message) ? 'Already enrolled in that sequence' : /admin_only/i.test(err.message) ? 'Running sequences is admin-only for now' : (err.message || 'Enroll failed'), 'error'); }
+  };
+  const stopEnroll = async (id) => {
+    try { await api.crmStopEnrollment(id); toast('Sequence stopped'); await load(); onChanged?.(); }
+    catch (err) { toast('Stop failed: ' + err.message, 'error'); }
+  };
 
   const rec = data?.record;
   const setStatus = async (s) => {
@@ -276,6 +384,23 @@ function RecordDrawer({ recordId, onClose, onChanged }) {
                 <span style=${{ fontSize: '10.5px', color: 'var(--text-dim)' }}>${timeAgo(e.created_at)}</span>
               </div>`)}
             </div>` : null}
+
+            <!-- Sequences -->
+            ${sectionLabel('Sequences')}
+            ${(data.enrollments || []).map(e => html`<div key=${e.id} style=${{ display: 'flex', alignItems: 'center', gap: '8px', padding: '7px 0', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+              <span style=${{ flex: 1, fontSize: '12.5px', color: 'var(--text)' }}>${e.sequence_name}
+                <span style=${{ color: 'var(--text-dim)', fontSize: '11px' }}> · step ${Math.min(e.current_step, e.total_steps)}/${e.total_steps}</span></span>
+              <span style=${{ fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.05em', color: e.status === 'active' ? 'rgb(111 207 151)' : e.status === 'errored' ? 'rgb(232 142 168)' : 'var(--text-dim)' }}>${e.status}</span>
+              ${e.status === 'active' ? html`<button onClick=${() => stopEnroll(e.id)} style=${{ background: 'transparent', border: '1px solid var(--border)', color: 'var(--text-muted)', borderRadius: '5px', padding: '3px 8px', fontSize: '10.5px', cursor: 'pointer' }}>Stop</button>` : null}
+            </div>`)}
+            ${data.can_send ? html`<div style=${{ display: 'flex', gap: '8px', marginTop: '8px' }}>
+              <select value=${selSeq} onChange=${e => setSelSeq(e.target.value)}
+                style=${{ flex: 1, background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border)', color: 'var(--text)', padding: '6px 9px', borderRadius: '6px', fontSize: '12px' }}>
+                <option value="">Enroll in a sequence…</option>
+                ${seqList.map(s => html`<option key=${s.id} value=${s.id}>${s.name}</option>`)}
+              </select>
+              <button onClick=${enroll} disabled=${!selSeq} style=${{ background: 'var(--accent)', border: '1px solid var(--accent)', color: '#fff', borderRadius: '6px', padding: '6px 14px', fontSize: '12px', fontWeight: 600, cursor: selSeq ? 'pointer' : 'not-allowed' }}>Enroll</button>
+            </div>` : html`<div class="muted small">Automated sequences run from your own domain — coming soon.</div>`}
 
             <!-- Tasks -->
             ${sectionLabel('Tasks')}

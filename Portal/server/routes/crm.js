@@ -15,7 +15,7 @@
 
 import { Router } from 'express';
 import { query } from '../db.js';
-import { ensureCrmRecord, logActivity } from '../lib/crm.js';
+import { ensureCrmRecord, logActivity, markContacted } from '../lib/crm.js';
 import { sendEmail, getFromAddress } from '../lib/email.js';
 
 const router = Router();
@@ -106,13 +106,17 @@ router.get('/records/:id', async (req, res, next) => {
     const r = await query(`${RECORD_SELECT} WHERE r.id = $1 AND r.tenant_id = $2`, [id, tenantId(req)]);
     if (!r.rows.length) return res.status(404).json({ error: 'not_found' });
 
-    const [notes, activities, tasks, emails] = await Promise.all([
+    const [notes, activities, tasks, emails, enrollments] = await Promise.all([
       query(`SELECT id, author_email, body, created_at FROM crm_notes WHERE record_id=$1 ORDER BY created_at DESC`, [id]),
       query(`SELECT id, type, actor_email, summary, payload, occurred_at FROM crm_activities WHERE record_id=$1 ORDER BY occurred_at DESC LIMIT 200`, [id]),
       query(`SELECT t.id, t.title, t.description, t.due_at, t.status, t.assignee_user_id, u.email AS assignee_email, t.created_by, t.created_at, t.completed_at
                FROM crm_tasks t LEFT JOIN users u ON u.id = t.assignee_user_id
               WHERE t.record_id=$1 ORDER BY t.status, t.due_at NULLS LAST, t.created_at DESC`, [id]),
       query(`SELECT id, direction, to_email, subject, status, sent_by, created_at, sent_at FROM crm_emails WHERE record_id=$1 ORDER BY created_at DESC LIMIT 100`, [id]),
+      query(`SELECT e.id, e.sequence_id, e.current_step, e.status, e.next_run_at, s.name AS sequence_name,
+                    (SELECT count(*)::int FROM crm_sequence_steps st WHERE st.sequence_id=e.sequence_id) AS total_steps
+               FROM crm_sequence_enrollments e JOIN crm_sequences s ON s.id=e.sequence_id
+              WHERE e.record_id=$1 ORDER BY e.enrolled_at DESC`, [id]),
     ]);
     const rec = r.rows[0];
     // Only expose the recipient email + send capability to admins (who can send).
@@ -127,7 +131,8 @@ router.get('/records/:id', async (req, res, next) => {
     }
     res.json({
       record: rec, notes: notes.rows, activities: activities.rows, tasks: tasks.rows,
-      emails: emails.rows, can_send: canSendEmail(req), suggested_to: suggestedTo,
+      emails: emails.rows, enrollments: enrollments.rows,
+      can_send: canSendEmail(req), suggested_to: suggestedTo,
     });
   } catch (err) { next(err); }
 });
@@ -302,6 +307,7 @@ router.post('/records/:id/email', async (req, res, next) => {
         actorUserId: actorUserId(req), actorEmail: replyTo,
         summary: 'Email sent: ' + (subject || '(no subject)'), payload: { to, email_id: emailId },
       });
+      await markContacted(null, tenantId(req), id, replyTo);
       res.json({ id: emailId, status: 'sent', message_id: sent.id });
     } catch (err) {
       const safe = /key_missing/i.test(err.message) ? 'Email is not configured yet (set the Resend key).' : 'Could not send the email.';
@@ -328,6 +334,103 @@ router.post('/templates', async (req, res, next) => {
        VALUES ($1,$2,$3,$4,$5) RETURNING id, name, subject, body, created_at`,
       [tenantId(req), name, req.body?.subject || null, req.body?.body || null, actorEmail(req)]);
     res.json(r.rows[0]);
+  } catch (err) { next(err); }
+});
+
+// ── Sequences ───────────────────────────────────────────────────────────────
+
+// GET /api/crm/sequences — list with step + active-enrollment counts
+router.get('/sequences', async (req, res, next) => {
+  try {
+    const r = await query(
+      `SELECT s.id, s.name, s.status, s.created_at,
+              (SELECT count(*)::int FROM crm_sequence_steps st WHERE st.sequence_id = s.id) AS step_count,
+              (SELECT count(*)::int FROM crm_sequence_enrollments e WHERE e.sequence_id = s.id AND e.status='active') AS active_enrollments
+         FROM crm_sequences s WHERE s.tenant_id = $1 ORDER BY s.created_at DESC`,
+      [tenantId(req)]);
+    res.json({ rows: r.rows });
+  } catch (err) { next(err); }
+});
+
+// GET /api/crm/sequences/:id — sequence + steps
+router.get('/sequences/:id', async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    const s = await query(`SELECT * FROM crm_sequences WHERE id=$1 AND tenant_id=$2`, [id, tenantId(req)]);
+    if (!s.rows.length) return res.status(404).json({ error: 'not_found' });
+    const steps = await query(`SELECT id, step_no, delay_days, subject, body FROM crm_sequence_steps WHERE sequence_id=$1 ORDER BY step_no`, [id]);
+    res.json({ sequence: s.rows[0], steps: steps.rows });
+  } catch (err) { next(err); }
+});
+
+// POST /api/crm/sequences  { name, steps:[{delay_days, subject, body}, ...] }
+router.post('/sequences', async (req, res, next) => {
+  try {
+    const name = String(req.body?.name || '').trim();
+    const steps = Array.isArray(req.body?.steps) ? req.body.steps : [];
+    if (!name) return res.status(400).json({ error: 'name_required' });
+    if (!steps.length) return res.status(400).json({ error: 'steps_required' });
+    const s = await query(
+      `INSERT INTO crm_sequences (tenant_id, name, created_by) VALUES ($1,$2,$3) RETURNING id`,
+      [tenantId(req), name, actorEmail(req)]);
+    const seqId = Number(s.rows[0].id);
+    let n = 0;
+    for (const st of steps) {
+      n++;
+      await query(
+        `INSERT INTO crm_sequence_steps (tenant_id, sequence_id, step_no, delay_days, subject, body)
+         VALUES ($1,$2,$3,$4,$5,$6)`,
+        [tenantId(req), seqId, n, Math.max(0, Number(st.delay_days) || 0), st.subject || null, st.body || null]);
+    }
+    res.json({ id: seqId, steps: n });
+  } catch (err) { next(err); }
+});
+
+// POST /api/crm/records/:id/enroll  { sequence_id }  (admin-only while sending is single-domain)
+router.post('/records/:id/enroll', async (req, res, next) => {
+  try {
+    if (!canSendEmail(req)) {
+      return res.status(403).json({ error: 'admin_only', reason: 'Running sequences is limited to admins for now.' });
+    }
+    const recordId = Number(req.params.id);
+    const sequenceId = Number(req.body?.sequence_id);
+    if (!Number.isFinite(sequenceId)) return res.status(400).json({ error: 'sequence_id_required' });
+    const owns = await query(`SELECT 1 FROM crm_records WHERE id=$1 AND tenant_id=$2`, [recordId, tenantId(req)]);
+    if (!owns.rows.length) return res.status(404).json({ error: 'not_found' });
+    const seq = await query(`SELECT 1 FROM crm_sequences WHERE id=$1 AND tenant_id=$2`, [sequenceId, tenantId(req)]);
+    if (!seq.rows.length) return res.status(404).json({ error: 'sequence_not_found' });
+    const step1 = await query(`SELECT delay_days FROM crm_sequence_steps WHERE sequence_id=$1 AND step_no=1`, [sequenceId]);
+    if (!step1.rows.length) return res.status(400).json({ error: 'sequence_has_no_steps' });
+    const delay = Math.max(0, Number(step1.rows[0].delay_days) || 0);
+
+    const r = await query(
+      `INSERT INTO crm_sequence_enrollments (tenant_id, sequence_id, record_id, current_step, status, enrolled_by, next_run_at)
+       VALUES ($1,$2,$3,1,'active',$4, now() + ($5 || ' days')::interval)
+       ON CONFLICT (tenant_id, sequence_id, record_id) DO NOTHING
+       RETURNING id`,
+      [tenantId(req), sequenceId, recordId, actorEmail(req), String(delay)]);
+    if (!r.rows.length) return res.status(409).json({ error: 'already_enrolled' });
+    await logActivity(null, tenantId(req), recordId, 'sequence', {
+      actorUserId: actorUserId(req), actorEmail: actorEmail(req), summary: 'Enrolled in a sequence',
+      payload: { sequence_id: sequenceId, enrollment_id: r.rows[0].id },
+    });
+    res.json({ enrollment_id: r.rows[0].id, status: 'active' });
+  } catch (err) { next(err); }
+});
+
+// POST /api/crm/enrollments/:id/stop
+router.post('/enrollments/:id/stop', async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    const r = await query(
+      `UPDATE crm_sequence_enrollments SET status='stopped'
+        WHERE id=$1 AND tenant_id=$2 AND status='active' RETURNING id, record_id`,
+      [id, tenantId(req)]);
+    if (!r.rows.length) return res.status(404).json({ error: 'not_found_or_not_active' });
+    await logActivity(null, tenantId(req), r.rows[0].record_id, 'sequence', {
+      actorEmail: actorEmail(req), summary: 'Sequence stopped',
+    });
+    res.json({ stopped: id });
   } catch (err) { next(err); }
 });
 

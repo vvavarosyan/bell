@@ -44,6 +44,23 @@ export async function ensureCrmRecord(client, tenantId, entityType, entityId, so
   return { id: recordId, created: true };
 }
 
+/**
+ * When the first outreach goes out, advance a 'new' record to 'contacted'
+ * (no-op for any other status). Logs a status_change so the timeline reflects it.
+ */
+export async function markContacted(client, tenantId, recordId, actorEmail = null) {
+  const r = runnerOf(client);
+  const up = await r.query(
+    `UPDATE crm_records SET status='contacted' WHERE id=$1 AND tenant_id=$2 AND status='new' RETURNING id`,
+    [recordId, tenantId]
+  );
+  if (up.rows.length) {
+    await logActivity(r, tenantId, recordId, 'status_change', {
+      actorEmail, summary: 'Status → Contacted (outreach sent)', payload: { from: 'new', to: 'contacted', auto: true },
+    });
+  }
+}
+
 /** Append a timeline activity + bump the record's last_activity_at. */
 export async function logActivity(client, tenantId, recordId, type, { actorUserId = null, actorEmail = null, summary = null, payload = {} } = {}) {
   const r = runnerOf(client);
