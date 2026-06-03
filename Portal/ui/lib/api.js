@@ -139,6 +139,9 @@ export const api = {
   crmAddTask:             (id, body) => request(`/api/crm/records/${id}/tasks`, { method: 'POST', body: JSON.stringify(body) }),
   crmTasks:               (q = {}) => request('/api/crm/tasks?' + new URLSearchParams(q)),
   crmUpdateTask:          (id, body) => request('/api/crm/tasks/' + id, { method: 'PATCH', body: JSON.stringify(body) }),
+  crmSendEmail:           (id, body) => request(`/api/crm/records/${id}/email`, { method: 'POST', body: JSON.stringify(body) }),
+  crmTemplates:           () => request('/api/crm/templates'),
+  crmSaveTemplate:        (body) => request('/api/crm/templates', { method: 'POST', body: JSON.stringify(body) }),
 
   // Deep Data (Qatar Open Data)
   openDataStats:          () => request('/api/open-data/stats'),

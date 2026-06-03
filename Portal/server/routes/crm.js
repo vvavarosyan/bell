@@ -16,8 +16,13 @@
 import { Router } from 'express';
 import { query } from '../db.js';
 import { ensureCrmRecord, logActivity } from '../lib/crm.js';
+import { sendEmail, getFromAddress } from '../lib/email.js';
 
 const router = Router();
+
+// For now, only platform_admin may SEND email (single verified bell.qa domain).
+// Later, tenants add their own domains via DNS and send as themselves.
+const canSendEmail = (req) => req.user?.role === 'platform_admin';
 
 const tenantId = (req) => req.tenant?.id;
 const actorEmail = (req) => req.user?.email || null;
@@ -101,14 +106,29 @@ router.get('/records/:id', async (req, res, next) => {
     const r = await query(`${RECORD_SELECT} WHERE r.id = $1 AND r.tenant_id = $2`, [id, tenantId(req)]);
     if (!r.rows.length) return res.status(404).json({ error: 'not_found' });
 
-    const [notes, activities, tasks] = await Promise.all([
+    const [notes, activities, tasks, emails] = await Promise.all([
       query(`SELECT id, author_email, body, created_at FROM crm_notes WHERE record_id=$1 ORDER BY created_at DESC`, [id]),
       query(`SELECT id, type, actor_email, summary, payload, occurred_at FROM crm_activities WHERE record_id=$1 ORDER BY occurred_at DESC LIMIT 200`, [id]),
       query(`SELECT t.id, t.title, t.description, t.due_at, t.status, t.assignee_user_id, u.email AS assignee_email, t.created_by, t.created_at, t.completed_at
                FROM crm_tasks t LEFT JOIN users u ON u.id = t.assignee_user_id
               WHERE t.record_id=$1 ORDER BY t.status, t.due_at NULLS LAST, t.created_at DESC`, [id]),
+      query(`SELECT id, direction, to_email, subject, status, sent_by, created_at, sent_at FROM crm_emails WHERE record_id=$1 ORDER BY created_at DESC LIMIT 100`, [id]),
     ]);
-    res.json({ record: r.rows[0], notes: notes.rows, activities: activities.rows, tasks: tasks.rows });
+    const rec = r.rows[0];
+    // Only expose the recipient email + send capability to admins (who can send).
+    let suggestedTo = null;
+    if (canSendEmail(req)) {
+      const e = await query(
+        rec.entity_type === 'company'
+          ? `SELECT email FROM companies WHERE id=$1`
+          : `SELECT email FROM people WHERE id=$1`,
+        [rec.entity_id]);
+      suggestedTo = e.rows[0]?.email || null;
+    }
+    res.json({
+      record: rec, notes: notes.rows, activities: activities.rows, tasks: tasks.rows,
+      emails: emails.rows, can_send: canSendEmail(req), suggested_to: suggestedTo,
+    });
   } catch (err) { next(err); }
 });
 
@@ -237,6 +257,76 @@ router.patch('/tasks/:id', async (req, res, next) => {
         actorUserId: actorUserId(req), actorEmail: actorEmail(req), summary: 'Task completed',
       });
     }
+    res.json(r.rows[0]);
+  } catch (err) { next(err); }
+});
+
+// POST /api/crm/records/:id/email  { to?, subject, body }
+// Sends via Resend from the bell.qa domain; reply_to = the sender so replies
+// reach their inbox. Admin-only for now. Logged to crm_emails + the timeline.
+router.post('/records/:id/email', async (req, res, next) => {
+  try {
+    if (!canSendEmail(req)) {
+      return res.status(403).json({ error: 'admin_only', reason: 'Email sending is limited to admins for now.' });
+    }
+    const id = Number(req.params.id);
+    const rec = await query(
+      `SELECT r.entity_type, r.entity_id,
+              c.email AS company_email, p.email AS person_email
+         FROM crm_records r
+         LEFT JOIN companies c ON r.entity_type='company' AND c.id=r.entity_id
+         LEFT JOIN people    p ON r.entity_type='person'  AND p.id=r.entity_id
+        WHERE r.id=$1 AND r.tenant_id=$2`, [id, tenantId(req)]);
+    if (!rec.rows.length) return res.status(404).json({ error: 'not_found' });
+    const r0 = rec.rows[0];
+
+    const to = String(req.body?.to || (r0.entity_type === 'company' ? r0.company_email : r0.person_email) || '').trim();
+    if (!to) return res.status(400).json({ error: 'no_recipient', reason: 'No email address on file — enter one.' });
+    const subject  = String(req.body?.subject || '').trim();
+    const bodyText = String(req.body?.body || '').trim();
+    if (!subject && !bodyText) return res.status(400).json({ error: 'empty_email' });
+    const replyTo = actorEmail(req);
+
+    const ins = await query(
+      `INSERT INTO crm_emails (tenant_id, record_id, direction, to_email, reply_to, subject, body_text, status, sent_by)
+       VALUES ($1,$2,'out',$3,$4,$5,$6,'queued',$7) RETURNING id`,
+      [tenantId(req), id, to, replyTo, subject, bodyText, replyTo]);
+    const emailId = Number(ins.rows[0].id);
+
+    try {
+      const from = await getFromAddress();
+      const sent = await sendEmail({ from, to, replyTo, subject, text: bodyText });
+      await query(`UPDATE crm_emails SET status='sent', provider_message_id=$2, from_email=$3, sent_at=now() WHERE id=$1`,
+        [emailId, sent.id, from]);
+      await logActivity(null, tenantId(req), id, 'email_out', {
+        actorUserId: actorUserId(req), actorEmail: replyTo,
+        summary: 'Email sent: ' + (subject || '(no subject)'), payload: { to, email_id: emailId },
+      });
+      res.json({ id: emailId, status: 'sent', message_id: sent.id });
+    } catch (err) {
+      const safe = /key_missing/i.test(err.message) ? 'Email is not configured yet (set the Resend key).' : 'Could not send the email.';
+      await query(`UPDATE crm_emails SET status='failed', error=$2 WHERE id=$1`, [emailId, String(err.message).slice(0, 500)]);
+      console.error('[crm] email send failed:', err.message);
+      res.status(502).json({ error: 'send_failed', reason: safe });
+    }
+  } catch (err) { next(err); }
+});
+
+// Email templates (per tenant)
+router.get('/templates', async (req, res, next) => {
+  try {
+    const r = await query(`SELECT id, name, subject, body, created_at FROM crm_email_templates WHERE tenant_id=$1 ORDER BY name`, [tenantId(req)]);
+    res.json({ rows: r.rows });
+  } catch (err) { next(err); }
+});
+router.post('/templates', async (req, res, next) => {
+  try {
+    const name = String(req.body?.name || '').trim();
+    if (!name) return res.status(400).json({ error: 'name_required' });
+    const r = await query(
+      `INSERT INTO crm_email_templates (tenant_id, name, subject, body, created_by)
+       VALUES ($1,$2,$3,$4,$5) RETURNING id, name, subject, body, created_at`,
+      [tenantId(req), name, req.body?.subject || null, req.body?.body || null, actorEmail(req)]);
     res.json(r.rows[0]);
   } catch (err) { next(err); }
 });
