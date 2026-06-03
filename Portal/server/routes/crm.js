@@ -530,6 +530,84 @@ router.post('/enrollments/:id/stop', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+// ── Bulk actions ────────────────────────────────────────────────────────────
+// POST /api/crm/records/bulk  { ids:[], action, status?|archived?|sequence_id? }
+router.post('/records/bulk', async (req, res, next) => {
+  try {
+    const ids = (Array.isArray(req.body?.ids) ? req.body.ids : []).map(Number).filter(Number.isFinite);
+    if (!ids.length) return res.status(400).json({ error: 'no_ids' });
+    const action = req.body?.action;
+    const tid = tenantId(req);
+
+    if (action === 'status') {
+      const status = req.body?.status;
+      if (!RECORD_STATUSES.has(status)) return res.status(400).json({ error: 'invalid_status' });
+      const r = await query(`UPDATE crm_records SET status=$1 WHERE tenant_id=$2 AND id = ANY($3::bigint[]) RETURNING id`, [status, tid, ids]);
+      for (const row of r.rows) {
+        await logActivity(null, tid, row.id, 'status_change', { actorUserId: actorUserId(req), actorEmail: actorEmail(req), summary: 'Status → ' + status, payload: { to: status, bulk: true } });
+      }
+      return res.json({ updated: r.rowCount });
+    }
+    if (action === 'archive') {
+      const archived = req.body?.archived !== false;
+      const r = await query(`UPDATE crm_records SET archived=$1 WHERE tenant_id=$2 AND id = ANY($3::bigint[]) RETURNING id`, [archived, tid, ids]);
+      return res.json({ updated: r.rowCount });
+    }
+    if (action === 'enroll') {
+      if (!canSendEmail(req)) return res.status(403).json({ error: 'admin_only', reason: 'Running sequences is limited to admins for now.' });
+      const sequenceId = Number(req.body?.sequence_id);
+      if (!Number.isFinite(sequenceId)) return res.status(400).json({ error: 'sequence_id_required' });
+      const seq = await query(`SELECT 1 FROM crm_sequences WHERE id=$1 AND tenant_id=$2`, [sequenceId, tid]);
+      if (!seq.rows.length) return res.status(404).json({ error: 'sequence_not_found' });
+      const step1 = await query(`SELECT delay_days FROM crm_sequence_steps WHERE sequence_id=$1 AND step_no=1`, [sequenceId]);
+      if (!step1.rows.length) return res.status(400).json({ error: 'sequence_has_no_steps' });
+      const delay = String(Math.max(0, Number(step1.rows[0].delay_days) || 0));
+      // Only enroll records that actually belong to this tenant.
+      const own = await query(`SELECT id FROM crm_records WHERE tenant_id=$1 AND id = ANY($2::bigint[])`, [tid, ids]);
+      let enrolled = 0;
+      for (const row of own.rows) {
+        const r = await query(
+          `INSERT INTO crm_sequence_enrollments (tenant_id, sequence_id, record_id, current_step, status, enrolled_by, next_run_at)
+           VALUES ($1,$2,$3,1,'active',$4, now() + ($5 || ' days')::interval)
+           ON CONFLICT (tenant_id, sequence_id, record_id) DO NOTHING RETURNING id`,
+          [tid, sequenceId, row.id, actorEmail(req), delay]);
+        if (r.rows.length) {
+          enrolled++;
+          await logActivity(null, tid, row.id, 'sequence', { actorEmail: actorEmail(req), summary: 'Enrolled in a sequence', payload: { sequence_id: sequenceId, bulk: true } });
+        }
+      }
+      return res.json({ enrolled, requested: own.rows.length });
+    }
+    return res.status(400).json({ error: 'unknown_action' });
+  } catch (err) { next(err); }
+});
+
+// ── Saved segments ──────────────────────────────────────────────────────────
+router.get('/segments', async (req, res, next) => {
+  try {
+    const r = await query(`SELECT id, name, filters, created_at FROM crm_segments WHERE tenant_id=$1 ORDER BY name`, [tenantId(req)]);
+    res.json({ rows: r.rows });
+  } catch (err) { next(err); }
+});
+router.post('/segments', async (req, res, next) => {
+  try {
+    const name = String(req.body?.name || '').trim();
+    if (!name) return res.status(400).json({ error: 'name_required' });
+    const filters = req.body?.filters && typeof req.body.filters === 'object' ? req.body.filters : {};
+    const r = await query(
+      `INSERT INTO crm_segments (tenant_id, name, filters, created_by) VALUES ($1,$2,$3::jsonb,$4) RETURNING id, name, filters, created_at`,
+      [tenantId(req), name, JSON.stringify(filters), actorEmail(req)]);
+    res.json(r.rows[0]);
+  } catch (err) { next(err); }
+});
+router.delete('/segments/:id', async (req, res, next) => {
+  try {
+    const r = await query(`DELETE FROM crm_segments WHERE id=$1 AND tenant_id=$2 RETURNING id`, [Number(req.params.id), tenantId(req)]);
+    if (!r.rows.length) return res.status(404).json({ error: 'not_found' });
+    res.json({ deleted: r.rows[0].id });
+  } catch (err) { next(err); }
+});
+
 // GET /api/crm/stats — header counts for the CRM tab
 router.get('/stats', async (req, res, next) => {
   try {

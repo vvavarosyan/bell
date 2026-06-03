@@ -49,7 +49,12 @@ export function CrmTab() {
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
   const [openedId, setOpenedId] = useState(null);
-  const [view, setView] = useState('records');   // records | sequences
+  const [view, setView] = useState('records');   // records | pipeline | sequences
+  const [selected, setSelected] = useState(() => new Set());
+  const [segments, setSegments] = useState([]);
+  const [seqList, setSeqList] = useState([]);
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [bulkSeq, setBulkSeq] = useState('');
 
   const load = useCallback(async ({ silent = false } = {}) => {
     if (!silent) setLoading(true);
@@ -66,6 +71,53 @@ export function CrmTab() {
   }, [entityType, status, revealedOnly, q]);
 
   useEffect(() => { load(); }, [load]);
+  // Clear selection whenever the visible set changes.
+  useEffect(() => { setSelected(new Set()); }, [entityType, status, revealedOnly, q, view]);
+  // One-time loads: role (for admin-only bulk enroll), saved segments, sequences.
+  useEffect(() => {
+    (async () => { try { const m = await api.authMe(); setIsAdmin(m?.user?.role === 'platform_admin'); } catch { /* ignore */ } })();
+    (async () => { try { const r = await api.crmSegments(); setSegments(r.rows || []); } catch { /* ignore */ } })();
+    (async () => { try { const r = await api.crmSequences(); setSeqList((r.rows || []).filter(s => s.status === 'active' && s.step_count > 0)); } catch { /* ignore */ } })();
+  }, []);
+
+  const toggleSel = (id) => setSelected(prev => { const n = new Set(prev); n.has(id) ? n.delete(id) : n.add(id); return n; });
+  const allSelected = rows.length > 0 && rows.every(r => selected.has(r.id));
+  const toggleAll = () => setSelected(allSelected ? new Set() : new Set(rows.map(r => r.id)));
+  const clearSel = () => setSelected(new Set());
+  const bulk = async (action, extra = {}) => {
+    const ids = [...selected];
+    if (!ids.length) return;
+    try {
+      const r = await api.crmBulk(ids, action, extra);
+      toast(action === 'enroll' ? `Enrolled ${r.enrolled} record${r.enrolled === 1 ? '' : 's'}` : `Updated ${r.updated} record${r.updated === 1 ? '' : 's'}`);
+      clearSel(); setBulkSeq(''); await load({ silent: true });
+    } catch (err) {
+      toast(/admin_only/i.test(err.message) ? 'Running sequences is admin-only for now' : 'Bulk action failed: ' + err.message, 'error');
+    }
+  };
+  const applySegment = (seg) => {
+    const f = seg.filters || {};
+    setEntityType(f.entity_type || 'company');
+    setStatus(f.status || '');
+    setRevealedOnly(f.source === 'reveal');
+    setQ(f.q || '');
+  };
+  const saveSegment = async () => {
+    const name = window.prompt('Name this view:');
+    if (!name || !name.trim()) return;
+    try {
+      const filters = { entity_type: entityType };
+      if (status) filters.status = status;
+      if (revealedOnly) filters.source = 'reveal';
+      if (q.trim()) filters.q = q.trim();
+      const r = await api.crmSaveSegment(name.trim(), filters);
+      setSegments(s => [...s, r]); toast('View saved');
+    } catch (err) { toast('Save failed: ' + err.message, 'error'); }
+  };
+  const deleteSegment = async (id) => {
+    try { await api.crmDeleteSegment(id); setSegments(s => s.filter(x => x.id !== id)); }
+    catch (err) { toast('Delete failed: ' + err.message, 'error'); }
+  };
 
   return html`
     <div style=${{ padding: '20px 24px', height: '100%', overflowY: 'auto' }}>
@@ -114,8 +166,38 @@ export function CrmTab() {
           onChange=${e => setQ(e.target.value)}
           style=${{ background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border)', color: 'var(--text)', padding: '6px 10px', borderRadius: '6px', fontSize: '12px', minWidth: '180px' }} />
         <span style=${{ flex: 1 }}></span>
+        <button class="toolbar-toggle" onClick=${saveSegment} title="Save the current filters as a reusable view">Save view</button>
         <button class="toolbar-toggle" onClick=${() => load()}>Refresh</button>
       </div>
+
+      ${segments.length ? html`<div style=${{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '12px' }}>
+        ${segments.map(seg => html`<span key=${seg.id} style=${{ display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: '11.5px', color: 'var(--text-muted)', background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border)', borderRadius: '999px', padding: '3px 10px' }}>
+          <button onClick=${() => applySegment(seg)} style=${{ background: 'transparent', border: 'none', color: 'inherit', cursor: 'pointer', fontSize: '11.5px' }}>${seg.name}</button>
+          <button onClick=${() => deleteSegment(seg.id)} title="Delete view" style=${{ background: 'transparent', border: 'none', color: 'var(--text-dim)', cursor: 'pointer', fontSize: '11px' }}>✕</button>
+        </span>`)}
+      </div>` : null}
+
+      ${selected.size > 0 ? html`<div style=${{ display: 'flex', alignItems: 'center', gap: '10px', padding: '10px 14px', marginBottom: '10px', background: 'rgba(91,140,255,0.1)', border: '1px solid rgba(91,140,255,0.35)', borderRadius: '10px', flexWrap: 'wrap' }}>
+        <strong style=${{ fontSize: '12.5px', color: 'var(--text)' }}>${selected.size} selected</strong>
+        <span style=${{ fontSize: '11.5px', color: 'var(--text-muted)' }}>Set status:</span>
+        ${STATUSES.map(s => html`<button key=${s} onClick=${() => bulk('status', { status: s })}
+          style=${{ background: 'transparent', border: '1px solid var(--border)', color: STATUS_META[s].color, borderRadius: '6px', padding: '3px 9px', fontSize: '11px', cursor: 'pointer' }}>${STATUS_META[s].label}</button>`)}
+        ${isAdmin && seqList.length ? html`<span style=${{ width: '1px', height: '18px', background: 'var(--border)' }}></span>
+          <select value=${bulkSeq} onChange=${e => setBulkSeq(e.target.value)}
+            style=${{ background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: '6px', padding: '4px 8px', fontSize: '11.5px' }}>
+            <option value="">Enroll in sequence…</option>
+            ${seqList.map(s => html`<option key=${s.id} value=${s.id}>${s.name}</option>`)}
+          </select>
+          <button onClick=${() => bulkSeq && bulk('enroll', { sequence_id: Number(bulkSeq) })} disabled=${!bulkSeq}
+            style=${{ background: 'var(--accent)', border: '1px solid var(--accent)', color: '#fff', borderRadius: '6px', padding: '4px 12px', fontSize: '11.5px', fontWeight: 600, cursor: bulkSeq ? 'pointer' : 'not-allowed' }}>Enroll</button>` : null}
+        <span style=${{ flex: 1 }}></span>
+        <button onClick=${() => bulk('archive', { archived: true })} style=${{ background: 'transparent', border: '1px solid var(--border)', color: 'var(--text-muted)', borderRadius: '6px', padding: '4px 10px', fontSize: '11.5px', cursor: 'pointer' }}>Archive</button>
+        <button onClick=${clearSel} style=${{ background: 'transparent', border: 'none', color: 'var(--text-dim)', cursor: 'pointer', fontSize: '11.5px' }}>Clear</button>
+      </div>` : null}
+
+      ${rows.length > 0 ? html`<label style=${{ display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: '11px', color: 'var(--text-dim)', marginBottom: '8px', cursor: 'pointer' }}>
+        <input type="checkbox" checked=${allSelected} onChange=${toggleAll} /> Select all (${rows.length})
+      </label>` : null}
 
       <!-- List -->
       ${loading ? html`<div style=${{ color: 'var(--text-dim)', textAlign: 'center', padding: '50px 0', fontSize: '12px' }}>Loading…</div>`
@@ -128,9 +210,10 @@ export function CrmTab() {
               onClick=${() => setOpenedId(r.id)}
               style=${{
                 display: 'flex', alignItems: 'center', gap: '12px', padding: '11px 14px', cursor: 'pointer',
-                background: openedId === r.id ? 'rgba(91,140,255,0.08)' : 'linear-gradient(180deg, rgba(19,24,41,.6), rgba(13,18,35,.6))',
-                border: '1px solid ' + (openedId === r.id ? 'rgba(91,140,255,0.35)' : 'var(--border)'), borderRadius: '10px',
+                background: selected.has(r.id) ? 'rgba(91,140,255,0.12)' : openedId === r.id ? 'rgba(91,140,255,0.08)' : 'linear-gradient(180deg, rgba(19,24,41,.6), rgba(13,18,35,.6))',
+                border: '1px solid ' + (selected.has(r.id) || openedId === r.id ? 'rgba(91,140,255,0.35)' : 'var(--border)'), borderRadius: '10px',
               }}>
+              <input type="checkbox" checked=${selected.has(r.id)} onClick=${e => e.stopPropagation()} onChange=${() => toggleSel(r.id)} style=${{ flexShrink: 0 }} />
               <div style=${{
                 width: '34px', height: '34px', borderRadius: '8px', flexShrink: 0,
                 background: 'rgba(255,255,255,0.05)', color: 'var(--text-muted)',
