@@ -112,7 +112,7 @@ router.get('/records/:id', async (req, res, next) => {
       query(`SELECT t.id, t.title, t.description, t.due_at, t.status, t.assignee_user_id, u.email AS assignee_email, t.created_by, t.created_at, t.completed_at
                FROM crm_tasks t LEFT JOIN users u ON u.id = t.assignee_user_id
               WHERE t.record_id=$1 ORDER BY t.status, t.due_at NULLS LAST, t.created_at DESC`, [id]),
-      query(`SELECT id, direction, to_email, subject, status, sent_by, created_at, sent_at FROM crm_emails WHERE record_id=$1 ORDER BY created_at DESC LIMIT 100`, [id]),
+      query(`SELECT id, direction, from_email, to_email, subject, body_text, status, sent_by, created_at, sent_at FROM crm_emails WHERE record_id=$1 ORDER BY created_at DESC LIMIT 100`, [id]),
       query(`SELECT e.id, e.sequence_id, e.current_step, e.status, e.next_run_at, s.name AS sequence_name,
                     (SELECT count(*)::int FROM crm_sequence_steps st WHERE st.sequence_id=e.sequence_id) AS total_steps
                FROM crm_sequence_enrollments e JOIN crm_sequences s ON s.id=e.sequence_id
