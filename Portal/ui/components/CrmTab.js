@@ -506,6 +506,7 @@ function RecordDrawer({ recordId, onClose, onChanged }) {
   const [sending, setSending] = useState(false);
   const [seqList, setSeqList] = useState([]);
   const [selSeq, setSelSeq] = useState('');
+  const [openEmail, setOpenEmail] = useState(null);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -645,12 +646,24 @@ function RecordDrawer({ recordId, onClose, onChanged }) {
               `}
             ` : html`<div class="muted small">Email outreach from your own domain is coming soon.</div>`}
 
-            ${(data.emails || []).length ? html`<div style=${{ marginTop: '10px' }}>
-              ${data.emails.map(e => html`<div key=${e.id} style=${{ display: 'flex', alignItems: 'center', gap: '8px', padding: '6px 0', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
-                <span style=${{ fontSize: '11px', color: e.status === 'sent' ? 'rgb(111 207 151)' : e.status === 'failed' ? 'rgb(232 142 168)' : 'var(--text-dim)' }}>${e.status === 'sent' ? '✓' : e.status === 'failed' ? '✕' : '•'}</span>
-                <span style=${{ flex: 1, minWidth: 0, fontSize: '12px', color: 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>${e.subject || '(no subject)'}</span>
-                <span style=${{ fontSize: '10.5px', color: 'var(--text-dim)' }}>${timeAgo(e.created_at)}</span>
-              </div>`)}
+            ${(data.emails || []).length ? html`<div style=${{ marginTop: '10px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+              ${data.emails.map(e => {
+                const inbound = e.direction === 'in';
+                const open = openEmail === e.id;
+                return html`<div key=${e.id} style=${{ border: '1px solid ' + (open ? 'var(--border)' : 'transparent'), borderRadius: '8px', background: open ? 'rgba(255,255,255,0.02)' : 'transparent' }}>
+                  <div onClick=${() => setOpenEmail(open ? null : e.id)} style=${{ display: 'flex', alignItems: 'center', gap: '8px', padding: '6px 8px', cursor: 'pointer', borderBottom: open ? 'none' : '1px solid rgba(255,255,255,0.05)' }}>
+                    <span title=${inbound ? 'Reply received' : 'Sent'} style=${{ fontSize: '11px', color: inbound ? 'rgb(91 140 255)' : e.status === 'sent' ? 'rgb(111 207 151)' : e.status === 'failed' ? 'rgb(232 142 168)' : 'var(--text-dim)' }}>${inbound ? '↙' : e.status === 'failed' ? '✕' : '↗'}</span>
+                    <span style=${{ flex: 1, minWidth: 0, fontSize: '12px', color: 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>${e.subject || '(no subject)'}</span>
+                    <span style=${{ fontSize: '10.5px', color: 'var(--text-dim)' }}>${timeAgo(e.created_at)}</span>
+                  </div>
+                  ${open ? html`<div style=${{ padding: '4px 12px 12px' }}>
+                    <div style=${{ fontSize: '10.5px', color: 'var(--text-dim)', marginBottom: '8px' }}>
+                      ${inbound ? 'From ' + (e.from_email || '—') : 'To ' + (e.to_email || '—')} · ${new Date(e.created_at).toLocaleString()}${!inbound ? ' · ' + (e.status || '') : ''}
+                    </div>
+                    <div style=${{ fontSize: '12.5px', color: 'var(--text)', lineHeight: 1.6, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>${e.body_text || html`<span class="muted small">(no text content)</span>`}</div>
+                  </div>` : null}
+                </div>`;
+              })}
             </div>` : null}
 
             <!-- Sequences -->
