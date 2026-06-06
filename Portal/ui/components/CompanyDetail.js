@@ -226,6 +226,24 @@ const LEGAL_GROUPS = [
       ['qstp_directory_url','Directory URL'],
     ],
   },
+  {
+    source: 'QSE',
+    label: 'QSE — Qatar Stock Exchange',
+    fields: [
+      ['qse_symbol',             'Ticker symbol'],
+      ['qse_isin',               'ISIN'],
+      ['qse_market',             'Market'],
+      ['qse_comp_type',          'Listing type'],
+      ['qse_shariah',            'Shariah'],
+      ['qse_market_cap',         'Market cap (QAR)'],
+      ['qse_free_float',         'Free float %'],
+      ['qse_eps',                'EPS'],
+      ['qse_pe_ratio',           'P/E ratio'],
+      ['qse_price_book',         'Price/Book'],
+      ['qse_last_price',         'Last price'],
+      ['qse_shares_outstanding', 'Shares outstanding'],
+    ],
+  },
 ];
 
 // ============================================================================

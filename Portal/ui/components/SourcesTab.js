@@ -8,6 +8,7 @@ const SOURCE_DESCRIPTIONS = {
   QFC:  { label: 'Qatar Financial Centre',   url: 'https://eservices.qfc.qa/QFCPublicRegister/PublicRegister.aspx' },
   MOCI: { label: 'Ministry of Commerce',     url: 'https://businessmap.moci.gov.qa' },
   QSTP: { label: 'Qatar Science & Tech Park',url: 'https://qstp.qa/directory/' },
+  QSE:  { label: 'Qatar Stock Exchange',     url: 'https://www.qe.com.qa/listed-companies' },
 };
 
 export function SourcesTab() {
