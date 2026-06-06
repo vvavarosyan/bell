@@ -10,6 +10,10 @@ import { wipeStaleEnrichmentAfterUrlReplace } from '../enrichment/stages/stage1.
 import { revealOne, revealBulk, getRevealedSet, bypassesCredits } from '../lib/credits.js';
 import { denyUnlessLocalEngine } from '../lib/auth.js';
 import { addRevealedToCrm } from '../lib/crm.js';
+import { normalizeName } from '../ingest/normalize.js';
+
+// Escape LIKE wildcards in user input so a literal % or _ doesn't widen the match.
+function likeEscape(s) { return String(s).replace(/[\\%_]/g, '\\$&'); }
 
 const router = Router();
 
@@ -101,9 +105,28 @@ router.get('/', async (req, res, next) => {
     const where = [];
     const params = [];
 
+    // Advanced search: every detail is searchable via the maintained search_blob
+    // (name, legal name, CR/CP/QFC #, ISIN/symbol, BIN, city, contacts, acronym,
+    // any extra_fields value), AND the name is matched fuzzily (pg_trgm) so typos
+    // and partial spellings still surface the intended company.
+    let orderSql = 'ORDER BY id DESC';
     if (q) {
-      params.push('%' + q.toLowerCase() + '%');
-      where.push(`(lower(name) LIKE $${params.length} OR lower(coalesce(legal_name,'')) LIKE $${params.length} OR coalesce(primary_registration_no,'') ILIKE $${params.length})`);
+      const qLower = q.toLowerCase();
+      const qNorm = normalizeName(q) || qLower;
+      params.push('%' + likeEscape(qLower) + '%');
+      const pLike = params.length;
+      params.push(qNorm);
+      const pNorm = params.length;
+      where.push(
+        `(companies.search_blob LIKE $${pLike} ` +
+        `OR (char_length($${pNorm}) >= 3 AND companies.name_normalized % $${pNorm}))`
+      );
+      // Rank: exact normalized name, then substring hits, then fuzzy closeness.
+      orderSql =
+        `ORDER BY (companies.name_normalized = $${pNorm}) DESC, ` +
+        `(companies.search_blob LIKE $${pLike}) DESC, ` +
+        `similarity(companies.name_normalized, $${pNorm}) DESC, ` +
+        `companies.name ASC`;
     }
     if (status) {
       params.push(status);
@@ -165,7 +188,7 @@ router.get('/', async (req, res, next) => {
               FROM company_sources cs WHERE cs.company_id = companies.id ${srcFilter}) AS source_records
       FROM companies
       ${whereSql}
-      ORDER BY id DESC
+      ${orderSql}
       LIMIT $${params.length - 1} OFFSET $${params.length}
     `;
     const countSql = `SELECT count(*)::int AS total FROM companies ${whereSql}`;
