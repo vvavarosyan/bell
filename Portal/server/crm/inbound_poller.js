@@ -7,9 +7,13 @@
 // (app.bell.qa) so a single poller reads the mailbox:
 //   BDI_CRM_IMAP_HOST, BDI_CRM_IMAP_PORT(=993), BDI_CRM_IMAP_USER, BDI_CRM_IMAP_PASSWORD
 
-import { ImapFlow } from 'imapflow';
-import { simpleParser } from 'mailparser';
+// NOTE: imapflow + mailparser are imported lazily (inside startInboundPoller),
+// so the Portal still boots on machines/deployments where those packages aren't
+// installed and IMAP isn't configured (e.g. the local engine).
 import { processInboundReply, parseReplyId } from './inbound.js';
+
+let ImapFlow = null;
+let simpleParser = null;
 
 const TICK_MS = 60_000;
 let timer = null;
@@ -24,10 +28,18 @@ function cfg() {
   };
 }
 
-export function startInboundPoller() {
+export async function startInboundPoller() {
   const c = cfg();
   if (!c.host || !c.user || !c.pass) {
     console.log('[crm-inbound] IMAP poller disabled (set BDI_CRM_IMAP_HOST/USER/PASSWORD on one service)');
+    return;
+  }
+  // Load the IMAP/parse libs only now that we know the poller is wanted.
+  try {
+    ({ ImapFlow } = await import('imapflow'));
+    ({ simpleParser } = await import('mailparser'));
+  } catch (e) {
+    console.warn('[crm-inbound] IMAP poller not started — imapflow/mailparser not installed here:', e.message);
     return;
   }
   setTimeout(safeRun, 10_000);
