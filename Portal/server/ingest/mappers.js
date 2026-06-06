@@ -209,9 +209,59 @@ export function mapQSTP(raw) {
   };
 }
 
+// ------- QSE --------------------------------------------------------------
+// Qatar Stock Exchange listed companies (Main + Venture markets). Each record
+// is a publicly-traded company; we key on the trading symbol (fallback ISIN).
+export function mapQSE(raw) {
+  const orgName = nz(raw.name) || nz(raw.name_short);
+  if (!orgName) return null;
+  const { name, name_normalized } = namePair(orgName);
+
+  const key = nz(raw.symbol) || nz(raw.isin);
+  if (!key) return null;
+  const recordId = 'qse:' + key;
+
+  // Listed companies are, by definition, active/operating entities.
+  const { status_normalized, is_active } = normalizeUnspecifiedStatus();
+
+  return {
+    source_record_id: recordId,
+    source_url: nz(raw.listed_securities_url) || 'https://www.qe.com.qa/listed-companies',
+    companyFields: {
+      name,
+      name_normalized,
+      legal_name: nz(raw.name_ar),
+      legal_form: 'Listed Company (QSE)',
+      is_active,
+      archived: !is_active,
+      status_normalized,
+      status_raw: nz(raw.listing_state) || 'Listed',
+      sector: nz(raw.sector),
+      country: 'Qatar',
+    },
+    extraFields: {
+      qse_symbol: nz(raw.symbol),
+      qse_isin: nz(raw.isin),
+      qse_market: nz(raw.market),
+      qse_comp_type: nz(raw.comp_type),
+      qse_sector_code: nz(raw.sector_code),
+      qse_shariah: nz(raw.shariah),
+      qse_market_cap: raw.market_cap ?? null,
+      qse_free_float: raw.free_float ?? null,
+      qse_eps: raw.eps ?? null,
+      qse_pe_ratio: raw.pe_ratio ?? null,
+      qse_price_book: raw.price_book ?? null,
+      qse_last_price: raw.last_price ?? null,
+      qse_shares_outstanding: raw.shares_outstanding ?? null,
+    },
+    rawPayload: raw,
+  };
+}
+
 export const MAPPERS = {
   QFZ:  mapQFZ,
   QFC:  mapQFC,
   MOCI: mapMOCI,
   QSTP: mapQSTP,
+  QSE:  mapQSE,
 };

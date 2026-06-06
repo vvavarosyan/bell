@@ -9,6 +9,7 @@ const COLORS = {
   QFZ:  { bg: '#2c1c52', text: '#c5a3ff', border: '#6e4cc1' },
   MOCI: { bg: '#3a2812', text: '#ffc594', border: '#a36422' },
   QSTP: { bg: '#173322', text: '#9fefb8', border: '#2f8a5a' },
+  QSE:  { bg: '#0f3340', text: '#8eeaf6', border: '#2f7f93' },
 };
 
 function prettyId(source, recordId) {

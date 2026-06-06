@@ -17,13 +17,14 @@ const DIR_ROOT   = path.join(WORKSPACE, 'Data', 'Companies', '1. Data Gathering'
 
 const router = Router();
 
-const SOURCES = ['QFZ', 'QFC', 'MOCI', 'QSTP'];
+const SOURCES = ['QFZ', 'QFC', 'MOCI', 'QSTP', 'QSE'];
 
 const SCRAPE_COMMAND = {
   QFZ:  { dir: 'QFZ',  script: 'Run Scan Now.command' },
   QFC:  { dir: 'QFC',  script: 'Run Scan Now.command' },
   MOCI: { dir: 'MOCI', script: 'Run Scan Now.command' },
   QSTP: { dir: 'QSTP', script: 'Run Scan Now.command' },
+  QSE:  { dir: '../Other Sources/QSE', script: 'Run Scan Now.command' },
 };
 
 // GET /api/sources  — per-source snapshot

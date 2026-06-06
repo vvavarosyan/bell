@@ -9,6 +9,7 @@ const COLORS = {
   QFZ:  { bg: '#2c1c52', text: '#b78bff', border: '#6e4cc1' },  // purple
   MOCI: { bg: '#3a2812', text: '#ffb774', border: '#a36422' },  // amber/orange
   QSTP: { bg: '#173322', text: '#7be3a8', border: '#2f8a5a' },  // green
+  QSE:  { bg: '#0f3340', text: '#6fe0ee', border: '#2f7f93' },  // teal/cyan
 };
 const FALLBACK = { bg: '#1c2030', text: '#8a93a6', border: '#2b2f3d' };
 

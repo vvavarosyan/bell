@@ -22,6 +22,7 @@ const LATEST_FILE = {
   QFC:  'QFC/scans/qfc_companies_latest.json',
   MOCI: 'MOCI/scans/moci_companies_latest.json',
   QSTP: 'QSTP/scans/qstp_companies_latest.json',
+  QSE:  '../Other Sources/QSE/scans/qse_companies_latest.json',
 };
 
 const BATCH_SIZE = 200;
