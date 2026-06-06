@@ -113,9 +113,12 @@ echo
 ( cd "$SERVER_DIR" && PORT="$PORT" HOST="$HOST" "$NODE_BIN" server.js ) > "$LOG_FILE" 2>&1 &
 SERVER_PID=$!
 
-# Wait for /api/health to respond
+# Wait for /api/health to respond. The first launch after an update can take a
+# minute or two while the database applies a one-time upgrade (migration), so we
+# wait generously (up to ~5 min) and only give up early if the server process
+# actually exits.
 HEALTH_OK=0
-for i in $(seq 1 30); do
+for i in $(seq 1 600); do
   sleep 0.5
   if curl -sf "http://${HOST}:${PORT}/api/health" >/dev/null 2>&1; then
     HEALTH_OK=1
@@ -123,6 +126,9 @@ for i in $(seq 1 30); do
   fi
   if ! kill -0 "$SERVER_PID" 2>/dev/null; then
     break
+  fi
+  if [ "$i" -eq 20 ]; then
+    echo "  (still starting — applying a one-time database upgrade, please wait…)"
   fi
 done
 

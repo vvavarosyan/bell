@@ -244,6 +244,25 @@ const LEGAL_GROUPS = [
       ['qse_shares_outstanding', 'Shares outstanding'],
     ],
   },
+  {
+    source: 'QCCI',
+    label: 'QCCI — Qatar Chamber Directory',
+    fields: [
+      ['qcci_cr_number',          'CR number'],
+      ['qcci_membership_number',  'Chamber membership #'],
+      ['qcci_company_type',       'Company type'],
+      ['qcci_category',           'Category'],
+      ['qcci_sub_category',       'Sub-category'],
+      ['qcci_owner_name',         'Owner'],
+      ['qcci_contact_person',     'Contact person'],
+      ['qcci_mobile',             'Mobile'],
+      ['qcci_fax',                'Fax'],
+      ['qcci_po_box',             'PO Box'],
+      ['qcci_opening_hours',      'Opening hours'],
+      ['qcci_description',        'Description'],
+      ['qcci_listing_url',        'Listing URL'],
+    ],
+  },
 ];
 
 // ============================================================================
