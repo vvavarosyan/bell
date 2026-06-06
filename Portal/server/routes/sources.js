@@ -17,7 +17,7 @@ const DIR_ROOT   = path.join(WORKSPACE, 'Data', 'Companies', '1. Data Gathering'
 
 const router = Router();
 
-const SOURCES = ['QFZ', 'QFC', 'MOCI', 'QSTP', 'QSE'];
+const SOURCES = ['QFZ', 'QFC', 'MOCI', 'QSTP', 'QSE', 'QCCI'];
 
 const SCRAPE_COMMAND = {
   QFZ:  { dir: 'QFZ',  script: 'Run Scan Now.command' },
@@ -25,6 +25,7 @@ const SCRAPE_COMMAND = {
   MOCI: { dir: 'MOCI', script: 'Run Scan Now.command' },
   QSTP: { dir: 'QSTP', script: 'Run Scan Now.command' },
   QSE:  { dir: '../Other Sources/QSE', script: 'Run Scan Now.command' },
+  QCCI: { dir: '../Other Sources/Qatar Chamber', script: 'Run Scan Now.command' },
 };
 
 // GET /api/sources  — per-source snapshot

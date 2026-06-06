@@ -258,10 +258,84 @@ export function mapQSE(raw) {
   };
 }
 
+// ------- QCCI (Qatar Chamber) ---------------------------------------------
+// Qatar Chamber Commercial & Industrial Directory (qatarcid.com). Rich contact
+// data + the MOCI CR number, so we set primary_registration_no = CR to let the
+// Assembly stage merge these with MOCI rows for the same company.
+export function mapQATARCID(raw) {
+  const orgName = nz(raw.name);
+  if (!orgName) return null;
+  const { name, name_normalized } = namePair(orgName);
+
+  const cr   = nz(raw.cr_number);
+  const memb = nz(raw.qcci_membership_number) || nz(raw.membership_number);
+  const slug = nz(raw.slug);
+  const key  = cr || memb || slug;
+  if (!key) return null;
+  const recordId = 'qcci:' + key;
+
+  const { status_normalized, is_active } = normalizeUnspecifiedStatus();
+
+  // Opening hours → a single readable string (object kept in rawPayload).
+  const ohStr = (raw.opening_hours && typeof raw.opening_hours === 'object')
+    ? Object.entries(raw.opening_hours).map(([d, t]) => `${d}: ${t}`).join('; ')
+    : null;
+
+  const extraFields = {
+    qcci_cr_number: cr,
+    qcci_membership_number: memb,
+    qcci_company_type: nz(raw.company_type),
+    qcci_category: nz(raw.category),
+    qcci_sub_category: nz(raw.sub_category),
+    qcci_owner_name: nz(raw.owner_name),
+    qcci_contact_person: nz(raw.contact_person),
+    qcci_mobile: nz(raw.mobile),
+    qcci_fax: nz(raw.fax),
+    qcci_po_box: nz(raw.po_box),
+    qcci_opening_hours: ohStr,
+    qcci_description: nz(raw.description),
+    qcci_listing_url: nz(raw.listing_url),
+  };
+
+  // Catch-all: fold in ANY other label found on the page so no detail is lost.
+  if (raw.other_details && typeof raw.other_details === 'object') {
+    for (const [k, v] of Object.entries(raw.other_details)) {
+      const val = nz(v);
+      if (!val) continue;
+      const key = 'qcci_x_' + String(k).toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
+      if (!(key in extraFields)) extraFields[key] = val;
+    }
+  }
+
+  return {
+    source_record_id: recordId,
+    source_url: nz(raw.listing_url) || 'https://www.qatarcid.com/',
+    companyFields: {
+      name,
+      name_normalized,
+      legal_form: null,
+      is_active,
+      archived: !is_active,
+      status_normalized,
+      status_raw: null,
+      primary_registration_no: cr || null,   // CR # → cross-links with MOCI
+      sector: nz(raw.sub_category) || nz(raw.category),
+      website: nz(raw.website),
+      email: nz(raw.email),
+      phone: nz(raw.phone) || nz(raw.mobile),
+      address: nz(raw.address),
+      country: 'Qatar',
+    },
+    extraFields,
+    rawPayload: raw,
+  };
+}
+
 export const MAPPERS = {
   QFZ:  mapQFZ,
   QFC:  mapQFC,
   MOCI: mapMOCI,
   QSTP: mapQSTP,
   QSE:  mapQSE,
+  QCCI: mapQATARCID,
 };

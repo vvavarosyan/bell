@@ -9,6 +9,7 @@ const SOURCE_DESCRIPTIONS = {
   MOCI: { label: 'Ministry of Commerce',     url: 'https://businessmap.moci.gov.qa' },
   QSTP: { label: 'Qatar Science & Tech Park',url: 'https://qstp.qa/directory/' },
   QSE:  { label: 'Qatar Stock Exchange',     url: 'https://www.qe.com.qa/listed-companies' },
+  QCCI: { label: 'Qatar Chamber Directory',  url: 'https://www.qatarcid.com/' },
 };
 
 export function SourcesTab() {

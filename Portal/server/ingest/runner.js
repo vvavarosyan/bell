@@ -23,6 +23,7 @@ const LATEST_FILE = {
   MOCI: 'MOCI/scans/moci_companies_latest.json',
   QSTP: 'QSTP/scans/qstp_companies_latest.json',
   QSE:  '../Other Sources/QSE/scans/qse_companies_latest.json',
+  QCCI: '../Other Sources/Qatar Chamber/scans/qatarcid_companies_latest.json',
 };
 
 const BATCH_SIZE = 200;
