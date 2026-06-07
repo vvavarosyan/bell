@@ -44,6 +44,7 @@ import authRouter              from './routes/auth.js';
 import billingRouter           from './routes/billing.js';
 import syncRouter              from './routes/sync.js';
 import creditsRouter           from './routes/credits.js';
+import accountRouter           from './routes/account.js';
 import feedRouter              from './routes/feed.js';
 import crmRouter               from './routes/crm.js';
 import crmInboundRouter        from './routes/crm_inbound.js';
@@ -155,6 +156,8 @@ app.use('/api/stats',      requireAuth, statsRouter);
 // Credits — balance/ledger for any signed-in tenant; /adjust is platform_admin
 // (enforced inside the router). No subscription gate so the top-bar pill always loads.
 app.use('/api/credits',    requireAuth, creditsRouter);
+// Account — the signed-in user's own profile / notifications / preferences.
+app.use('/api/account',    requireAuth, accountRouter);
 
 // Local-engine-only tools — these read local directory files and/or originate
 // canonical data, so they run ONLY on Val's Mac (blocked on app AND admin).
