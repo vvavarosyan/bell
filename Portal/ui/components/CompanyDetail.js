@@ -251,6 +251,7 @@ const LEGAL_GROUPS = [
       ['qcci_cr_number',          'CR number'],
       ['qcci_membership_number',  'Chamber membership #'],
       ['qcci_company_type',       'Company type'],
+      ['qcci_location',           'Location'],
       ['qcci_category',           'Category'],
       ['qcci_sub_category',       'Sub-category'],
       ['qcci_owner_name',         'Owner'],
