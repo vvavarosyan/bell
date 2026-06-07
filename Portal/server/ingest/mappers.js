@@ -292,19 +292,30 @@ export function mapQATARCID(raw) {
     qcci_mobile: nz(raw.mobile),
     qcci_fax: nz(raw.fax),
     qcci_po_box: nz(raw.po_box),
+    qcci_location: nz(raw.location),
     qcci_opening_hours: ohStr,
     qcci_description: nz(raw.description),
     qcci_listing_url: nz(raw.listing_url),
   };
 
-  // Catch-all: fold in ANY other label found on the page so no detail is lost.
-  if (raw.other_details && typeof raw.other_details === 'object') {
-    for (const [k, v] of Object.entries(raw.other_details)) {
-      const val = nz(v);
-      if (!val) continue;
-      const key = 'qcci_x_' + String(k).toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
-      if (!(key in extraFields)) extraFields[key] = val;
-    }
+  // Completeness guarantee: fold EVERY label found on the page into extra_fields
+  // so nothing is ever dropped (listings vary in which fields they show). Known
+  // labels already have canonical qcci_* keys above; anything else becomes
+  // qcci_x_<label>. Uses all_fields (complete) with other_details as fallback.
+  const CURATED = new Set([
+    'cr_number', 'qcci_membership_number', 'company_type', 'address', 'po_box',
+    'email', 'website', 'phone', 'telephone', 'mobile', 'contact_person_mobile',
+    'fax', 'contact_person', 'owner_name', 'location', 'listing_type',
+  ]);
+  const allFields = (raw.all_fields && typeof raw.all_fields === 'object') ? raw.all_fields
+    : (raw.other_details && typeof raw.other_details === 'object' ? raw.other_details : {});
+  for (const [k, v] of Object.entries(allFields)) {
+    const val = nz(v);
+    if (!val) continue;
+    const slug = String(k).toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '');
+    if (CURATED.has(slug)) continue;
+    const key = 'qcci_x_' + slug;
+    if (!(key in extraFields)) extraFields[key] = val;
   }
 
   return {

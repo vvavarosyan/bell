@@ -193,17 +193,40 @@ export async function requireAuth(req, res, next) {
   query(`UPDATE users SET last_signed_in_at = now() WHERE id = $1`, [row.id])
     .catch(() => { /* ignore */ });
 
+  // ----- Clerk Organizations -------------------------------------------------
+  // If the session has an ACTIVE organization, that org is the workspace for
+  // this request: resolve it to our tenant + use the org role. Fully
+  // backward-compatible — no org claim (or any error) → keep the home tenant.
+  // platform_admin staff always keep their cross-tenant identity.
+  let actTenant = null, actRole = null;
+  const orgId = claims.org_id || claims.o?.id || null;
+  const orgRole = claims.org_role || claims.o?.rol || null;
+  if (orgId && row.role !== 'platform_admin') {
+    try {
+      const t = await resolveOrgTenant(orgId);
+      if (t && t.is_active !== false) { actTenant = t; actRole = orgRoleToBell(orgRole); }
+    } catch (err) {
+      console.error('[auth] org resolve failed — using home tenant:', err.message);
+    }
+  }
+
   req.user = {
     id:             Number(row.id),
-    tenant_id:      Number(row.tenant_id),
+    tenant_id:      actTenant ? Number(actTenant.id) : Number(row.tenant_id),
     clerk_user_id:  row.clerk_user_id,
     email:          row.email,
     full_name:      row.full_name,
-    role:           row.role,
+    role:           actRole || row.role,
     function_team:  row.function_team,
     is_active:      row.is_active,
   };
-  req.tenant = {
+  req.tenant = actTenant ? {
+    id:        Number(actTenant.id),
+    name:      actTenant.name,
+    slug:      actTenant.slug,
+    plan:      actTenant.plan,
+    is_active: actTenant.is_active,
+  } : {
     id:        Number(row.t_id),
     name:      row.t_name,
     slug:      row.t_slug,
@@ -211,6 +234,44 @@ export async function requireAuth(req, res, next) {
     is_active: row.t_is_active,
   };
   next();
+}
+
+// Map a Clerk org role (e.g. "org:admin", "org:owner") to a Bell role.
+// Unknown roles fall back to the least-privileged 'member'.
+export function orgRoleToBell(orgRole) {
+  if (!orgRole) return null;
+  const r = String(orgRole).replace(/^org:/, '').toLowerCase();
+  const map = { owner: 'owner', admin: 'admin', lead: 'lead', member: 'member', viewer: 'viewer' };
+  return map[r] || 'member';
+}
+
+// Resolve a Clerk org id to our tenant row. Lazy-creates the tenant from Clerk
+// if the webhook hasn't synced it yet, so org workspaces work immediately.
+export async function resolveOrgTenant(orgId) {
+  const ex = await query(
+    `SELECT id, name, slug, plan, is_active FROM tenants WHERE clerk_org_id = $1 LIMIT 1`,
+    [orgId],
+  );
+  if (ex.rows.length) return ex.rows[0];
+  // Not synced yet — fetch from Clerk and create.
+  const org = await clerkClient().organizations.getOrganization({ organizationId: orgId });
+  if (!org) return null;
+  const base = (org.slug || ('org-' + String(orgId).slice(-8))).toLowerCase().replace(/[^a-z0-9-]+/g, '-');
+  const slug = base.slice(0, 40) + '-' + String(orgId).slice(-4).toLowerCase();
+  try {
+    const ins = await query(
+      `INSERT INTO tenants (name, slug, plan, clerk_org_id) VALUES ($1, $2, 'free', $3)
+       RETURNING id, name, slug, plan, is_active`,
+      [org.name || slug, slug, orgId],
+    );
+    return ins.rows[0];
+  } catch {
+    const again = await query(
+      `SELECT id, name, slug, plan, is_active FROM tenants WHERE clerk_org_id = $1 LIMIT 1`,
+      [orgId],
+    );
+    return again.rows[0] || null;
+  }
 }
 
 /**
