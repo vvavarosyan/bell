@@ -162,6 +162,72 @@ router.post('/portal', requireAuth, async (req, res, next) => {
 });
 
 // ---------------------------------------------------------------------------
+// GET /api/billing/invoices — the tenant's invoices/receipts from Stripe
+// (date, amount, status, hosted page + downloadable PDF).
+// ---------------------------------------------------------------------------
+router.get('/invoices', requireAuth, async (req, res, next) => {
+  try {
+    const r = await query(`SELECT stripe_customer_id FROM tenants WHERE id = $1`, [req.tenant.id]);
+    const customerId = r.rows[0]?.stripe_customer_id;
+    if (!customerId) return res.json({ invoices: [] });
+    const limit = Math.min(Number(req.query.limit ?? 24), 100);
+    const list = await stripe().invoices.list({ customer: customerId, limit });
+    const invoices = (list.data || []).map(inv => ({
+      id:                 inv.id,
+      number:             inv.number,
+      created:            inv.created ? new Date(inv.created * 1000).toISOString() : null,
+      total:              inv.total,
+      amount_paid:        inv.amount_paid,
+      currency:           (inv.currency || 'qar').toUpperCase(),
+      status:             inv.status,         // draft | open | paid | void | uncollectible
+      hosted_invoice_url: inv.hosted_invoice_url,
+      invoice_pdf:        inv.invoice_pdf,
+    }));
+    res.json({ invoices });
+  } catch (err) {
+    if (err.message?.includes('STRIPE_SECRET_KEY')) return res.json({ invoices: [], stripe_unconfigured: true });
+    next(err);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// GET /api/billing/usage — credit balance, this cycle's usage, and the full
+// ledger history (every grant + spend with reason/amount/date).
+// ---------------------------------------------------------------------------
+router.get('/usage', requireAuth, async (req, res, next) => {
+  try {
+    const limit  = Math.min(Number(req.query.limit ?? 50), 200);
+    const offset = Math.max(Number(req.query.offset ?? 0), 0);
+    const tr = await query(
+      `SELECT plan, credit_balance, plan_renewed_at, plan_expires_at FROM tenants WHERE id = $1`,
+      [req.tenant.id],
+    );
+    const t = tr.rows[0] || {};
+    const cycleStart = t.plan_renewed_at || null;
+    const usedR = await query(
+      `SELECT COALESCE(-SUM(delta), 0)::int AS used FROM credit_ledger
+        WHERE tenant_id = $1 AND delta < 0
+          AND created_at >= COALESCE($2, date_trunc('month', now()))`,
+      [req.tenant.id, cycleStart],
+    );
+    const entriesR = await query(
+      `SELECT delta, reason, balance_after, ref_type, ref_id, actor, created_at
+         FROM credit_ledger WHERE tenant_id = $1
+        ORDER BY created_at DESC, id DESC LIMIT $2 OFFSET $3`,
+      [req.tenant.id, limit, offset],
+    );
+    res.json({
+      balance:         Number(t.credit_balance) || 0,
+      allotment:       planById(t.plan)?.credits ?? null,
+      used_this_cycle: usedR.rows[0]?.used || 0,
+      cycle_start:     cycleStart,
+      cycle_reset:     t.plan_expires_at || null,
+      entries:         entriesR.rows,
+    });
+  } catch (err) { next(err); }
+});
+
+// ---------------------------------------------------------------------------
 // POST /api/billing/stripe-webhook — Stripe → us, subscription lifecycle
 //
 // MOUNTED WITH RAW BODY (see server.js) — Stripe needs the exact bytes to

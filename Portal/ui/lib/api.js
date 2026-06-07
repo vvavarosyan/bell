@@ -193,4 +193,10 @@ export const api = {
   billingSubscription:    () => request('/api/billing/subscription'),
   billingCheckout:        (plan_id) => request('/api/billing/checkout', { method: 'POST', body: JSON.stringify({ plan_id }) }),
   billingPortal:          () => request('/api/billing/portal', { method: 'POST', body: '{}' }),
+  billingInvoices:        () => request('/api/billing/invoices'),
+  billingUsage:           (limit = 50) => request('/api/billing/usage?limit=' + limit),
+
+  // Account (the signed-in user's own profile / notifications / preferences)
+  getAccount:             () => request('/api/account'),
+  updateAccount:          (patch) => request('/api/account', { method: 'PATCH', body: JSON.stringify(patch) }),
 };

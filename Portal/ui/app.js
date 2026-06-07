@@ -28,6 +28,8 @@ import { DeepDataTab }   from './components/DeepDataTab.js';
 import { SyncTab }       from './components/SyncTab.js';
 import { MarketFeedTab } from './components/MarketFeedTab.js';
 import { CrmTab }        from './components/CrmTab.js';
+import { BillingTab }    from './components/BillingTab.js';
+import { AccountTab }    from './components/AccountTab.js';
 
 // Maps a sidebar nav id to a renderable view. Items not listed here fall back
 // to a ComingSoon placeholder with the item's label.
@@ -39,6 +41,8 @@ const VIEWS = {
   'jobs':        { Component: JobsTab },
   'sources':     { Component: SourcesTab },
   'settings':    { Component: SettingsTab },
+  'billing':     { Component: BillingTab },
+  'account':     { Component: AccountTab },
   'map':         { Component: MapTab },
   'dedup-queue': { Component: DedupQueueTab },
   'recent-jobs': { Component: RecentJobsTab },
@@ -52,7 +56,8 @@ const VIEWS = {
 
 const LABELS = {
   'companies': 'Companies', 'people': 'People', 'jobs': 'Jobs',
-  'sources': 'Sources', 'settings': 'Settings', 'archived': 'Archived',
+  'sources': 'Sources', 'settings': 'System Config', 'archived': 'Archived',
+  'billing': 'Billing', 'account': 'Settings',
   'market-feed': 'Market Feed',
   'signals': 'Signals',
   'map': 'Map',

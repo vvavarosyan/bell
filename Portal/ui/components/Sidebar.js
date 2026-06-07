@@ -49,7 +49,10 @@ export const NAV_SECTIONS = [
       { id: 'approvals',   label: 'Research Approvals', icon: 'research', placeholder: false, visibility: ['platform_admin'] },
       { id: 'recent-jobs', label: 'Recent Jobs', icon: 'history',  placeholder: false, visibility: ['platform_admin'] },
       { id: 'sync',        label: 'Sync to Bell.qa', icon: 'sync', placeholder: false, visibility: ['platform_admin'] },
-      { id: 'settings',    label: 'Settings',    icon: 'gear',     placeholder: false, visibility: 'all' },
+      { id: 'billing',     label: 'Billing',     icon: 'history',  placeholder: false, visibility: 'all' },
+      { id: 'account',     label: 'Settings',    icon: 'gear',     placeholder: false, visibility: 'all' },
+      // Internal local/admin system config (hidden from customers via ADMIN_ONLY_NAV_IDS).
+      { id: 'settings',    label: 'System Config', icon: 'gear',   placeholder: false, visibility: ['platform_admin'] },
     ],
   },
 ];
