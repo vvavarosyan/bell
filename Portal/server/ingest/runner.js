@@ -239,7 +239,9 @@ async function upsertBatch(source, slice) {
       const seenPh = new Set();
       for (const raw of phoneRaws) {
         const ph = normalizePhone(raw);
-        if (!ph || seenPh.has(ph)) continue;
+        // Skip junk numbers with no real digit (e.g. "0", "00000000") so we
+        // don't show a phone icon for a number that isn't really there.
+        if (!ph || !/[1-9]/.test(ph) || seenPh.has(ph)) continue;
         seenPh.add(ph);
         await client.query(
           `INSERT INTO company_contacts (company_id, type, value, value_display, source)

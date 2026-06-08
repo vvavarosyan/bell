@@ -512,6 +512,15 @@ export async function mergeCompanies(canonicalId, duplicateId, jobLog = null) {
       WHERE id = $2
     `, [canonicalId, duplicateId]));
 
+    // 3b. Flatten any merge chain: rows that previously pointed at this
+    //     duplicate (because it used to be a canonical) must now point at the
+    //     FINAL canonical. This keeps canonical_id always referencing a true
+    //     top-level canonical — required so the mirror sync (which sends
+    //     canonical rows before duplicates) never hits a forward reference.
+    await timed('UPDATE flatten merge chain', () => client.query(
+      `UPDATE companies SET canonical_id = $1 WHERE canonical_id = $2`,
+      [canonicalId, duplicateId]));
+
     // 4. Mark the canonical as a canonical (it's now the survivor for at least one merge)
     await timed('UPDATE canonical merge_status', () => client.query(`
       UPDATE companies SET merge_status = 'canonical', updated_at = now() WHERE id = $1
