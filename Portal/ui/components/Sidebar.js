@@ -172,7 +172,11 @@ export function Sidebar({ activeId, onSelect, dbStatus, settings, stats, current
             <div class="nav-section-label">${section.label}</div>
             ${visibleItems.map(item => {
               const count = COUNT_KEY[item.id];
-              const compact = count != null ? compactCount(count) : null;
+              let compact = count != null ? compactCount(count) : null;
+              // Deep Data shows datasets / records, e.g. "1.3K / 3.5M".
+              if (item.id === 'deep-data' && stats?.deep_data_records_total != null) {
+                compact = compactCount(stats.deep_data_total || 0) + ' / ' + compactCount(stats.deep_data_records_total);
+              }
               return html`
                 <button
                   key=${item.id}
