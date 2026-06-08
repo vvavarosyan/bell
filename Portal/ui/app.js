@@ -74,7 +74,7 @@ const LABELS = {
 function App({ initialUser, initialTenant, mode }) {
   const resolveTab = () => {
     const { tab } = currentRoute();
-    return NAV_IDS.includes(tab) ? tab : 'companies';
+    return NAV_IDS.includes(tab) ? tab : 'market-feed';
   };
   const [tab, setTab] = useState(resolveTab);
   const [stats, setStats] = useState(null);

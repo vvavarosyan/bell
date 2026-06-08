@@ -127,7 +127,8 @@ export function MarketFeedTab() {
   const breaking = events.filter(e => (e.importance || 0) >= 0.7).slice(0, 8);
 
   return html`
-    <div style=${{ padding: '18px 22px', height: '100%', overflowY: 'auto' }}>
+    <div class="page-fill">
+     <div class="page-scroll">
      <div style=${{ display: 'flex', gap: '18px', alignItems: 'flex-start' }}>
       <!-- Main column -->
       <div style=${{ flex: 1, minWidth: 0 }}>
@@ -226,6 +227,7 @@ export function MarketFeedTab() {
           ? html`<${ResearchReport} event=${ev} onClose=${() => setOpenedId(null)} />`
           : html`<${NewsDetail} event=${ev} onClose=${() => setOpenedId(null)} />`;
       })() : null}
+     </div>
     </div>
   `;
 }
