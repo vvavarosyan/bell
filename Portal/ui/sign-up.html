@@ -6,30 +6,38 @@
   <title>Sign up · Bell Data Intelligence</title>
   <link rel="stylesheet" href="/styles.css" />
   <style>
-    body {
-      margin: 0;
-      min-height: 100vh;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      background:
-        radial-gradient(ellipse 60% 50% at 50% 0%, rgba(91,140,255,0.18) 0%, transparent 65%),
-        var(--bg);
-    }
-    .auth-page { width: 100%; max-width: 440px; padding: 32px 24px; text-align: center; }
-    .auth-brand { display: inline-flex; align-items: center; gap: 10px; margin-bottom: 28px; }
+    body { margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center;
+      background: radial-gradient(ellipse 60% 50% at 50% 0%, rgba(91,140,255,0.18) 0%, transparent 65%), var(--bg); }
+    .auth-page { width: 100%; max-width: 420px; padding: 32px 24px; }
+    .auth-brand { display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 26px; }
     .auth-brand-mark { width: 36px; height: 36px; border-radius: 8px;
       background: linear-gradient(135deg, rgb(91 140 255) 0%, rgb(165 195 255) 100%);
-      display: flex; align-items: center; justify-content: center;
-      color: white; font-weight: 700; font-size: 13px; letter-spacing: 0.06em; }
+      display: flex; align-items: center; justify-content: center; color: #fff; font-weight: 700; font-size: 13px; letter-spacing: .06em; }
     .auth-brand-text { color: var(--text); font-weight: 600; font-size: 15px; }
-    .auth-title { font-size: 22px; font-weight: 600; color: var(--text); margin: 0 0 6px; }
-    .auth-subtitle { font-size: 13px; color: var(--text-muted); margin: 0 0 28px; }
-    .auth-mount { background: rgba(19,24,41,0.4); border: 1px solid var(--border);
-      border-radius: 14px; padding: 8px; min-height: 380px; }
-    .auth-fallback { padding: 40px 20px; color: var(--text-dim); font-size: 13px; }
-    .auth-foot { margin-top: 18px; font-size: 11.5px; color: var(--text-dim); }
+    .auth-card { background: rgba(19,24,41,0.5); border: 1px solid var(--border); border-radius: 16px; padding: 28px 26px; }
+    .auth-title { font-size: 21px; font-weight: 700; color: var(--text); margin: 0 0 5px; text-align: center; }
+    .auth-subtitle { font-size: 13px; color: var(--text-muted); margin: 0 0 22px; text-align: center; }
+    .auth-form { display: flex; flex-direction: column; gap: 14px; }
+    .auth-field label { display: block; font-size: 12px; color: var(--text-muted); margin-bottom: 6px; font-weight: 600; }
+    .auth-input { width: 100%; box-sizing: border-box; background: var(--bg-elev-2); border: 1px solid var(--border);
+      border-radius: 9px; color: var(--text); font: inherit; font-size: 14px; padding: 11px 13px;
+      transition: border-color .15s ease, box-shadow .15s ease; }
+    .auth-input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-fade); }
+    .auth-name-row { display: flex; gap: 10px; }
+    .auth-name-row > div { flex: 1; }
+    .auth-btn { width: 100%; background: var(--accent); color: #fff; border: 0; border-radius: 9px; padding: 12px;
+      font: inherit; font-size: 14px; font-weight: 700; cursor: pointer; margin-top: 4px; transition: filter .15s ease; }
+    .auth-btn:hover { filter: brightness(1.1); }
+    .auth-btn:disabled { opacity: .6; cursor: default; }
+    .auth-error { background: rgba(255,90,90,.1); border: 1px solid rgba(255,90,90,.4); color: #ff8a8a;
+      font-size: 12.5px; padding: 9px 12px; border-radius: 8px; }
+    .auth-row { display: flex; justify-content: center; }
+    .auth-link { background: none; border: 0; color: var(--accent-bright); cursor: pointer; font: inherit; font-size: 12px; padding: 0; text-decoration: none; }
+    .auth-foot { margin-top: 18px; font-size: 12px; color: var(--text-dim); text-align: center; }
     .auth-foot a { color: var(--accent-bright); text-decoration: none; }
+    .auth-hidden { display: none; }
+    .auth-loading { text-align: center; color: var(--text-dim); font-size: 13px; padding: 30px 0; }
+    .auth-hint { font-size: 11.5px; color: var(--text-dim); text-align: center; }
   </style>
 </head>
 <body>
@@ -38,58 +46,123 @@
       <div class="auth-brand-mark">BDI</div>
       <div class="auth-brand-text">Bell Data Intelligence</div>
     </div>
-    <h1 class="auth-title">Create your workspace</h1>
-    <p class="auth-subtitle">Sign up to start using Bell's intelligence platform.</p>
 
-    <div id="clerk-sign-up" class="auth-mount">
-      <div class="auth-fallback">Loading sign-up…</div>
+    <div class="auth-card" id="card">
+      <div class="auth-loading" id="boot">Loading…</div>
+
+      <!-- Sign up -->
+      <div id="view-signup" class="auth-hidden">
+        <h1 class="auth-title">Create your workspace</h1>
+        <p class="auth-subtitle">Start using Bell's intelligence platform.</p>
+        <form class="auth-form" id="form-signup">
+          <div class="auth-error auth-hidden" id="err-signup"></div>
+          <div class="auth-name-row">
+            <div class="auth-field"><label>First name</label><input class="auth-input" id="su-first" autocomplete="given-name" /></div>
+            <div class="auth-field"><label>Last name</label><input class="auth-input" id="su-last" autocomplete="family-name" /></div>
+          </div>
+          <div class="auth-field"><label>Work email</label><input class="auth-input" id="su-email" type="email" autocomplete="email" required /></div>
+          <div class="auth-field"><label>Password</label><input class="auth-input" id="su-password" type="password" autocomplete="new-password" required /></div>
+          <!-- Clerk Smart CAPTCHA renders here when bot protection is on -->
+          <div id="clerk-captcha"></div>
+          <button class="auth-btn" id="su-submit" type="submit">Create account</button>
+        </form>
+      </div>
+
+      <!-- Verify email -->
+      <div id="view-verify" class="auth-hidden">
+        <h1 class="auth-title">Verify your email</h1>
+        <p class="auth-subtitle" id="verify-sub">Enter the code we sent to your email.</p>
+        <form class="auth-form" id="form-verify">
+          <div class="auth-error auth-hidden" id="err-verify"></div>
+          <div class="auth-field"><label>Verification code</label><input class="auth-input" id="vf-code" inputmode="numeric" autocomplete="one-time-code" required /></div>
+          <button class="auth-btn" id="vf-submit" type="submit">Verify & continue</button>
+          <div class="auth-row"><button type="button" class="auth-link" id="vf-resend">Resend code</button></div>
+        </form>
+      </div>
+
+      <!-- Fallback (Clerk component) -->
+      <div id="clerk-fallback" class="auth-hidden auth-mount"></div>
     </div>
 
-    <p class="auth-foot">
-      Already have an account? <a href="/sign-in">Sign in</a>
-    </p>
+    <p class="auth-foot">Already have an account? <a href="/sign-in">Sign in</a></p>
   </div>
 
   <script>
     (async function () {
-      let mode;
-      try { const r = await fetch('/api/auth/mode'); mode = await r.json(); }
-      catch { document.getElementById('clerk-sign-up').innerHTML =
-        '<div class="auth-fallback">Could not reach the server. Please refresh.</div>'; return; }
+      const $ = (id) => document.getElementById(id);
+      const show = (id) => $(id).classList.remove('auth-hidden');
+      const hide = (id) => $(id).classList.add('auth-hidden');
+      const showErr = (id, msg) => { const e = $(id); e.textContent = msg; e.classList.remove('auth-hidden'); };
+      const clerkErr = (e) => (e && (e.errors?.[0]?.longMessage || e.errors?.[0]?.message)) || e?.message || 'Something went wrong. Please try again.';
+      const go = (url) => window.location.replace(url);
+      const AFTER = '/subscribe';   // Bell has no free tier — subscribe right after sign-up
 
-      if (mode.mode === 'local-admin' || !mode.auth_required) {
-        window.location.replace('/');
-        return;
-      }
-      if (!mode.publishable_key) {
-        document.getElementById('clerk-sign-up').innerHTML =
-          '<div class="auth-fallback">Sign-up not configured.<br/>(CLERK_PUBLISHABLE_KEY missing.)</div>';
-        return;
-      }
-      const script = document.createElement('script');
-      script.async = true;
-      script.crossOrigin = 'anonymous';
-      script.setAttribute('data-clerk-publishable-key', mode.publishable_key);
-      script.src = 'https://cdn.jsdelivr.net/npm/@clerk/clerk-js@5/dist/clerk.browser.js';
-      script.onload = async () => {
+      let mode;
+      try { mode = await (await fetch('/api/auth/mode')).json(); }
+      catch { $('boot').textContent = 'Could not reach the server. Please refresh.'; return; }
+      if (mode.mode === 'local-admin' || !mode.auth_required) return go('/');
+      if (!mode.publishable_key) { $('boot').textContent = 'Sign-up not configured (CLERK_PUBLISHABLE_KEY missing).'; return; }
+
+      const s = document.createElement('script');
+      s.async = true; s.crossOrigin = 'anonymous';
+      s.setAttribute('data-clerk-publishable-key', mode.publishable_key);
+      s.src = 'https://cdn.jsdelivr.net/npm/@clerk/clerk-js@5/dist/clerk.browser.js';
+      s.onerror = () => { $('boot').textContent = 'Failed to load sign-up (network).'; };
+      s.onload = async () => {
         try {
           await window.Clerk.load();
-          if (window.Clerk.user) { window.location.replace('/'); return; }
-          window.Clerk.mountSignUp(document.getElementById('clerk-sign-up'), {
-            // After sign-up, user MUST subscribe — Bell has no free tier.
-            afterSignUpUrl: '/subscribe',
-            signInUrl: '/sign-in',
-          });
-        } catch (err) {
-          document.getElementById('clerk-sign-up').innerHTML =
-            '<div class="auth-fallback">Failed to load sign-up: ' + (err.message || err) + '</div>';
-        }
+          if (window.Clerk.user) return go('/');
+          hide('boot'); show('view-signup');
+        } catch (e) { $('boot').textContent = clerkErr(e); }
       };
-      script.onerror = () => {
-        document.getElementById('clerk-sign-up').innerHTML =
-          '<div class="auth-fallback">Failed to load sign-up (network).</div>';
+      document.head.appendChild(s);
+
+      const fallback = () => {
+        ['view-signup', 'view-verify'].forEach(hide);
+        show('clerk-fallback');
+        try { window.Clerk.mountSignUp($('clerk-fallback'), { afterSignUpUrl: AFTER, signInUrl: '/sign-in' }); } catch (e) {}
       };
-      document.head.appendChild(script);
+
+      const finish = async (res) => {
+        if (res && res.status === 'complete') { await window.Clerk.setActive({ session: res.createdSessionId }); go(AFTER); return true; }
+        return false;
+      };
+
+      // ---- Sign up ----
+      $('form-signup').addEventListener('submit', async (ev) => {
+        ev.preventDefault(); hide('err-signup');
+        const btn = $('su-submit'); btn.disabled = true; btn.textContent = 'Creating…';
+        try {
+          const params = { emailAddress: $('su-email').value.trim(), password: $('su-password').value };
+          if ($('su-first').value.trim()) params.firstName = $('su-first').value.trim();
+          if ($('su-last').value.trim()) params.lastName = $('su-last').value.trim();
+          const res = await window.Clerk.client.signUp.create(params);
+          if (await finish(res)) return;
+          // Needs email verification
+          await window.Clerk.client.signUp.prepareEmailAddressVerification({ strategy: 'email_code' });
+          $('verify-sub').textContent = 'Enter the code we sent to ' + params.emailAddress + '.';
+          hide('view-signup'); show('view-verify');
+        } catch (e) { showErr('err-signup', clerkErr(e)); }
+        finally { btn.disabled = false; btn.textContent = 'Create account'; }
+      });
+
+      // ---- Verify email code ----
+      $('form-verify').addEventListener('submit', async (ev) => {
+        ev.preventDefault(); hide('err-verify');
+        const btn = $('vf-submit'); btn.disabled = true; btn.textContent = 'Verifying…';
+        try {
+          const res = await window.Clerk.client.signUp.attemptEmailAddressVerification({ code: $('vf-code').value.trim() });
+          if (await finish(res)) return;
+          fallback();   // any remaining requirement — let Clerk's UI finish it
+        } catch (e) { showErr('err-verify', clerkErr(e)); }
+        finally { btn.disabled = false; btn.textContent = 'Verify & continue'; }
+      });
+
+      $('vf-resend').addEventListener('click', async () => {
+        hide('err-verify');
+        try { await window.Clerk.client.signUp.prepareEmailAddressVerification({ strategy: 'email_code' }); }
+        catch (e) { showErr('err-verify', clerkErr(e)); }
+      });
     })();
   </script>
 </body>

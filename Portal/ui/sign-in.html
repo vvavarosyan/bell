@@ -6,58 +6,35 @@
   <title>Sign in · Bell Data Intelligence</title>
   <link rel="stylesheet" href="/styles.css" />
   <style>
-    body {
-      margin: 0;
-      min-height: 100vh;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-      background:
-        radial-gradient(ellipse 60% 50% at 50% 0%, rgba(91,140,255,0.18) 0%, transparent 65%),
-        var(--bg);
-    }
-    .auth-page {
-      width: 100%;
-      max-width: 440px;
-      padding: 32px 24px;
-      text-align: center;
-    }
-    .auth-brand {
-      display: inline-flex; align-items: center; gap: 10px;
-      margin-bottom: 28px;
-    }
-    .auth-brand-mark {
-      width: 36px; height: 36px;
-      border-radius: 8px;
+    body { margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center;
+      background: radial-gradient(ellipse 60% 50% at 50% 0%, rgba(91,140,255,0.18) 0%, transparent 65%), var(--bg); }
+    .auth-page { width: 100%; max-width: 420px; padding: 32px 24px; }
+    .auth-brand { display: flex; align-items: center; justify-content: center; gap: 10px; margin-bottom: 26px; }
+    .auth-brand-mark { width: 36px; height: 36px; border-radius: 8px;
       background: linear-gradient(135deg, rgb(91 140 255) 0%, rgb(165 195 255) 100%);
-      display: flex; align-items: center; justify-content: center;
-      color: white; font-weight: 700; font-size: 13px;
-      letter-spacing: 0.06em;
-    }
+      display: flex; align-items: center; justify-content: center; color: #fff; font-weight: 700; font-size: 13px; letter-spacing: .06em; }
     .auth-brand-text { color: var(--text); font-weight: 600; font-size: 15px; }
-    .auth-title {
-      font-size: 22px; font-weight: 600; color: var(--text);
-      margin: 0 0 6px;
-    }
-    .auth-subtitle {
-      font-size: 13px; color: var(--text-muted);
-      margin: 0 0 28px;
-    }
-    .auth-mount {
-      background: rgba(19,24,41,0.4);
-      border: 1px solid var(--border);
-      border-radius: 14px;
-      padding: 8px;
-      min-height: 380px;
-    }
-    .auth-fallback {
-      padding: 40px 20px; color: var(--text-dim); font-size: 13px;
-    }
-    .auth-foot {
-      margin-top: 18px;
-      font-size: 11.5px; color: var(--text-dim);
-    }
+    .auth-card { background: rgba(19,24,41,0.5); border: 1px solid var(--border); border-radius: 16px; padding: 28px 26px; }
+    .auth-title { font-size: 21px; font-weight: 700; color: var(--text); margin: 0 0 5px; text-align: center; }
+    .auth-subtitle { font-size: 13px; color: var(--text-muted); margin: 0 0 22px; text-align: center; }
+    .auth-form { display: flex; flex-direction: column; gap: 14px; }
+    .auth-field label { display: block; font-size: 12px; color: var(--text-muted); margin-bottom: 6px; font-weight: 600; }
+    .auth-input { width: 100%; box-sizing: border-box; background: var(--bg-elev-2); border: 1px solid var(--border);
+      border-radius: 9px; color: var(--text); font: inherit; font-size: 14px; padding: 11px 13px;
+      transition: border-color .15s ease, box-shadow .15s ease; }
+    .auth-input:focus { outline: none; border-color: var(--accent); box-shadow: 0 0 0 3px var(--accent-fade); }
+    .auth-btn { width: 100%; background: var(--accent); color: #fff; border: 0; border-radius: 9px; padding: 12px;
+      font: inherit; font-size: 14px; font-weight: 700; cursor: pointer; margin-top: 4px; transition: filter .15s ease; }
+    .auth-btn:hover { filter: brightness(1.1); }
+    .auth-btn:disabled { opacity: .6; cursor: default; }
+    .auth-error { background: rgba(255,90,90,.1); border: 1px solid rgba(255,90,90,.4); color: #ff8a8a;
+      font-size: 12.5px; padding: 9px 12px; border-radius: 8px; }
+    .auth-row { display: flex; justify-content: flex-end; }
+    .auth-link { background: none; border: 0; color: var(--accent-bright); cursor: pointer; font: inherit; font-size: 12px; padding: 0; text-decoration: none; }
+    .auth-foot { margin-top: 18px; font-size: 12px; color: var(--text-dim); text-align: center; }
     .auth-foot a { color: var(--accent-bright); text-decoration: none; }
+    .auth-hidden { display: none; }
+    .auth-loading { text-align: center; color: var(--text-dim); font-size: 13px; padding: 30px 0; }
   </style>
 </head>
 <body>
@@ -66,77 +43,185 @@
       <div class="auth-brand-mark">BDI</div>
       <div class="auth-brand-text">Bell Data Intelligence</div>
     </div>
-    <h1 class="auth-title">Sign in</h1>
-    <p class="auth-subtitle">Welcome back. Sign in to your Bell workspace.</p>
 
-    <div id="clerk-sign-in" class="auth-mount">
-      <div class="auth-fallback">Loading sign-in…</div>
+    <div class="auth-card" id="card">
+      <div class="auth-loading" id="boot">Loading…</div>
+
+      <!-- Sign in -->
+      <div id="view-signin" class="auth-hidden">
+        <h1 class="auth-title">Sign in</h1>
+        <p class="auth-subtitle">Welcome back to your Bell workspace.</p>
+        <form class="auth-form" id="form-signin">
+          <div class="auth-error auth-hidden" id="err-signin"></div>
+          <div class="auth-field"><label>Email</label><input class="auth-input" id="si-email" type="email" autocomplete="email" required /></div>
+          <div class="auth-field"><label>Password</label><input class="auth-input" id="si-password" type="password" autocomplete="current-password" required /></div>
+          <div class="auth-row"><button type="button" class="auth-link" id="to-reset">Forgot password?</button></div>
+          <button class="auth-btn" id="si-submit" type="submit">Sign in</button>
+        </form>
+      </div>
+
+      <!-- Verify (emailed/authenticator code as a factor) -->
+      <div id="view-verify" class="auth-hidden">
+        <h1 class="auth-title">Verify it's you</h1>
+        <p class="auth-subtitle" id="verify-sub">Enter the verification code we sent you.</p>
+        <form class="auth-form" id="form-verify">
+          <div class="auth-error auth-hidden" id="err-verify"></div>
+          <div class="auth-field"><label>Verification code</label><input class="auth-input" id="vf-code" inputmode="numeric" autocomplete="one-time-code" required /></div>
+          <button class="auth-btn" id="vf-submit" type="submit">Verify &amp; continue</button>
+          <div class="auth-row" style="justify-content:center"><button type="button" class="auth-link" id="vf-resend">Resend code</button></div>
+        </form>
+      </div>
+
+      <!-- Reset password -->
+      <div id="view-reset" class="auth-hidden">
+        <h1 class="auth-title">Reset password</h1>
+        <p class="auth-subtitle" id="reset-sub">Enter your email and we'll send you a code.</p>
+        <form class="auth-form" id="form-reset">
+          <div class="auth-error auth-hidden" id="err-reset"></div>
+          <div class="auth-field"><label>Email</label><input class="auth-input" id="rs-email" type="email" autocomplete="email" required /></div>
+          <div class="auth-field auth-hidden" id="rs-code-field"><label>Verification code</label><input class="auth-input" id="rs-code" inputmode="numeric" autocomplete="one-time-code" /></div>
+          <div class="auth-field auth-hidden" id="rs-newpass-field"><label>New password</label><input class="auth-input" id="rs-newpass" type="password" autocomplete="new-password" /></div>
+          <button class="auth-btn" id="rs-submit" type="submit">Send code</button>
+          <div class="auth-row" style="justify-content:center"><button type="button" class="auth-link" id="back-signin">Back to sign in</button></div>
+        </form>
+      </div>
+
+      <!-- Fallback (Clerk component) -->
+      <div id="clerk-fallback" class="auth-hidden auth-mount"></div>
     </div>
 
-    <p class="auth-foot">
-      New to Bell? <a href="/sign-up">Create an account</a>
-    </p>
+    <p class="auth-foot">New to Bell? <a href="/sign-up">Create an account</a></p>
   </div>
 
   <script>
     (async function () {
-      // Fetch the publishable key + mode from our own /api/auth/mode endpoint.
-      // The publishable key is safe to expose to the browser — that's what
-      // it's designed for.
+      const $ = (id) => document.getElementById(id);
+      const show = (id) => $(id).classList.remove('auth-hidden');
+      const hide = (id) => $(id).classList.add('auth-hidden');
+      const showErr = (id, msg) => { const e = $(id); e.textContent = msg; e.classList.remove('auth-hidden'); };
+      const clerkErr = (e) => (e && (e.errors?.[0]?.longMessage || e.errors?.[0]?.message)) || e?.message || 'Something went wrong. Please try again.';
+      const go = (url) => window.location.replace(url);
+      const SI = () => window.Clerk.client.signIn;
+
       let mode;
-      try {
-        const r = await fetch('/api/auth/mode');
-        mode = await r.json();
-      } catch (e) {
-        document.getElementById('clerk-sign-in').innerHTML =
-          '<div class="auth-fallback">Could not reach the server. Please refresh.</div>';
-        return;
-      }
+      try { mode = await (await fetch('/api/auth/mode')).json(); }
+      catch { $('boot').textContent = 'Could not reach the server. Please refresh.'; return; }
+      if (mode.mode === 'local-admin' || !mode.auth_required) return go('/');
+      if (!mode.publishable_key) { $('boot').textContent = 'Sign-in not configured (CLERK_PUBLISHABLE_KEY missing).'; return; }
 
-      // Local-admin mode: no auth required, redirect straight to the app
-      if (mode.mode === 'local-admin' || !mode.auth_required) {
-        window.location.replace('/');
-        return;
-      }
-
-      if (!mode.publishable_key) {
-        document.getElementById('clerk-sign-in').innerHTML =
-          '<div class="auth-fallback">Sign-in not configured.<br/>(CLERK_PUBLISHABLE_KEY missing.)</div>';
-        return;
-      }
-
-      // Dynamically load Clerk JS SDK from their CDN
-      const pk = mode.publishable_key;
-      // Clerk's recommended frontend domain comes from the publishable key
-      // (it's encoded inside). The clerk-js script auto-discovers it.
-      const script = document.createElement('script');
-      script.async = true;
-      script.crossOrigin = 'anonymous';
-      script.setAttribute('data-clerk-publishable-key', pk);
-      // Stable Clerk JS browser SDK
-      script.src = 'https://cdn.jsdelivr.net/npm/@clerk/clerk-js@5/dist/clerk.browser.js';
-      script.onload = async () => {
+      const s = document.createElement('script');
+      s.async = true; s.crossOrigin = 'anonymous';
+      s.setAttribute('data-clerk-publishable-key', mode.publishable_key);
+      s.src = 'https://cdn.jsdelivr.net/npm/@clerk/clerk-js@5/dist/clerk.browser.js';
+      s.onerror = () => { $('boot').textContent = 'Failed to load sign-in (network).'; };
+      s.onload = async () => {
         try {
           await window.Clerk.load();
-          if (window.Clerk.user) {
-            // Already signed in — go to app
-            window.location.replace('/');
-            return;
-          }
-          window.Clerk.mountSignIn(document.getElementById('clerk-sign-in'), {
-            afterSignInUrl: '/',
-            signUpUrl: '/sign-up',
-          });
-        } catch (err) {
-          document.getElementById('clerk-sign-in').innerHTML =
-            '<div class="auth-fallback">Failed to load sign-in: ' + (err.message || err) + '</div>';
+          if (window.Clerk.user) return go('/');
+          hide('boot'); show('view-signin');
+        } catch (e) { $('boot').textContent = clerkErr(e); }
+      };
+      document.head.appendChild(s);
+
+      const fallback = () => {
+        ['view-signin', 'view-verify', 'view-reset'].forEach(hide);
+        show('clerk-fallback');
+        try { window.Clerk.mountSignIn($('clerk-fallback'), { afterSignInUrl: '/', signUpUrl: '/sign-up' }); } catch (e) {}
+      };
+
+      const toVerify = (sub) => { hide('view-signin'); hide('view-reset'); $('verify-sub').textContent = sub; show('view-verify'); };
+
+      // Drive a SignIn resource toward completion, surfacing any code step in OUR UI.
+      let pending = null;   // { level: 'first'|'second', strategy, emailAddressId?, phoneNumberId? }
+      async function advance(res) {
+        if (res.status === 'complete') { await window.Clerk.setActive({ session: res.createdSessionId }); return go('/'); }
+        if (res.status === 'needs_second_factor') {
+          const list = res.supportedSecondFactors || [];
+          const f = list.find(x => x.strategy === 'email_code') || list.find(x => x.strategy === 'phone_code') || list.find(x => x.strategy === 'totp') || list[0];
+          if (!f) return fallback();
+          pending = { level: 'second', strategy: f.strategy };
+          if (f.strategy !== 'totp') await SI().prepareSecondFactor({ strategy: f.strategy });
+          return toVerify(f.strategy === 'totp' ? 'Enter the code from your authenticator app.' : 'Enter the verification code we just sent you.');
         }
-      };
-      script.onerror = () => {
-        document.getElementById('clerk-sign-in').innerHTML =
-          '<div class="auth-fallback">Failed to load sign-in (network).</div>';
-      };
-      document.head.appendChild(script);
+        if (res.status === 'needs_first_factor') {
+          const list = res.supportedFirstFactors || [];
+          const f = list.find(x => x.strategy === 'email_code') || list.find(x => x.strategy === 'phone_code');
+          if (!f) return fallback();
+          pending = { level: 'first', strategy: f.strategy, emailAddressId: f.emailAddressId, phoneNumberId: f.phoneNumberId };
+          await SI().prepareFirstFactor({ strategy: f.strategy, emailAddressId: f.emailAddressId, phoneNumberId: f.phoneNumberId });
+          return toVerify('Enter the verification code we just sent you.');
+        }
+        return fallback();
+      }
+
+      // ---- Sign in (email + password, then any code factor) ----
+      $('form-signin').addEventListener('submit', async (ev) => {
+        ev.preventDefault(); hide('err-signin');
+        const btn = $('si-submit'); btn.disabled = true; btn.textContent = 'Signing in…';
+        const password = $('si-password').value;
+        try {
+          let res = await SI().create({ identifier: $('si-email').value.trim(), password });
+          if (res.status === 'needs_first_factor') {
+            const hasPw = (res.supportedFirstFactors || []).some((f) => f.strategy === 'password');
+            if (hasPw && password) res = await SI().attemptFirstFactor({ strategy: 'password', password });
+          }
+          await advance(res);
+        } catch (e) { showErr('err-signin', clerkErr(e)); }
+        finally { btn.disabled = false; btn.textContent = 'Sign in'; }
+      });
+
+      // ---- Verify code (first- or second-factor) ----
+      $('form-verify').addEventListener('submit', async (ev) => {
+        ev.preventDefault(); hide('err-verify');
+        const btn = $('vf-submit'); btn.disabled = true; btn.textContent = 'Verifying…';
+        const code = $('vf-code').value.trim();
+        try {
+          const res = pending && pending.level === 'second'
+            ? await SI().attemptSecondFactor({ strategy: pending.strategy, code })
+            : await SI().attemptFirstFactor({ strategy: pending.strategy, code });
+          await advance(res);
+        } catch (e) { showErr('err-verify', clerkErr(e)); }
+        finally { btn.disabled = false; btn.textContent = 'Verify & continue'; }
+      });
+
+      $('vf-resend').addEventListener('click', async () => {
+        hide('err-verify');
+        try {
+          if (pending && pending.level === 'second' && pending.strategy !== 'totp') await SI().prepareSecondFactor({ strategy: pending.strategy });
+          else if (pending && pending.level === 'first') await SI().prepareFirstFactor({ strategy: pending.strategy, emailAddressId: pending.emailAddressId, phoneNumberId: pending.phoneNumberId });
+        } catch (e) { showErr('err-verify', clerkErr(e)); }
+      });
+
+      // ---- Forgot password (email code reset) ----
+      $('to-reset').addEventListener('click', () => { hide('view-signin'); show('view-reset'); });
+      $('back-signin').addEventListener('click', () => { hide('view-reset'); show('view-signin'); });
+      let resetStage = 'email';
+      $('form-reset').addEventListener('submit', async (ev) => {
+        ev.preventDefault(); hide('err-reset');
+        const btn = $('rs-submit'); btn.disabled = true;
+        try {
+          if (resetStage === 'email') {
+            btn.textContent = 'Sending…';
+            const si = await SI().create({ identifier: $('rs-email').value.trim() });
+            const f = (si.supportedFirstFactors || []).find((x) => x.strategy === 'reset_password_email_code');
+            if (!f) { showErr('err-reset', 'Password reset by email is not available for this account.'); return; }
+            await SI().prepareFirstFactor({ strategy: 'reset_password_email_code', emailAddressId: f.emailAddressId });
+            resetStage = 'code';
+            $('reset-sub').textContent = 'Enter the code we emailed you and a new password.';
+            show('rs-code-field'); show('rs-newpass-field');
+            btn.textContent = 'Reset password';
+          } else {
+            btn.textContent = 'Resetting…';
+            const att = await SI().attemptFirstFactor({ strategy: 'reset_password_email_code', code: $('rs-code').value.trim() });
+            if (att.status === 'needs_new_password') {
+              const done = await SI().resetPassword({ password: $('rs-newpass').value });
+              return advance(done);
+            }
+            return advance(att);
+          }
+        } catch (e) { showErr('err-reset', clerkErr(e)); }
+        finally { btn.disabled = false; }
+      });
     })();
   </script>
 </body>
