@@ -369,14 +369,17 @@ async function handleInvoicePaid(inv) {
   const plan = planById(t.plan);
   if (!plan) return;
 
+  // Credits are granted EXCLUSIVELY by ensureMonthlyGrant() (the single source
+  // of truth) so they can't be double-counted. This webhook only confirms the
+  // subscription is active; the lazy monthly grant issues plan.credits exactly
+  // once per period on the next balance read.
   await query(`
     UPDATE tenants
-       SET credit_balance      = credit_balance + $2,
-           subscription_status = 'active',
+       SET subscription_status = 'active',
            plan_renewed_at     = now()
      WHERE id = $1
-  `, [t.id, plan.credits || 0]);
-  console.log(`[billing] tenant ${t.id} renewed plan=${plan.id}, +${plan.credits} credits`);
+  `, [t.id]);
+  console.log(`[billing] tenant ${t.id} invoice paid plan=${plan.id} — credits via monthly grant`);
 }
 
 async function handleInvoiceFailed(inv) {
