@@ -120,9 +120,9 @@ export function CrmTab() {
   };
 
   return html`
-    <div style=${{ padding: '20px 24px', height: '100%', overflowY: 'auto' }}>
-      <!-- Header -->
-      <div style=${{ display: 'flex', alignItems: 'center', gap: '16px', marginBottom: '18px', flexWrap: 'wrap' }}>
+    <div class="page-fill">
+      <!-- Header (flush bar) -->
+      <div class="page-bar">
         <div>
           <div style=${{ fontSize: '20px', fontWeight: 700, color: 'var(--text)' }}>CRM</div>
           <div style=${{ fontSize: '12px', color: 'var(--text-muted)' }}>Your companies & people — act on the data.</div>
@@ -137,6 +137,7 @@ export function CrmTab() {
         </div>` : null}
       </div>
 
+      <div class="page-scroll">
       <!-- View toggle: Records | Pipeline | Sequences -->
       <div style=${{ display: 'inline-flex', gap: '4px', marginBottom: '14px' }}>
         ${[['records', 'Records'], ['pipeline', 'Pipeline'], ['sequences', 'Sequences'], ['timeline', 'Timeline']].map(([k, lbl]) => html`
@@ -232,6 +233,7 @@ export function CrmTab() {
 
       ${openedId ? html`<${RecordDrawer} recordId=${openedId} onClose=${() => setOpenedId(null)} onChanged=${() => load({ silent: true })} />` : null}
       `}
+      </div>
     </div>
   `;
 }
