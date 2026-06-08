@@ -11,6 +11,7 @@ import { fileURLToPath } from 'url';
 import { query, withTransaction } from '../db.js';
 import { MAPPERS } from './mappers.js';
 import { recomputeCompanyStatus } from './recompute_status.js';
+import { normalizeEmail, normalizePhone, isJunkEmail } from '../lib/contacts.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const SERVER_DIR = path.dirname(path.dirname(__filename));
@@ -215,6 +216,37 @@ async function upsertBatch(source, slice) {
                raw_payload  = EXCLUDED.raw_payload`,
         [companyId, source, source_record_id, source_url, JSON.stringify(rawPayload || {})]
       );
+
+      // 2b. Mirror the directly-provided email + phone(s) into company_contacts.
+      //     The companies.phone/email columns are NOT what the detail drawer's
+      //     Contacts panel reads, nor what merges re-parent — company_contacts
+      //     is. Writing here makes ingested numbers visible in the drawer and
+      //     ensures every number survives a dedup merge (no data loss).
+      const ccSource = source.toLowerCase() + '-ingest';
+      const em = normalizeEmail(companyFields.email);
+      if (em && !isJunkEmail(em)) {
+        await client.query(
+          `INSERT INTO company_contacts (company_id, type, value, value_display, source)
+           VALUES ($1, 'email', $2, $3, $4) ON CONFLICT (company_id, type, value) DO NOTHING`,
+          [companyId, em, String(companyFields.email), ccSource],
+        );
+      }
+      // Collect phone + any source-specific mobile/fax numbers (e.g. qcci_mobile).
+      const phoneRaws = [companyFields.phone];
+      if (extraFields) for (const [k, v] of Object.entries(extraFields)) {
+        if (/(mobile|fax|phone|telephone)$/i.test(k) && v) phoneRaws.push(v);
+      }
+      const seenPh = new Set();
+      for (const raw of phoneRaws) {
+        const ph = normalizePhone(raw);
+        if (!ph || seenPh.has(ph)) continue;
+        seenPh.add(ph);
+        await client.query(
+          `INSERT INTO company_contacts (company_id, type, value, value_display, source)
+           VALUES ($1, 'phone', $2, $3, $4) ON CONFLICT (company_id, type, value) DO NOTHING`,
+          [companyId, ph, String(raw), ccSource],
+        );
+      }
 
       // 3. Recompute is_active across ALL sources (ANY active → active).
       // Means: a company expired in MOCI but still Licensed in QFC stays active.

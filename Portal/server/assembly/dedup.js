@@ -125,7 +125,11 @@ function normalizeLinkedIn(url) {
 // over-match across the registry.
 function normalizeRegistration(s) {
   if (!s) return null;
-  const v = String(s).trim().toLowerCase().replace(/\s+/g, ' ');
+  let v = String(s).trim().toLowerCase().replace(/\s+/g, ' ');
+  // Purely-numeric IDs (like the MOCI/QCCI CR number) can differ only by
+  // leading zeros across sources (e.g. "00090275" vs "90275") — strip them so
+  // the same CR matches regardless of formatting.
+  if (/^\d+$/.test(v)) v = v.replace(/^0+/, '') || '0';
   return v.length >= 4 ? v : null;
 }
 
@@ -164,6 +168,19 @@ async function findCandidatePairs(jobLog = null) {
     const sb = sourcesByCompany.get(b);
     if (!sa || !sb) return false;
     for (const s of sa) if (sb.has(s)) return true;
+    return false;
+  };
+
+  // Sources that key on the SAME official MOCI Commercial Registration (CR)
+  // number. A CR match BETWEEN any of these is a real duplicate (same company),
+  // not a cross-system coincidence — so the registration gate must allow it even
+  // though the two records come from different directories. (QCCI's primary
+  // registration IS the MOCI CR; QFC/QFZ/QSTP/QSE use their own ID systems.)
+  const CR_FAMILY = new Set(['MOCI', 'QCCI']);
+  const inCrFamily = (id) => {
+    const s = sourcesByCompany.get(id);
+    if (!s) return false;
+    for (const x of s) if (CR_FAMILY.has(x)) return true;
     return false;
   };
 
@@ -209,7 +226,9 @@ async function findCandidatePairs(jobLog = null) {
   for (const grp of byRegNo.values()) {
     for (let i = 0; i < grp.length; i++) {
       for (let j = i + 1; j < grp.length; j++) {
-        if (sharesSource(grp[i], grp[j])) {
+        // Allow same-source matches, AND cross-source matches within the CR
+        // family (MOCI ↔ QCCI share the official CR number → real duplicate).
+        if (sharesSource(grp[i], grp[j]) || (inCrFamily(grp[i]) && inCrFamily(grp[j]))) {
           addReason(grp[i], grp[j], 'registration_no_match');
         } else {
           regCrossSourceSkipped++;
