@@ -1767,3 +1767,19 @@ a.contact-icon.on { cursor: pointer; text-decoration: none; position: relative; 
 .sidebar-brand { flex-shrink: 0; min-height: 56px; }
 /* Full-bleed pages fill the REMAINING column space, not 100% of it. */
 .page-fill { height: auto; flex: 1; min-height: 0; }
+
+/* Market Feed — prominent primary type switch (News / Research / …) + a flush,
+   de-boxed status bar so it reads as part of the page, not a floating card. */
+.feed-tabs { display: inline-flex; background: var(--bg-elev-2); border: 1px solid var(--border);
+             border-radius: 10px; padding: 3px; gap: 2px; margin-bottom: 12px; }
+.feed-tab  { padding: 8px 18px; border: 0; border-radius: 8px; background: transparent;
+             color: var(--text-muted); font: inherit; font-size: 13px; font-weight: 600; cursor: pointer;
+             transition: background .15s ease, color .15s ease; }
+.feed-tab:hover { color: var(--text); }
+.feed-tab.active { background: var(--accent); color: #fff; box-shadow: 0 1px 8px rgba(91,140,255,.35); }
+.feed-tab.research.active { background: #1f8a5a; box-shadow: 0 1px 8px rgba(31,138,90,.4); }
+.feed-cats-label { font-size: 11px; text-transform: uppercase; letter-spacing: .5px; color: var(--text-dim); margin-right: 6px; }
+
+/* De-box the live-intelligence bar (was a bordered gradient card). */
+.feed-scanbar { border: 0; border-radius: 0; background: transparent;
+                padding: 2px 0 12px; margin-bottom: 12px; border-bottom: 1px solid var(--border); }
