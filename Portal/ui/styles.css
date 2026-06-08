@@ -1759,3 +1759,11 @@ a.contact-icon.on { cursor: pointer; text-decoration: none; position: relative; 
                flex-wrap: wrap; flex-shrink: 0; }
 .page-scroll { flex: 1; overflow: auto; padding: 18px 22px; min-height: 0; }
 .page-scroll.flush { padding: 0; }
+
+/* The global header must NEVER be compressed by a greedy full-height page body.
+   (A flex child with height:100% squeezes its siblings — this kept the header
+   from staying its fixed 56px on CRM / Market Feed.) */
+.page-header   { flex-shrink: 0; min-height: 56px; }
+.sidebar-brand { flex-shrink: 0; min-height: 56px; }
+/* Full-bleed pages fill the REMAINING column space, not 100% of it. */
+.page-fill { height: auto; flex: 1; min-height: 0; }
