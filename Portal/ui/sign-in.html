@@ -60,6 +60,18 @@
         </form>
       </div>
 
+      <!-- Verify (emailed/authenticator code as a factor) -->
+      <div id="view-verify" class="auth-hidden">
+        <h1 class="auth-title">Verify it's you</h1>
+        <p class="auth-subtitle" id="verify-sub">Enter the verification code we sent you.</p>
+        <form class="auth-form" id="form-verify">
+          <div class="auth-error auth-hidden" id="err-verify"></div>
+          <div class="auth-field"><label>Verification code</label><input class="auth-input" id="vf-code" inputmode="numeric" autocomplete="one-time-code" required /></div>
+          <button class="auth-btn" id="vf-submit" type="submit">Verify &amp; continue</button>
+          <div class="auth-row" style="justify-content:center"><button type="button" class="auth-link" id="vf-resend">Resend code</button></div>
+        </form>
+      </div>
+
       <!-- Reset password -->
       <div id="view-reset" class="auth-hidden">
         <h1 class="auth-title">Reset password</h1>
@@ -89,6 +101,7 @@
       const showErr = (id, msg) => { const e = $(id); e.textContent = msg; e.classList.remove('auth-hidden'); };
       const clerkErr = (e) => (e && (e.errors?.[0]?.longMessage || e.errors?.[0]?.message)) || e?.message || 'Something went wrong. Please try again.';
       const go = (url) => window.location.replace(url);
+      const SI = () => window.Clerk.client.signIn;
 
       let mode;
       try { mode = await (await fetch('/api/auth/mode')).json(); }
@@ -96,7 +109,6 @@
       if (mode.mode === 'local-admin' || !mode.auth_required) return go('/');
       if (!mode.publishable_key) { $('boot').textContent = 'Sign-in not configured (CLERK_PUBLISHABLE_KEY missing).'; return; }
 
-      // Load Clerk JS SDK
       const s = document.createElement('script');
       s.async = true; s.crossOrigin = 'anonymous';
       s.setAttribute('data-clerk-publishable-key', mode.publishable_key);
@@ -112,34 +124,77 @@
       document.head.appendChild(s);
 
       const fallback = () => {
-        ['view-signin', 'view-reset'].forEach(hide);
+        ['view-signin', 'view-verify', 'view-reset'].forEach(hide);
         show('clerk-fallback');
         try { window.Clerk.mountSignIn($('clerk-fallback'), { afterSignInUrl: '/', signUpUrl: '/sign-up' }); } catch (e) {}
       };
 
-      // ---- Sign in ----
+      const toVerify = (sub) => { hide('view-signin'); hide('view-reset'); $('verify-sub').textContent = sub; show('view-verify'); };
+
+      // Drive a SignIn resource toward completion, surfacing any code step in OUR UI.
+      let pending = null;   // { level: 'first'|'second', strategy, emailAddressId?, phoneNumberId? }
+      async function advance(res) {
+        if (res.status === 'complete') { await window.Clerk.setActive({ session: res.createdSessionId }); return go('/'); }
+        if (res.status === 'needs_second_factor') {
+          const list = res.supportedSecondFactors || [];
+          const f = list.find(x => x.strategy === 'email_code') || list.find(x => x.strategy === 'phone_code') || list.find(x => x.strategy === 'totp') || list[0];
+          if (!f) return fallback();
+          pending = { level: 'second', strategy: f.strategy };
+          if (f.strategy !== 'totp') await SI().prepareSecondFactor({ strategy: f.strategy });
+          return toVerify(f.strategy === 'totp' ? 'Enter the code from your authenticator app.' : 'Enter the verification code we just sent you.');
+        }
+        if (res.status === 'needs_first_factor') {
+          const list = res.supportedFirstFactors || [];
+          const f = list.find(x => x.strategy === 'email_code') || list.find(x => x.strategy === 'phone_code');
+          if (!f) return fallback();
+          pending = { level: 'first', strategy: f.strategy, emailAddressId: f.emailAddressId, phoneNumberId: f.phoneNumberId };
+          await SI().prepareFirstFactor({ strategy: f.strategy, emailAddressId: f.emailAddressId, phoneNumberId: f.phoneNumberId });
+          return toVerify('Enter the verification code we just sent you.');
+        }
+        return fallback();
+      }
+
+      // ---- Sign in (email + password, then any code factor) ----
       $('form-signin').addEventListener('submit', async (ev) => {
         ev.preventDefault(); hide('err-signin');
         const btn = $('si-submit'); btn.disabled = true; btn.textContent = 'Signing in…';
         const password = $('si-password').value;
         try {
-          let res = await window.Clerk.client.signIn.create({ identifier: $('si-email').value.trim(), password });
-          // Some Clerk configs don't complete inline — they return needs_first_factor
-          // and expect the password to be attempted explicitly. Do that here.
+          let res = await SI().create({ identifier: $('si-email').value.trim(), password });
           if (res.status === 'needs_first_factor') {
             const hasPw = (res.supportedFirstFactors || []).some((f) => f.strategy === 'password');
-            if (hasPw) res = await window.Clerk.client.signIn.attemptFirstFactor({ strategy: 'password', password });
+            if (hasPw && password) res = await SI().attemptFirstFactor({ strategy: 'password', password });
           }
-          if (res.status === 'complete') { await window.Clerk.setActive({ session: res.createdSessionId }); return go('/'); }
-          fallback();   // genuine multi-step (e.g., two-factor) — let Clerk's UI finish it
+          await advance(res);
         } catch (e) { showErr('err-signin', clerkErr(e)); }
         finally { btn.disabled = false; btn.textContent = 'Sign in'; }
       });
 
+      // ---- Verify code (first- or second-factor) ----
+      $('form-verify').addEventListener('submit', async (ev) => {
+        ev.preventDefault(); hide('err-verify');
+        const btn = $('vf-submit'); btn.disabled = true; btn.textContent = 'Verifying…';
+        const code = $('vf-code').value.trim();
+        try {
+          const res = pending && pending.level === 'second'
+            ? await SI().attemptSecondFactor({ strategy: pending.strategy, code })
+            : await SI().attemptFirstFactor({ strategy: pending.strategy, code });
+          await advance(res);
+        } catch (e) { showErr('err-verify', clerkErr(e)); }
+        finally { btn.disabled = false; btn.textContent = 'Verify & continue'; }
+      });
+
+      $('vf-resend').addEventListener('click', async () => {
+        hide('err-verify');
+        try {
+          if (pending && pending.level === 'second' && pending.strategy !== 'totp') await SI().prepareSecondFactor({ strategy: pending.strategy });
+          else if (pending && pending.level === 'first') await SI().prepareFirstFactor({ strategy: pending.strategy, emailAddressId: pending.emailAddressId, phoneNumberId: pending.phoneNumberId });
+        } catch (e) { showErr('err-verify', clerkErr(e)); }
+      });
+
+      // ---- Forgot password (email code reset) ----
       $('to-reset').addEventListener('click', () => { hide('view-signin'); show('view-reset'); });
       $('back-signin').addEventListener('click', () => { hide('view-reset'); show('view-signin'); });
-
-      // ---- Reset password (email code) ----
       let resetStage = 'email';
       $('form-reset').addEventListener('submit', async (ev) => {
         ev.preventDefault(); hide('err-reset');
@@ -147,22 +202,22 @@
         try {
           if (resetStage === 'email') {
             btn.textContent = 'Sending…';
-            const si = await window.Clerk.client.signIn.create({ identifier: $('rs-email').value.trim() });
+            const si = await SI().create({ identifier: $('rs-email').value.trim() });
             const f = (si.supportedFirstFactors || []).find((x) => x.strategy === 'reset_password_email_code');
             if (!f) { showErr('err-reset', 'Password reset by email is not available for this account.'); return; }
-            await window.Clerk.client.signIn.prepareFirstFactor({ strategy: 'reset_password_email_code', emailAddressId: f.emailAddressId });
+            await SI().prepareFirstFactor({ strategy: 'reset_password_email_code', emailAddressId: f.emailAddressId });
             resetStage = 'code';
             $('reset-sub').textContent = 'Enter the code we emailed you and a new password.';
             show('rs-code-field'); show('rs-newpass-field');
             btn.textContent = 'Reset password';
           } else {
             btn.textContent = 'Resetting…';
-            const att = await window.Clerk.client.signIn.attemptFirstFactor({ strategy: 'reset_password_email_code', code: $('rs-code').value.trim() });
+            const att = await SI().attemptFirstFactor({ strategy: 'reset_password_email_code', code: $('rs-code').value.trim() });
             if (att.status === 'needs_new_password') {
-              const done = await window.Clerk.client.signIn.resetPassword({ password: $('rs-newpass').value });
-              if (done.status === 'complete') { await window.Clerk.setActive({ session: done.createdSessionId }); return go('/'); }
-            } else if (att.status === 'complete') { await window.Clerk.setActive({ session: att.createdSessionId }); return go('/'); }
-            fallback();
+              const done = await SI().resetPassword({ password: $('rs-newpass').value });
+              return advance(done);
+            }
+            return advance(att);
           }
         } catch (e) { showErr('err-reset', clerkErr(e)); }
         finally { btn.disabled = false; }
