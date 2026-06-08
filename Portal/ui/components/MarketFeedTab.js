@@ -162,18 +162,18 @@ export function MarketFeedTab() {
           </div>
         ` : null}
 
-        <!-- Type filter (News vs Research vs …) -->
-        <div class="feed-filters" style=${{ marginBottom: '6px' }}>
-          ${[['', 'All types'], ['news', 'News'], ['research', 'Research'], ['company_registered', 'New companies']].map(([val, label]) => html`
-            <button key=${val || 'alltypes'}
-              class=${'feed-chip ' + (kind === val ? 'active' : '')}
-              style=${val === 'research' ? { borderColor: 'rgba(111,207,151,0.5)', color: kind === val ? '#fff' : 'rgb(111 207 151)' } : null}
+        <!-- Primary switch: News / Research / New companies -->
+        <div class="feed-tabs">
+          ${[['', 'All'], ['news', 'News'], ['research', 'Research'], ['company_registered', 'New companies']].map(([val, label]) => html`
+            <button key=${val || 'all'}
+              class=${'feed-tab' + (val === 'research' ? ' research' : '') + (kind === val ? ' active' : '')}
               onClick=${() => setKind(val)}>${label}</button>
           `)}
         </div>
 
-        <!-- Category filters -->
+        <!-- Secondary: topic categories -->
         <div class="feed-filters">
+          <span class="feed-cats-label">Topics</span>
           ${CATEGORIES.map(([val, label]) => html`
             <button key=${val || 'all'}
               class=${'feed-chip ' + (category === val ? 'active' : '')}
