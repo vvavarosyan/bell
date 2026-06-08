@@ -14,6 +14,16 @@ const COLORS = {
 };
 const FALLBACK = { bg: '#1c2030', text: '#8a93a6', border: '#2b2f3d' };
 
+// Full source names — shown on hover over a badge.
+export const SOURCE_NAMES = {
+  QFC:  'Qatar Financial Centre',
+  QFZ:  'Qatar Free Zones',
+  MOCI: 'Ministry of Commerce & Industry',
+  QSTP: 'Qatar Science & Technology Park',
+  QSE:  'Qatar Stock Exchange',
+  QCCI: 'Qatar Chamber — Commercial & Industrial Directory',
+};
+
 export function SourceBadge({ source, compact = false }) {
   const c = COLORS[source] || FALLBACK;
   const style = {
@@ -26,8 +36,9 @@ export function SourceBadge({ source, compact = false }) {
     color: c.text,
     border: '1px solid ' + c.border,
     letterSpacing: '.3px',
+    cursor: 'default',
   };
-  return html`<span style=${style}>${source}</span>`;
+  return html`<span style=${style} title=${SOURCE_NAMES[source] || source}>${source}</span>`;
 }
 
 /** Render a group of badges for a company.sources array. */
