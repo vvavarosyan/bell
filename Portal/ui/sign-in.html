@@ -121,12 +121,17 @@
       $('form-signin').addEventListener('submit', async (ev) => {
         ev.preventDefault(); hide('err-signin');
         const btn = $('si-submit'); btn.disabled = true; btn.textContent = 'Signing in…';
+        const password = $('si-password').value;
         try {
-          const res = await window.Clerk.client.signIn.create({
-            identifier: $('si-email').value.trim(), password: $('si-password').value,
-          });
+          let res = await window.Clerk.client.signIn.create({ identifier: $('si-email').value.trim(), password });
+          // Some Clerk configs don't complete inline — they return needs_first_factor
+          // and expect the password to be attempted explicitly. Do that here.
+          if (res.status === 'needs_first_factor') {
+            const hasPw = (res.supportedFirstFactors || []).some((f) => f.strategy === 'password');
+            if (hasPw) res = await window.Clerk.client.signIn.attemptFirstFactor({ strategy: 'password', password });
+          }
           if (res.status === 'complete') { await window.Clerk.setActive({ session: res.createdSessionId }); return go('/'); }
-          fallback();   // MFA or another factor — let Clerk's UI finish it
+          fallback();   // genuine multi-step (e.g., two-factor) — let Clerk's UI finish it
         } catch (e) { showErr('err-signin', clerkErr(e)); }
         finally { btn.disabled = false; btn.textContent = 'Sign in'; }
       });
