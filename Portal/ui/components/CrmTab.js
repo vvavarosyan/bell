@@ -121,22 +121,6 @@ export function CrmTab() {
 
   return html`
     <div class="page-fill">
-      <!-- Header (flush bar) -->
-      <div class="page-bar">
-        <div>
-          <div style=${{ fontSize: '20px', fontWeight: 700, color: 'var(--text)' }}>CRM</div>
-          <div style=${{ fontSize: '12px', color: 'var(--text-muted)' }}>Your companies & people — act on the data.</div>
-        </div>
-        <div style=${{ flex: 1 }}></div>
-        ${stats ? html`<div style=${{ display: 'flex', gap: '20px' }}>
-          ${[['Companies', stats.companies], ['People', stats.people], ['Revealed', stats.revealed], ['Open tasks', stats.open_tasks]].map(([l, n]) => html`
-            <div key=${l} style=${{ textAlign: 'center' }}>
-              <div style=${{ fontSize: '18px', fontWeight: 700, color: 'var(--text)', fontVariantNumeric: 'tabular-nums' }}>${(n ?? 0).toLocaleString()}</div>
-              <div style=${{ fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.06em', color: 'var(--text-dim)' }}>${l}</div>
-            </div>`)}
-        </div>` : null}
-      </div>
-
       <div class="page-scroll">
       <!-- View toggle: Records | Pipeline | Sequences -->
       <div style=${{ display: 'inline-flex', gap: '4px', marginBottom: '14px' }}>
