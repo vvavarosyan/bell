@@ -57,17 +57,10 @@ export function ResearchTab({ mode } = {}) {
   const citationsToday = stats?.citations_total || 0;
 
   return html`
-    <div style=${{ padding: '20px 24px', overflowY: 'auto', height: '100%' }}>
+    <div class="page-fill">
 
-      <!-- Console header -->
-      <div style=${{
-        background: 'linear-gradient(180deg, rgba(19,24,41,.92) 0%, rgba(13,18,35,.92) 100%)',
-        border: '1px solid var(--border)',
-        borderRadius: '14px',
-        padding: '16px 18px',
-        marginBottom: '20px',
-        display: 'flex', alignItems: 'center', gap: '16px', flexWrap: 'wrap',
-      }}>
+      <!-- Console toolbar (flush) -->
+      <div class="page-bar">
         <span style=${{ display: 'inline-flex', alignItems: 'center', gap: '8px' }}>
           <span style=${{ position: 'relative', width: '10px', height: '10px' }}>
             <span style=${{
@@ -123,6 +116,7 @@ export function ResearchTab({ mode } = {}) {
         >+ Start a deep research</button>
       </div>
 
+      <div class="page-scroll">
       <!-- Body: grid or empty state -->
       ${loading ? html`
         <div style=${{ color: 'var(--text-dim)', textAlign: 'center', padding: '60px 0', fontSize: '12px' }}>
@@ -164,6 +158,7 @@ export function ResearchTab({ mode } = {}) {
         onClose=${() => setShowModal(false)}
         onCreated=${onCreated}
       />` : null}
+      </div>
     </div>
   `;
 }
