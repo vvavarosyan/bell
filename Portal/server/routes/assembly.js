@@ -234,21 +234,30 @@ router.get('/audit', async (req, res, next) => {
     // number spaces, so comparing reg across sources produces pure coincidences.
     // The engine deliberately doesn't merge those, so we don't flag them either:
     // a same-source reg collision is the only one that signals a true missed dup.
+    // Normalization MUST match the engine's normalizeRegistration: lowercase +
+    // whitespace-collapse, and strip leading zeros ONLY for purely-numeric IDs.
+    // Critically it does NOT strip internal punctuation — MOCI's "10235/2" (CR
+    // 10235, branch 2) must stay distinct from the unrelated "102352". (Earlier
+    // the audit stripped the "/", manufacturing false collisions.)
     const dupRegs = (await query(`
-      WITH reg AS (
+      WITH reg0 AS (
         SELECT c.id, c.name, cs.source, c.primary_registration_no AS reg,
-               regexp_replace(regexp_replace(lower(coalesce(c.primary_registration_no,'')),
-                              '[[:space:][:punct:]]+','','g'),'^0+','') AS rn
+               regexp_replace(lower(trim(c.primary_registration_no)), '[[:space:]]+', ' ', 'g') AS v
           FROM companies c
           JOIN company_sources cs ON cs.company_id = c.id
          WHERE c.merge_status IN ('canonical','standalone') AND c.archived=false
            AND c.primary_registration_no IS NOT NULL
       ),
+      reg AS (
+        SELECT id, name, source, reg,
+               CASE WHEN v ~ '^[0-9]+$' THEN regexp_replace(v, '^0+', '') ELSE v END AS rn
+          FROM reg0
+      ),
       grp AS (
         SELECT source, rn, count(DISTINCT id)::int AS c,
                (array_agg(DISTINCT name))[1:6] AS names,
                (array_agg(DISTINCT reg))[1:6]  AS regs
-          FROM reg WHERE length(rn) >= 3
+          FROM reg WHERE length(rn) >= 4
          GROUP BY source, rn HAVING count(DISTINCT id) > 1
       )
       SELECT

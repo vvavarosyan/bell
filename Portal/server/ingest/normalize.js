@@ -5,6 +5,13 @@ const QATAR_LEGAL_FORM_WORDS = /\b(llc|wll|qfz|qfc|pjsc|ltd|limited|inc|incorpor
 export function normalizeName(name) {
   if (!name) return '';
   return String(name)
+    // Fold Unicode punctuation to ASCII first, so en/em dashes and curly quotes
+    // behave like their ASCII cousins ("Averda – Qatar" == "Averda - Qatar",
+    // "Burj Al’Amah" == "Burj Al'Amah"). Otherwise they survive the strip
+    // below and create phantom non-duplicate twins.
+    .replace(/[‐-―−]/g, '-')           // hyphen/figure/en/em dash, minus
+    .replace(/[‘’‚‛ʼ]/g, "'") // curly / modifier apostrophes
+    .replace(/[“”]/g, '"')                   // curly double quotes
     .toLowerCase()
     .replace(/[.,()&'"\-]/g, ' ')
     .replace(QATAR_LEGAL_FORM_WORDS, ' ')
