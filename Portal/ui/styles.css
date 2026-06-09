@@ -1783,3 +1783,71 @@ a.contact-icon.on { cursor: pointer; text-decoration: none; position: relative; 
 /* De-box the live-intelligence bar (was a bordered gradient card). */
 .feed-scanbar { border: 0; border-radius: 0; background: transparent;
                 padding: 2px 0 12px; margin-bottom: 12px; border-bottom: 1px solid var(--border); }
+
+/* ── Dedup Audit modal ─────────────────────────────────────────────────── */
+.audit-overlay {
+  position: fixed; inset: 0; z-index: 200;
+  background: rgba(0,0,0,.55); backdrop-filter: blur(2px);
+  display: flex; align-items: flex-start; justify-content: center;
+  padding: 40px 20px; overflow-y: auto;
+}
+.audit-modal {
+  width: min(960px, 100%); background: var(--bg-elev);
+  border: 1px solid var(--border); border-radius: 12px;
+  box-shadow: var(--shadow); display: flex; flex-direction: column;
+}
+.audit-modal-head {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 16px 20px; border-bottom: 1px solid var(--border);
+  position: sticky; top: 0; background: var(--bg-elev); border-radius: 12px 12px 0 0;
+}
+.audit-modal-title { font-size: 16px; font-weight: 700; }
+.audit-modal-actions { display: flex; gap: 8px; }
+.audit-modal-body { padding: 8px 20px 24px; }
+.audit-loading { padding: 40px; text-align: center; color: var(--text-dim); }
+
+.audit-verdict {
+  margin: 14px 0; padding: 12px 16px; border-radius: 8px; font-weight: 600;
+  display: flex; align-items: center; gap: 10px; font-size: 13.5px;
+}
+.audit-verdict.ok   { background: color-mix(in srgb, var(--green) 14%, transparent); color: var(--green); border: 1px solid color-mix(in srgb, var(--green) 40%, transparent); }
+.audit-verdict.fail { background: color-mix(in srgb, var(--red)   14%, transparent); color: var(--red);   border: 1px solid color-mix(in srgb, var(--red)   40%, transparent); }
+.audit-verdict-icon { font-size: 18px; font-weight: 800; }
+
+.audit-section { margin: 22px 0; }
+.audit-section-head { display: flex; align-items: baseline; gap: 10px; margin-bottom: 10px; }
+.audit-section-title { font-size: 13px; font-weight: 700; letter-spacing: .2px; }
+
+.audit-checks { display: grid; grid-template-columns: 1fr 1fr; gap: 6px; }
+@media (max-width: 680px) { .audit-checks { grid-template-columns: 1fr; } }
+.audit-check {
+  display: flex; align-items: center; gap: 10px;
+  padding: 8px 12px; border-radius: 7px; border: 1px solid var(--border);
+  background: var(--bg-elev-2); font-size: 12.5px;
+}
+.audit-check.ok   .audit-check-dot { color: var(--green); }
+.audit-check.fail { border-color: color-mix(in srgb, var(--red) 50%, transparent); background: color-mix(in srgb, var(--red) 8%, transparent); }
+.audit-check.fail .audit-check-dot { color: var(--red); }
+.audit-check-dot { font-weight: 800; }
+.audit-check-label { flex: 1; color: var(--text-dim); }
+.audit-check-val { font-weight: 700; font-variant-numeric: tabular-nums; }
+
+.audit-stats { display: grid; grid-template-columns: repeat(6, 1fr); gap: 8px; }
+@media (max-width: 760px) { .audit-stats { grid-template-columns: repeat(3, 1fr); } }
+.audit-stat { padding: 10px 12px; border: 1px solid var(--border); border-radius: 8px; background: var(--bg-elev-2); }
+.audit-stat-val { font-size: 18px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.audit-stat-label { font-size: 10.5px; color: var(--text-muted); margin-top: 2px; }
+
+.audit-persource { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.audit-chip { font-size: 11px; padding: 3px 9px; border-radius: 20px; background: var(--bg-elev-2); border: 1px solid var(--border); color: var(--text-dim); }
+.audit-chip strong { color: var(--text); }
+
+.audit-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+.audit-table th { text-align: left; color: var(--text-muted); font-weight: 600; padding: 6px 10px; border-bottom: 1px solid var(--border); }
+.audit-table td { padding: 6px 10px; border-bottom: 1px solid color-mix(in srgb, var(--border) 50%, transparent); vertical-align: top; }
+.audit-table tr:last-child td { border-bottom: none; }
+
+.audit-status { font-size: 10px; font-weight: 700; padding: 1px 7px; border-radius: 4px; text-transform: uppercase; letter-spacing: .3px; }
+.audit-status.canonical  { background: color-mix(in srgb, var(--green) 18%, transparent); color: var(--green); }
+.audit-status.merged_into { background: color-mix(in srgb, var(--amber) 18%, transparent); color: var(--amber); }
+.audit-status.standalone { background: var(--bg-elev-2); color: var(--text-dim); }

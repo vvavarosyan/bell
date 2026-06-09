@@ -107,6 +107,7 @@ export const api = {
 
   // Assembly (Phase 5)
   assemblyStats:          () => request('/api/assembly/stats'),
+  assemblyAudit:          () => request('/api/assembly/audit'),
   assemblyRun:            () => request('/api/assembly/run', { method: 'POST', body: '{}' }),
   assemblyAssignIds:      () => request('/api/assembly/assign-ids', { method: 'POST', body: '{}' }),
   dedupQueue:             (limit = 50) => request('/api/assembly/dedup-queue?limit=' + limit),

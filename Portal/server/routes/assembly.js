@@ -143,6 +143,166 @@ router.post('/dedup/:id/decide', async (req, res, next) => {
 });
 
 // ---------------------------------------------------------------------------
+// GET /api/assembly/audit — read-only integrity + quality audit of the merge.
+// Answers "is the dedup 100% correct?" with hard checks (must be zero) plus
+// review lists (under-/over-merge candidates) and coverage wins. Heavy-ish
+// (full scans); intended for on-demand admin use, not hot paths.
+// ---------------------------------------------------------------------------
+router.get('/audit', async (req, res, next) => {
+  try {
+    const SAMPLE = Math.min(Number(req.query.sample ?? 25), 100);
+
+    // --- 1. INTEGRITY — every one of these MUST be zero. -------------------
+    // A "live" company = canonical or standalone and not archived. A merged
+    // duplicate must: have a canonical, be archived, point at a FINAL canonical
+    // (not another duplicate), and have ALL its sources + contacts re-parented
+    // to the canonical (so no source tag or number is stranded on a dead row).
+    const integrity = (await query(`
+      SELECT
+        (SELECT count(*)::int FROM companies
+          WHERE merge_status='merged_into' AND canonical_id IS NULL)               AS merged_without_canonical,
+        (SELECT count(*)::int FROM companies d
+          WHERE d.merge_status='merged_into'
+            AND EXISTS (SELECT 1 FROM companies p
+                         WHERE p.id=d.canonical_id AND p.merge_status='merged_into')) AS unflattened_chains,
+        (SELECT count(*)::int FROM companies
+          WHERE merge_status IN ('canonical','standalone') AND canonical_id IS NOT NULL) AS nonmerged_with_canonical,
+        (SELECT count(*)::int FROM companies
+          WHERE merge_status='merged_into' AND archived=false)                     AS merged_not_archived,
+        (SELECT count(*)::int FROM company_sources cs
+           JOIN companies c ON c.id=cs.company_id
+          WHERE c.merge_status='merged_into')                                      AS sources_stranded_on_merged,
+        (SELECT count(*)::int FROM company_contacts cc
+           JOIN companies c ON c.id=cc.company_id
+          WHERE c.merge_status='merged_into')                                      AS contacts_stranded_on_merged
+    `)).rows[0];
+
+    // --- 2. COVERAGE — the merge win + totals. ----------------------------
+    const coverage = (await query(`
+      WITH live AS (
+        SELECT id FROM companies
+         WHERE merge_status IN ('canonical','standalone') AND archived=false
+      ),
+      src AS (
+        SELECT cs.company_id, count(DISTINCT cs.source) AS nsrc
+          FROM company_sources cs JOIN live l ON l.id=cs.company_id
+         GROUP BY cs.company_id
+      )
+      SELECT
+        (SELECT count(*)::int FROM live)                                       AS live_companies,
+        (SELECT count(*)::int FROM companies WHERE merge_status='canonical')   AS canonical,
+        (SELECT count(*)::int FROM companies WHERE merge_status='merged_into') AS merged_away,
+        (SELECT count(*)::int FROM companies WHERE merge_status='standalone')  AS standalone,
+        (SELECT count(*)::int FROM src WHERE nsrc>=2)                          AS multi_source_companies,
+        (SELECT count(*)::int FROM src WHERE nsrc>=3)                          AS three_plus_source_companies
+    `)).rows[0];
+
+    const perSource = (await query(`
+      SELECT cs.source, count(DISTINCT cs.company_id)::int AS companies
+        FROM company_sources cs JOIN companies c ON c.id=cs.company_id
+       WHERE c.merge_status IN ('canonical','standalone') AND c.archived=false
+       GROUP BY cs.source ORDER BY companies DESC
+    `)).rows;
+
+    // --- 3. UNDER-MERGE — duplicates that probably should have merged. -----
+    // Same normalized name across ≥2 distinct LIVE companies.
+    const dupNames = (await query(`
+      WITH live AS (
+        SELECT id, name,
+               lower(regexp_replace(coalesce(name,''),'[^a-zA-Z0-9]','','g')) AS nn
+          FROM companies
+         WHERE merge_status IN ('canonical','standalone') AND archived=false
+      ),
+      grp AS (
+        SELECT nn, count(*)::int AS c,
+               (array_agg(name ORDER BY name))[1:6] AS names,
+               (array_agg(id   ORDER BY name))[1:6] AS ids
+          FROM live WHERE length(nn) >= 4
+         GROUP BY nn HAVING count(*) > 1
+      )
+      SELECT
+        (SELECT count(*)::int FROM grp)                          AS group_count,
+        (SELECT coalesce(sum(c-1),0)::int FROM grp)              AS redundant_rows,
+        (SELECT json_agg(g) FROM (SELECT * FROM grp ORDER BY c DESC LIMIT ${SAMPLE}) g) AS samples
+    `)).rows[0];
+
+    // Same normalized registration number across ≥2 distinct LIVE companies.
+    // NOTE: sources use different ID systems, and the engine deliberately only
+    // auto-merges registration matches within the CR family (MOCI/QCCI). So a
+    // shared reg across other sources can be a real coincidence — review, not bug.
+    const dupRegs = (await query(`
+      WITH live AS (
+        SELECT id, name, primary_registration_no AS reg,
+               regexp_replace(regexp_replace(lower(coalesce(primary_registration_no,'')),
+                              '[^a-z0-9]','','g'),'^0+','') AS rn
+          FROM companies
+         WHERE merge_status IN ('canonical','standalone') AND archived=false
+           AND primary_registration_no IS NOT NULL
+      ),
+      grp AS (
+        SELECT rn, count(*)::int AS c,
+               (array_agg(name ORDER BY name))[1:6] AS names,
+               (array_agg(id   ORDER BY name))[1:6] AS ids,
+               (array_agg(reg  ORDER BY name))[1:6] AS regs
+          FROM live WHERE length(rn) >= 3
+         GROUP BY rn HAVING count(*) > 1
+      )
+      SELECT
+        (SELECT count(*)::int FROM grp)                          AS group_count,
+        (SELECT json_agg(g) FROM (SELECT * FROM grp ORDER BY c DESC LIMIT ${SAMPLE}) g) AS samples
+    `)).rows[0];
+
+    // --- 4. OVER-MERGE — canonicals that may have fused distinct companies. -
+    // A canonical holding ≥2 source records from the SAME source (e.g. two MOCI
+    // CRs) likely fused two real companies. Review-worthy (could be branches).
+    const sameSourceMulti = (await query(`
+      WITH multi AS (
+        SELECT cs.company_id, cs.source, count(*)::int AS records
+          FROM company_sources cs JOIN companies c ON c.id=cs.company_id
+         WHERE c.merge_status='canonical'
+         GROUP BY cs.company_id, cs.source HAVING count(*) > 1
+      )
+      SELECT
+        (SELECT count(DISTINCT company_id)::int FROM multi) AS canonical_count,
+        (SELECT json_agg(s) FROM (
+           SELECT m.company_id AS id, c.name, m.source, m.records
+             FROM multi m JOIN companies c ON c.id=m.company_id
+            ORDER BY m.records DESC LIMIT ${SAMPLE}) s) AS samples
+    `)).rows[0];
+
+    // Largest merge clusters — eyeball for a generic name that swallowed too much.
+    const biggestClusters = (await query(`
+      SELECT d.canonical_id AS id, c.name,
+             count(*)::int AS merged_members,
+             (SELECT array_agg(DISTINCT s.source ORDER BY s.source)
+                FROM company_sources s WHERE s.company_id=d.canonical_id) AS sources
+        FROM companies d JOIN companies c ON c.id=d.canonical_id
+       WHERE d.merge_status='merged_into' AND d.canonical_id IS NOT NULL
+       GROUP BY d.canonical_id, c.name
+       ORDER BY merged_members DESC LIMIT ${SAMPLE}
+    `)).rows;
+
+    // --- 5. SPOT CHECK — Ezdan (Val's worked example). --------------------
+    const spotEzdan = (await query(`
+      SELECT c.id, c.name, c.merge_status, c.canonical_id,
+             (SELECT array_agg(DISTINCT s.source ORDER BY s.source)
+                FROM company_sources s WHERE s.company_id=c.id) AS sources
+        FROM companies c
+       WHERE c.name ILIKE '%ezdan%'
+       ORDER BY c.merge_status, c.name LIMIT 40
+    `)).rows;
+
+    res.json({
+      generated_at: new Date().toISOString(),
+      integrity, coverage, per_source: perSource,
+      under_merge: { duplicate_names: dupNames, duplicate_registrations: dupRegs },
+      over_merge:  { same_source_multiplicity: sameSourceMulti, biggest_clusters: biggestClusters },
+      spot_check:  { ezdan: spotEzdan },
+    });
+  } catch (err) { next(err); }
+});
+
+// ---------------------------------------------------------------------------
 // POST /api/assembly/assign-ids — manual: just run the identifier assignment
 // without dedup. Useful after a manual data import.
 // ---------------------------------------------------------------------------
