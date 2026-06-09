@@ -131,8 +131,8 @@ export function DedupAuditPanel({ onClose }) {
               ${renderGroups(data.under_merge?.duplicate_names?.samples, false)}
             </${Section}>
 
-            <${Section} title="Possible missed merges — same registration #"
-                        sub=${`${n(data.under_merge?.duplicate_registrations?.group_count)} reg groups · cross-source can be coincidence (review)`}>
+            <${Section} title="Possible missed merges — same registration # (within one source)"
+                        sub=${`${n(data.under_merge?.duplicate_registrations?.group_count)} reg groups · same registry only — these are real candidates`}>
               ${renderGroups(data.under_merge?.duplicate_registrations?.samples, true)}
             </${Section}>
 
@@ -172,14 +172,15 @@ export function DedupAuditPanel({ onClose }) {
   `;
 }
 
-// Render a list of "same key" groups (name or reg). withRegs shows the reg values.
+// Render a list of "same key" groups (name or reg). withRegs shows source + reg.
 function renderGroups(samples, withRegs) {
   if (!samples || samples.length === 0) return html`<div class="muted small">None found — clean.</div>`;
   return html`<table class="audit-table">
-    <thead><tr><th>#</th><th>Names sharing this ${withRegs ? 'registration' : 'name'}</th>${withRegs ? html`<th>Reg values</th>` : null}</tr></thead>
+    <thead><tr><th>#</th>${withRegs ? html`<th>Source</th>` : null}<th>Names sharing this ${withRegs ? 'registration' : 'name'}</th>${withRegs ? html`<th>Reg values</th>` : null}</tr></thead>
     <tbody>
       ${samples.map((g, i) => html`<tr key=${i}>
         <td>${g.c}</td>
+        ${withRegs ? html`<td><strong>${g.source}</strong></td>` : null}
         <td>${(g.names || []).join('  ·  ')}</td>
         ${withRegs ? html`<td class="muted small">${[...new Set(g.regs || [])].join(', ')}</td>` : null}
       </tr>`)}
