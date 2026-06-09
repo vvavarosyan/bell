@@ -656,6 +656,41 @@ async function clusterMergeByExactName({ jobLog = null } = {}) {
 // ---------------------------------------------------------------------------
 // Entry point — run dedup pass + auto-merge + queue uncertain pairs
 // ---------------------------------------------------------------------------
+// Re-parent any contacts/sources stranded on a merged (dead) row onto their
+// final canonical, then delete the strays. Idempotent — safe to run any time.
+// Mirrors migrations/031; called at the end of every dedup run so the audit's
+// "stranded on a dead row" checks stay at zero.
+export async function healStrandedChildren() {
+  await query(`
+    INSERT INTO company_contacts (company_id, type, value, value_display, source, source_url, source_label, is_primary, is_verified, verified_at, extra_fields)
+    SELECT c.canonical_id, cc.type, cc.value, cc.value_display, cc.source, cc.source_url, cc.source_label, cc.is_primary, cc.is_verified, cc.verified_at, cc.extra_fields
+      FROM company_contacts cc JOIN companies c ON c.id = cc.company_id
+     WHERE c.merge_status = 'merged_into' AND c.canonical_id IS NOT NULL
+    ON CONFLICT (company_id, type, value) DO NOTHING`);
+  const cDel = await query(`DELETE FROM company_contacts cc USING companies c
+     WHERE cc.company_id = c.id AND c.merge_status = 'merged_into'`);
+
+  await query(`
+    UPDATE company_sources cs SET company_id = c.canonical_id
+      FROM companies c
+     WHERE cs.company_id = c.id AND c.merge_status='merged_into' AND c.canonical_id IS NOT NULL
+       AND NOT EXISTS (SELECT 1 FROM company_sources x
+                        WHERE x.company_id = c.canonical_id AND x.source = cs.source AND x.source_record_id = cs.source_record_id)`);
+  const sDel = await query(`DELETE FROM company_sources cs USING companies c
+     WHERE cs.company_id = c.id AND c.merge_status = 'merged_into'`);
+
+  await query(`
+    INSERT INTO person_contacts (person_id, type, value, value_display, source, source_url, source_label, is_primary, is_verified, verified_at, extra_fields)
+    SELECT p.canonical_id, pc.type, pc.value, pc.value_display, pc.source, pc.source_url, pc.source_label, pc.is_primary, pc.is_verified, pc.verified_at, pc.extra_fields
+      FROM person_contacts pc JOIN people p ON p.id = pc.person_id
+     WHERE p.merge_status = 'merged_into' AND p.canonical_id IS NOT NULL
+    ON CONFLICT (person_id, type, value) DO NOTHING`);
+  const pcDel = await query(`DELETE FROM person_contacts pc USING people p
+     WHERE pc.person_id = p.id AND p.merge_status = 'merged_into'`);
+
+  return { contacts: cDel.rowCount || 0, sources: sDel.rowCount || 0, person_contacts: pcDel.rowCount || 0 };
+}
+
 export async function runDedup({ jobLog = null } = {}) {
   jobLog?.(`▸ Starting dedup scan`);
 
@@ -734,6 +769,15 @@ export async function runDedup({ jobLog = null } = {}) {
   if (staleIds.length > 0) {
     await query(`DELETE FROM dedup_candidates WHERE id = ANY($1)`, [staleIds]);
     jobLog?.(`  Removed ${staleIds.length.toLocaleString()} stale pending pair(s) (no longer match current scoring rules)`);
+  }
+
+  // Self-heal — re-parent any child rows stranded on a merged (dead) row to the
+  // canonical. Merges already re-parent, but a late write (backfill / ingest to
+  // the phone column) can land on an already-merged row; this guarantees the
+  // audit's "stranded on a dead row" checks stay at zero after every run.
+  const healed = await healStrandedChildren();
+  if (healed.contacts || healed.sources || healed.person_contacts) {
+    jobLog?.(`  Healed stranded rows → canonical: ${healed.contacts} contact(s), ${healed.sources} source(s), ${healed.person_contacts} person contact(s)`);
   }
 
   jobLog?.(`▸ Dedup complete — cluster pre-merge absorbed ${cluster.rows_absorbed} row(s) across ${cluster.clusters_merged} cluster(s); pair pass auto-merged ${autoMerged}, queued ${queued}, skipped (below threshold) ${skippedBelow}, stale removed ${staleIds.length}`);
