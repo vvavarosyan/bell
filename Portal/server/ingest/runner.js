@@ -166,6 +166,12 @@ async function upsertBatch(source, slice) {
     for (const rec of slice) {
       const { source_record_id, source_url, companyFields, extraFields, rawPayload } = rec;
 
+      // Sanitize junk contact values in the company COLUMNS (e.g. phone "0" from
+      // a directory listing with no real number) so the row's contact icon
+      // doesn't light up for a number/email that isn't actually there.
+      if (companyFields.phone != null && !/[1-9]/.test(String(companyFields.phone))) companyFields.phone = null;
+      if (companyFields.email != null && !String(companyFields.email).includes('@'))  companyFields.email = null;
+
       // 1. Look up existing source link
       const existing = await client.query(
         `SELECT company_id FROM company_sources WHERE source = $1 AND source_record_id = $2`,
