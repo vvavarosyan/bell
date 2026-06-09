@@ -205,11 +205,14 @@ router.get('/audit', async (req, res, next) => {
     `)).rows;
 
     // --- 3. UNDER-MERGE — duplicates that probably should have merged. -----
-    // Same normalized name across ≥2 distinct LIVE companies.
+    // Same normalized name across ≥2 distinct LIVE companies. Normalization
+    // strips spaces + punctuation only (NOT letters) so it's script-agnostic —
+    // keeping Arabic intact — and we exclude digit-only keys, so two unrelated
+    // Arabic names that share only a number ("…2000…") don't false-group.
     const dupNames = (await query(`
       WITH live AS (
         SELECT id, name,
-               lower(regexp_replace(coalesce(name,''),'[^a-zA-Z0-9]','','g')) AS nn
+               lower(regexp_replace(coalesce(name,''),'[[:space:][:punct:]]+','','g')) AS nn
           FROM companies
          WHERE merge_status IN ('canonical','standalone') AND archived=false
       ),
@@ -217,7 +220,7 @@ router.get('/audit', async (req, res, next) => {
         SELECT nn, count(*)::int AS c,
                (array_agg(name ORDER BY name))[1:6] AS names,
                (array_agg(id   ORDER BY name))[1:6] AS ids
-          FROM live WHERE length(nn) >= 4
+          FROM live WHERE length(nn) >= 4 AND nn ~ '[^0-9]'
          GROUP BY nn HAVING count(*) > 1
       )
       SELECT
@@ -226,30 +229,32 @@ router.get('/audit', async (req, res, next) => {
         (SELECT json_agg(g) FROM (SELECT * FROM grp ORDER BY c DESC LIMIT ${SAMPLE}) g) AS samples
     `)).rows[0];
 
-    // Same normalized registration number across ≥2 distinct LIVE companies.
-    // NOTE: sources use different ID systems, and the engine deliberately only
-    // auto-merges registration matches within the CR family (MOCI/QCCI). So a
-    // shared reg across other sources can be a real coincidence — review, not bug.
+    // Same normalized registration number — but ONLY within the SAME source.
+    // Different registries (MOCI CR "270/7" vs a QCCI id "2707") use overlapping
+    // number spaces, so comparing reg across sources produces pure coincidences.
+    // The engine deliberately doesn't merge those, so we don't flag them either:
+    // a same-source reg collision is the only one that signals a true missed dup.
     const dupRegs = (await query(`
-      WITH live AS (
-        SELECT id, name, primary_registration_no AS reg,
-               regexp_replace(regexp_replace(lower(coalesce(primary_registration_no,'')),
-                              '[^a-z0-9]','','g'),'^0+','') AS rn
-          FROM companies
-         WHERE merge_status IN ('canonical','standalone') AND archived=false
-           AND primary_registration_no IS NOT NULL
+      WITH reg AS (
+        SELECT c.id, c.name, cs.source, c.primary_registration_no AS reg,
+               regexp_replace(regexp_replace(lower(coalesce(c.primary_registration_no,'')),
+                              '[[:space:][:punct:]]+','','g'),'^0+','') AS rn
+          FROM companies c
+          JOIN company_sources cs ON cs.company_id = c.id
+         WHERE c.merge_status IN ('canonical','standalone') AND c.archived=false
+           AND c.primary_registration_no IS NOT NULL
       ),
       grp AS (
-        SELECT rn, count(*)::int AS c,
-               (array_agg(name ORDER BY name))[1:6] AS names,
-               (array_agg(id   ORDER BY name))[1:6] AS ids,
-               (array_agg(reg  ORDER BY name))[1:6] AS regs
-          FROM live WHERE length(rn) >= 3
-         GROUP BY rn HAVING count(*) > 1
+        SELECT source, rn, count(DISTINCT id)::int AS c,
+               (array_agg(DISTINCT name))[1:6] AS names,
+               (array_agg(DISTINCT reg))[1:6]  AS regs
+          FROM reg WHERE length(rn) >= 3
+         GROUP BY source, rn HAVING count(DISTINCT id) > 1
       )
       SELECT
-        (SELECT count(*)::int FROM grp)                          AS group_count,
-        (SELECT json_agg(g) FROM (SELECT * FROM grp ORDER BY c DESC LIMIT ${SAMPLE}) g) AS samples
+        (SELECT count(*)::int FROM grp) AS group_count,
+        (SELECT json_agg(g) FROM (
+           SELECT source, c, names, regs FROM grp ORDER BY c DESC LIMIT ${SAMPLE}) g) AS samples
     `)).rows[0];
 
     // --- 4. OVER-MERGE — canonicals that may have fused distinct companies. -

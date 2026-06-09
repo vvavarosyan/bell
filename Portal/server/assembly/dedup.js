@@ -557,11 +557,16 @@ async function clusterMergeByExactName({ jobLog = null } = {}) {
       AND archived = false
   `);
 
-  // Group by name_normalized
+  // Group by a SPACE-STRIPPED normalized name so spacing/case/punctuation twins
+  // collapse together: "A B S Qatar" == "Abs Qatar" == "ABS-Qatar". name_normalized
+  // has already lowercased, stripped punctuation and dropped legal-form words
+  // (LLC/WLL); we additionally remove all whitespace here. The conflict gate
+  // below still blocks any cluster whose members have differing LinkedIn/website
+  // identities, so distinct companies that share a collapsed name won't fuse.
   const clusters = new Map();
   for (const r of all.rows) {
-    const n = (r.name_normalized || '').trim();
-    if (!n) continue;
+    const n = (r.name_normalized || '').replace(/\s+/g, '');
+    if (n.length < 4) continue;   // too short to collapse safely
     let arr = clusters.get(n);
     if (!arr) { arr = []; clusters.set(n, arr); }
     arr.push(r);
