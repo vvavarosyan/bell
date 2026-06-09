@@ -6,6 +6,7 @@ import { html } from '../lib/html.js';
 import { api } from '../lib/api.js';
 import { toast } from '../lib/toast.js';
 import { JobLogPanel } from './JobLogPanel.js';
+import { DedupAuditPanel } from './DedupAuditPanel.js';
 
 const REASON_LABELS = {
   linkedin_url_match:    { label: 'LinkedIn URL',      color: '#8bb0ff' },
@@ -74,6 +75,7 @@ export function DedupQueueTab() {
 
   // Which pair IDs are currently expanded (showing side-by-side + actions).
   const [expandedIds, setExpandedIds] = useState(() => new Set());
+  const [showAudit, setShowAudit] = useState(false);
 
   const toggleExpanded = useCallback((id) => {
     setExpandedIds(prev => {
@@ -155,6 +157,7 @@ export function DedupQueueTab() {
           <button onClick=${expandAll}   disabled=${loading || rows.length === 0}>Expand all</button>
           <button onClick=${collapseAll} disabled=${loading || expandedIds.size === 0}>Collapse all</button>
           <button onClick=${load}        disabled=${loading}>Refresh</button>
+          <button onClick=${() => setShowAudit(true)} title="Run a full integrity + quality audit of the merge">🔍 Audit</button>
           <button class="accent" onClick=${runAssembly} disabled=${busy || !!activeJob}>
             ${activeJob ? 'Assembly running…' : '▶ Run Assembly'}
           </button>
@@ -252,6 +255,8 @@ export function DedupQueueTab() {
         onClose=${() => setActiveJob(null)}
         onComplete=${() => { load(); setActiveJob(null); }}
       />` : null}
+
+      ${showAudit ? html`<${DedupAuditPanel} onClose=${() => setShowAudit(false)} />` : null}
     </div>
   `;
 }
