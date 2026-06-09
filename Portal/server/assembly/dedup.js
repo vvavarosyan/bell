@@ -23,6 +23,7 @@
 // the canonical, archive the duplicate with canonical_id pointing back.
 
 import { query, withTransaction } from '../db.js';
+import { normalizeName } from '../ingest/normalize.js';
 
 const AUTO_THRESHOLD   = 0.95;
 const QUEUE_THRESHOLD  = 0.70;
@@ -565,7 +566,11 @@ async function clusterMergeByExactName({ jobLog = null } = {}) {
   // identities, so distinct companies that share a collapsed name won't fuse.
   const clusters = new Map();
   for (const r of all.rows) {
-    const n = (r.name_normalized || '').replace(/\s+/g, '');
+    // Recompute the key from the raw name with the CURRENT normalizer (not the
+    // stored name_normalized, which may predate a normalizer change), then strip
+    // all whitespace. This lets normalizer improvements (e.g. Unicode dash/quote
+    // folding) fix existing rows on the next run without a full re-ingest.
+    const n = normalizeName(r.name).replace(/\s+/g, '');
     if (n.length < 4) continue;   // too short to collapse safely
     let arr = clusters.get(n);
     if (!arr) { arr = []; clusters.set(n, arr); }
