@@ -126,13 +126,13 @@ export function DedupAuditPanel({ onClose }) {
             </${Section}>
 
             <!-- 4. Under-merge -->
-            <${Section} title="Possible missed merges — same name"
-                        sub=${`${n(data.under_merge?.duplicate_names?.group_count)} name groups · ${n(data.under_merge?.duplicate_names?.redundant_rows)} redundant rows`}>
+            <${Section} title="Held for review — same name, different identity"
+                        sub=${`${n(data.under_merge?.duplicate_names?.group_count)} groups · share the engine's name key but have differing LinkedIn/website, so auto-merge was held back for your approval (Dedup Queue)`}>
               ${renderGroups(data.under_merge?.duplicate_names?.samples, false)}
             </${Section}>
 
-            <${Section} title="Possible missed merges — same registration # (within one source)"
-                        sub=${`${n(data.under_merge?.duplicate_registrations?.group_count)} reg groups · same registry only — these are real candidates`}>
+            <${Section} title="Held for review — same registration # (within one source)"
+                        sub=${`${n(data.under_merge?.duplicate_registrations?.group_count)} groups · same registry, different names → admin approval (Dedup Queue), per policy`}>
               ${renderGroups(data.under_merge?.duplicate_registrations?.samples, true)}
             </${Section}>
 

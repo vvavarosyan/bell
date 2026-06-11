@@ -111,6 +111,7 @@ export const api = {
   assemblyRun:            () => request('/api/assembly/run', { method: 'POST', body: '{}' }),
   assemblyAssignIds:      () => request('/api/assembly/assign-ids', { method: 'POST', body: '{}' }),
   dedupQueue:             (limit = 50) => request('/api/assembly/dedup-queue?limit=' + limit),
+  dedupBulkApprove:       () => request('/api/assembly/dedup/bulk-approve', { method: 'POST', body: '{}' }),
   dedupDecide:            (id, action, adminEmail) => request(`/api/assembly/dedup/${id}/decide`, { method: 'POST', body: JSON.stringify({ action, admin_email: adminEmail }) }),
 
   similarCompanies:       (q = {}) => request('/api/similar-companies?' + new URLSearchParams(q)),

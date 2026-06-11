@@ -701,6 +701,61 @@ export async function healStrandedChildren() {
   return { contacts: cDel.rowCount || 0, sources: sDel.rowCount || 0, person_contacts: pcDel.rowCount || 0 };
 }
 
+// Bulk-approve the high-confidence slice of the pending review queue: pairs
+// that share an EXACT normalized name and have NO conflicting strong identity
+// (no two different non-null websites or LinkedIn handles). These are the
+// same-name pairs the cluster pass left for review only because some sibling in
+// their group had a conflict — the pair itself is safe to merge. Pairs whose
+// match is registration/fuzzy with DIFFERENT names are deliberately left in the
+// queue for manual admin approval (Val's rule).
+export async function bulkApproveExactName({ jobLog = null } = {}) {
+  const pend = await query(`
+    SELECT dc.id, dc.company_a_id AS a, dc.company_b_id AS b,
+           a.website AS aw, a.linkedin_url AS al,
+           b.website AS bw, b.linkedin_url AS bl
+      FROM dedup_candidates dc
+      JOIN companies a ON a.id = dc.company_a_id
+      JOIN companies b ON b.id = dc.company_b_id
+     WHERE dc.decision = 'pending'
+       AND dc.similarity_reasons @> '["name_exact_match"]'::jsonb
+     ORDER BY dc.id
+  `);
+  jobLog?.(`▸ ${pend.rows.length.toLocaleString()} exact-name pairs to assess`);
+
+  let merged = 0, skipped = 0;
+  const touched = new Set();
+  for (const r of pend.rows) {
+    if (touched.has(r.a) || touched.has(r.b)) { skipped++; continue; }
+
+    const domA = normalizeDomain(r.aw),  domB = normalizeDomain(r.bw);
+    const liA  = normalizeLinkedIn(r.al), liB = normalizeLinkedIn(r.bl);
+    const webConflict = domA && domB && domA !== domB;
+    const liConflict  = liA  && liB  && liA  !== liB;
+    if (webConflict || liConflict) { skipped++; continue; }  // genuinely ambiguous — keep for manual review
+
+    try {
+      const canonical = await pickCanonical(r.a, r.b);
+      const duplicate = canonical === r.a ? r.b : r.a;
+      await mergeCompanies(canonical, duplicate, jobLog);
+      await query(
+        `UPDATE dedup_candidates SET decision='auto_merged', decided_at=now(), decided_by='bulk-approve' WHERE id=$1`,
+        [r.id],
+      );
+      touched.add(duplicate);
+      touched.add(canonical);
+      merged++;
+      if (merged % 200 === 0) jobLog?.(`  … merged ${merged.toLocaleString()} so far`);
+    } catch (err) {
+      jobLog?.(`  ✗ ${r.a}↔${r.b} failed: ${err.message}`);
+      skipped++;
+    }
+  }
+
+  const healed = await healStrandedChildren();
+  jobLog?.(`▸ Bulk-approve done — merged ${merged.toLocaleString()}, skipped ${skipped.toLocaleString()} (conflicts/ambiguous) of ${pend.rows.length.toLocaleString()} exact-name pairs`);
+  return { examined: pend.rows.length, merged, skipped, healed };
+}
+
 export async function runDedup({ jobLog = null } = {}) {
   jobLog?.(`▸ Starting dedup scan`);
 
@@ -725,7 +780,12 @@ export async function runDedup({ jobLog = null } = {}) {
 
     const reasonsArr = [...p.reasons];
 
-    if (p.score >= AUTO_THRESHOLD || hasUniqueIdMatch(p.reasons)) {
+    // Auto-merge requires NAME agreement (exact or high-fuzzy) OR a globally
+    // unique id (LinkedIn URL). A registration/website match alone — i.e. with
+    // DIFFERENT names — must NOT auto-merge; it goes to the admin queue for
+    // manual approval (Val's rule 2026-06-09: different names → admin approval).
+    const nameAgree = p.reasons.has('name_exact_match') || p.reasons.has('fuzzy_name_high');
+    if (hasUniqueIdMatch(p.reasons) || (p.score >= AUTO_THRESHOLD && nameAgree)) {
       // Auto-merge
       const canonical = await pickCanonical(p.a, p.b);
       const duplicate = canonical === p.a ? p.b : p.a;
