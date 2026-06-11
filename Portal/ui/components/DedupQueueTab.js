@@ -118,6 +118,18 @@ export function DedupQueueTab() {
     finally { setBusy(false); }
   };
 
+  const runBulkApprove = async () => {
+    if (busy || activeJob) return;
+    if (!window.confirm('Auto-merge every pending pair that shares an EXACT name and has no conflicting website/LinkedIn?\n\nRegistration-only and different-name pairs are NOT touched — they stay here for manual approval.')) return;
+    setBusy(true);
+    try {
+      const r = await api.dedupBulkApprove();
+      setActiveJob({ id: r.job_id, title: 'Bulk-approve exact-name pairs' });
+      toast('Bulk-approve started');
+    } catch (err) { toast(err.message, 'error'); }
+    finally { setBusy(false); }
+  };
+
   const decide = async (candId, action) => {
     setDecidingIds(prev => new Set(prev).add(candId));
     try {
@@ -158,6 +170,7 @@ export function DedupQueueTab() {
           <button onClick=${collapseAll} disabled=${loading || expandedIds.size === 0}>Collapse all</button>
           <button onClick=${load}        disabled=${loading}>Refresh</button>
           <button onClick=${() => setShowAudit(true)} title="Run a full integrity + quality audit of the merge">🔍 Audit</button>
+          <button onClick=${runBulkApprove} disabled=${busy || !!activeJob} title="Auto-merge exact-name pairs with no conflicting website/LinkedIn. Registration-only / different-name pairs stay for manual approval.">✓ Bulk-approve same-name</button>
           <button class="accent" onClick=${runAssembly} disabled=${busy || !!activeJob}>
             ${activeJob ? 'Assembly running…' : '▶ Run Assembly'}
           </button>

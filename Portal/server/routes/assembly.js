@@ -10,8 +10,9 @@
 import { Router } from 'express';
 import { query, withTransaction } from '../db.js';
 import { jobs } from '../ingest/jobs.js';
-import { runDedup, mergeCompanies } from '../assembly/dedup.js';
+import { runDedup, mergeCompanies, bulkApproveExactName } from '../assembly/dedup.js';
 import { assignAllIdentifiers } from '../assembly/assign_ids.js';
+import { normalizeName } from '../ingest/normalize.js';
 
 const router = Router();
 
@@ -32,6 +33,28 @@ router.post('/run', async (req, res, next) => {
         const idResult     = await assignAllIdentifiers((m) => jobs.log(job.id, m));
         jobs.log(job.id, `▸▸▸ Assembly complete.`);
         jobs.complete(job.id, { dedup: dedupResult, identifiers: idResult });
+      } catch (err) {
+        jobs.fail(job.id, err);
+      }
+    })();
+  } catch (err) { next(err); }
+});
+
+// ---------------------------------------------------------------------------
+// POST /api/assembly/dedup/bulk-approve — auto-merge the high-confidence slice
+// of the pending queue (exact-name pairs with no conflicting website/linkedin).
+// Runs in the background on the job channel like a full assembly run.
+// ---------------------------------------------------------------------------
+router.post('/dedup/bulk-approve', async (req, res, next) => {
+  try {
+    const job = jobs.start({ kind: 'assembly', source: 'dedup-bulk-approve' });
+    res.json({ job_id: job.id, status: job.status });
+
+    (async () => {
+      try {
+        jobs.log(job.id, `▸▸▸ Bulk-approving exact-name pairs`);
+        const result = await bulkApproveExactName({ jobLog: (m) => jobs.log(job.id, m) });
+        jobs.complete(job.id, result);
       } catch (err) {
         jobs.fail(job.id, err);
       }
@@ -205,29 +228,37 @@ router.get('/audit', async (req, res, next) => {
     `)).rows;
 
     // --- 3. UNDER-MERGE — duplicates that probably should have merged. -----
-    // Same normalized name across ≥2 distinct LIVE companies. Normalization
-    // strips spaces + punctuation only (NOT letters) so it's script-agnostic —
-    // keeping Arabic intact — and we exclude digit-only keys, so two unrelated
-    // Arabic names that share only a number ("…2000…") don't false-group.
-    const dupNames = (await query(`
-      WITH live AS (
-        SELECT id, name,
-               lower(regexp_replace(coalesce(name,''),'[[:space:][:punct:]]+','','g')) AS nn
-          FROM companies
-         WHERE merge_status IN ('canonical','standalone') AND archived=false
-      ),
-      grp AS (
-        SELECT nn, count(*)::int AS c,
-               (array_agg(name ORDER BY name))[1:6] AS names,
-               (array_agg(id   ORDER BY name))[1:6] AS ids
-          FROM live WHERE length(nn) >= 4 AND nn ~ '[^0-9]'
-         GROUP BY nn HAVING count(*) > 1
-      )
-      SELECT
-        (SELECT count(*)::int FROM grp)                          AS group_count,
-        (SELECT coalesce(sum(c-1),0)::int FROM grp)              AS redundant_rows,
-        (SELECT json_agg(g) FROM (SELECT * FROM grp ORDER BY c DESC LIMIT ${SAMPLE}) g) AS samples
-    `)).rows[0];
+    // Same-name candidates measured with the ENGINE'S EXACT cluster key
+    // (normalizeName + whitespace stripped, min length 4) so the audit reflects
+    // what the dedup actually does — not a looser definition. A residual group
+    // here means the rows share the engine key yet were NOT auto-merged, i.e. the
+    // conflict gate held them for manual review (distinct LinkedIn/website). We
+    // compute in JS to reuse the engine normalizer verbatim instead of
+    // re-implementing it (and its Unicode + legal-word handling) in SQL.
+    const liveNamed = (await query(`
+      SELECT id, name FROM companies
+       WHERE merge_status IN ('canonical','standalone') AND archived = false
+         AND name IS NOT NULL
+    `)).rows;
+    const nameGroups = new Map();
+    for (const r of liveNamed) {
+      const k = normalizeName(r.name).replace(/\s+/g, '');
+      if (k.length < 4 || !/[^0-9]/.test(k)) continue;  // skip too-short + digit-only keys
+      let g = nameGroups.get(k);
+      if (!g) { g = []; nameGroups.set(k, g); }
+      g.push(r);
+    }
+    const nameDupGroups = [...nameGroups.values()].filter(g => g.length > 1)
+      .sort((a, b) => b.length - a.length);
+    const dupNames = {
+      group_count:    nameDupGroups.length,
+      redundant_rows: nameDupGroups.reduce((s, g) => s + (g.length - 1), 0),
+      samples: nameDupGroups.slice(0, SAMPLE).map(g => ({
+        c: g.length,
+        names: g.slice(0, 6).map(r => r.name),
+        ids:   g.slice(0, 6).map(r => r.id),
+      })),
+    };
 
     // Same normalized registration number — but ONLY within the SAME source.
     // Different registries (MOCI CR "270/7" vs a QCCI id "2707") use overlapping
