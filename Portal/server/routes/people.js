@@ -73,6 +73,8 @@ router.get('/', async (req, res, next) => {
     const offset = Math.max(Number(req.query.offset ?? 0), 0);
     const q      = (req.query.q || '').trim();
     const companyId = req.query.company_id ? Number(req.query.company_id) : null;
+    const companyName = (req.query.company || '').trim();   // employer NAME text filter
+    const source = (req.query.source || '').trim();          // MoPH | LinkedIn | manual | …
     const onlyRevealed = req.query.revealed;
     const archivedQ = req.query.archived;   // 'true' | 'false' | 'all' | undefined → defaults to 'false'
     const employment = req.query.employment; // 'with' | 'without' | undefined → no filter
@@ -89,11 +91,29 @@ router.get('/', async (req, res, next) => {
 
     if (q) {
       params.push('%' + q.toLowerCase() + '%');
-      where.push(`(lower(full_name) LIKE $${params.length} OR coalesce(linkedin_url,'') ILIKE $${params.length} OR coalesce(email::text,'') ILIKE $${params.length})`);
+      const p = `$${params.length}`;
+      // Search name, linkedin, email, headline, and MoPH scope/license too, so the
+      // box doubles as a specialty/license search.
+      where.push(`(lower(full_name) LIKE ${p} OR coalesce(linkedin_url,'') ILIKE ${p} OR coalesce(email::text,'') ILIKE ${p} OR lower(coalesce(headline,'')) LIKE ${p} OR lower(coalesce(extra_fields->>'moph_scope','')) LIKE ${p} OR lower(coalesce(extra_fields->>'moph_license_no','')) LIKE ${p})`);
     }
     if (companyId) {
       params.push(companyId);
       where.push(`EXISTS (SELECT 1 FROM person_companies pc WHERE pc.person_id = people.id AND pc.company_id = $${params.length})`);
+    }
+    if (companyName) {
+      params.push('%' + companyName + '%');
+      where.push(`EXISTS (SELECT 1 FROM person_companies pc JOIN companies c ON c.id = pc.company_id
+                          WHERE pc.person_id = people.id AND c.name ILIKE $${params.length})`);
+    }
+    if (source) {
+      // 'LinkedIn' is derived from having a profile URL; everything else is the
+      // explicit extra_fields.source tag (e.g. 'MoPH', 'manual').
+      if (source === 'LinkedIn') {
+        where.push(`linkedin_url IS NOT NULL`);
+      } else {
+        params.push(source);
+        where.push(`extra_fields->>'source' = $${params.length}`);
+      }
     }
     if (onlyRevealed === 'true' || onlyRevealed === 'false') {
       params.push(onlyRevealed === 'true');
@@ -134,6 +154,14 @@ router.get('/', async (req, res, next) => {
     const contactsMap = await loadPersonContactsByIds(visibleIds);
     for (const row of rowsResult.rows) {
       row.contacts = contactsMap.get(row.id) || [];
+      // Derive the source badge(s): explicit extra_fields.source (MoPH/manual/…)
+      // plus 'LinkedIn' when we have a profile URL. Done before masking so the
+      // badge is accurate even when the URL itself is hidden in user mode.
+      const srcs = [];
+      const s = row.extra_fields && row.extra_fields.source;
+      if (s) srcs.push(s);
+      if (row.linkedin_url) srcs.push('LinkedIn');
+      row.sources = [...new Set(srcs)];
     }
     await maskPeople(req, rowsResult.rows);
 

@@ -113,6 +113,8 @@ export const api = {
   dedupQueue:             (limit = 50) => request('/api/assembly/dedup-queue?limit=' + limit),
   dedupBulkApprove:       () => request('/api/assembly/dedup/bulk-approve', { method: 'POST', body: '{}' }),
   dedupDecide:            (id, action, adminEmail) => request(`/api/assembly/dedup/${id}/decide`, { method: 'POST', body: JSON.stringify({ action, admin_email: adminEmail }) }),
+  peopleDedupQueue:       (limit = 100) => request('/api/assembly/people/dedup-queue?limit=' + limit),
+  peopleDedupDecide:      (id, action, adminEmail) => request(`/api/assembly/people/dedup/${id}/decide`, { method: 'POST', body: JSON.stringify({ action, admin_email: adminEmail }) }),
 
   similarCompanies:       (q = {}) => request('/api/similar-companies?' + new URLSearchParams(q)),
   similarBySource:        (companyId) => request('/api/similar-companies/by-source/' + companyId),

@@ -7,6 +7,7 @@ import { api } from '../lib/api.js';
 import { toast } from '../lib/toast.js';
 import { JobLogPanel } from './JobLogPanel.js';
 import { DedupAuditPanel } from './DedupAuditPanel.js';
+import { PeopleReviewList } from './PeopleReviewList.js';
 
 const REASON_LABELS = {
   linkedin_url_match:    { label: 'LinkedIn URL',      color: '#8bb0ff' },
@@ -76,6 +77,7 @@ export function DedupQueueTab() {
   // Which pair IDs are currently expanded (showing side-by-side + actions).
   const [expandedIds, setExpandedIds] = useState(() => new Set());
   const [showAudit, setShowAudit] = useState(false);
+  const [queueMode, setQueueMode] = useState('companies');   // 'companies' | 'people'
 
   const toggleExpanded = useCallback((id) => {
     setExpandedIds(prev => {
@@ -165,6 +167,10 @@ export function DedupQueueTab() {
             <span class="muted small"> · ${stats.companies_with_bin.toLocaleString()} BINs · ${stats.people_with_pin.toLocaleString()} PINs · ${stats.jobs_with_jin.toLocaleString()} JINs</span>
           ` : html`<span class="muted small">Loading stats…</span>`}
         </div>
+        <div class="dedup-mode-toggle">
+          <button class=${queueMode === 'companies' ? 'on' : ''} onClick=${() => setQueueMode('companies')}>Companies${stats ? ` · ${stats.pending_review.toLocaleString()}` : ''}</button>
+          <button class=${queueMode === 'people' ? 'on' : ''} onClick=${() => setQueueMode('people')}>People${stats?.people_pending_review != null ? ` · ${stats.people_pending_review.toLocaleString()}` : ''}</button>
+        </div>
         <div class="dedup-header-actions">
           <button onClick=${expandAll}   disabled=${loading || rows.length === 0}>Expand all</button>
           <button onClick=${collapseAll} disabled=${loading || expandedIds.size === 0}>Collapse all</button>
@@ -178,6 +184,7 @@ export function DedupQueueTab() {
       </div>
 
       <div class="dedup-list-wrap">
+        ${queueMode === 'people' ? html`<${PeopleReviewList} />` : html`
         ${loading ? html`<div class="dedup-list-empty">Loading queue…</div>` : null}
         ${!loading && rows.length === 0 ? html`
           <div class="dedup-list-empty">
@@ -259,6 +266,7 @@ export function DedupQueueTab() {
             </div>
           </div>
         ` : null}
+        `}
       </div>
 
       ${activeJob ? html`<${JobLogPanel}

@@ -12,6 +12,8 @@ const COLORS = {
   QSE:  { bg: '#0f3340', text: '#6fe0ee', border: '#2f7f93' },  // teal/cyan
   QCCI: { bg: '#3a1230', text: '#ff9ad6', border: '#a3327f' },  // magenta/pink
   MoPH: { bg: '#10302a', text: '#5fe3c0', border: '#2c8a73' },  // emerald/health
+  LinkedIn: { bg: '#13243f', text: '#7cb8ff', border: '#2b5da3' },  // linkedin blue (people)
+  manual:   { bg: '#2a2233', text: '#c9a8e6', border: '#5a4470' },  // manual entries
 };
 const FALLBACK = { bg: '#1c2030', text: '#8a93a6', border: '#2b2f3d' };
 
@@ -24,6 +26,8 @@ export const SOURCE_NAMES = {
   QSE:  'Qatar Stock Exchange',
   QCCI: 'Qatar Chamber — Commercial & Industrial Directory',
   MoPH: 'Ministry of Public Health — Healthcare Facilities (DHP)',
+  LinkedIn: 'LinkedIn',
+  manual: 'Manually added',
 };
 
 export function SourceBadge({ source, compact = false }) {
