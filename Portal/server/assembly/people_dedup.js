@@ -86,6 +86,23 @@ export async function mergePeople(canonicalId, duplicateId, jobLog = null) {
               AND COALESCE(x.title,'') = COALESCE(pc.title,''))`, [canonicalId, duplicateId]);
     await client.query(`DELETE FROM person_companies WHERE person_id = $1`, [duplicateId]);
 
+    // Collapse duplicate CURRENT links to the same employer (a person has one
+    // current role per company). Keep the most useful title: a real designation
+    // beats a blank or facility-name-as-title; then the longest; then oldest id.
+    await client.query(`
+      WITH ranked AS (
+        SELECT pc.id, row_number() OVER (
+          PARTITION BY pc.person_id, pc.company_id, pc.is_current
+          ORDER BY (CASE WHEN pc.title IS NULL OR btrim(pc.title) = '' THEN 0
+                         WHEN lower(btrim(pc.title)) = lower(btrim(c.name)) THEN 0
+                         ELSE 1 END) DESC,
+                   (CASE WHEN pc.source_stage = 0 AND coalesce(btrim(pc.title),'') <> '' THEN 1 ELSE 0 END) DESC,
+                   length(coalesce(pc.title, '')) DESC, pc.id ASC) AS rn
+          FROM person_companies pc JOIN companies c ON c.id = pc.company_id
+         WHERE pc.person_id = $1
+      )
+      DELETE FROM person_companies WHERE id IN (SELECT id FROM ranked WHERE rn > 1)`, [canonicalId]);
+
     // Re-parent contacts (unique on person_id,type,value).
     await client.query(`
       INSERT INTO person_contacts (person_id, type, value, value_display, source, source_url, source_label, is_primary, is_verified, verified_at, extra_fields)
