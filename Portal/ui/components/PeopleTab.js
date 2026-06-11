@@ -8,6 +8,7 @@ import { Pagination } from './Pagination.js';
 import { PersonDetail } from './PersonDetail.js';
 import { JobLogPanel } from './JobLogPanel.js';
 import { ContactIcons } from './ContactIcons.js';
+import { SourceBadges } from './SourceBadge.js';
 
 export function PeopleTab({ mode = 'local-admin' } = {}) {
   const isUser = mode === 'user';   // customers reveal contacts instead of editing internals
@@ -18,6 +19,8 @@ export function PeopleTab({ mode = 'local-admin' } = {}) {
   const [limit]                 = useState(100);
   const [offset, setOffset]     = useState(0);
   const [q, setQ]               = useState('');
+  const [source, setSource]     = useState('');        // '' | 'MoPH' | 'LinkedIn' | 'manual'
+  const [company, setCompany]   = useState('');        // employer name text filter
   const [employment, setEmployment] = useState('');   // '' | 'with' | 'without'
   const [loading, setLoading]   = useState(false);
   const [openedId, setOpenedId] = useState(null);
@@ -29,13 +32,15 @@ export function PeopleTab({ mode = 'local-admin' } = {}) {
     try {
       const params = { limit, offset, archived: archivedMode ? 'true' : 'false' };
       if (q.trim()) params.q = q.trim();
+      if (source) params.source = source;
+      if (company.trim()) params.company = company.trim();
       if (employment) params.employment = employment;
       const r = await api.people(params);
       setRows(r.rows);
       setTotal(r.total);
     } catch (err) { toast('Load failed: ' + err.message, 'error'); }
     finally { if (!silent) setLoading(false); }
-  }, [limit, offset, q, archivedMode, employment]);
+  }, [limit, offset, q, source, company, archivedMode, employment]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -147,9 +152,23 @@ export function PeopleTab({ mode = 'local-admin' } = {}) {
   return html`
     <div class="grid-toolbar">
       <input
-        type="text" placeholder=${archivedMode ? "Search archived people..." : "Search name, LinkedIn URL, email..."}
+        type="text" placeholder=${archivedMode ? "Search archived people..." : "Search name, email, specialty, license..."}
         value=${q} onChange=${e => { setQ(e.target.value); setOffset(0); }}
       />
+      <input
+        type="text" placeholder="Employer company…"
+        value=${company} onChange=${e => { setCompany(e.target.value); setOffset(0); }}
+      />
+      <select
+        title="Filter by source"
+        value=${source}
+        onChange=${e => { setSource(e.target.value); setOffset(0); }}
+      >
+        <option value="">All sources</option>
+        <option value="MoPH">MoPH</option>
+        <option value="LinkedIn">LinkedIn</option>
+        <option value="manual">Manual</option>
+      </select>
       <select
         title="Filter by employment links"
         value=${employment}
@@ -215,7 +234,17 @@ export function PeopleTab({ mode = 'local-admin' } = {}) {
                   <input type="checkbox" checked=${selected.has(r.id)} onChange=${() => toggleRow(r.id)} />
                 </td>
                 <td><${PhotoCell} person=${r} /></td>
-                <${EditableCell} value=${r.full_name} readOnly=${isUser} onSave=${(v) => update(r.id, 'full_name', v)} />
+                <${EditableCell}
+                  value=${r.full_name}
+                  readOnly=${isUser}
+                  onSave=${(v) => update(r.id, 'full_name', v)}
+                  formatter=${(name) => html`
+                    <div class="name-cell">
+                      <div class="name-cell-main">${name || html`<span style=${{color:'var(--text-dim)'}}>—</span>`}</div>
+                      ${(r.sources && r.sources.length) ? html`<${SourceBadges} sources=${r.sources} compact=${true} />` : null}
+                    </div>
+                  `}
+                />
                 <${EditableCell} value=${r.headline}  readOnly=${isUser} onSave=${(v) => update(r.id, 'headline', v)} />
                 <td>${isUser && !r.revealed_by_tenant
                   ? html`<span class="contact-locked-cell"><${ContactIcons} company=${r} /><button class="reveal-btn" onClick=${(e) => { e.stopPropagation(); revealRow(r.id); }}>Reveal · 1</button></span>`

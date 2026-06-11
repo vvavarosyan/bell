@@ -1851,3 +1851,11 @@ a.contact-icon.on { cursor: pointer; text-decoration: none; position: relative; 
 .audit-status.canonical  { background: color-mix(in srgb, var(--green) 18%, transparent); color: var(--green); }
 .audit-status.merged_into { background: color-mix(in srgb, var(--amber) 18%, transparent); color: var(--amber); }
 .audit-status.standalone { background: var(--bg-elev-2); color: var(--text-dim); }
+
+/* ── Dedup Companies/People queue toggle ───────────────────────────────── */
+.dedup-mode-toggle { display: inline-flex; gap: 2px; background: var(--bg-elev-2); border: 1px solid var(--border); border-radius: 8px; padding: 2px; }
+.dedup-mode-toggle button {
+  background: transparent; border: none; color: var(--text-dim);
+  padding: 4px 12px; border-radius: 6px; font-size: 12px; font-weight: 600; cursor: pointer;
+}
+.dedup-mode-toggle button.on { background: var(--accent-fade); color: var(--accent-bright); }

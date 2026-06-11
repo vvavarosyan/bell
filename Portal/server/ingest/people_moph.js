@@ -42,6 +42,13 @@ export async function ingestMophPractitioners(jobProgress) {
   const rows = Array.isArray(json.people) ? json.people : [];
   jobProgress?.(`Practitioners in file: ${rows.length.toLocaleString()}`);
 
+  // Resync the id sequences to MAX(id) first. Rows imported with explicit ids
+  // (research two-way sync / pull) can leave the bigserial sequence behind the
+  // real max, so a plain INSERT picks an id that already exists → duplicate PK.
+  for (const t of ['people', 'person_companies']) {
+    await query(`SELECT setval(pg_get_serial_sequence('${t}', 'id'), (SELECT COALESCE(MAX(id), 1) FROM ${t}))`);
+  }
+
   // facility id → FINAL canonical company id (facilities ingested as MoPH companies)
   const facMap = new Map();
   const fres = await query(
