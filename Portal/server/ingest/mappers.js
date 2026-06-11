@@ -384,6 +384,47 @@ export function mapMOPH(raw) {
   };
 }
 
+// ------- Tasmu Digital Valley (Qatar Digital Directory, MCIT) --------------
+// Digital companies with rich contacts (website + phone + email) + sector +
+// technology tags. No registration number exposed, so dedup links these to
+// existing MOCI/QCCI rows by name/website and folds in the contacts.
+export function mapTASMU(raw) {
+  const orgName = nz(raw.name);
+  if (!orgName) return null;
+  const { name, name_normalized } = namePair(orgName);
+  const recordId = 'tasmu:' + (slug(orgName) || 'unknown');
+
+  const { status_normalized, is_active } = normalizeUnspecifiedStatus();
+
+  return {
+    source_record_id: recordId,
+    source_url: nz(raw.profile_url) || nz(raw.listing_url) || 'https://tdv.motc.gov.qa/business-directory',
+    companyFields: {
+      name,
+      name_normalized,
+      legal_form: null,
+      is_active,
+      archived: !is_active,
+      status_normalized,
+      status_raw: null,
+      primary_registration_no: null,
+      sector: nz(raw.sector),
+      website: nz(raw.website),
+      email: nz(raw.email),
+      phone: nz(raw.phone),
+      address: null,
+      country: 'Qatar',
+    },
+    extraFields: {
+      tasmu_sector:      nz(raw.sector),
+      tasmu_technology:  nz(raw.technology),
+      tasmu_description: nz(raw.description),
+      tasmu_profile_url: nz(raw.profile_url),
+    },
+    rawPayload: raw,
+  };
+}
+
 export const MAPPERS = {
   QFZ:  mapQFZ,
   QFC:  mapQFC,
@@ -392,4 +433,5 @@ export const MAPPERS = {
   QSE:  mapQSE,
   QCCI: mapQATARCID,
   MoPH: mapMOPH,
+  Tasmu: mapTASMU,
 };

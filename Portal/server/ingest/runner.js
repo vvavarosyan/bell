@@ -27,6 +27,7 @@ const LATEST_FILE = {
   QSE:  '../Other Sources/QSE/scans/qse_companies_latest.json',
   QCCI: '../Other Sources/Qatar Chamber/scans/qatarcid_companies_latest.json',
   MoPH: '../Other Sources/MoPH/scans/moph_facilities_latest.json',
+  Tasmu: '../Other Sources/Tasmu/scans/tasmu_companies_latest.json',
 };
 
 const BATCH_SIZE = 200;
