@@ -159,13 +159,15 @@ router.post('/dedup/:id/decide', async (req, res, next) => {
     const canonical = action === 'merge_a_to_b' ? cand.company_b_id : cand.company_a_id;
     const duplicate = action === 'merge_a_to_b' ? cand.company_a_id : cand.company_b_id;
     await mergeCompanies(canonical, duplicate);
+    // The CHECK constraint stores past-tense decisions: merge_a_to_b → merged_a_to_b.
+    const decisionVal = action === 'merge_a_to_b' ? 'merged_a_to_b' : 'merged_b_to_a';
     await query(`
       UPDATE dedup_candidates
       SET decision = $2, decided_at = now(), decided_by = $3
       WHERE id = $1
-    `, [id, action, admin_email || 'unknown']);
+    `, [id, decisionVal, admin_email || 'unknown']);
 
-    res.json({ ok: true, canonical, duplicate, decision: action });
+    res.json({ ok: true, canonical, duplicate, decision: decisionVal });
   } catch (err) { next(err); }
 });
 
@@ -227,9 +229,11 @@ router.post('/people/dedup/:id/decide', async (req, res, next) => {
     const canonical = action === 'merge_a_to_b' ? cand.person_b_id : cand.person_a_id;
     const duplicate = action === 'merge_a_to_b' ? cand.person_a_id : cand.person_b_id;
     await mergePeople(canonical, duplicate);
+    // Constraint stores past-tense decisions: merge_a_to_b → merged_a_to_b.
+    const decisionVal = action === 'merge_a_to_b' ? 'merged_a_to_b' : 'merged_b_to_a';
     await query(`UPDATE person_dedup_candidates SET decision=$2, decided_at=now(), decided_by=$3 WHERE id=$1`,
-      [id, action, admin_email || 'unknown']);
-    res.json({ ok: true, canonical, duplicate, decision: action });
+      [id, decisionVal, admin_email || 'unknown']);
+    res.json({ ok: true, canonical, duplicate, decision: decisionVal });
   } catch (err) { next(err); }
 });
 
