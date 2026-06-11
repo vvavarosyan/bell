@@ -12,6 +12,7 @@ import { query, withTransaction } from '../db.js';
 import { MAPPERS } from './mappers.js';
 import { recomputeCompanyStatus } from './recompute_status.js';
 import { normalizeEmail, normalizePhone, isJunkEmail } from '../lib/contacts.js';
+import { ingestMophPractitioners } from './people_moph.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const SERVER_DIR = path.dirname(path.dirname(__filename));
@@ -25,6 +26,7 @@ const LATEST_FILE = {
   QSTP: 'QSTP/scans/qstp_companies_latest.json',
   QSE:  '../Other Sources/QSE/scans/qse_companies_latest.json',
   QCCI: '../Other Sources/Qatar Chamber/scans/qatarcid_companies_latest.json',
+  MoPH: '../Other Sources/MoPH/scans/moph_facilities_latest.json',
 };
 
 const BATCH_SIZE = 200;
@@ -76,6 +78,14 @@ export async function ingestSource(source, jobProgress) {
   const recon = await reconcileDisappearances(source, runStart);
   jobProgress?.(`  Disappeared: ${recon.missing.toLocaleString()} · archived ${recon.archived} · flagged for review ${recon.flagged}`);
 
+  // MoPH carries a companion practitioners file: after the facility companies
+  // are in, fold the licensed practitioners in as people linked to their facility.
+  let practitioners = null;
+  if (source === 'MoPH') {
+    jobProgress?.('Ingesting DHP practitioners as people …');
+    practitioners = await ingestMophPractitioners(jobProgress);
+  }
+
   // Remember when this source was last ingested (UI/debug).
   await query(
     `INSERT INTO settings (key, value) VALUES ($1, $2::jsonb)
@@ -93,6 +103,7 @@ export async function ingestSource(source, jobProgress) {
     disappeared: recon.missing,
     archived:    recon.archived,
     flagged_for_review: recon.flagged,
+    ...(practitioners ? { practitioners } : {}),
   };
 }
 
