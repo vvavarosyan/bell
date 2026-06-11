@@ -342,6 +342,48 @@ export function mapQATARCID(raw) {
   };
 }
 
+// ------- MoPH / DHP (healthcare facilities) -------------------------------
+// From the DHP "Place of work" directory: each facility is a healthcare company
+// (pharmacy, clinic, hospital, optics, lab…). Keyed by the DHP facility id.
+// No registration number is exposed here, so primary_registration_no stays null
+// (dedup still links these to MOCI/QCCI by name + the usual signals).
+export function mapMOPH(raw) {
+  const orgName = nz(raw.name);
+  if (!orgName) return null;
+  const { name, name_normalized } = namePair(orgName);
+
+  const fid = nz(raw.dhp_facility_id);
+  if (!fid) return null;
+  const recordId = 'moph:' + fid;
+
+  const { status_normalized, is_active } = normalizeUnspecifiedStatus();
+
+  return {
+    source_record_id: recordId,
+    source_url: nz(raw.listing_url) || 'https://dhp.moph.gov.qa/en/Pages/SearchPractitionersPage.aspx',
+    companyFields: {
+      name,
+      name_normalized,
+      legal_form: null,
+      is_active,
+      archived: !is_active,
+      status_normalized,
+      status_raw: null,
+      primary_registration_no: null,
+      sector: 'Healthcare',
+      website: null,
+      email: null,
+      phone: null,
+      address: null,
+      country: 'Qatar',
+    },
+    extraFields: {
+      moph_facility_id: fid,
+    },
+    rawPayload: raw,
+  };
+}
+
 export const MAPPERS = {
   QFZ:  mapQFZ,
   QFC:  mapQFC,
@@ -349,4 +391,5 @@ export const MAPPERS = {
   QSTP: mapQSTP,
   QSE:  mapQSE,
   QCCI: mapQATARCID,
+  MoPH: mapMOPH,
 };
