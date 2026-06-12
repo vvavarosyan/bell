@@ -6,7 +6,7 @@ import { html } from '../lib/html.js';
 import { api } from '../lib/api.js';
 import { toast } from '../lib/toast.js';
 import { navigateTo } from '../lib/router.js';
-import { formatValue } from '../lib/format.js';
+import { formatValue, isEmptyValue } from '../lib/format.js';
 import { CompanyLogo } from './CompanyLogo.js';
 import { SourceBadge } from './SourceBadge.js';
 import { ContactsList } from './ContactsList.js';
@@ -328,6 +328,11 @@ export function CompanyDetail({ companyId, onMutated, onDeleted, canHardDelete =
   const sources = data.sources || [];
   const needsReveal = isUser && c.revealed_by_tenant === false;
   const intelCount = (data.financials?.length || 0) + (data.shareholders?.length || 0) + (data.partnerships?.length || 0);
+  // Users don't see the raw "Sources" section in Legal — only the regulatory
+  // groups that actually have data — so the tab count should match that.
+  const legalTabCount = isUser
+    ? LEGAL_GROUPS.filter(g => sources.some(s => s.source === g.source) && g.fields.some(([k]) => !isEmptyValue(extra[k]))).length
+    : sources.length;
 
   const revealContacts = async () => {
     try {
@@ -349,7 +354,7 @@ export function CompanyDetail({ companyId, onMutated, onDeleted, canHardDelete =
           <span class="bin">${c.bin || '— (unassembled)'}</span>
           <strong>${c.name}</strong>
           <div class="detail-status-row">
-            ${sources.map(s => html`<${SourceBadge} key=${s.source} source=${s.source} compact=${true} />`)}
+            ${[...new Set(sources.map(s => s.source))].map(src => html`<${SourceBadge} key=${src} source=${src} compact=${true} />`)}
             <span class=${'pill ' + (c.is_active ? 'active' : 'inactive')}>${c.status_normalized || (c.is_active ? 'active' : 'inactive')}</span>
             ${c.archived ? html`<span class="pill" style=${{borderColor:'var(--amber)',color:'var(--amber)'}} title=${'Archived' + (c.archive_reason ? ' · ' + (ARCHIVE_REASON_LABEL[c.archive_reason] || c.archive_reason) : '')}>archived${c.archive_reason ? ' · ' + (ARCHIVE_REASON_LABEL[c.archive_reason] || c.archive_reason) : ''}</span>` : null}
             ${c.needs_review ? html`<span class="pill" style=${{borderColor:'rgb(91 140 255)',color:'rgb(91 140 255)'}} title="Disappeared from a source — needs an admin decision">needs review</span>` : null}
@@ -439,7 +444,7 @@ export function CompanyDetail({ companyId, onMutated, onDeleted, canHardDelete =
         <button class=${tab==='company'?'active':''} onClick=${()=>setTab('company')}>Company</button>
         <button class=${tab==='people'?'active':''}  onClick=${()=>setTab('people')}>People (${data.people.length})</button>
         <button class=${tab==='intel'?'active':''}   onClick=${()=>setTab('intel')}>Intel${intelCount ? ` (${intelCount})` : ''}</button>
-        <button class=${tab==='legal'?'active':''}   onClick=${()=>setTab('legal')}>Legal (${sources.length})</button>
+        <button class=${tab==='legal'?'active':''}   onClick=${()=>setTab('legal')}>Legal (${legalTabCount})</button>
       </div>
 
       <div class="detail-body" ref=${bodyRef}>
@@ -487,7 +492,8 @@ function CompanyTab({ company, extra, similar, contacts, onReload, needsReveal =
     if (v === null || v === undefined) continue;
     if (RUNTIME_KEY_PREFIXES.some(p => k.startsWith(p))) continue;
     if (LINKEDIN_RUNTIME_KEYS.has(k)) continue;
-    if (isUser && /photo|logo_url|cover_url/i.test(k)) continue;   // image URLs: not useful as text for customers
+    if (isUser && /photo|logo_url|cover_url|call_to_action/i.test(k)) continue;   // image URLs / CTA: not useful for customers
+    if (isUser && isEmptyValue(v)) continue;                                       // hide empty fields from customers
     if (k.startsWith('linkedin_')) linkedinExtras[k] = v;
     else if (k.startsWith('gmaps_')) gmapsExtras[k] = v;
   }
@@ -521,9 +527,14 @@ function CompanyTab({ company, extra, similar, contacts, onReload, needsReveal =
   // Customers (app.bell.qa) see a curated view: internal/runtime groups are
   // admin-only, and Google "Photo URLs" are dropped (not useful to display).
   const USER_HIDDEN_GROUPS = new Set(['Status', 'Enrichment stages', 'Bookkeeping']);
-  const USER_HIDDEN_FIELDS = new Set(['gmaps_photos']);
+  const USER_HIDDEN_FIELDS = new Set(['gmaps_photos', 'linkedin_logo_url', 'linkedin_cover_url']);
   const groups = (isUser ? COMPANY_GROUPS.filter(g => !USER_HIDDEN_GROUPS.has(g.label)) : COMPANY_GROUPS)
-    .map(g => (isUser ? { ...g, fields: g.fields.filter(([k]) => !USER_HIDDEN_FIELDS.has(k)) } : g));
+    .map(g => (isUser
+      ? { ...g, fields: g.fields.filter(([k]) => !USER_HIDDEN_FIELDS.has(k) && !isEmptyValue(company[k])) }
+      : g))
+    // Drop now-empty groups for users — but always keep Contact (it hosts the
+    // contacts list) and Identity (name/BIN summary).
+    .filter(g => g.fields.length > 0 || g.label === 'Contact' || g.label === 'Identity');
 
   return html`
     <div class="overview">

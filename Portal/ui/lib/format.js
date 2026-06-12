@@ -8,12 +8,13 @@ const DASH = html`<span class="muted">—</span>`;
 
 const isUrl = (s) => typeof s === 'string' && /^https?:\/\//i.test(s.trim());
 
-// True for null/undefined/'', empty arrays, and empty objects.
+// True for null/undefined/'', empty arrays, and empty objects (after dropping
+// LinkedIn recipe-metadata keys like $type/$recipeTypes).
 export function isEmptyValue(v) {
   if (v === null || v === undefined) return true;
   if (typeof v === 'string') return v.trim() === '';
   if (Array.isArray(v)) return v.length === 0;
-  if (typeof v === 'object') return Object.keys(v).length === 0;
+  if (typeof v === 'object') return Object.keys(v).filter(k => !k.startsWith('$')).length === 0;
   return false;
 }
 
@@ -35,6 +36,11 @@ function locationLine(o) {
 const looksLikeLocation = (o) =>
   o && typeof o === 'object' && (o.city != null || o.line1 != null || o.country != null || o.headquarter !== undefined || o.localizedName != null);
 
+// An object whose every value is a boolean, e.g. {"Credit cards": true}.
+const isBoolObj = (o) => o && typeof o === 'object' && !Array.isArray(o) &&
+  Object.keys(o).length > 0 && Object.values(o).every(v => typeof v === 'boolean');
+const truthyKeys = (o) => Object.entries(o).filter(([, v]) => v === true).map(([k]) => k);
+
 export function formatValue(value) {
   if (value === null || value === undefined) return DASH;
 
@@ -46,30 +52,40 @@ export function formatValue(value) {
   if (typeof value === 'string') {
     const s = value.trim();
     if (!s) return DASH;
-    if (isUrl(s)) return html`<a href=${s} target="_blank" rel="noreferrer">${s}</a>`;
+    if (isUrl(s)) return html`<a class="url-btn" href=${s} target="_blank" rel="noreferrer" title=${s}>Open ↗</a>`;
     if (/^\d{4}-\d{2}-\d{2}T/.test(s)) { try { return new Date(s).toLocaleString(); } catch {} }
     return s;
   }
 
   if (Array.isArray(value)) {
     if (value.length === 0) return DASH;
+    // Google-features style: [{"Credit cards":true}, …] → the enabled labels.
+    if (value.every(isBoolObj)) {
+      const keys = value.flatMap(truthyKeys);
+      return keys.length ? chips(keys) : DASH;
+    }
     if (value.every(x => typeof x === 'string' || typeof x === 'number')) return chips(value);
     if (value.every(x => x && typeof x === 'object')) {
       const lines = value.map(o => looksLikeLocation(o)
         ? locationLine(o)
-        : Object.entries(o).filter(([, v]) => v != null && v !== '').map(([k, v]) => `${k.replace(/_/g, ' ')}: ${typeof v === 'object' ? JSON.stringify(v) : v}`).join(', '));
+        : Object.entries(o).filter(([k, v]) => !k.startsWith('$') && v != null && v !== '').map(([k, v]) => `${k.replace(/_/g, ' ')}: ${typeof v === 'object' ? JSON.stringify(v) : v}`).join(', '));
       const clean = lines.filter(Boolean);
-      if (clean.length === 0) return DASH;
-      return html`<div class="val-lines">${clean.map((l, i) => html`<div key=${i}>${l}</div>`)}</div>`;
+      return clean.length ? html`<div class="val-lines">${clean.map((l, i) => html`<div key=${i}>${l}</div>`)}</div>` : DASH;
     }
     return chips(value.map(x => (typeof x === 'object' ? JSON.stringify(x) : String(x))));
   }
 
   if (typeof value === 'object') {
-    const entries = Object.entries(value).filter(([, v]) => v != null && v !== '');
+    // Drop LinkedIn recipe metadata ($type, $recipeTypes, …) and empties.
+    const entries = Object.entries(value).filter(([k, v]) => !k.startsWith('$') && v != null && v !== '');
     if (entries.length === 0) return DASH;
+    // {start, end} → "51 - 200"
+    if (value.start != null && value.end != null && entries.length <= 2) return `${value.start} - ${value.end}`;
+    // A single meaningful key (e.g. {year: 2018}) → just the value.
+    if (entries.length === 1) return formatValue(entries[0][1]);
+    // Otherwise "key: <formatted value>" lines (recurses for nested features).
     return html`<div class="val-lines">${entries.map(([k, v]) => html`
-      <div key=${k}><span class="muted">${k.replace(/_/g, ' ')}:</span> ${typeof v === 'object' ? JSON.stringify(v) : String(v)}</div>`)}</div>`;
+      <div key=${k}><span class="muted">${k.replace(/_/g, ' ')}:</span> ${formatValue(v)}</div>`)}</div>`;
   }
 
   return String(value);

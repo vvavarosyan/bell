@@ -35,7 +35,7 @@ function fmtDisplay(value, type) {
   }
   if (typeof value === 'string') {
     if (/^https?:\/\//.test(value)) {
-      return html`<a href=${value} target="_blank" rel="noreferrer">${value}</a>`;
+      return html`<a class="url-btn" href=${value} target="_blank" rel="noreferrer" title=${value}>Open ↗</a>`;
     }
     if (/^\d{4}-\d{2}-\d{2}T/.test(value)) {
       try { return new Date(value).toLocaleString(); } catch {}

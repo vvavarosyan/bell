@@ -57,6 +57,21 @@ function SourceTag({ source }) {
   }}>${label}</span>`;
 }
 
+// Brand identity for a social URL → a colorful icon chip.
+function socialMeta(url) {
+  const u = String(url || '').toLowerCase();
+  if (u.includes('linkedin.com'))                       return { name: 'LinkedIn',  bg: '#0A66C2', label: 'in' };
+  if (u.includes('instagram.com'))                      return { name: 'Instagram', bg: '#E4405F', label: 'IG' };
+  if (u.includes('facebook.com') || u.includes('fb.com')) return { name: 'Facebook', bg: '#1877F2', label: 'f' };
+  if (u.includes('twitter.com') || /(^|\/\/)x\.com/.test(u)) return { name: 'X', bg: '#000000', label: '𝕏' };
+  if (u.includes('youtube.com') || u.includes('youtu.be')) return { name: 'YouTube', bg: '#FF0000', label: '▶' };
+  if (u.includes('wa.me') || u.includes('whatsapp'))    return { name: 'WhatsApp', bg: '#25D366', label: '✆' };
+  if (u.includes('tiktok.com'))                         return { name: 'TikTok',  bg: '#010101', label: 'TT' };
+  if (u.includes('snapchat'))                           return { name: 'Snapchat', bg: '#FFFC00', fg: '#000', label: 'SC' };
+  if (u.includes('t.me') || u.includes('telegram'))     return { name: 'Telegram', bg: '#229ED9', label: '✈' };
+  return { name: 'Website', bg: '#5b8cff', label: '↗' };
+}
+
 function ContactRow({ contact, kind, refId, onChange, readOnly = false }) {
   const remove = async () => {
     try {
@@ -81,18 +96,22 @@ function ContactRow({ contact, kind, refId, onChange, readOnly = false }) {
   if (contact.type === 'phone') href = 'tel:' + contact.value.replace(/\s+/g, '');
   if (contact.type === 'social') href = contact.value;
 
+  const isSocial = contact.type === 'social';
+  const sm = isSocial ? socialMeta(contact.value) : null;
+
   return html`
     <div class="contact-row">
       <div class="contact-row-main">
-        ${href
-          ? html`<a href=${href} target=${contact.type==='social'?'_blank':'_self'} rel="noreferrer">${display}</a>`
-          : html`<span>${display}</span>`}
-        ${contact.is_primary ? html`<span class="contact-primary-pill" title="Primary">primary</span>` : null}
+        ${isSocial
+          ? html`<a class="social-icon" href=${href} target="_blank" rel="noreferrer" title=${sm.name}
+                    style=${{ background: sm.bg, color: sm.fg || '#fff' }}>${sm.label}</a>`
+          : (href
+              ? html`<a href=${href} target="_self" rel="noreferrer">${display}</a>`
+              : html`<span>${display}</span>`)}
+        ${contact.is_primary && !isSocial ? html`<span class="contact-primary-pill" title="Primary">primary</span>` : null}
       </div>
       <div class="contact-row-meta">
-        <${SourceTag} source=${contact.source} />
-        ${contact.source_url ? html`<a href=${contact.source_url} target="_blank" rel="noreferrer" class="muted small" title=${contact.source_url}>↗</a>` : null}
-        ${contact.source_label ? html`<span class="muted small">${contact.source_label}</span>` : null}
+        ${!readOnly && contact.source_label ? html`<span class="muted small">${contact.source_label}</span>` : null}
         ${!readOnly && !contact.is_primary ? html`<button class="linkbtn" onClick=${promote} title="Use this as the primary value">★</button>` : null}
         ${!readOnly ? html`<button class="linkbtn danger" onClick=${remove} title="Remove this contact">×</button>` : null}
       </div>
