@@ -9,6 +9,7 @@ import { navigateTo } from '../lib/router.js';
 import { formatValue, isEmptyValue } from '../lib/format.js';
 import { BellScore } from './BellScore.js';
 import { ContactIcons } from './ContactIcons.js';
+import { RequestDetailsBox } from './RequestDetailsBox.js';
 import { CompanyLogo } from './CompanyLogo.js';
 import { SourceBadge } from './SourceBadge.js';
 import { ContactsList } from './ContactsList.js';
@@ -554,6 +555,7 @@ function CompanyTab({ company, extra, similar, contacts, onReload, needsReveal =
 
   return html`
     <div class="overview">
+      ${isUser && !needsReveal ? html`<${RequestDetailsBox} companyId=${company.id} />` : null}
       ${groups.map(g => html`
         <section class="group" key=${g.label}>
           <h3>${g.label}</h3>

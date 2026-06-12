@@ -30,6 +30,7 @@ import { MarketFeedTab } from './components/MarketFeedTab.js';
 import { CrmTab }        from './components/CrmTab.js';
 import { BillingTab }    from './components/BillingTab.js';
 import { AccountTab }    from './components/AccountTab.js';
+import { DetailRequestsTab } from './components/DetailRequestsTab.js';
 
 // Maps a sidebar nav id to a renderable view. Items not listed here fall back
 // to a ComingSoon placeholder with the item's label.
@@ -48,6 +49,7 @@ const VIEWS = {
   'recent-jobs': { Component: RecentJobsTab },
   'research':    { Component: ResearchTab },
   'approvals':   { Component: ResearchApprovalsTab },
+  'detail-requests': { Component: DetailRequestsTab },
   'deep-data':   { Component: DeepDataTab },
   'sync':        { Component: SyncTab },
   // Archived is reachable via deep-link/sidebar too
@@ -68,6 +70,7 @@ const LABELS = {
   'crm': 'CRM',
   'research': 'Research',
   'approvals': 'Research Approvals',
+  'detail-requests': 'Detail Requests',
   'team': 'Team',
 };
 
