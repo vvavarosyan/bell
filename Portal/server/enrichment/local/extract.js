@@ -114,6 +114,10 @@ export function findSocials(text, links = []) {
       catch { clean = clean.toLowerCase(); }
       // Drop bare profile roots (e.g. instagram.com/ with no handle).
       if (/(facebook|instagram|twitter|x|tiktok|youtube|linkedin)\.com\/?$/i.test(clean)) continue;
+      // Drop Facebook generic section roots with no specific handle after them.
+      // (Real profiles are facebook.com/people/Name/12345 — those have a handle
+      // and are kept; a bare .../people, .../pages, .../groups is navigation.)
+      if (/facebook\.com\/(people|pages|pg|groups|watch|marketplace|events|profile\.php|sharer)\/?$/i.test(clean)) continue;
       if (seen.has(clean)) continue;
       seen.add(clean);
       out.push({ network: name, url: clean });

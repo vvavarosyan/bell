@@ -25,6 +25,7 @@ import { upsertContact } from '../../lib/contacts.js';
 import { recomputeBellScoreForCompany } from '../../assembly/bell_score.js';
 import { inferSeniority } from '../seniority.js';
 import { fetchPage, toRootUrl, sameHost } from './http.js';
+import { renderPage, rendererAvailable, closeRenderer } from './render.js';
 import {
   findEmails, findPhones, findSocials,
   guessAddress, extractTeam, extractPartners, pickLogo,
@@ -34,6 +35,7 @@ export const STAGE_LABEL = 'Stage 7 — Local Website Harvester';
 export const TOOL_NAME   = 'local_website_harvester';
 
 const MAX_PAGES        = 7;      // homepage + up to 6 discovered pages
+const JS_SHELL_CHARS   = 400;    // homepage text shorter than this ⇒ JS-rendered shell
 const PER_COMPANY_MS   = 700;    // politeness delay between companies
 const SOURCE           = 'stage7-website';
 
@@ -120,12 +122,27 @@ export async function enrichCompany(company) {
 
   await markStage(company.id, 'running');
 
-  // 1) Homepage.
-  const home = await fetchPage(homeUrl);
+  // 1) Homepage — plain fetch first (fast, $0). If it comes back as a near-empty
+  // JS shell, re-render it with a headless browser (if one is installed). The
+  // whole site is then crawled in the same mode.
+  let home = await fetchPage(homeUrl);
+  let renderMode = false;
+  let renderTried = false;
+
+  const isShell = (p) => !p.ok || (p.text || '').length < JS_SHELL_CHARS;
+  if (isShell(home) && await rendererAvailable()) {
+    renderTried = true;
+    const r = await renderPage(homeUrl);
+    if (r.ok && (r.text || '').length > (home.text || '').length) { home = r; renderMode = true; }
+  }
+
   if (!home.ok) {
     await markStage(company.id, 'failed', { stage7_error: home.error || 'home_unreachable' });
     return { status: 'failed', reason: home.error || 'home_unreachable', usd: 0 };
   }
+
+  // Pick the loader for the rest of the site based on the homepage's mode.
+  const load = (url) => (renderMode ? renderPage(url) : fetchPage(url));
 
   const pages = [{ url: home.finalUrl, kind: 'home', page: home }];
 
@@ -137,9 +154,9 @@ export async function enrichCompany(company) {
   const guesses = guessPages(home.finalUrl).filter(g => !seenPath.has(safePath(g.url)));
   const toCrawl = [...linked, ...guesses].slice(0, MAX_PAGES - 1);
 
-  // 3) Fetch them (sequential, polite). Guessed pages soft-fail on 404.
+  // 3) Load them (sequential, polite). Guessed pages soft-fail on 404.
   for (const p of toCrawl) {
-    const r = await fetchPage(p.url);
+    const r = await load(p.url);
     if (r.ok && r.text) pages.push({ url: r.finalUrl, kind: p.kind, page: r });
   }
 
@@ -196,6 +213,7 @@ export async function enrichCompany(company) {
   const summary = {
     stage7_scraped_at: new Date().toISOString(),
     stage7_pages:      pages.map(p => ({ url: p.url, kind: p.kind })),
+    stage7_rendered:   renderMode,
     stage7_found:      { emails: wE, phones: wP, socials: wS, people: peopleAdded, partners: partners.length },
   };
   const wroteSomething = (wE + wP + wS + peopleAdded + partners.length) > 0 || !!address || !!logo;
@@ -207,7 +225,13 @@ export async function enrichCompany(company) {
   const homeTextLen = pages[0].page.text.length;
   let note = null;
   if ((wE + wP + wS) === 0) {
-    note = homeTextLen < 400 ? 'likely JS-rendered (empty HTML)' : 'no contacts found on crawled pages';
+    if (homeTextLen < JS_SHELL_CHARS && !renderMode) {
+      note = renderTried
+        ? 'JS-rendered; headless render returned no text'
+        : 'JS-rendered — run "Install Harvester Browser.command"';
+    } else {
+      note = renderMode ? 'rendered, no contacts found' : 'no contacts found on crawled pages';
+    }
   }
 
   return {
@@ -216,6 +240,7 @@ export async function enrichCompany(company) {
     scraped_pages: pages.map(p => p.url),
     pages_crawled: pages.length,
     home_text_len: homeTextLen,
+    rendered: renderMode,
     note,
     found: { emails: wE, phones: wP, socials: wS, people: peopleAdded, partners: partners.length },
   };
@@ -351,25 +376,33 @@ async function markStage(companyId, status, extras = null) {
 // ---------------------------------------------------------------------------
 
 export async function enrichCompanies(companies, jobLog = null) {
-  let done = 0, noData = 0, failed = 0;
-  for (let i = 0; i < companies.length; i++) {
-    const c = companies[i];
-    try {
-      const r = await enrichCompany(c);
-      if (r.status === 'done')        done++;
-      else if (r.status === 'no_data') noData++;
-      else                             failed++;
-      const tag = r.status === 'done' ? '✓' : (r.status === 'no_data' ? '·' : '✗');
-      jobLog?.(`  ${tag} [${i + 1}/${companies.length}] ${c.name}` +
-        (r.found ? ` — +${r.found.emails}e/${r.found.phones}p/${r.found.socials}s/${r.found.people}ppl/${r.found.partners}ptnr` : '') +
-        (r.pages_crawled ? ` · ${r.pages_crawled}pg/${r.home_text_len}ch` : '') +
-        (r.note ? ` · ${r.note}` : '') +
-        (r.reason ? ` (${r.reason})` : ''));
-    } catch (err) {
-      failed++;
-      jobLog?.(`  ✗ [${i + 1}/${companies.length}] ${c.name} — ${err.message}`);
+  let done = 0, noData = 0, failed = 0, rendered = 0;
+  const hasBrowser = await rendererAvailable();
+  jobLog?.(`  Render tier: ${hasBrowser ? 'headless browser ready (JS sites supported)' : 'fetch-only — run "Install Harvester Browser.command" to harvest JS sites'}`);
+  try {
+    for (let i = 0; i < companies.length; i++) {
+      const c = companies[i];
+      try {
+        const r = await enrichCompany(c);
+        if (r.status === 'done')        done++;
+        else if (r.status === 'no_data') noData++;
+        else                             failed++;
+        if (r.rendered) rendered++;
+        const tag = r.status === 'done' ? '✓' : (r.status === 'no_data' ? '·' : '✗');
+        jobLog?.(`  ${tag} [${i + 1}/${companies.length}] ${c.name}` +
+          (r.found ? ` — +${r.found.emails}e/${r.found.phones}p/${r.found.socials}s/${r.found.people}ppl/${r.found.partners}ptnr` : '') +
+          (r.pages_crawled ? ` · ${r.pages_crawled}pg/${r.home_text_len}ch${r.rendered ? '/JS' : ''}` : '') +
+          (r.note ? ` · ${r.note}` : '') +
+          (r.reason ? ` (${r.reason})` : ''));
+      } catch (err) {
+        failed++;
+        jobLog?.(`  ✗ [${i + 1}/${companies.length}] ${c.name} — ${err.message}`);
+      }
+      if (i < companies.length - 1) await new Promise(r => setTimeout(r, PER_COMPANY_MS));
     }
-    if (i < companies.length - 1) await new Promise(r => setTimeout(r, PER_COMPANY_MS));
+  } finally {
+    await closeRenderer();   // free Chromium at the end of the run
   }
+  if (rendered) jobLog?.(`  ▸ ${rendered} site(s) needed headless rendering.`);
   return { done, no_data: noData, failed, usd: 0 };
 }
