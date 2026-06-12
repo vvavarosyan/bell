@@ -44,6 +44,10 @@ const STAGE_INFO = {
     short: 'Website Contacts',
     desc:  'Stage 6 — Firecrawl scrapes the company website (if known from Stage 2 or 5) for email addresses, phone numbers, and contact pages.',
   },
+  7: {
+    short: 'Local Website Harvester',
+    desc:  'Stage 7 — Bell\'s local engine (no Firecrawl/Apify, $0). Crawls the company website and its contact/about/team/partners pages for emails, phones, socials, address, logo, team people, and partner companies. Idempotent — safe to re-run.',
+  },
 };
 const FULL_ENRICHMENT_TOOLTIP =
   'Run all 6 stages in dependency order: Stage 1 + Stage 5 in parallel first, then Stages 2/3/4 once a LinkedIn URL is found, then Stage 6 once a website is known. Companies without LinkedIn after Stage 1 skip 2/3/4 to save credits.';
@@ -256,7 +260,7 @@ export function CompaniesTab({ archivedMode: initialArchived = false, mode = 'lo
           : html`<span class="muted small"> · click a button to enrich them all</span>`}
         <span class="spacer"></span>
         ${!archivedMode ? html`
-          ${[1, 2, 3, 4, 5, 6].map(n => {
+          ${[1, 2, 3, 4, 5, 6, 7].map(n => {
             const info = STAGE_INFO[n];
             return html`
               <button
