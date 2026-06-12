@@ -30,7 +30,9 @@ export function normalizePhone(raw) {
   // Strip any '+' that isn't at index 0
   const cleaned = s.replace(/(?!^)\+/g, '');
   const digitCount = cleaned.replace(/\D/g, '').length;
-  if (digitCount < 6) return null;
+  // Sane phone length: 6–13 digits. Longer values aren't real numbers — we've
+  // seen 14-digit millisecond-timestamp IDs leak into phone fields.
+  if (digitCount < 6 || digitCount > 13) return null;
   return cleaned;
 }
 

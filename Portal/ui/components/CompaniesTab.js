@@ -280,6 +280,9 @@ export function CompaniesTab({ archivedMode: initialArchived = false, mode = 'lo
       </div>
     ` : null}
 
+    ${archivedMode ? html`<div class="view-banner archived-banner">📦 Archived companies — these are <strong>not active</strong> and are kept for reference only.</div>` : null}
+    ${reviewMode ? html`<div class="view-banner review-banner">⚠ Review queue — companies that disappeared from a source and need a decision.</div>` : null}
+
     <div class="grid-pane">
       <div class="grid-wrap">
         <table class="grid">

@@ -1869,3 +1869,26 @@ a.contact-icon.on { cursor: pointer; text-decoration: none; position: relative; 
 }
 .val-lines { font-size: 12.5px; }
 .val-lines > div { line-height: 1.5; }
+
+/* ── Compact URL button (drawer fields) ───────────────────────────────── */
+.url-btn {
+  display: inline-block; padding: 1px 9px; border-radius: 5px;
+  background: var(--bg-elev-2); border: 1px solid var(--border);
+  font-size: 11px; font-weight: 600; color: var(--accent-bright); text-decoration: none;
+}
+.url-btn:hover { border-color: var(--accent); }
+
+/* ── Social brand icons (contacts) ────────────────────────────────────── */
+.social-icon {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 24px; height: 24px; border-radius: 6px;
+  font-size: 12px; font-weight: 800; text-decoration: none; line-height: 1;
+}
+
+/* ── View banners (archived / review) ─────────────────────────────────── */
+.view-banner {
+  margin: 0 0 8px; padding: 8px 14px; border-radius: 8px;
+  font-size: 12.5px; font-weight: 600;
+}
+.archived-banner { background: color-mix(in srgb, var(--amber) 14%, transparent); color: var(--amber); border: 1px solid color-mix(in srgb, var(--amber) 38%, transparent); }
+.review-banner   { background: rgba(91,140,255,0.10); color: rgb(120 160 255); border: 1px solid rgba(91,140,255,0.34); }
