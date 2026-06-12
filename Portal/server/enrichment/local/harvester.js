@@ -55,6 +55,28 @@ function classifyPage(url) {
   return 'other';
 }
 
+// Common paths to probe directly even when the homepage doesn't link them
+// (sites with JavaScript-rendered navs hide their links from the raw HTML).
+const GUESS_PATHS = [
+  { path: '/contact',    kind: 'contact' },
+  { path: '/contact-us', kind: 'contact' },
+  { path: '/about',      kind: 'about'   },
+  { path: '/about-us',   kind: 'about'   },
+  { path: '/our-team',   kind: 'team'    },
+  { path: '/team',       kind: 'team'    },
+];
+
+function guessPages(homeUrl) {
+  let origin;
+  try { origin = new URL(homeUrl).origin; } catch { return []; }
+  return GUESS_PATHS.map(g => ({ url: origin + g.path, kind: g.kind, guessed: true }));
+}
+
+function safePath(url) {
+  try { return new URL(url).pathname.replace(/\/$/, '').toLowerCase() || '/'; }
+  catch { return url; }
+}
+
 /** From the homepage link list, choose the key pages to crawl (same host). */
 function pickPages(homeUrl, links) {
   const picked = [];
@@ -107,10 +129,18 @@ export async function enrichCompany(company) {
 
   const pages = [{ url: home.finalUrl, kind: 'home', page: home }];
 
-  // 2) Discover + fetch key pages (sequential, polite).
-  for (const p of pickPages(home.finalUrl, home.links)) {
+  // 2) Build the crawl set: pages linked from the homepage, then common paths
+  // probed directly (covers JS navs). De-dupe by URL/path, cap at MAX_PAGES.
+  const linked = pickPages(home.finalUrl, home.links);
+  const seenPath = new Set([safePath(home.finalUrl)]);
+  for (const p of linked) seenPath.add(safePath(p.url));
+  const guesses = guessPages(home.finalUrl).filter(g => !seenPath.has(safePath(g.url)));
+  const toCrawl = [...linked, ...guesses].slice(0, MAX_PAGES - 1);
+
+  // 3) Fetch them (sequential, polite). Guessed pages soft-fail on 404.
+  for (const p of toCrawl) {
     const r = await fetchPage(p.url);
-    if (r.ok) pages.push({ url: r.finalUrl, kind: p.kind, page: r });
+    if (r.ok && r.text) pages.push({ url: r.finalUrl, kind: p.kind, page: r });
   }
 
   // 3) Aggregate.
@@ -172,10 +202,21 @@ export async function enrichCompany(company) {
   await markStage(company.id, wroteSomething ? 'done' : 'no_data', summary);
   await recomputeBellScoreForCompany(company.id);
 
+  // Diagnostics: a "done" with no contacts is usually a JS-rendered site (the
+  // homepage came back as a near-empty shell) — flag it so the admin knows.
+  const homeTextLen = pages[0].page.text.length;
+  let note = null;
+  if ((wE + wP + wS) === 0) {
+    note = homeTextLen < 400 ? 'likely JS-rendered (empty HTML)' : 'no contacts found on crawled pages';
+  }
+
   return {
     status: wroteSomething ? 'done' : 'no_data',
     usd: 0,
     scraped_pages: pages.map(p => p.url),
+    pages_crawled: pages.length,
+    home_text_len: homeTextLen,
+    note,
     found: { emails: wE, phones: wP, socials: wS, people: peopleAdded, partners: partners.length },
   };
 }
@@ -321,6 +362,8 @@ export async function enrichCompanies(companies, jobLog = null) {
       const tag = r.status === 'done' ? '✓' : (r.status === 'no_data' ? '·' : '✗');
       jobLog?.(`  ${tag} [${i + 1}/${companies.length}] ${c.name}` +
         (r.found ? ` — +${r.found.emails}e/${r.found.phones}p/${r.found.socials}s/${r.found.people}ppl/${r.found.partners}ptnr` : '') +
+        (r.pages_crawled ? ` · ${r.pages_crawled}pg/${r.home_text_len}ch` : '') +
+        (r.note ? ` · ${r.note}` : '') +
         (r.reason ? ` (${r.reason})` : ''));
     } catch (err) {
       failed++;
