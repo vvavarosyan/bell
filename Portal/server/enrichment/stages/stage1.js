@@ -85,9 +85,16 @@ export async function wipeStaleEnrichmentAfterUrlReplace(companyId) {
   // 4. Drop ALL enrichment-derived contacts (LinkedIn Stage 2/3, website Stage 6),
   //    which is where the wrong-company email/phone came from. Stage 5 (Google
   //    Maps) and ingest-/manual-derived contacts stay intact.
+  // Delete every contact that isn't from a genuine directory ingest, manual
+  // entry, or Google Maps (Stage 5). This covers LinkedIn/website-derived rows
+  // AND the 'backfill' rows that mirrored the now-wiped email/phone columns —
+  // which is where a leftover wrong email like info@docservices.com hides.
   const contactsRes = await query(
     `DELETE FROM company_contacts
-      WHERE company_id = $1 AND source LIKE 'stage%' AND source NOT LIKE 'stage5%' RETURNING id`,
+      WHERE company_id = $1
+        AND source NOT LIKE '%-ingest'
+        AND source <> 'manual'
+        AND source NOT LIKE 'stage5%' RETURNING id`,
     [companyId],
   );
   summary.web_contacts_removed = contactsRes.rowCount;

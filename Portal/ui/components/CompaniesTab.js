@@ -355,7 +355,7 @@ export function CompaniesTab({ archivedMode: initialArchived = false, mode = 'lo
                 </td>
                 <td><${ContactIcons} company=${r} /></td>
                 <td class="bellscore"><${BellScore} score=${r.bell_score} bar=${false} /></td>
-                <td>${isUser
+                <td class="stages-cell">${isUser
                   ? (r.revealed_by_tenant
                       ? html`<span class="revealed-badge">✓ revealed</span>`
                       : html`<button class="reveal-btn" onClick=${(e) => { e.stopPropagation(); revealRow(r.id); }}>Reveal · 1</button>`)

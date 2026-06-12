@@ -566,7 +566,10 @@ html, body {
 .grid col.employees { width: 82px; }
 .grid col.contacts  { width: 118px; }
 .grid col.bellscore { width: 62px; }
-.grid col.stages    { width: 76px; }
+.grid col.stages    { width: 96px; }
+/* Don't clip the Reveal button / stage bar (esp. Safari) — overflow into the
+   trailing flex spacer is fine since it's empty. */
+.grid td.stages-cell, .grid th:nth-last-child(2) { overflow: visible; }
 /* Trailing spacer absorbs leftover width so real columns stay snug + left-packed
    with no extra gaps between them. */
 .grid col.flex      { width: auto; }
