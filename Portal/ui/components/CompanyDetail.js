@@ -58,6 +58,7 @@ const COMPANY_FIELD_META = {
   stage5_status: { editable: false }, stage5_at: { editable: false, type: 'date' },
   stage6_status: { editable: false }, stage6_at: { editable: false, type: 'date' },
   stage7_status: { editable: false }, stage7_at: { editable: false, type: 'date' },
+  stage8_status: { editable: false }, stage8_at: { editable: false, type: 'date' },
   created_at:    { editable: false, type: 'date' },
   updated_at:    { editable: false, type: 'date' },
   assembled_at:  { editable: false, type: 'date' },
@@ -155,6 +156,8 @@ const COMPANY_GROUPS = [
       ['stage6_at',     '   at'],
       ['stage7_status', 'Stage 7 — Local Website Harvester'],
       ['stage7_at',     '   at'],
+      ['stage8_status', 'Stage 8 — Local Website Finder'],
+      ['stage8_at',     '   at'],
     ],
   },
   {

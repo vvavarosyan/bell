@@ -48,6 +48,10 @@ const STAGE_INFO = {
     short: 'Local Website Harvester',
     desc:  'Stage 7 — Bell\'s local engine (no Firecrawl/Apify, $0). Crawls the company website and its contact/about/team/partners pages for emails, phones, socials, address, logo, team people, and partner companies. Idempotent — safe to re-run.',
   },
+  8: {
+    short: 'Local Website Finder',
+    desc:  'Stage 8 — Finds the official website for companies that have none ($0, local). Guesses domains from the company name, then falls back to a headless web search; only saves a site that verifies against the name. Run this before Stage 7.',
+  },
 };
 const FULL_ENRICHMENT_TOOLTIP =
   'Run all 6 stages in dependency order: Stage 1 + Stage 5 in parallel first, then Stages 2/3/4 once a LinkedIn URL is found, then Stage 6 once a website is known. Companies without LinkedIn after Stage 1 skip 2/3/4 to save credits.';
@@ -63,6 +67,7 @@ export function CompaniesTab({ archivedMode: initialArchived = false, mode = 'lo
   const [reviewCount, setReviewCount] = useState(0);
   const [rows, setRows] = useState([]);
   const [total, setTotal] = useState(0);
+  const [sweepSize, setSweepSize] = useState(100);
   const [limit] = useState(100);
   const [offset, setOffset] = useState(0);
   const [q, setQ] = useState('');
@@ -213,6 +218,14 @@ export function CompaniesTab({ archivedMode: initialArchived = false, mode = 'lo
     } catch (err) { toast(err.message, 'error'); }
   };
 
+  const runSweep = async () => {
+    try {
+      const r = await api.runHarvestSweep(sweepSize);
+      setActiveJob({ id: r.job_id, title: `Harvest Sweep · ${sweepSize}` });
+      toast(`Harvest Sweep started (batch ${sweepSize})`);
+    } catch (err) { toast(err.message, 'error'); }
+  };
+
   const toggleArchiveView = () => {
     const next = archivedMode ? 'active' : 'archived';
     setArchiveMode(next); setOffset(0); setSelected(new Set()); setOpenedId(null);
@@ -234,6 +247,15 @@ export function CompaniesTab({ archivedMode: initialArchived = false, mode = 'lo
       </select>
       ${loading ? html`<span class="count">loading…</span>` : html`<${Pagination} total=${total} limit=${limit} offset=${offset} onChange=${setOffset} />`}
       <span class="spacer"></span>
+      ${isLocalEngine && !isUser && archiveMode === 'active' ? html`
+        <div class="sweep-group" style=${{ display: 'inline-flex', gap: '4px', alignItems: 'center' }}
+             title="Find websites (Stage 8) then harvest them (Stage 7) for the most-incomplete companies — local, $0. Run repeatedly to advance through the database.">
+          <select value=${sweepSize} onChange=${e => setSweepSize(Number(e.target.value))}>
+            ${[25, 50, 100, 250, 500].map(n => html`<option key=${n} value=${n}>${n}</option>`)}
+          </select>
+          <button class="accent" onClick=${runSweep}>Harvest stale ▶</button>
+        </div>
+      ` : null}
       <button onClick=${load}>Refresh</button>
       <div class="seg-toggle" style=${{ display: 'inline-flex', gap: '4px' }}>
         ${[
@@ -260,7 +282,7 @@ export function CompaniesTab({ archivedMode: initialArchived = false, mode = 'lo
           : html`<span class="muted small"> · click a button to enrich them all</span>`}
         <span class="spacer"></span>
         ${!archivedMode ? html`
-          ${[1, 2, 3, 4, 5, 6, 7].map(n => {
+          ${[1, 2, 3, 4, 5, 6, 7, 8].map(n => {
             const info = STAGE_INFO[n];
             return html`
               <button

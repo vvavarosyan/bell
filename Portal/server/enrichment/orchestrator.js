@@ -16,6 +16,7 @@ import * as stage4 from './stages/stage4.js';
 import * as stage5 from './stages/stage5.js';
 import * as stage6 from './stages/stage6.js';
 import * as stage7 from './local/harvester.js';
+import * as stage8 from './local/finder.js';
 
 const STAGES = {
   1: { module: stage1, label: 'Stage 1 — LinkedIn Discovery',         tool: 'firecrawl_spark_pro' },
@@ -25,6 +26,7 @@ const STAGES = {
   5: { module: stage5, label: 'Stage 5 — Google Maps',                tool: 'apify_google_maps' },
   6: { module: stage6, label: 'Stage 6 — Website Contacts',           tool: 'firecrawl_website_scrape' },
   7: { module: stage7, label: 'Stage 7 — Local Website Harvester',    tool: 'local_website_harvester' },
+  8: { module: stage8, label: 'Stage 8 — Local Website Finder',       tool: 'local_website_finder' },
 };
 
 // (No more placeholders — every stage is implemented.)
@@ -36,7 +38,7 @@ function stageInfo(stage) {
 
 /** All stages with implemented flag and label — for the UI. */
 export function stageList() {
-  return [1, 2, 3, 4, 5, 6, 7].map(n => ({
+  return [1, 2, 3, 4, 5, 6, 7, 8].map(n => ({
     stage: n,
     label:  (STAGES[n] || PLACEHOLDERS[n]).label,
     implemented: !!STAGES[n],
@@ -306,4 +308,70 @@ function unwrap(r) {
 async function safeRun(fn) {
   try { return { status: 'fulfilled', value: await fn() }; }
   catch (err) { return { status: 'rejected', reason: err }; }
+}
+
+/**
+ * Local Harvest Sweep — the continuous-enrichment workhorse. Over a batch of
+ * the most-incomplete active companies it:
+ *   Phase 1 — Stage 8 (Website Finder) on companies that have NO website and
+ *             were never checked, to discover their site.
+ *   Phase 2 — Stage 7 (Website Harvester) on companies that HAVE a website
+ *             (including any just found) but were never harvested.
+ *
+ * Priority: lowest Bell Score first (most to gain), then id. `limit` caps each
+ * phase so the admin controls volume (and search-engine exposure). Fully local,
+ * $0, idempotent — safe to run repeatedly; each pass advances the frontier.
+ */
+export async function runHarvestSweep({ limit = 100, triggeredBy = null, jobLog = null }) {
+  const cap = Math.max(1, Math.min(Number(limit) || 100, 2000));
+  jobLog?.(`▸▸▸ Local Harvest Sweep — batch size ${cap}`);
+
+  // Phase 1 — find websites for companies that have none.
+  const findRows = await query(
+    `SELECT id FROM companies
+      WHERE COALESCE(archived, false) = false AND is_active IS NOT false
+        AND (website IS NULL OR btrim(website) = '')
+        AND stage8_at IS NULL
+      ORDER BY bell_score ASC, id ASC
+      LIMIT $1`, [cap]);
+  const findIds = findRows.rows.map(r => r.id);
+  let find = { done: 0, no_data: 0, failed: 0 };
+  if (findIds.length) {
+    jobLog?.(`  Phase 1 — Website Finder on ${findIds.length} company(ies) with no website…`);
+    find = await safeRun(() => runStageForCompanies({ stage: 8, companyIds: findIds, triggeredBy, jobLog: (m) => jobLog?.('  [S8] ' + m) })).then(unwrap);
+  } else {
+    jobLog?.(`  Phase 1 — no un-checked website-less companies. Skipping.`);
+  }
+
+  // Phase 2 — harvest companies that have a website but were never harvested
+  // (includes any just discovered in Phase 1).
+  const harvestRows = await query(
+    `SELECT id FROM companies
+      WHERE COALESCE(archived, false) = false AND is_active IS NOT false
+        AND website IS NOT NULL AND btrim(website) <> ''
+        AND stage7_at IS NULL
+      ORDER BY bell_score ASC, id ASC
+      LIMIT $1`, [cap]);
+  const harvestIds = harvestRows.rows.map(r => r.id);
+  let harvest = { done: 0, no_data: 0, failed: 0 };
+  if (harvestIds.length) {
+    jobLog?.(`  Phase 2 — Website Harvester on ${harvestIds.length} company(ies) with a website…`);
+    harvest = await safeRun(() => runStageForCompanies({ stage: 7, companyIds: harvestIds, triggeredBy, jobLog: (m) => jobLog?.('  [S7] ' + m) })).then(unwrap);
+  } else {
+    jobLog?.(`  Phase 2 — no un-harvested companies with a website. Skipping.`);
+  }
+
+  // How much frontier remains, so the admin knows whether to run again.
+  const remain = await query(
+    `SELECT
+       (SELECT count(*) FROM companies WHERE COALESCE(archived,false)=false AND is_active IS NOT false AND (website IS NULL OR btrim(website)='') AND stage8_at IS NULL) AS find_left,
+       (SELECT count(*) FROM companies WHERE COALESCE(archived,false)=false AND is_active IS NOT false AND website IS NOT NULL AND btrim(website)<>'' AND stage7_at IS NULL) AS harvest_left`);
+  const { find_left, harvest_left } = remain.rows[0] || {};
+  jobLog?.(`▸▸▸ Sweep complete. Found ${find?.done || 0} site(s); harvested ${harvest?.done || 0}. Remaining — to find: ${find_left}, to harvest: ${harvest_left}.`);
+
+  return {
+    found: find?.done || 0, find_attempted: findIds.length,
+    harvested: harvest?.done || 0, harvest_attempted: harvestIds.length,
+    find_left: Number(find_left || 0), harvest_left: Number(harvest_left || 0),
+  };
 }
