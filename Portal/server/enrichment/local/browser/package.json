@@ -1,0 +1,12 @@
+{
+  "name": "bell-harvester-browser",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Isolated Playwright install for the Stage 7 Local Website Harvester's headless render tier. Local-only — not part of the Portal server deps, so Railway never installs it and the Portal's npm install never prunes it. Set up once via 'Install Harvester Browser.command'.",
+  "dependencies": {
+    "playwright": "^1.48.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
