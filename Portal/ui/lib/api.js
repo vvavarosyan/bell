@@ -79,6 +79,12 @@ export const api = {
   updatePerson:           (id, body) => request('/api/people/' + id, { method: 'PATCH', body: JSON.stringify(body) }),
   archivePerson:          (id, archived) => request(`/api/people/${id}/archive`, { method: 'POST', body: JSON.stringify({ archived }) }),
   revealPerson:           (id) => request(`/api/people/${id}/reveal`, { method: 'POST', body: '{}' }),
+  // Detail requests
+  requestDetails:         (companyId, note) => request('/api/detail-requests', { method: 'POST', body: JSON.stringify({ company_id: companyId, note }) }),
+  myDetailRequest:        (companyId) => request('/api/detail-requests/mine?company_id=' + companyId),
+  detailRequests:         (status = 'pending') => request('/api/detail-requests?status=' + status),
+  detailRequestsCount:    () => request('/api/detail-requests/count'),
+  decideDetailRequest:    (id, action, adminNote) => request(`/api/detail-requests/${id}/decide`, { method: 'POST', body: JSON.stringify({ action, admin_note: adminNote }) }),
   revealPeopleBulk:       (ids) => request('/api/people/reveal-bulk', { method: 'POST', body: JSON.stringify({ ids }) }),
   deepEnrichPeople:       (personIds) => request('/api/people/deep-enrich', { method: 'POST', body: JSON.stringify({ person_ids: personIds }) }),
   recomputeSeniority:     () => request('/api/people/recompute-seniority', { method: 'POST', body: '{}' }),

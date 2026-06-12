@@ -1921,3 +1921,20 @@ a.contact-icon.on { cursor: pointer; text-decoration: none; position: relative; 
 .org-grid td.person-main .person-title { margin-top: 1px; }
 .org-grid td.person-contacts { text-align: right; }
 .org-grid td.person-contacts .contact-icons { justify-content: flex-end; }
+
+/* ── Request-details (drawer box + admin queue) ───────────────────────── */
+.request-box h3 { color: var(--accent-bright); }
+.request-pill {
+  display: inline-block; padding: 2px 10px; border-radius: 12px;
+  font-size: 11px; font-weight: 700; border: 1px solid var(--border);
+  text-transform: capitalize;
+}
+.dr-shell { display: flex; flex-direction: column; height: 100%; }
+.dr-list { padding: 12px; display: flex; flex-direction: column; gap: 10px; overflow: auto; }
+.dr-card {
+  border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px;
+  background: var(--bg-elev);
+}
+.dr-card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.dr-note { margin: 8px 0 4px; font-size: 13px; color: var(--text); font-style: italic; }
+.dr-actions { display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap; }
