@@ -36,7 +36,8 @@ export async function wipeStaleEnrichmentAfterUrlReplace(companyId) {
   //    run will be free to repopulate from the correct source.
   const wipeRes = await query(`
     UPDATE companies
-    SET linkedin_id           = NULL,
+    SET linkedin_url          = NULL,
+        linkedin_id           = NULL,
         linkedin_description  = NULL,
         linkedin_followers    = NULL,
         linkedin_logo_url     = NULL,
@@ -53,6 +54,10 @@ export async function wipeStaleEnrichmentAfterUrlReplace(companyId) {
         address               = NULL,
         city                  = NULL,
         country               = NULL,
+        email                 = NULL,
+        extra_fields          = (SELECT coalesce(jsonb_object_agg(k, val), '{}'::jsonb)
+                                   FROM jsonb_each(extra_fields) AS e(k, val)
+                                  WHERE k NOT LIKE 'linkedin_%' AND k NOT LIKE 'firecrawl_%'),
         stage2_status         = 'pending',
         stage2_at             = NULL,
         stage3_status         = 'pending',
@@ -64,7 +69,7 @@ export async function wipeStaleEnrichmentAfterUrlReplace(companyId) {
         updated_at            = now()
     WHERE id = $1
   `, [companyId]);
-  if (wipeRes.rowCount > 0) summary.fields_wiped = 17;  // count of NULLed fields
+  if (wipeRes.rowCount > 0) summary.fields_wiped = 20;  // incl. linkedin_url, email, extra_fields
 
   // 2. Drop person→company links for this company. The persons themselves stay
   //    (they may belong to other companies). Only the wrong-company link is
@@ -77,14 +82,20 @@ export async function wipeStaleEnrichmentAfterUrlReplace(companyId) {
   const jobsRes = await query(`DELETE FROM jobs WHERE company_id = $1 RETURNING id`, [companyId]);
   summary.jobs_removed = jobsRes.rowCount;
 
-  // 4. Drop website-scraped contacts (emails/phones/socials Stage 6 found on
-  //    the WRONG company's website). Other contact rows (ingest-derived, or
-  //    Stage 5 phone) stay intact.
+  // 4. Drop ALL enrichment-derived contacts (LinkedIn Stage 2/3, website Stage 6),
+  //    which is where the wrong-company email/phone came from. Stage 5 (Google
+  //    Maps) and ingest-/manual-derived contacts stay intact.
   const contactsRes = await query(
-    `DELETE FROM company_contacts WHERE company_id = $1 AND source = 'stage6-website' RETURNING id`,
+    `DELETE FROM company_contacts
+      WHERE company_id = $1 AND source LIKE 'stage%' AND source NOT LIKE 'stage5%' RETURNING id`,
     [companyId],
   );
   summary.web_contacts_removed = contactsRes.rowCount;
+
+  // 5. Drop discovered "similar companies" (those came from the WRONG LinkedIn
+  //    page, so they're meaningless once the bad match is reset).
+  const simRes = await query(`DELETE FROM similar_company_queue WHERE source_company_id = $1 RETURNING id`, [companyId]);
+  summary.similar_removed = simRes.rowCount;
 
   return summary;
 }

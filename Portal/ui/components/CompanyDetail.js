@@ -705,8 +705,10 @@ function PeopleView({ people, isUser = false, onReveal }) {
 
   const renderRow = (p) => html`
     <tr key=${p.id} class="person-row">
-      <td class="person-name" onClick=${() => openInPeople(p.id)} title="Open this person in the People tab">${p.full_name || '—'}</td>
-      <td class="person-title">${p.headline || p.title || '—'}</td>
+      <td class="person-main" onClick=${() => openInPeople(p.id)} title="Open this person in the People tab">
+        <div class="person-name">${p.full_name || '—'}</div>
+        ${(p.headline || p.title) ? html`<div class="muted small person-title">${p.headline || p.title}</div>` : null}
+      </td>
       <td class="person-contacts">
         ${isUser && p.revealed_by_tenant === false
           ? html`<button class="reveal-btn" onClick=${(e) => { e.stopPropagation(); onReveal?.(p.id); }}>Reveal · 1</button>`
@@ -733,11 +735,10 @@ function PeopleView({ people, isUser = false, onReveal }) {
             </h4>
             <table class="grid org-grid">
               <colgroup>
-                <col style=${{width:'38%'}}/>
-                <col style=${{width:'40%'}}/>
-                <col style=${{width:'22%'}}/>
+                <col/>
+                <col style=${{width:'118px'}}/>
               </colgroup>
-              <thead><tr><th>Name</th><th>Title</th><th>Contacts</th></tr></thead>
+              <thead><tr><th>Name</th><th>Contacts</th></tr></thead>
               <tbody>${rows.map(renderRow)}</tbody>
             </table>
           </section>
