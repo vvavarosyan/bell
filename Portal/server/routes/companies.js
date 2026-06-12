@@ -9,6 +9,7 @@ import {
 } from '../lib/contacts.js';
 import { maskPeople } from './people.js';
 import { wipeStaleEnrichmentAfterUrlReplace } from '../enrichment/stages/stage1.js';
+import { recomputeBellScoreForCompany } from '../assembly/bell_score.js';
 import { revealOne, revealBulk, getRevealedSet, bypassesCredits } from '../lib/credits.js';
 import { denyUnlessLocalEngine } from '../lib/auth.js';
 import { addRevealedToCrm } from '../lib/crm.js';
@@ -393,6 +394,7 @@ router.post('/:id/contacts', async (req, res, next) => {
       is_verified:   body.is_verified === true,
     });
     if (!row) return res.status(400).json({ error: 'invalid_or_junk_value' });
+    await recomputeBellScoreForCompany(id);
     res.json({ contact: row });
   } catch (err) { next(err); }
 });
@@ -418,6 +420,7 @@ router.delete('/:id/contacts/:cid', async (req, res, next) => {
     const cid = Number(req.params.cid);
     const ok  = await deleteContact('company', id, cid);
     if (!ok) return res.status(404).json({ error: 'not_found' });
+    await recomputeBellScoreForCompany(id);
     res.json({ ok: true });
   } catch (err) { next(err); }
 });
@@ -494,6 +497,7 @@ router.patch('/:id', async (req, res, next) => {
     const sql = `UPDATE companies SET ${setParts.join(', ')} WHERE id = $${params.length} RETURNING *`;
     const result = await query(sql, params);
     if (!result.rows.length) return res.status(404).json({ error: 'not_found' });
+    await recomputeBellScoreForCompany(id);
     res.json({ company: result.rows[0] });
   } catch (err) { next(err); }
 });
@@ -527,6 +531,7 @@ router.post('/:id/set-linkedin-url', async (req, res, next) => {
       }),
     ]);
     if (!r.rows.length) return res.status(404).json({ error: 'not_found' });
+    await recomputeBellScoreForCompany(id);
     res.json(r.rows[0]);
   } catch (err) { next(err); }
 });
@@ -553,6 +558,7 @@ router.post('/:id/reset-enrichment', async (req, res, next) => {
         },
       })],
     );
+    await recomputeBellScoreForCompany(id);   // data shrank → rescore live
     res.json({ ok: true, company_id: id, ...summary });
   } catch (err) { next(err); }
 });

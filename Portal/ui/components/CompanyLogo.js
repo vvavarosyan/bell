@@ -46,6 +46,7 @@ export function CompanyLogo({ company, size = 24 }) {
       style=${{ width: size + 'px', height: size + 'px' }}
       onError=${() => setIdx(i => i + 1)}
       loading="lazy"
+      referrerpolicy="no-referrer"
     />`;
   }
 
