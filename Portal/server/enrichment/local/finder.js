@@ -113,6 +113,22 @@ function tokenHits(page, tokens) {
  *   fromGuess=false → a search result: the domain is unrelated to the name, so
  *                     require real name-token overlap on the page.
  */
+/**
+ * A guess is "distinctive" only when the domain slug contains the FULL
+ * concatenation of the company's significant tokens (e.g. jasworldwide,
+ * chainsys, thinkresearch) or a single long coined token (ipsotek, designorina).
+ * Generic/short matches (master.com for "Master", begin.net for "Begin",
+ * globalstorage.net for "Global Storage Tanks") are NOT distinctive — those go
+ * to the search path instead, which finds the actual company site far more
+ * reliably than guessing a common-word domain.
+ */
+function distinctiveGuess(tokens, domainSlug) {
+  const joined = tokens.join('');
+  if (tokens.length >= 2 && joined.length >= 6 && domainSlug.includes(joined)) return true;
+  if (tokens.length === 1 && tokens[0].length >= 7 && domainSlug.includes(tokens[0])) return true;
+  return false;
+}
+
 export function verifyMatch(page, company, { fromGuess }) {
   if (!page || !page.ok) return false;
   if (isParked(page)) return false;
@@ -130,12 +146,11 @@ export function verifyMatch(page, company, { fromGuess }) {
   const hits = tokenHits(page, tokens);
 
   if (fromGuess) {
-    // The guessed domain matched the name, BUT it may have 301'd to an
-    // unrelated site (corporate parent, holding page, someone else's domain).
-    // Require the FINAL domain to still match the name, OR the page to clearly
-    // mention the company (so a real but differently-branded site still counts).
-    if (domainMatchesName) return true;
-    return hits >= Math.min(2, tokens.length);
+    // Only accept a guess for a DISTINCTIVE name (coined / full-name domain).
+    // Generic names fall through (return false) → the Finder then tries search.
+    if (!distinctiveGuess(tokens, domainSlug)) return false;
+    // Distinctive + reachable + not parked/trapped ⇒ it's almost certainly them.
+    return true;
   }
 
   // Search result: the domain is unrelated to the name, so require real overlap.
