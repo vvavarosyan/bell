@@ -15,7 +15,9 @@ function domainOf(company) {
 
 function candidates(company) {
   const out = [];
-  const primary = company?.linkedin_logo_url || company?.extra_fields?.qstp_logo_url;
+  const primary = company?.linkedin_logo_url
+    || company?.extra_fields?.website_logo_url   // Stage 7 local harvester (og:image/favicon)
+    || company?.extra_fields?.qstp_logo_url;
   if (primary) out.push(primary);
   const dom = domainOf(company);
   if (dom) {

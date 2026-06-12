@@ -73,7 +73,7 @@ router.post('/run', async (req, res, next) => {
       // path layers dependency gates between them, but a SINGLE-stage run has
       // no inter-stage prereqs — each stage handles its own input checks
       // (Stage 6 silently skips companies without a website, etc.).
-      if (![1, 2, 3, 4, 5, 6].includes(n)) return res.status(400).json({ error: 'stage must be 1-6' });
+      if (![1, 2, 3, 4, 5, 6, 7].includes(n)) return res.status(400).json({ error: 'stage must be 1-7' });
       const job = jobs.start({ kind: 'enrichment', source: 'stage' + n });
       res.json({ job_id: job.id, status: job.status });
       (async () => {

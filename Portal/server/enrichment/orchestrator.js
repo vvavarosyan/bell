@@ -15,6 +15,7 @@ import * as stage3 from './stages/stage3.js';
 import * as stage4 from './stages/stage4.js';
 import * as stage5 from './stages/stage5.js';
 import * as stage6 from './stages/stage6.js';
+import * as stage7 from './local/harvester.js';
 
 const STAGES = {
   1: { module: stage1, label: 'Stage 1 — LinkedIn Discovery',         tool: 'firecrawl_spark_pro' },
@@ -23,6 +24,7 @@ const STAGES = {
   4: { module: stage4, label: 'Stage 4 — LinkedIn Jobs',              tool: 'apify_linkedin_jobs' },
   5: { module: stage5, label: 'Stage 5 — Google Maps',                tool: 'apify_google_maps' },
   6: { module: stage6, label: 'Stage 6 — Website Contacts',           tool: 'firecrawl_website_scrape' },
+  7: { module: stage7, label: 'Stage 7 — Local Website Harvester',    tool: 'local_website_harvester' },
 };
 
 // (No more placeholders — every stage is implemented.)
@@ -34,7 +36,7 @@ function stageInfo(stage) {
 
 /** All stages with implemented flag and label — for the UI. */
 export function stageList() {
-  return [1, 2, 3, 4, 5, 6].map(n => ({
+  return [1, 2, 3, 4, 5, 6, 7].map(n => ({
     stage: n,
     label:  (STAGES[n] || PLACEHOLDERS[n]).label,
     implemented: !!STAGES[n],
