@@ -6,6 +6,7 @@ import { jobs } from '../ingest/jobs.js';
 import {
   runStageForCompanies,
   runFullEnrichment,
+  runHarvestSweep,
   stageList,
 } from '../enrichment/orchestrator.js';
 
@@ -73,7 +74,7 @@ router.post('/run', async (req, res, next) => {
       // path layers dependency gates between them, but a SINGLE-stage run has
       // no inter-stage prereqs — each stage handles its own input checks
       // (Stage 6 silently skips companies without a website, etc.).
-      if (![1, 2, 3, 4, 5, 6, 7].includes(n)) return res.status(400).json({ error: 'stage must be 1-7' });
+      if (![1, 2, 3, 4, 5, 6, 7, 8].includes(n)) return res.status(400).json({ error: 'stage must be 1-8' });
       const job = jobs.start({ kind: 'enrichment', source: 'stage' + n });
       res.json({ job_id: job.id, status: job.status });
       (async () => {
@@ -93,6 +94,30 @@ router.post('/run', async (req, res, next) => {
     }
 
     return res.status(400).json({ error: 'mode must be "stage" or "full"' });
+  } catch (err) { next(err); }
+});
+
+/**
+ * POST /api/enrichment/sweep
+ * Body: { limit?: number }
+ * Selects the most-incomplete active companies server-side and runs the local
+ * Harvest Sweep (Stage 8 Website Finder → Stage 7 Website Harvester) in the
+ * background. Returns a job_id to poll like any enrichment run.
+ */
+router.post('/sweep', async (req, res, next) => {
+  try {
+    const limit = Math.max(1, Math.min(Number(req.body?.limit) || 100, 2000));
+    const admin = (await query(`SELECT value FROM settings WHERE key='admin_email'`)).rows[0]?.value || 'admin@local';
+    const job = jobs.start({ kind: 'enrichment', source: 'harvest_sweep' });
+    res.json({ job_id: job.id, status: job.status });
+    (async () => {
+      try {
+        const result = await runHarvestSweep({ limit, triggeredBy: admin, jobLog: (m) => jobs.log(job.id, m) });
+        jobs.complete(job.id, result);
+      } catch (err) {
+        jobs.fail(job.id, err);
+      }
+    })();
   } catch (err) { next(err); }
 });
 

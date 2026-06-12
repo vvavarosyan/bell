@@ -119,6 +119,70 @@ export async function renderPage(url, { timeoutMs = 22_000, settleMs = 1500 } = 
   }
 }
 
+// ---------------------------------------------------------------------------
+// Web search (for the Website Finder, Stage 8)
+// ---------------------------------------------------------------------------
+
+// Hosts that are never a company's *own* website — directories, social,
+// marketplaces, encyclopedias, government portals. Skipped in search results.
+const SEARCH_SKIP_HOSTS = /(^|\.)(linkedin\.com|facebook\.com|instagram\.com|twitter\.com|x\.com|youtube\.com|tiktok\.com|wikipedia\.org|yelp\.com|yellowpages|bing\.com|google\.|duckduckgo\.com|microsoft\.com|amazon\.|glassdoor\.|indeed\.|crunchbase\.com|zoominfo\.com|dnb\.com|bloomberg\.com|traduora|qataryellowpages|qatarbusinessdirectory|gov\.qa|moci\.gov|qfc\.qa|qfz\.gov|baladiya)/i;
+
+/**
+ * Search the web for `query` via the shared headless browser and return up to
+ * `limit` organic result URLs (company-site candidates). Tries Bing first, then
+ * DuckDuckGo HTML. Returns [] on any failure — the Finder then falls back to
+ * domain-guessing only.
+ */
+export async function searchWeb(query, { limit = 6, timeoutMs = 20_000 } = {}) {
+  const pw = loadPlaywright();
+  if (!pw || _launchFailed) return [];
+
+  const engines = [
+    { url: 'https://www.bing.com/search?q=' + encodeURIComponent(query), sel: '#b_results .b_algo a[href^="http"]' },
+    { url: 'https://html.duckduckgo.com/html/?q=' + encodeURIComponent(query), sel: 'a.result__a[href^="http"]' },
+  ];
+
+  for (const eng of engines) {
+    let context, page;
+    try {
+      const browser = await getBrowser();
+      context = await browser.newContext({ userAgent: UA, viewport: { width: 1280, height: 900 }, ignoreHTTPSErrors: true, locale: 'en-US' });
+      page = await context.newPage();
+      await page.route('**/*', (route) => {
+        const t = route.request().resourceType();
+        if (t === 'image' || t === 'media' || t === 'font') return route.abort();
+        return route.continue();
+      });
+      await page.goto(eng.url, { waitUntil: 'domcontentloaded', timeout: timeoutMs });
+      await page.waitForTimeout(1200);
+
+      const hrefs = await page.$$eval(eng.sel, (els) => els.map(a => a.href)).catch(() => []);
+      const out = [];
+      const seenHost = new Set();
+      for (const raw of hrefs) {
+        let host, clean;
+        try {
+          const u = new URL(raw);
+          host = u.hostname.replace(/^www\./, '').toLowerCase();
+          u.hash = ''; u.search = '';
+          clean = u.toString();
+        } catch { continue; }
+        if (SEARCH_SKIP_HOSTS.test(host)) continue;
+        if (seenHost.has(host)) continue;     // one result per host
+        seenHost.add(host);
+        out.push(clean);
+        if (out.length >= limit) break;
+      }
+      if (out.length) return out;
+    } catch { /* try next engine */ }
+    finally {
+      try { await page?.close(); } catch {}
+      try { await context?.close(); } catch {}
+    }
+  }
+  return [];
+}
+
 /** Close the shared browser at the end of a harvest run. */
 export async function closeRenderer() {
   try { await _browser?.close(); } catch {}

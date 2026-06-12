@@ -109,6 +109,7 @@ export const api = {
   enrichmentStages:       () => request('/api/enrichment/stages'),
   enrichmentRuns:         (limit = 25) => request('/api/enrichment/runs?limit=' + limit),
   runEnrichment:          (body) => request('/api/enrichment/run', { method: 'POST', body: JSON.stringify(body) }),
+  runHarvestSweep:        (limit = 100) => request('/api/enrichment/sweep', { method: 'POST', body: JSON.stringify({ limit }) }),
   enrichmentJob:          (id, since = 0) => request(`/api/enrichment/jobs/${id}?since=${since}`),
 
   // Assembly (Phase 5)
