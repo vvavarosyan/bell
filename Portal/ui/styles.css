@@ -547,7 +547,7 @@ html, body {
 }
 .grid th, .grid td {
   border-bottom: 1px solid var(--border);
-  padding: 6px 10px;
+  padding: 6px 8px;
   text-align: left;
   white-space: nowrap;
   vertical-align: middle;
@@ -557,17 +557,21 @@ html, body {
 
 /* Per-column widths for the Companies grid (and Archived) */
 .grid col.pick      { width: 30px; }
-.grid col.logo      { width: 38px; }
-.grid col.name      { width: 220px; }
+.grid col.logo      { width: 32px; }
+.grid col.name      { width: 200px; }
 .grid col.sources   { width: 90px; }
 .grid col.status    { width: 100px; }
-.grid col.industry  { width: 160px; }
-.grid col.city      { width: 110px; }
-.grid col.employees { width: 90px; }
-.grid col.contacts  { width: 130px; }
-.grid col.bellscore { width: 80px; }
-.grid col.stages    { width: 96px; }
-.grid td.employees, .grid td.bellscore { text-align: right; font-feature-settings: "tnum"; }
+.grid col.industry  { width: 148px; }
+.grid col.city      { width: 96px; }
+.grid col.employees { width: 62px; }
+.grid col.contacts  { width: 118px; }
+.grid col.bellscore { width: 54px; }
+.grid col.stages    { width: 74px; }
+/* Trailing spacer absorbs leftover width so real columns stay snug + left-packed
+   with no extra gaps between them. */
+.grid col.flex      { width: auto; }
+.grid th.flex, .grid td.flex { padding: 0; border-bottom: 1px solid var(--border); }
+.grid td.employees, .grid td.bellscore { text-align: left; font-feature-settings: "tnum"; }
 
 /* Make links inside the grid pop on dark background */
 .grid td a {

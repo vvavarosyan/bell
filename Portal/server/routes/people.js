@@ -30,7 +30,7 @@ const SENSITIVE_CONTACT_TYPES = new Set(['email', 'phone', 'mobile', 'whatsapp',
 // Mask email/phone on people rows for tenants that haven't revealed them.
 // platform_admin + internal tenant (bypass) see everything. Adds
 // `revealed_by_tenant` so the UI can show a Reveal button vs the value.
-async function maskPeople(req, rows) {
+export async function maskPeople(req, rows) {
   if (!rows.length) return;
   if (bypassesCredits(req.user, req.tenant)) {
     for (const r of rows) r.revealed_by_tenant = true;
