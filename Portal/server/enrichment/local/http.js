@@ -20,6 +20,25 @@ const DEFAULT_TIMEOUT_MS = 15_000;
 const MAX_BYTES          = 3_000_000;   // 3 MB hard cap per page
 
 // ---------------------------------------------------------------------------
+// Concurrency pool — run `worker` over `items` with at most `limit` in flight.
+// Preserves each item's original index for stable logging.
+// ---------------------------------------------------------------------------
+
+export async function pool(items, limit, worker) {
+  const n = items.length;
+  const width = Math.max(1, Math.min(limit, n));
+  let next = 0;
+  const runners = Array.from({ length: width }, async () => {
+    while (true) {
+      const idx = next++;
+      if (idx >= n) break;
+      await worker(items[idx], idx);
+    }
+  });
+  await Promise.all(runners);
+}
+
+// ---------------------------------------------------------------------------
 // URL helpers
 // ---------------------------------------------------------------------------
 

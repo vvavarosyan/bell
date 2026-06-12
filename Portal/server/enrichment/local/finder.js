@@ -18,13 +18,13 @@
 
 import { query } from '../../db.js';
 import { recomputeBellScoreForCompany } from '../../assembly/bell_score.js';
-import { fetchPage, hostOf } from './http.js';
+import { fetchPage, hostOf, pool } from './http.js';
 import { searchWeb, rendererAvailable, closeRenderer } from './render.js';
 
-export const STAGE_LABEL = 'Stage 8 — Local Website Finder';
+export const STAGE_LABEL = 'Local Engine 1 — Website Finder';
 export const TOOL_NAME   = 'local_website_finder';
 
-const PER_COMPANY_MS = 1200;
+const CONCURRENCY = Number(process.env.BELL_FINDER_CONCURRENCY || 6);
 const TLDS = ['com', 'com.qa', 'qa', 'net'];
 
 // Words stripped from a company name before slugifying to a domain.
@@ -36,7 +36,11 @@ const LEGAL_STOP = new Set([
   'contracting', 'wll.', 'inc', 'ltd', 'limited', 'sons', 'bros', 'brothers',
 ]);
 
-const PARKING_RX = /(domain (is )?for sale|buy this domain|this domain (is|may be) (for sale|parked)|parked (free|domain)|hugedomains|sedoparking|godaddy\.com\/domainsearch|domain parking|backorder this domain)/i;
+const PARKING_RX = /(domain (is )?for sale|buy this domain|this domain (is|may be) (for sale|parked)|parked (free|domain)|hugedomains|sedo(parking)?|afternic|dan\.com|godaddy\.com\/domainsearch|domain parking|backorder this domain|is for sale|interested in this domain|the domain .* is available|under construction)/i;
+
+// Hosts that a guessed domain commonly *redirects* to — generic registrars,
+// parking, or webmail/login — which means the guess was wrong, not the company.
+const REDIRECT_TRAP_HOSTS = /(afternic\.com|dan\.com|sedo\.com|hugedomains\.com|godaddy\.com|namecheap\.com|bluehost\.com|hostgator\.com|wix\.com|squarespace\.com|wordpress\.com|rediff|gabia\.com|register\.com|domain\.com|porkbun\.com|name\.com)/i;
 
 // ---------------------------------------------------------------------------
 // Name → domain candidates
@@ -115,18 +119,26 @@ export function verifyMatch(page, company, { fromGuess }) {
 
   const tokens = significantTokens(company.name);
   const host = hostOf(page.finalUrl) || '';
+  // A guessed domain that redirected to a registrar/parking/webmail host is a
+  // dead end, not the company — reject regardless of page text.
+  if (REDIRECT_TRAP_HOSTS.test(host)) return false;
+
   const domainSlug = host.split('.')[0] || '';
+  const joined = tokens.join('');
   const domainMatchesName = tokens.some(t => t.length >= 4 && domainSlug.includes(t))
-    || (tokens.join('').length >= 4 && domainSlug.includes(tokens.join('')));
+    || (joined.length >= 4 && domainSlug.includes(joined));
+  const hits = tokenHits(page, tokens);
 
   if (fromGuess) {
-    // Domain was built from the name. Accept any reachable, non-parked page;
-    // a token hit is a bonus, not required (some sites are image-heavy).
-    return true;
+    // The guessed domain matched the name, BUT it may have 301'd to an
+    // unrelated site (corporate parent, holding page, someone else's domain).
+    // Require the FINAL domain to still match the name, OR the page to clearly
+    // mention the company (so a real but differently-branded site still counts).
+    if (domainMatchesName) return true;
+    return hits >= Math.min(2, tokens.length);
   }
 
-  // Search result: need the page to actually mention the company.
-  const hits = tokenHits(page, tokens);
+  // Search result: the domain is unrelated to the name, so require real overlap.
   const need = tokens.length <= 1 ? 1 : 2;
   return domainMatchesName || hits >= need;
 }
@@ -142,14 +154,30 @@ export async function enrichCompany(company) {
   }
   await markStage(company.id, 'running');
 
-  // 1) Domain guessing.
-  for (const domain of domainCandidates(company.name)) {
-    for (const scheme of ['https://', 'http://']) {
-      const page = await fetchPage(scheme + domain, { respectRobots: false, timeoutMs: 9000 });
-      if (verifyMatch(page, company, { fromGuess: true })) {
-        return await saveWebsite(company, page.finalUrl, 'guess');
+  // 1) Domain guessing — fetch all candidates in parallel (https first wave,
+  // then http for any that failed), then accept the first that verifies in
+  // priority order. Much faster than sequential, and trims not_found latency.
+  const cands = domainCandidates(company.name);
+  if (cands.length) {
+    const httpsPages = await Promise.all(
+      cands.map(d => fetchPage('https://' + d, { respectRobots: false, timeoutMs: 7000 }).catch(() => null)),
+    );
+    for (let k = 0; k < cands.length; k++) {
+      if (verifyMatch(httpsPages[k], company, { fromGuess: true })) {
+        return await saveWebsite(company, httpsPages[k].finalUrl, 'guess');
       }
-      if (page.ok) break;   // reachable but unverified host — don't try http after https
+    }
+    // http fallback only for candidates whose https didn't even connect.
+    const needHttp = cands.filter((_, k) => !httpsPages[k] || !httpsPages[k].ok);
+    if (needHttp.length) {
+      const httpPages = await Promise.all(
+        needHttp.map(d => fetchPage('http://' + d, { respectRobots: false, timeoutMs: 7000 }).catch(() => null)),
+      );
+      for (let k = 0; k < needHttp.length; k++) {
+        if (verifyMatch(httpPages[k], company, { fromGuess: true })) {
+          return await saveWebsite(company, httpPages[k].finalUrl, 'guess');
+        }
+      }
     }
   }
 
@@ -202,25 +230,23 @@ async function markStage(companyId, status, extras = null) {
 // ---------------------------------------------------------------------------
 
 export async function enrichCompanies(companies, jobLog = null) {
-  let done = 0, noData = 0, failed = 0;
+  let done = 0, noData = 0, failed = 0, finished = 0;
+  const total = companies.length;
   const hasBrowser = await rendererAvailable();
-  jobLog?.(`  Search tier: ${hasBrowser ? 'headless search enabled' : 'domain-guessing only (install headless browser for search)'}`);
+  jobLog?.(`  Concurrency: ${CONCURRENCY} · Search tier: ${hasBrowser ? 'headless search enabled' : 'domain-guessing only (install headless browser for search)'}`);
   try {
-    for (let i = 0; i < companies.length; i++) {
-      const c = companies[i];
+    await pool(companies, CONCURRENCY, async (c) => {
       try {
         const r = await enrichCompany(c);
-        if (r.status === 'done')        done++;
-        else                            noData++;
+        if (r.status === 'done') done++; else noData++;
         const tag = r.status === 'done' ? '✓' : '·';
-        jobLog?.(`  ${tag} [${i + 1}/${companies.length}] ${c.name}` +
+        jobLog?.(`  ${tag} [${++finished}/${total}] ${c.name}` +
           (r.website ? ` → ${r.website} (${r.method})` : ` — ${r.reason || 'not found'}`));
       } catch (err) {
         failed++;
-        jobLog?.(`  ✗ [${i + 1}/${companies.length}] ${c.name} — ${err.message}`);
+        jobLog?.(`  ✗ [${++finished}/${total}] ${c.name} — ${err.message}`);
       }
-      if (i < companies.length - 1) await new Promise(r => setTimeout(r, PER_COMPANY_MS));
-    }
+    });
   } finally {
     await closeRenderer();
   }

@@ -25,8 +25,8 @@ const STAGES = {
   4: { module: stage4, label: 'Stage 4 — LinkedIn Jobs',              tool: 'apify_linkedin_jobs' },
   5: { module: stage5, label: 'Stage 5 — Google Maps',                tool: 'apify_google_maps' },
   6: { module: stage6, label: 'Stage 6 — Website Contacts',           tool: 'firecrawl_website_scrape' },
-  7: { module: stage7, label: 'Stage 7 — Local Website Harvester',    tool: 'local_website_harvester' },
-  8: { module: stage8, label: 'Stage 8 — Local Website Finder',       tool: 'local_website_finder' },
+  7: { module: stage7, label: 'Local Engine 2 — Website Harvester',   tool: 'local_website_harvester' },
+  8: { module: stage8, label: 'Local Engine 1 — Website Finder',      tool: 'local_website_finder' },
 };
 
 // (No more placeholders — every stage is implemented.)
@@ -337,8 +337,8 @@ export async function runHarvestSweep({ limit = 100, triggeredBy = null, jobLog 
   const findIds = findRows.rows.map(r => r.id);
   let find = { done: 0, no_data: 0, failed: 0 };
   if (findIds.length) {
-    jobLog?.(`  Phase 1 — Website Finder on ${findIds.length} company(ies) with no website…`);
-    find = await safeRun(() => runStageForCompanies({ stage: 8, companyIds: findIds, triggeredBy, jobLog: (m) => jobLog?.('  [S8] ' + m) })).then(unwrap);
+    jobLog?.(`  Phase 1 — Engine 1 (Website Finder) on ${findIds.length} company(ies) with no website…`);
+    find = await safeRun(() => runStageForCompanies({ stage: 8, companyIds: findIds, triggeredBy, jobLog: (m) => jobLog?.('  [E1] ' + m) })).then(unwrap);
   } else {
     jobLog?.(`  Phase 1 — no un-checked website-less companies. Skipping.`);
   }
@@ -355,8 +355,8 @@ export async function runHarvestSweep({ limit = 100, triggeredBy = null, jobLog 
   const harvestIds = harvestRows.rows.map(r => r.id);
   let harvest = { done: 0, no_data: 0, failed: 0 };
   if (harvestIds.length) {
-    jobLog?.(`  Phase 2 — Website Harvester on ${harvestIds.length} company(ies) with a website…`);
-    harvest = await safeRun(() => runStageForCompanies({ stage: 7, companyIds: harvestIds, triggeredBy, jobLog: (m) => jobLog?.('  [S7] ' + m) })).then(unwrap);
+    jobLog?.(`  Phase 2 — Engine 2 (Website Harvester) on ${harvestIds.length} company(ies) with a website…`);
+    harvest = await safeRun(() => runStageForCompanies({ stage: 7, companyIds: harvestIds, triggeredBy, jobLog: (m) => jobLog?.('  [E2] ' + m) })).then(unwrap);
   } else {
     jobLog?.(`  Phase 2 — no un-harvested companies with a website. Skipping.`);
   }

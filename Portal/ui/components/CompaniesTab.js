@@ -45,12 +45,12 @@ const STAGE_INFO = {
     desc:  'Stage 6 — Firecrawl scrapes the company website (if known from Stage 2 or 5) for email addresses, phone numbers, and contact pages.',
   },
   7: {
-    short: 'Local Website Harvester',
-    desc:  'Stage 7 — Bell\'s local engine (no Firecrawl/Apify, $0). Crawls the company website and its contact/about/team/partners pages for emails, phones, socials, address, logo, team people, and partner companies. Idempotent — safe to re-run.',
+    short: 'Engine 2 · Harvest Site',
+    desc:  'Local Engine 2 — Website Harvester (Bell\'s own engine, no Firecrawl/Apify, $0). Crawls the company website + its contact/about/team/partners pages for emails, phones, socials, address, logo, team people, and partner companies. Renders JavaScript sites. Idempotent — safe to re-run.',
   },
   8: {
-    short: 'Local Website Finder',
-    desc:  'Stage 8 — Finds the official website for companies that have none ($0, local). Guesses domains from the company name, then falls back to a headless web search; only saves a site that verifies against the name. Run this before Stage 7.',
+    short: 'Engine 1 · Find Website',
+    desc:  'Local Engine 1 — Website Finder (Bell\'s own engine, $0). Finds the official website for companies that have none: guesses domains from the company name, then falls back to a headless web search; only saves a site that verifies against the name. Run this before Engine 2.',
   },
 };
 const FULL_ENRICHMENT_TOOLTIP =
@@ -281,8 +281,8 @@ export function CompaniesTab({ archivedMode: initialArchived = false, mode = 'lo
           ? html`<span class="muted small"> · archived companies cannot be enriched</span>`
           : html`<span class="muted small"> · click a button to enrich them all</span>`}
         <span class="spacer"></span>
-        ${!archivedMode ? html`
-          ${[1, 2, 3, 4, 5, 6, 7, 8].map(n => {
+        ${!archivedMode && !isUser ? html`
+          ${[1, 2, 3, 4, 5, 6].map(n => {
             const info = STAGE_INFO[n];
             return html`
               <button
@@ -301,6 +301,11 @@ export function CompaniesTab({ archivedMode: initialArchived = false, mode = 'lo
           >
             Full Enrichment ▶
           </button>
+          ${isLocalEngine ? html`
+            <span class="bulk-divider" style=${{ opacity: 0.4, margin: '0 2px' }}>│</span>
+            <button class="accent" onClick=${() => runEnrich({ mode: 'stage', stage: 8 })} title=${STAGE_INFO[8]?.desc}>${STAGE_INFO[8].short} ▶</button>
+            <button class="accent" onClick=${() => runEnrich({ mode: 'stage', stage: 7 })} title=${STAGE_INFO[7]?.desc}>${STAGE_INFO[7].short} ▶</button>
+          ` : null}
         ` : null}
         <button class="accent" onClick=${runBulkReveal} title="Reveal contact details · 1 credit each (already-revealed are free)">Reveal contacts ▶</button>
         <button onClick=${clearSelection}>Clear</button>

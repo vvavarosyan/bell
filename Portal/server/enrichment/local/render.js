@@ -32,7 +32,24 @@ const UA =
 
 let _pw = undefined;       // undefined=untried, null=unavailable, object=loaded
 let _browser = null;
+let _browserPromise = null;
 let _launchFailed = false;
+
+// Cap simultaneous browser pages so a parallel sweep can't spawn 20 Chromium
+// tabs and exhaust memory. Renders/searches queue for a slot.
+const MAX_BROWSER_PAGES = Number(process.env.BELL_MAX_RENDERS || 3);
+let _activePages = 0;
+const _pageWaiters = [];
+async function acquirePage() {
+  if (_activePages < MAX_BROWSER_PAGES) { _activePages++; return; }
+  await new Promise(res => _pageWaiters.push(res));
+  _activePages++;
+}
+function releasePage() {
+  _activePages = Math.max(0, _activePages - 1);
+  const w = _pageWaiters.shift();
+  if (w) w();
+}
 
 /** Load Playwright from the isolated folder, then any hoisted install. */
 function loadPlaywright() {
@@ -57,16 +74,15 @@ async function getBrowser() {
   const pw = loadPlaywright();
   if (!pw) throw new Error('playwright_not_installed');
   if (_browser && _browser.isConnected()) return _browser;
-  try {
-    _browser = await pw.chromium.launch({
+  // Single launch even under concurrency.
+  if (!_browserPromise) {
+    _browserPromise = pw.chromium.launch({
       headless: true,
       args: ['--disable-blink-features=AutomationControlled', '--no-sandbox', '--disable-dev-shm-usage'],
-    });
-    return _browser;
-  } catch (err) {
-    _launchFailed = true;   // e.g. chromium binary not downloaded
-    throw err;
+    }).then((b) => { _browser = b; return b; })
+      .catch((err) => { _launchFailed = true; _browserPromise = null; throw err; });
   }
+  return _browserPromise;
 }
 
 /**
@@ -76,6 +92,7 @@ async function getBrowser() {
 export async function renderPage(url, { timeoutMs = 22_000, settleMs = 1500 } = {}) {
   const blank = { ok: false, status: 0, finalUrl: url, html: '', text: '', links: [], meta: {}, mailto: [], tel: [], rendered: true };
   let context, page;
+  await acquirePage();
   try {
     const browser = await getBrowser();
     context = await browser.newContext({
@@ -116,6 +133,7 @@ export async function renderPage(url, { timeoutMs = 22_000, settleMs = 1500 } = 
   } finally {
     try { await page?.close(); } catch {}
     try { await context?.close(); } catch {}
+    releasePage();
   }
 }
 
@@ -142,6 +160,8 @@ export async function searchWeb(query, { limit = 6, timeoutMs = 20_000 } = {}) {
     { url: 'https://html.duckduckgo.com/html/?q=' + encodeURIComponent(query), sel: 'a.result__a[href^="http"]' },
   ];
 
+  await acquirePage();
+  try {
   for (const eng of engines) {
     let context, page;
     try {
@@ -181,6 +201,7 @@ export async function searchWeb(query, { limit = 6, timeoutMs = 20_000 } = {}) {
     }
   }
   return [];
+  } finally { releasePage(); }
 }
 
 /** Close the shared browser at the end of a harvest run. */

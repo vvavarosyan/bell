@@ -46,7 +46,7 @@ const poolConfig = hasDatabaseUrl
       port: Number(process.env.PGPORT || 5432),
       database: process.env.PGDATABASE || 'bell_intel',
       user: process.env.PGUSER || os.userInfo().username,
-      max: 10,
+      max: 24,                           // headroom for the parallel local engines
       idleTimeoutMillis: 30_000,
       connectionTimeoutMillis: 5_000,
     };
