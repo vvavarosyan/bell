@@ -154,10 +154,10 @@ const COMPANY_GROUPS = [
       ['stage5_at',     '   at'],
       ['stage6_status', 'Stage 6 — Website Contacts'],
       ['stage6_at',     '   at'],
-      ['stage7_status', 'Stage 7 — Local Website Harvester'],
-      ['stage7_at',     '   at'],
-      ['stage8_status', 'Stage 8 — Local Website Finder'],
+      ['stage8_status', 'Local Engine 1 — Website Finder'],
       ['stage8_at',     '   at'],
+      ['stage7_status', 'Local Engine 2 — Website Harvester'],
+      ['stage7_at',     '   at'],
     ],
   },
   {

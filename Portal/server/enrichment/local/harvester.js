@@ -24,19 +24,19 @@ import { query } from '../../db.js';
 import { upsertContact } from '../../lib/contacts.js';
 import { recomputeBellScoreForCompany } from '../../assembly/bell_score.js';
 import { inferSeniority } from '../seniority.js';
-import { fetchPage, toRootUrl, sameHost } from './http.js';
+import { fetchPage, toRootUrl, sameHost, pool } from './http.js';
 import { renderPage, rendererAvailable, closeRenderer } from './render.js';
 import {
   findEmails, findPhones, findSocials,
   guessAddress, extractTeam, extractPartners, pickLogo,
 } from './extract.js';
 
-export const STAGE_LABEL = 'Stage 7 — Local Website Harvester';
+export const STAGE_LABEL = 'Local Engine 2 — Website Harvester';
 export const TOOL_NAME   = 'local_website_harvester';
 
 const MAX_PAGES        = 7;      // homepage + up to 6 discovered pages
 const JS_SHELL_CHARS   = 400;    // homepage text shorter than this ⇒ JS-rendered shell
-const PER_COMPANY_MS   = 700;    // politeness delay between companies
+const CONCURRENCY      = Number(process.env.BELL_HARVESTER_CONCURRENCY || 5);
 const SOURCE           = 'stage7-website';
 
 // Page-path hints, grouped by what we expect to mine there.
@@ -376,12 +376,12 @@ async function markStage(companyId, status, extras = null) {
 // ---------------------------------------------------------------------------
 
 export async function enrichCompanies(companies, jobLog = null) {
-  let done = 0, noData = 0, failed = 0, rendered = 0;
+  let done = 0, noData = 0, failed = 0, rendered = 0, finished = 0;
+  const total = companies.length;
   const hasBrowser = await rendererAvailable();
-  jobLog?.(`  Render tier: ${hasBrowser ? 'headless browser ready (JS sites supported)' : 'fetch-only — run "Install Harvester Browser.command" to harvest JS sites'}`);
+  jobLog?.(`  Concurrency: ${CONCURRENCY} · Render tier: ${hasBrowser ? 'headless browser ready (JS sites supported)' : 'fetch-only — run "Install Harvester Browser.command" to harvest JS sites'}`);
   try {
-    for (let i = 0; i < companies.length; i++) {
-      const c = companies[i];
+    await pool(companies, CONCURRENCY, async (c) => {
       try {
         const r = await enrichCompany(c);
         if (r.status === 'done')        done++;
@@ -389,17 +389,16 @@ export async function enrichCompanies(companies, jobLog = null) {
         else                             failed++;
         if (r.rendered) rendered++;
         const tag = r.status === 'done' ? '✓' : (r.status === 'no_data' ? '·' : '✗');
-        jobLog?.(`  ${tag} [${i + 1}/${companies.length}] ${c.name}` +
+        jobLog?.(`  ${tag} [${++finished}/${total}] ${c.name}` +
           (r.found ? ` — +${r.found.emails}e/${r.found.phones}p/${r.found.socials}s/${r.found.people}ppl/${r.found.partners}ptnr` : '') +
           (r.pages_crawled ? ` · ${r.pages_crawled}pg/${r.home_text_len}ch${r.rendered ? '/JS' : ''}` : '') +
           (r.note ? ` · ${r.note}` : '') +
           (r.reason ? ` (${r.reason})` : ''));
       } catch (err) {
         failed++;
-        jobLog?.(`  ✗ [${i + 1}/${companies.length}] ${c.name} — ${err.message}`);
+        jobLog?.(`  ✗ [${++finished}/${total}] ${c.name} — ${err.message}`);
       }
-      if (i < companies.length - 1) await new Promise(r => setTimeout(r, PER_COMPANY_MS));
-    }
+    });
   } finally {
     await closeRenderer();   // free Chromium at the end of the run
   }
