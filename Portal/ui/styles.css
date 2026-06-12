@@ -1859,3 +1859,13 @@ a.contact-icon.on { cursor: pointer; text-decoration: none; position: relative; 
   padding: 4px 12px; border-radius: 6px; font-size: 12px; font-weight: 600; cursor: pointer;
 }
 .dedup-mode-toggle button.on { background: var(--accent-fade); color: var(--accent-bright); }
+
+/* ── Friendly value formatting in drawers (chips / readable lines) ─────── */
+.val-chips { display: inline-flex; flex-wrap: wrap; gap: 4px; }
+.val-chip {
+  display: inline-block; padding: 1px 8px; border-radius: 10px;
+  background: var(--bg-elev-2); border: 1px solid var(--border);
+  font-size: 11px; color: var(--text-dim); line-height: 1.6;
+}
+.val-lines { font-size: 12.5px; }
+.val-lines > div { line-height: 1.5; }

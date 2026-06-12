@@ -57,7 +57,7 @@ function SourceTag({ source }) {
   }}>${label}</span>`;
 }
 
-function ContactRow({ contact, kind, refId, onChange }) {
+function ContactRow({ contact, kind, refId, onChange, readOnly = false }) {
   const remove = async () => {
     try {
       if (kind === 'company') await api.deleteCompanyContact(refId, contact.id);
@@ -93,8 +93,8 @@ function ContactRow({ contact, kind, refId, onChange }) {
         <${SourceTag} source=${contact.source} />
         ${contact.source_url ? html`<a href=${contact.source_url} target="_blank" rel="noreferrer" class="muted small" title=${contact.source_url}>↗</a>` : null}
         ${contact.source_label ? html`<span class="muted small">${contact.source_label}</span>` : null}
-        ${!contact.is_primary ? html`<button class="linkbtn" onClick=${promote} title="Use this as the primary value">★</button>` : null}
-        <button class="linkbtn danger" onClick=${remove} title="Remove this contact">×</button>
+        ${!readOnly && !contact.is_primary ? html`<button class="linkbtn" onClick=${promote} title="Use this as the primary value">★</button>` : null}
+        ${!readOnly ? html`<button class="linkbtn danger" onClick=${remove} title="Remove this contact">×</button>` : null}
       </div>
     </div>
   `;
@@ -150,7 +150,7 @@ function AddContactForm({ kind, refId, onChange }) {
   `;
 }
 
-export function ContactsList({ kind, refId, contacts, onChange }) {
+export function ContactsList({ kind, refId, contacts, onChange, readOnly = false }) {
   const emails  = (contacts || []).filter(c => c.type === 'email');
   const phones  = (contacts || []).filter(c => c.type === 'phone');
   const socials = (contacts || []).filter(c => c.type === 'social');
@@ -160,7 +160,7 @@ export function ContactsList({ kind, refId, contacts, onChange }) {
       <div class="contact-group-h">${label} <span class="muted small">(${items.length})</span></div>
       ${items.length === 0
         ? html`<div class="muted small contact-group-empty">none on file</div>`
-        : items.map(c => html`<${ContactRow} key=${c.id} contact=${c} kind=${kind} refId=${refId} onChange=${onChange} />`)}
+        : items.map(c => html`<${ContactRow} key=${c.id} contact=${c} kind=${kind} refId=${refId} onChange=${onChange} readOnly=${readOnly} />`)}
     </div>
   `;
 
@@ -169,7 +169,7 @@ export function ContactsList({ kind, refId, contacts, onChange }) {
       ${renderGroup('Emails',  emails)}
       ${renderGroup('Phones',  phones)}
       ${socials.length > 0 ? renderGroup('Social',  socials) : null}
-      <${AddContactForm} kind=${kind} refId=${refId} onChange=${onChange} />
+      ${!readOnly ? html`<${AddContactForm} kind=${kind} refId=${refId} onChange=${onChange} />` : null}
     </div>
   `;
 }

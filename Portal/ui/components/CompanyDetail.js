@@ -1,11 +1,12 @@
 // Persistent side detail panel — 3 tabs: Company, People, Legal.
 // All fields a company can possibly have are surfaced across these three tabs.
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { html } from '../lib/html.js';
 import { api } from '../lib/api.js';
 import { toast } from '../lib/toast.js';
 import { navigateTo } from '../lib/router.js';
+import { formatValue } from '../lib/format.js';
 import { CompanyLogo } from './CompanyLogo.js';
 import { SourceBadge } from './SourceBadge.js';
 import { ContactsList } from './ContactsList.js';
@@ -273,6 +274,11 @@ export function CompanyDetail({ companyId, onMutated, onDeleted, canHardDelete =
   const [loading, setLoading] = useState(false);
   const [similar, setSimilar] = useState([]);
   const [tab, setTab] = useState('company');
+  const bodyRef = useRef(null);
+
+  // Switching tabs should start the new tab at the very top, not wherever the
+  // previous tab was scrolled to.
+  useEffect(() => { if (bodyRef.current) bodyRef.current.scrollTop = 0; }, [tab]);
 
   const reload = async () => {
     if (!companyId) return;
@@ -436,11 +442,11 @@ export function CompanyDetail({ companyId, onMutated, onDeleted, canHardDelete =
         <button class=${tab==='legal'?'active':''}   onClick=${()=>setTab('legal')}>Legal (${sources.length})</button>
       </div>
 
-      <div class="detail-body">
+      <div class="detail-body" ref=${bodyRef}>
         ${tab === 'company' ? html`<${CompanyTab} company=${c} extra=${extra} similar=${similar} contacts=${data.contacts || []} onReload=${reload} needsReveal=${needsReveal} onReveal=${revealContacts} isUser=${isUser} isLocalEngine=${isLocalEngine} />` : null}
         ${tab === 'people'  ? html`<${PeopleView}  people=${data.people} />` : null}
         ${tab === 'intel'   ? html`<${IntelTab} financials=${data.financials || []} shareholders=${data.shareholders || []} partnerships=${data.partnerships || []} />` : null}
-        ${tab === 'legal'   ? html`<${LegalTab}    sources=${sources} extra=${extra} />` : null}
+        ${tab === 'legal'   ? html`<${LegalTab}    sources=${sources} extra=${extra} isUser=${isUser} />` : null}
       </div>
     </aside>
   `;
@@ -481,6 +487,7 @@ function CompanyTab({ company, extra, similar, contacts, onReload, needsReveal =
     if (v === null || v === undefined) continue;
     if (RUNTIME_KEY_PREFIXES.some(p => k.startsWith(p))) continue;
     if (LINKEDIN_RUNTIME_KEYS.has(k)) continue;
+    if (isUser && /photo|logo_url|cover_url/i.test(k)) continue;   // image URLs: not useful as text for customers
     if (k.startsWith('linkedin_')) linkedinExtras[k] = v;
     else if (k.startsWith('gmaps_')) gmapsExtras[k] = v;
   }
@@ -511,9 +518,16 @@ function CompanyTab({ company, extra, similar, contacts, onReload, needsReveal =
   const importedSimilar = similar.filter(s => s.decision === 'added_to_scope');
   const skippedSimilar  = similar.filter(s => s.decision === 'skipped');
 
+  // Customers (app.bell.qa) see a curated view: internal/runtime groups are
+  // admin-only, and Google "Photo URLs" are dropped (not useful to display).
+  const USER_HIDDEN_GROUPS = new Set(['Status', 'Enrichment stages', 'Bookkeeping']);
+  const USER_HIDDEN_FIELDS = new Set(['gmaps_photos']);
+  const groups = (isUser ? COMPANY_GROUPS.filter(g => !USER_HIDDEN_GROUPS.has(g.label)) : COMPANY_GROUPS)
+    .map(g => (isUser ? { ...g, fields: g.fields.filter(([k]) => !USER_HIDDEN_FIELDS.has(k)) } : g));
+
   return html`
     <div class="overview">
-      ${COMPANY_GROUPS.map(g => html`
+      ${groups.map(g => html`
         <section class="group" key=${g.label}>
           <h3>${g.label}</h3>
           <dl>
@@ -567,7 +581,7 @@ function CompanyTab({ company, extra, similar, contacts, onReload, needsReveal =
           ` : null}
           ${g.label === 'Contact' && !needsReveal ? html`
             <div style=${{marginTop:'10px'}}>
-              <${ContactsList} kind="company" refId=${company.id} contacts=${contacts} onChange=${onReload} />
+              <${ContactsList} kind="company" refId=${company.id} contacts=${contacts} onChange=${onReload} readOnly=${isUser} />
             </div>
           ` : null}
         </section>
@@ -768,12 +782,13 @@ function IntelTab({ financials, shareholders, partnerships }) {
   </div>`;
 }
 
-function LegalTab({ sources, extra }) {
+function LegalTab({ sources, extra, isUser = false }) {
   // Only show source-specific groups when that source actually exists for this company.
   const visibleSources = new Set(sources.map(s => s.source));
 
   return html`
     <div class="overview">
+      ${!isUser ? html`
       <section class="group">
         <h3>Sources (${sources.length})</h3>
         ${sources.length === 0 ? html`<div class="empty">No source records.</div>` : null}
@@ -792,6 +807,7 @@ function LegalTab({ sources, extra }) {
           </div>
         `)}
       </section>
+      ` : null}
 
       ${LEGAL_GROUPS.filter(g => visibleSources.has(g.source)).map(g => {
         const present = g.fields.filter(([k]) => extra[k] !== null && extra[k] !== undefined);
@@ -814,18 +830,7 @@ function LegalTab({ sources, extra }) {
   `;
 }
 
+// Delegate to the shared friendly formatter (chips / readable lines, no raw JSON).
 function renderValue(v) {
-  if (v === null || v === undefined) return html`<span class="muted">—</span>`;
-  if (typeof v === 'boolean') return v ? 'true' : 'false';
-  if (typeof v === 'number')  return v.toLocaleString();
-  if (typeof v === 'string') {
-    if (/^https?:\/\//.test(v)) return html`<a href=${v} target="_blank" rel="noreferrer">${v}</a>`;
-    if (/^\d{4}-\d{2}-\d{2}T/.test(v)) {
-      try { return new Date(v).toLocaleString(); } catch { return v; }
-    }
-    return v;
-  }
-  if (Array.isArray(v)) return html`<pre style=${{margin:0}}>${JSON.stringify(v, null, 2)}</pre>`;
-  if (typeof v === 'object') return html`<pre style=${{margin:0}}>${JSON.stringify(v, null, 2)}</pre>`;
-  return String(v);
+  return formatValue(v);
 }
