@@ -12,6 +12,7 @@ import { query, withTransaction } from '../db.js';
 import { jobs } from '../ingest/jobs.js';
 import { runDedup, mergeCompanies, bulkApproveExactName } from '../assembly/dedup.js';
 import { runPeopleDedup, mergePeople } from '../assembly/people_dedup.js';
+import { recomputeBellScores } from '../assembly/bell_score.js';
 import { assignAllIdentifiers } from '../assembly/assign_ids.js';
 import { normalizeName } from '../ingest/normalize.js';
 
@@ -33,8 +34,9 @@ router.post('/run', async (req, res, next) => {
         const dedupResult  = await runDedup({ jobLog: (m) => jobs.log(job.id, m) });
         const peopleResult = await runPeopleDedup({ jobLog: (m) => jobs.log(job.id, m) });
         const idResult     = await assignAllIdentifiers((m) => jobs.log(job.id, m));
+        const scoreResult  = await recomputeBellScores((m) => jobs.log(job.id, m));
         jobs.log(job.id, `▸▸▸ Assembly complete.`);
-        jobs.complete(job.id, { dedup: dedupResult, people_dedup: peopleResult, identifiers: idResult });
+        jobs.complete(job.id, { dedup: dedupResult, people_dedup: peopleResult, identifiers: idResult, bell_score: scoreResult });
       } catch (err) {
         jobs.fail(job.id, err);
       }

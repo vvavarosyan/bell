@@ -134,12 +134,12 @@ router.get('/', async (req, res, next) => {
              linkedin_url, email, phone,
              location_text, country, city,
              profile_picture_url,
-             extra_fields,
+             extra_fields, bell_score,
              is_revealed, revealed_at,
              created_at, updated_at, archived
       FROM people
       ${whereSql}
-      ORDER BY id DESC
+      ORDER BY bell_score DESC, id DESC
       LIMIT $${params.length - 1} OFFSET $${params.length}
     `;
     const countSql = `SELECT count(*)::int AS total FROM people ${whereSql}`;

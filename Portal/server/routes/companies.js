@@ -109,7 +109,8 @@ router.get('/', async (req, res, next) => {
     // (name, legal name, CR/CP/QFC #, ISIN/symbol, BIN, city, contacts, acronym,
     // any extra_fields value), AND the name is matched fuzzily (pg_trgm) so typos
     // and partial spellings still surface the intended company.
-    let orderSql = 'ORDER BY id DESC';
+    // Default: most-complete records first (Bell Score), then newest.
+    let orderSql = 'ORDER BY companies.bell_score DESC, id DESC';
     if (q) {
       const qLower = q.toLowerCase();
       const qNorm = normalizeName(q) || qLower;
@@ -179,7 +180,7 @@ router.get('/', async (req, res, next) => {
              stage4_status, stage4_at,
              stage5_status, stage5_at,
              stage6_status, stage6_at,
-             extra_fields,
+             extra_fields, bell_score,
              created_at, updated_at, assembled_at, archived,
              archive_reason, needs_review, review_reason, manual_status_override,
              (SELECT array_agg(DISTINCT cs.source ORDER BY cs.source)
