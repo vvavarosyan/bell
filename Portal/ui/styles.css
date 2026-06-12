@@ -563,10 +563,10 @@ html, body {
 .grid col.status    { width: 100px; }
 .grid col.industry  { width: 148px; }
 .grid col.city      { width: 96px; }
-.grid col.employees { width: 62px; }
+.grid col.employees { width: 82px; }
 .grid col.contacts  { width: 118px; }
-.grid col.bellscore { width: 54px; }
-.grid col.stages    { width: 74px; }
+.grid col.bellscore { width: 62px; }
+.grid col.stages    { width: 76px; }
 /* Trailing spacer absorbs leftover width so real columns stay snug + left-packed
    with no extra gaps between them. */
 .grid col.flex      { width: auto; }
@@ -1910,3 +1910,11 @@ a.contact-icon.on { cursor: pointer; text-decoration: none; position: relative; 
 }
 .bell-score-bar > span { display: block; height: 100%; border-radius: 3px; }
 .bell-score-num { font-size: 11px; font-weight: 700; font-variant-numeric: tabular-nums; min-width: 18px; }
+
+/* ── Drawer People tab (org chart) rows ───────────────────────────────── */
+.org-grid td { white-space: normal; vertical-align: middle; overflow: visible; }
+.org-grid td.person-main { cursor: pointer; }
+.org-grid td.person-main .person-name { font-weight: 500; }
+.org-grid td.person-main .person-title { margin-top: 1px; }
+.org-grid td.person-contacts { text-align: right; }
+.org-grid td.person-contacts .contact-icons { justify-content: flex-end; }
