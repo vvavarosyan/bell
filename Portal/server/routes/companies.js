@@ -5,7 +5,9 @@ import { query } from '../db.js';
 import {
   listCompanyContacts, loadCompanyContactsByIds,
   upsertContact, setPrimaryContact, deleteContact,
+  loadPersonContactsByIds,
 } from '../lib/contacts.js';
+import { maskPeople } from './people.js';
 import { wipeStaleEnrichmentAfterUrlReplace } from '../enrichment/stages/stage1.js';
 import { revealOne, revealBulk, getRevealedSet, bypassesCredits } from '../lib/credits.js';
 import { denyUnlessLocalEngine } from '../lib/auth.js';
@@ -289,7 +291,7 @@ router.get('/:id', async (req, res, next) => {
       `, [id]),
       query(`
         SELECT p.id, p.pin, p.full_name, p.headline, p.linkedin_url,
-               p.is_revealed,
+               p.is_revealed, p.email, p.phone, p.profile_picture_url, p.bell_score,
                pc.title, pc.seniority_level, pc.org_chart_level, pc.is_current
         FROM person_companies pc
         JOIN people p ON p.id = pc.person_id
@@ -311,10 +313,20 @@ router.get('/:id', async (req, res, next) => {
     await maskCompanies(req, [row]);
     const maskedContacts = row.contacts;
     delete row.contacts;
+
+    // Drawer People tab: attach each person's contacts + per-tenant reveal
+    // status (masking hides the values until the user reveals that person).
+    const peopleRows = people.rows;
+    if (peopleRows.length) {
+      const pcMap = await loadPersonContactsByIds(peopleRows.map(p => p.id));
+      for (const p of peopleRows) p.contacts = pcMap.get(p.id) || [];
+      await maskPeople(req, peopleRows);
+    }
+
     res.json({
       company:  row,
       sources:  sources.rows,
-      people:   people.rows,
+      people:   peopleRows,
       contacts: maskedContacts,
       financials:   financials.rows,
       shareholders: shareholders.rows,

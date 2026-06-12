@@ -297,6 +297,7 @@ export function CompaniesTab({ archivedMode: initialArchived = false, mode = 'lo
             <col class="contacts" />
             <col class="bellscore" />
             <col class="stages" />
+            <col class="flex" />
           </colgroup>
           <thead>
             <tr>
@@ -313,12 +314,13 @@ export function CompaniesTab({ archivedMode: initialArchived = false, mode = 'lo
               <th>City</th>
               <th>Employees</th>
               <th>Contacts</th>
-              <th>Bell Score</th>
+              <th>Score</th>
               <th>${isUser ? 'Reveal' : 'Stages'}</th>
+              <th class="flex"></th>
             </tr>
           </thead>
           <tbody>
-            ${rows.length === 0 && !loading ? html`<tr><td colSpan="9" class="empty">${reviewMode ? 'Nothing to review — no companies have disappeared from a directory.' : archivedMode ? 'No archived companies.' : 'No active companies yet.'}</td></tr>` : null}
+            ${rows.length === 0 && !loading ? html`<tr><td colSpan="10" class="empty">${reviewMode ? 'Nothing to review — no companies have disappeared from a directory.' : archivedMode ? 'No archived companies.' : 'No active companies yet.'}</td></tr>` : null}
             ${rows.map(r => html`
               <tr
                 key=${r.id}
@@ -352,12 +354,13 @@ export function CompaniesTab({ archivedMode: initialArchived = false, mode = 'lo
                     : (r.employee_count_range || html`<span class="muted">—</span>`)}
                 </td>
                 <td><${ContactIcons} company=${r} /></td>
-                <td class="bellscore"><${BellScore} score=${r.bell_score} /></td>
+                <td class="bellscore"><${BellScore} score=${r.bell_score} bar=${false} /></td>
                 <td>${isUser
                   ? (r.revealed_by_tenant
                       ? html`<span class="revealed-badge">✓ revealed</span>`
                       : html`<button class="reveal-btn" onClick=${(e) => { e.stopPropagation(); revealRow(r.id); }}>Reveal · 1</button>`)
                   : html`<${StageBar} row=${r} />`}</td>
+                <td class="flex"></td>
               </tr>
             `)}
           </tbody>

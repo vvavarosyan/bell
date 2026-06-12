@@ -8,6 +8,7 @@ import { toast } from '../lib/toast.js';
 import { navigateTo } from '../lib/router.js';
 import { formatValue, isEmptyValue } from '../lib/format.js';
 import { BellScore } from './BellScore.js';
+import { ContactIcons } from './ContactIcons.js';
 import { CompanyLogo } from './CompanyLogo.js';
 import { SourceBadge } from './SourceBadge.js';
 import { ContactsList } from './ContactsList.js';
@@ -347,6 +348,19 @@ export function CompanyDetail({ companyId, onMutated, onDeleted, canHardDelete =
     }
   };
 
+  // Reveal a single person from the drawer's People tab (1 credit; already-
+  // revealed people are free and just show their contacts).
+  const revealPerson = async (personId) => {
+    try {
+      await api.revealPerson(personId);
+      window.dispatchEvent(new Event('bdi:credits-changed'));
+      toast('Person revealed');
+      reload();
+    } catch (err) {
+      toast(/insufficient/i.test(err.message) ? 'Not enough credits to reveal' : 'Reveal failed: ' + err.message, 'error');
+    }
+  };
+
   return html`
     <aside class="detail-side">
       <div class="detail-head">
@@ -451,7 +465,7 @@ export function CompanyDetail({ companyId, onMutated, onDeleted, canHardDelete =
 
       <div class="detail-body" ref=${bodyRef}>
         ${tab === 'company' ? html`<${CompanyTab} company=${c} extra=${extra} similar=${similar} contacts=${data.contacts || []} onReload=${reload} needsReveal=${needsReveal} onReveal=${revealContacts} isUser=${isUser} isLocalEngine=${isLocalEngine} />` : null}
-        ${tab === 'people'  ? html`<${PeopleView}  people=${data.people} />` : null}
+        ${tab === 'people'  ? html`<${PeopleView}  people=${data.people} isUser=${isUser} onReveal=${revealPerson} />` : null}
         ${tab === 'intel'   ? html`<${IntelTab} financials=${data.financials || []} shareholders=${data.shareholders || []} partnerships=${data.partnerships || []} />` : null}
         ${tab === 'legal'   ? html`<${LegalTab}    sources=${sources} extra=${extra} isUser=${isUser} />` : null}
       </div>
@@ -663,7 +677,7 @@ function CompanyTab({ company, extra, similar, contacts, onReload, needsReveal =
   `;
 }
 
-function PeopleView({ people }) {
+function PeopleView({ people, isUser = false, onReveal }) {
   if (!people || people.length === 0) return html`<div class="empty">No people linked yet. They appear after Stage 3 enrichment.</div>`;
 
   // Group by org_chart_level (1=C-level, 5=Other staff, null=unknown)
@@ -690,9 +704,14 @@ function PeopleView({ people }) {
   };
 
   const renderRow = (p) => html`
-    <tr key=${p.id} class="person-row" onClick=${() => openInPeople(p.id)} title="Click to open this person in the People tab">
-      <td class="person-name">${p.full_name || '—'}</td>
+    <tr key=${p.id} class="person-row">
+      <td class="person-name" onClick=${() => openInPeople(p.id)} title="Open this person in the People tab">${p.full_name || '—'}</td>
       <td class="person-title">${p.headline || p.title || '—'}</td>
+      <td class="person-contacts">
+        ${isUser && p.revealed_by_tenant === false
+          ? html`<button class="reveal-btn" onClick=${(e) => { e.stopPropagation(); onReveal?.(p.id); }}>Reveal · 1</button>`
+          : html`<${ContactIcons} company=${p} />`}
+      </td>
     </tr>
   `;
 
@@ -714,10 +733,11 @@ function PeopleView({ people }) {
             </h4>
             <table class="grid org-grid">
               <colgroup>
-                <col style=${{width:'45%'}}/>
-                <col style=${{width:'55%'}}/>
+                <col style=${{width:'38%'}}/>
+                <col style=${{width:'40%'}}/>
+                <col style=${{width:'22%'}}/>
               </colgroup>
-              <thead><tr><th>Name</th><th>Title</th></tr></thead>
+              <thead><tr><th>Name</th><th>Title</th><th>Contacts</th></tr></thead>
               <tbody>${rows.map(renderRow)}</tbody>
             </table>
           </section>
