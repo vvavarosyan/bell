@@ -71,3 +71,8 @@ out/
 
 # Marketing site Mapbox token if accidentally written to file (it should be env)
 **/.mapbox-token
+
+# Scratch / throwaway test scripts (e.g. harvester self-tests)
+**/_*.mjs
+_harv_test.mjs
+_t2.mjs
