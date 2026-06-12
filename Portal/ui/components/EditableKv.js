@@ -19,7 +19,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { html } from '../lib/html.js';
-import { formatValue } from '../lib/format.js';
+import { formatValue, fmtNumber } from '../lib/format.js';
 
 function fmtDisplay(value, type) {
   if (value === null || value === undefined || value === '') {
@@ -42,7 +42,7 @@ function fmtDisplay(value, type) {
     }
     return value;
   }
-  if (typeof value === 'number') return value.toLocaleString();
+  if (typeof value === 'number') return fmtNumber(value);
   if (Array.isArray(value) || typeof value === 'object') {
     // Friendly rendering (chips / readable lines) instead of a raw-JSON block.
     return formatValue(value);

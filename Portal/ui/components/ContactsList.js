@@ -57,6 +57,15 @@ function SourceTag({ source }) {
   }}>${label}</span>`;
 }
 
+async function removeContact(kind, refId, id, onChange) {
+  try {
+    if (kind === 'company') await api.deleteCompanyContact(refId, id);
+    else                    await api.deletePersonContact(refId, id);
+    toast('Removed');
+    onChange?.();
+  } catch (err) { toast('Remove failed: ' + err.message, 'error'); }
+}
+
 // Brand identity for a social URL → a colorful icon chip.
 function socialMeta(url) {
   const u = String(url || '').toLowerCase();
@@ -183,11 +192,28 @@ export function ContactsList({ kind, refId, contacts, onChange, readOnly = false
     </div>
   `;
 
+  // Socials render as a single horizontal row of brand icons (compact).
+  const renderSocials = (items) => html`
+    <div class="contact-group">
+      <div class="contact-group-h">Social <span class="muted small">(${items.length})</span></div>
+      <div class="social-row">
+        ${items.map(c => {
+          const sm = socialMeta(c.value);
+          return html`<span class="social-chip" key=${c.id}>
+            <a class="social-icon" href=${c.value} target="_blank" rel="noreferrer" title=${sm.name}
+               style=${{ background: sm.bg, color: sm.fg || '#fff' }}>${sm.label}</a>
+            ${!readOnly ? html`<button class="linkbtn danger social-x" title="Remove" onClick=${() => removeContact(kind, refId, c.id, onChange)}>×</button>` : null}
+          </span>`;
+        })}
+      </div>
+    </div>
+  `;
+
   return html`
     <div class="contacts-list">
       ${renderGroup('Emails',  emails)}
       ${renderGroup('Phones',  phones)}
-      ${socials.length > 0 ? renderGroup('Social',  socials) : null}
+      ${socials.length > 0 ? renderSocials(socials) : null}
       ${!readOnly ? html`<${AddContactForm} kind=${kind} refId=${refId} onChange=${onChange} />` : null}
     </div>
   `;

@@ -9,6 +9,7 @@ import { PersonDetail } from './PersonDetail.js';
 import { JobLogPanel } from './JobLogPanel.js';
 import { ContactIcons } from './ContactIcons.js';
 import { SourceBadges } from './SourceBadge.js';
+import { BellScore } from './BellScore.js';
 
 export function PeopleTab({ mode = 'local-admin' } = {}) {
   const isUser = mode === 'user';   // customers reveal contacts instead of editing internals
@@ -241,7 +242,10 @@ export function PeopleTab({ mode = 'local-admin' } = {}) {
                   formatter=${(name) => html`
                     <div class="name-cell">
                       <div class="name-cell-main">${name || html`<span style=${{color:'var(--text-dim)'}}>—</span>`}</div>
-                      ${(r.sources && r.sources.length) ? html`<${SourceBadges} sources=${r.sources} compact=${true} />` : null}
+                      <div style=${{display:'flex', alignItems:'center', gap:'6px', flexWrap:'wrap'}}>
+                        <${BellScore} score=${r.bell_score} />
+                        ${(r.sources && r.sources.length) ? html`<${SourceBadges} sources=${r.sources} compact=${true} />` : null}
+                      </div>
                     </div>
                   `}
                 />

@@ -8,6 +8,13 @@ const DASH = html`<span class="muted">—</span>`;
 
 const isUrl = (s) => typeof s === 'string' && /^https?:\/\//i.test(s.trim());
 
+// Numbers get thousands separators — EXCEPT 4-digit year-like integers (a
+// founded year should read "2018", not "2,018").
+export function fmtNumber(n) {
+  if (Number.isInteger(n) && n >= 1000 && n <= 9999) return String(n);
+  return Number(n).toLocaleString();
+}
+
 // True for null/undefined/'', empty arrays, and empty objects (after dropping
 // LinkedIn recipe-metadata keys like $type/$recipeTypes).
 export function isEmptyValue(v) {
@@ -47,7 +54,7 @@ export function formatValue(value) {
   if (typeof value === 'boolean') {
     return value ? html`<span class="pill active">Yes</span>` : html`<span class="pill inactive">No</span>`;
   }
-  if (typeof value === 'number') return value.toLocaleString();
+  if (typeof value === 'number') return fmtNumber(value);
 
   if (typeof value === 'string') {
     const s = value.trim();

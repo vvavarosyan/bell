@@ -11,6 +11,7 @@ import { CompanyDetail } from './CompanyDetail.js';
 import { CompanyLogo } from './CompanyLogo.js';
 import { SourceRecordsLine } from './SourceRecordsLine.js';
 import { ContactIcons } from './ContactIcons.js';
+import { BellScore } from './BellScore.js';
 
 const STATUS_OPTIONS = ['', 'active', 'inactive', 'suspended', 'withdrawn', 'in_liquidation', 'frozen', 'deregistered', 'not_licensed', 'unknown'];
 const SOURCE_OPTIONS = ['', 'QFC', 'QFZ', 'MOCI', 'QSTP', 'QSE', 'QCCI', 'MoPH', 'Tasmu'];
@@ -351,7 +352,7 @@ export function CompaniesTab({ archivedMode: initialArchived = false, mode = 'lo
                     : (r.employee_count_range || html`<span class="muted">—</span>`)}
                 </td>
                 <td><${ContactIcons} company=${r} /></td>
-                <td class="bellscore"><span class="muted">—</span></td>
+                <td class="bellscore"><${BellScore} score=${r.bell_score} /></td>
                 <td>${isUser
                   ? (r.revealed_by_tenant
                       ? html`<span class="revealed-badge">✓ revealed</span>`

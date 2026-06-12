@@ -7,6 +7,7 @@ import { api } from '../lib/api.js';
 import { toast } from '../lib/toast.js';
 import { navigateTo } from '../lib/router.js';
 import { formatValue, isEmptyValue } from '../lib/format.js';
+import { BellScore } from './BellScore.js';
 import { CompanyLogo } from './CompanyLogo.js';
 import { SourceBadge } from './SourceBadge.js';
 import { ContactsList } from './ContactsList.js';
@@ -354,6 +355,7 @@ export function CompanyDetail({ companyId, onMutated, onDeleted, canHardDelete =
           <span class="bin">${c.bin || '— (unassembled)'}</span>
           <strong>${c.name}</strong>
           <div class="detail-status-row">
+            <${BellScore} score=${c.bell_score} />
             ${[...new Set(sources.map(s => s.source))].map(src => html`<${SourceBadge} key=${src} source=${src} compact=${true} />`)}
             <span class=${'pill ' + (c.is_active ? 'active' : 'inactive')}>${c.status_normalized || (c.is_active ? 'active' : 'inactive')}</span>
             ${c.archived ? html`<span class="pill" style=${{borderColor:'var(--amber)',color:'var(--amber)'}} title=${'Archived' + (c.archive_reason ? ' · ' + (ARCHIVE_REASON_LABEL[c.archive_reason] || c.archive_reason) : '')}>archived${c.archive_reason ? ' · ' + (ARCHIVE_REASON_LABEL[c.archive_reason] || c.archive_reason) : ''}</span>` : null}
