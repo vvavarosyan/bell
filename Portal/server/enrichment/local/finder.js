@@ -36,7 +36,25 @@ const LEGAL_STOP = new Set([
   'contracting', 'wll.', 'inc', 'ltd', 'limited', 'sons', 'bros', 'brothers',
 ]);
 
-const PARKING_RX = /(domain (is )?for sale|buy this domain|this domain (is|may be) (for sale|parked)|parked (free|domain)|hugedomains|sedo(parking)?|afternic|dan\.com|godaddy\.com\/domainsearch|domain parking|backorder this domain|is for sale|interested in this domain|the domain .* is available|under construction)/i;
+// Generic business/descriptor words that appear in countless company names AND
+// on countless unrelated websites — useless for verifying a SEARCH result.
+export const GENERIC_WORDS = new Set([
+  'technology', 'technologies', 'tech', 'consulting', 'consultancy', 'consultant', 'consultants',
+  'systems', 'system', 'digital', 'smart', 'media', 'marketing', 'advertising', 'business',
+  'supply', 'supplies', 'products', 'product', 'projects', 'project', 'building', 'construction',
+  'water', 'energy', 'power', 'well', 'star', 'advance', 'advanced', 'post', 'production',
+  'films', 'film', 'treatment', 'equipment', 'automotive', 'beverages', 'foodstuff', 'food',
+  'industries', 'industry', 'industrial', 'global', 'middle', 'east', 'gulf', 'arabia', 'arabian',
+  'real', 'estate', 'engine', 'support', 'aviation', 'logistics', 'turnkey', 'dreams', 'group',
+  'trust', 'prime', 'royal', 'crown', 'apparel', 'beauty', 'health', 'medical', 'pharma',
+  'pharmaceutical', 'pharmaceuticals', 'agriculture', 'plastics', 'plastic', 'metal', 'steel',
+  'oil', 'gas', 'petroleum', 'drilling', 'security', 'cyber', 'cloud', 'data', 'network',
+  'networks', 'communications', 'telecom', 'electronics', 'electronic', 'electrical', 'computer',
+  'computers', 'mobile', 'mobiles', 'general', 'national', 'international', 'company', 'services',
+  'solutions', 'trading', 'world', 'works', 'center', 'centre', 'studio', 'studios', 'agency',
+]);
+
+const PARKING_RX =/(domain (is )?for sale|buy this domain|this domain (is|may be) (for sale|parked)|parked (free|domain)|hugedomains|sedo(parking)?|afternic|dan\.com|godaddy\.com\/domainsearch|domain parking|backorder this domain|is for sale|interested in this domain|the domain .* is available|under construction)/i;
 
 // Hosts that a guessed domain commonly *redirects* to — generic registrars,
 // parking, or webmail/login — which means the guess was wrong, not the company.
@@ -149,15 +167,26 @@ export function verifyMatch(page, company, { fromGuess }) {
     return true;
   }
 
-  // Search result: the domain is UNRELATED to the name by design, so a domain
-  // substring match is meaningless (calculator.io "matches" Cal Royal). Verify
-  // by CONTENT — the page must actually mention the company's distinctive words.
-  const sig = tokens.filter(t => t.length >= 4);
+  // Search result: the domain is UNRELATED to the name by design. Company names
+  // share GENERIC words (technology, trust, smart, building…) with unrelated
+  // global sites, so matching those causes false accepts (Titan→titannepal,
+  // Trust 360→trustwallet). The reliable signal: the company's DISTINCTIVE word
+  // must essentially BE the domain (Haeco→haeco.com), not merely appear inside a
+  // different one. Plus the page must mention it.
+  const distinctive = tokens.filter(t => t.length >= 4 && !GENERIC_WORDS.has(t));
+  if (!distinctive.length) return false;                  // only generic words → unverifiable
   const blob = ((page.title || '') + ' ' + (page.text || '')).toLowerCase();
-  const pageHits = sig.filter(t => blob.includes(t)).length;
-  if (sig.length >= 2) return pageHits >= 2;                       // ≥2 distinctive words on the page
-  if (sig.length === 1) return blob.includes(sig[0]) && domainSlug.includes(sig[0]);  // single-word: need both
-  return false;                                                    // nothing distinctive to verify against
+  const onPage = distinctive.filter(t => blob.includes(t));
+
+  // (a) brand-is-the-domain: a distinctive word equals the slug (or the slug is
+  //     that word + a ≤2-char tail), and it appears on the page.
+  if (onPage.some(t => domainSlug === t || (domainSlug.startsWith(t) && domainSlug.length - t.length <= 2))) return true;
+
+  // (b) full-name domain: slug contains the joined distinctive words + ≥2 on page.
+  const dj = distinctive.join('');
+  if (dj.length >= 6 && domainSlug.includes(dj) && onPage.length >= 2) return true;
+
+  return false;
 }
 
 // ---------------------------------------------------------------------------

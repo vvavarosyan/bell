@@ -21,7 +21,7 @@
 
 import { query, withTransaction } from '../../db.js';
 import { hostOf } from './http.js';
-import { significantTokens, distinctiveGuess, REDIRECT_TRAP_HOSTS } from './finder.js';
+import { significantTokens, distinctiveGuess, REDIRECT_TRAP_HOSTS, GENERIC_WORDS } from './finder.js';
 import { recomputeBellScoreForCompany } from '../../assembly/bell_score.js';
 
 // Decide a company's bucket from stored fields only (no fetch).
@@ -33,15 +33,20 @@ function classify(co, hasContacts, hasPeople) {
   const tokens = significantTokens(co.name);
   const domainSlug = host.split('.')[0] || '';
 
-  // A guess must still be distinctive.
-  if (co.method === 'guess' && !distinctiveGuess(tokens, domainSlug)) return 'wrong';
-
-  // Either method: if the domain shares NO distinctive word with the name, it's
-  // almost certainly the wrong site (calculator.io for "Cal Royal", mercedes for
-  // "G & E Industrial"). Static heuristic — can't re-check page content here.
-  const related = distinctiveGuess(tokens, domainSlug)
-    || tokens.some(t => t.length >= 5 && domainSlug.includes(t));
-  if (!related) return 'wrong';
+  if (co.method === 'guess') {
+    // A guess must still be distinctive (full-name / coined-token domain).
+    if (!distinctiveGuess(tokens, domainSlug)) return 'wrong';
+  } else {
+    // A search find must be brand-is-the-domain on a DISTINCTIVE (non-generic)
+    // word, or a full-name domain — same rule the live verifier now uses.
+    // Catches trustwallet / titannepal / smart.com / bayut etc. Can't re-check
+    // page content statically, so this is the domain-side of that test.
+    const distinctive = tokens.filter(t => t.length >= 4 && !GENERIC_WORDS.has(t));
+    const brand = distinctive.some(t => domainSlug === t || (domainSlug.startsWith(t) && domainSlug.length - t.length <= 2));
+    const dj = distinctive.join('');
+    const fullName = dj.length >= 6 && domainSlug.includes(dj);
+    if (!brand && !fullName) return 'wrong';
+  }
 
   if (!hasContacts && !hasPeople) return 'empty';
   return 'ok';
