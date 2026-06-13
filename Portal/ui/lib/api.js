@@ -112,6 +112,9 @@ export const api = {
   runHarvestSweep:        (limit = 100) => request('/api/enrichment/sweep', { method: 'POST', body: JSON.stringify({ limit }) }),
   finderAudit:            () => request('/api/enrichment/finder-audit'),
   finderCleanup:          (buckets) => request('/api/enrichment/finder-cleanup', { method: 'POST', body: JSON.stringify({ buckets }) }),
+  websiteCandidates:      (status = 'pending') => request('/api/enrichment/website-candidates?status=' + status),
+  websiteCandidatesCount: () => request('/api/enrichment/website-candidates/count'),
+  decideWebsiteCandidate: (id, action) => request(`/api/enrichment/website-candidates/${id}/decide`, { method: 'POST', body: JSON.stringify({ action }) }),
   enrichmentJob:          (id, since = 0) => request(`/api/enrichment/jobs/${id}?since=${since}`),
 
   // Assembly (Phase 5)
