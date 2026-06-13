@@ -68,6 +68,8 @@ export function CompaniesTab({ archivedMode: initialArchived = false, mode = 'lo
   const [rows, setRows] = useState([]);
   const [total, setTotal] = useState(0);
   const [sweepSize, setSweepSize] = useState(100);
+  const [finderAudit, setFinderAudit] = useState(null);   // {totals,wrong,empty} | null
+  const [auditing, setAuditing] = useState(false);
   const [limit] = useState(100);
   const [offset, setOffset] = useState(0);
   const [q, setQ] = useState('');
@@ -226,6 +228,30 @@ export function CompaniesTab({ archivedMode: initialArchived = false, mode = 'lo
     } catch (err) { toast(err.message, 'error'); }
   };
 
+  const runAudit = async () => {
+    setAuditing(true);
+    try {
+      const a = await api.finderAudit();
+      setFinderAudit(a);
+      if (a.totals.wrong === 0 && a.totals.empty === 0) toast('No bad website finds — all clean ✓');
+    } catch (err) { toast('Audit failed: ' + err.message, 'error'); }
+    finally { setAuditing(false); }
+  };
+
+  const runCleanup = async (buckets) => {
+    const t = finderAudit?.totals || {};
+    const n = buckets.includes('empty') ? (t.wrong + t.empty) : t.wrong;
+    const c = buckets.includes('empty') ? (t.wrong_contacts + t.empty_contacts) : t.wrong_contacts;
+    const p = buckets.includes('empty') ? (t.wrong_people + t.empty_people) : t.wrong_people;
+    if (!window.confirm(`Purge ${n} website find(s)?\nThis clears their website and removes ${c} harvested contact(s) and ${p} harvested person(s). The companies go back into the find queue. This cannot be undone.`)) return;
+    try {
+      const r = await api.finderCleanup(buckets);
+      setActiveJob({ id: r.job_id, title: 'Finder cleanup' });
+      setFinderAudit(null);
+      toast('Cleanup started');
+    } catch (err) { toast(err.message, 'error'); }
+  };
+
   const toggleArchiveView = () => {
     const next = archivedMode ? 'active' : 'archived';
     setArchiveMode(next); setOffset(0); setSelected(new Set()); setOpenedId(null);
@@ -254,6 +280,7 @@ export function CompaniesTab({ archivedMode: initialArchived = false, mode = 'lo
             ${[25, 50, 100, 250, 500].map(n => html`<option key=${n} value=${n}>${n}</option>`)}
           </select>
           <button class="accent" onClick=${runSweep}>Harvest stale ▶</button>
+          <button onClick=${runAudit} disabled=${auditing} title="Re-validate every website the Finder saved and show which are wrong or empty, before purging.">${auditing ? 'Auditing…' : 'Audit finds'}</button>
         </div>
       ` : null}
       <button onClick=${load}>Refresh</button>
@@ -273,6 +300,20 @@ export function CompaniesTab({ archivedMode: initialArchived = false, mode = 'lo
         `)}
       </div>
     </div>
+
+    ${finderAudit ? html`
+      <div class="audit-panel" style=${{ margin: '8px 0', padding: '10px 12px', border: '1px solid var(--border)', borderRadius: '8px', background: 'var(--surface-2, rgba(0,0,0,0.03))' }}>
+        <div style=${{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+          <strong>Finder audit</strong>
+          <span class="muted small">${finderAudit.totals.found} found · <span style=${{ color: 'var(--red)' }}>${finderAudit.totals.wrong} wrong</span> · <span style=${{ color: 'var(--amber)' }}>${finderAudit.totals.empty} empty</span> · ${finderAudit.totals.ok} ok</span>
+          <span class="spacer" style=${{ flex: 1 }}></span>
+          ${finderAudit.totals.wrong > 0 ? html`<button class="danger" onClick=${() => runCleanup(['wrong'])}>Purge ${finderAudit.totals.wrong} wrong (−${finderAudit.totals.wrong_contacts}c/−${finderAudit.totals.wrong_people}ppl)</button>` : null}
+          ${(finderAudit.totals.wrong + finderAudit.totals.empty) > 0 ? html`<button onClick=${() => runCleanup(['wrong', 'empty'])}>Purge wrong + empty (${finderAudit.totals.wrong + finderAudit.totals.empty})</button>` : null}
+          <button class="ghost" onClick=${() => setFinderAudit(null)}>Dismiss</button>
+        </div>
+        ${finderAudit.wrong.length ? html`<div class="muted small" style=${{ marginTop: '6px' }}>Wrong e.g.: ${finderAudit.wrong.slice(0, 6).map(w => `${w.name} → ${w.website}`).join(' · ')}${finderAudit.wrong.length > 6 ? ' …' : ''}</div>` : null}
+      </div>
+    ` : null}
 
     ${selected.size > 0 ? html`
       <div class="bulk-bar">

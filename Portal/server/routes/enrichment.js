@@ -9,6 +9,7 @@ import {
   runHarvestSweep,
   stageList,
 } from '../enrichment/orchestrator.js';
+import { auditFinderFinds, cleanupFinderFinds } from '../enrichment/local/cleanup.js';
 
 const router = Router();
 
@@ -117,6 +118,35 @@ router.post('/sweep', async (req, res, next) => {
       } catch (err) {
         jobs.fail(job.id, err);
       }
+    })();
+  } catch (err) { next(err); }
+});
+
+// GET /api/enrichment/finder-audit — dry run, no mutations. Returns the
+// wrong/empty buckets + counts so the admin can see what a cleanup would purge.
+router.get('/finder-audit', async (req, res, next) => {
+  try {
+    const audit = await auditFinderFinds();
+    // Trim the per-row payload to keep the response light.
+    const slim = (arr) => arr.slice(0, 200).map(x => ({ id: x.id, name: x.name, website: x.website, method: x.method, contacts: x.contacts, people: x.people }));
+    res.json({ totals: audit.totals, wrong: slim(audit.wrong), empty: slim(audit.empty) });
+  } catch (err) { next(err); }
+});
+
+// POST /api/enrichment/finder-cleanup  Body: { buckets: ['wrong'|'empty'] }
+// Purges the chosen buckets (membership recomputed server-side) in a job.
+router.post('/finder-cleanup', async (req, res, next) => {
+  try {
+    const raw = Array.isArray(req.body?.buckets) ? req.body.buckets : ['wrong'];
+    const buckets = raw.filter(b => b === 'wrong' || b === 'empty');
+    if (!buckets.length) return res.status(400).json({ error: 'buckets must include "wrong" and/or "empty"' });
+    const job = jobs.start({ kind: 'enrichment', source: 'finder_cleanup' });
+    res.json({ job_id: job.id, status: job.status });
+    (async () => {
+      try {
+        const result = await cleanupFinderFinds(buckets, (m) => jobs.log(job.id, m));
+        jobs.complete(job.id, result);
+      } catch (err) { jobs.fail(job.id, err); }
     })();
   } catch (err) { next(err); }
 });

@@ -40,7 +40,7 @@ const PARKING_RX = /(domain (is )?for sale|buy this domain|this domain (is|may b
 
 // Hosts that a guessed domain commonly *redirects* to — generic registrars,
 // parking, or webmail/login — which means the guess was wrong, not the company.
-const REDIRECT_TRAP_HOSTS = /(afternic\.com|dan\.com|sedo\.com|hugedomains\.com|godaddy\.com|namecheap\.com|bluehost\.com|hostgator\.com|wix\.com|squarespace\.com|wordpress\.com|rediff|gabia\.com|register\.com|domain\.com|porkbun\.com|name\.com)/i;
+export const REDIRECT_TRAP_HOSTS = /(afternic\.com|dan\.com|sedo\.com|hugedomains\.com|godaddy\.com|namecheap\.com|bluehost\.com|hostgator\.com|wix\.com|squarespace\.com|wordpress\.com|rediff|gabia\.com|register\.com|domain\.com|porkbun\.com|name\.com)/i;
 
 // ---------------------------------------------------------------------------
 // Name → domain candidates
@@ -122,7 +122,7 @@ function tokenHits(page, tokens) {
  * to the search path instead, which finds the actual company site far more
  * reliably than guessing a common-word domain.
  */
-function distinctiveGuess(tokens, domainSlug) {
+export function distinctiveGuess(tokens, domainSlug) {
   const joined = tokens.join('');
   if (tokens.length >= 2 && joined.length >= 6 && domainSlug.includes(joined)) return true;
   if (tokens.length === 1 && tokens[0].length >= 7 && domainSlug.includes(tokens[0])) return true;
