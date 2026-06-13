@@ -110,6 +110,8 @@ export const api = {
   enrichmentRuns:         (limit = 25) => request('/api/enrichment/runs?limit=' + limit),
   runEnrichment:          (body) => request('/api/enrichment/run', { method: 'POST', body: JSON.stringify(body) }),
   runHarvestSweep:        (limit = 100) => request('/api/enrichment/sweep', { method: 'POST', body: JSON.stringify({ limit }) }),
+  finderAudit:            () => request('/api/enrichment/finder-audit'),
+  finderCleanup:          (buckets) => request('/api/enrichment/finder-cleanup', { method: 'POST', body: JSON.stringify({ buckets }) }),
   enrichmentJob:          (id, since = 0) => request(`/api/enrichment/jobs/${id}?since=${since}`),
 
   // Assembly (Phase 5)
