@@ -75,7 +75,22 @@ const ICONS = {
       <path d="M22 12.06C22 6.55 17.52 2 12 2S2 6.55 2 12.06c0 4.99 3.66 9.13 8.44 9.88v-6.99H7.9v-2.89h2.54v-2.2c0-2.5 1.49-3.89 3.77-3.89 1.09 0 2.24.2 2.24.2v2.46h-1.26c-1.24 0-1.63.77-1.63 1.56v1.87h2.77l-.44 2.89h-2.33V22c4.78-.75 8.44-4.89 8.44-9.94z"/>
     </svg>
   `,
+  website: html`
+    <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <circle cx="12" cy="12" r="9"/>
+      <path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/>
+    </svg>
+  `,
 };
+
+// Normalize a website value to a clickable absolute URL (or null).
+function websiteUrl(c) {
+  const w = c.website || c.extra_fields?.website;
+  if (!w) return null;
+  const s = String(w).trim();
+  if (!s) return null;
+  return /^https?:\/\//i.test(s) ? s : 'https://' + s;
+}
 
 export function ContactIcons({ company }) {
   const email     = pickEmail(company);
@@ -84,6 +99,7 @@ export function ContactIcons({ company }) {
   const phoneCt   = countByType(company, 'phone') || (company.phone ? 1 : 0);
   const instagram = pickInstagram(company);
   const facebook  = pickFacebook(company);
+  const website   = websiteUrl(company);
 
   // Credit-gated channels can be "available but locked": the data exists for
   // this record, but the tenant must reveal (spend a credit) to see the value.
@@ -91,6 +107,8 @@ export function ContactIcons({ company }) {
   const phoneLocked = !phone && (!!company.phone_locked || phoneCt > 0);
 
   const items = [
+    { key: 'website',   label: 'Website',   href: website,
+      has: !!website, count: 0, tooltipExtra: website },
     { key: 'email',     label: 'Email',     href: email ? 'mailto:' + email : null,
       has: !!email || emailLocked, locked: emailLocked, count: emailCt, tooltipExtra: email },
     { key: 'phone',     label: 'Phone',     href: phone ? 'tel:' + String(phone).replace(/\s+/g, '') : null,

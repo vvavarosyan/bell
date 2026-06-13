@@ -564,7 +564,7 @@ html, body {
 .grid col.industry  { width: 148px; }
 .grid col.city      { width: 96px; }
 .grid col.employees { width: 82px; }
-.grid col.contacts  { width: 118px; }
+.grid col.contacts  { width: 150px; }
 .grid col.bellscore { width: 62px; }
 .grid col.stages    { width: 96px; }
 /* Don't clip the Reveal button / stage bar (esp. Safari) — overflow into the
@@ -586,7 +586,7 @@ html, body {
 
 /* Contact icons (Email / Phone / LinkedIn / Instagram / Facebook) */
 .contact-icons {
-  display: inline-flex; gap: 8px; align-items: center;
+  display: inline-flex; gap: 6px; align-items: center;
 }
 .contact-icon {
   display: inline-flex; align-items: center; justify-content: center;

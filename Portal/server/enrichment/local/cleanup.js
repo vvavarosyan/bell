@@ -108,6 +108,10 @@ const STRIP_KEYS = [
 async function purgeOne(companyId) {
   let removedContacts = 0, removedPeople = 0;
   await withTransaction(async (client) => {
+    // Capture the wrong host so the Finder never re-saves it (rejection memory).
+    const cur = await client.query(`SELECT website FROM companies WHERE id = $1`, [companyId]);
+    const badHost = (hostOf(cur.rows[0]?.website) || '').toLowerCase();
+
     const dc = await client.query(
       `DELETE FROM company_contacts WHERE company_id = $1 AND source = 'stage7-website'`, [companyId]);
     removedContacts = dc.rowCount;
@@ -132,8 +136,13 @@ async function purgeOne(companyId) {
           SET website = NULL,
               stage7_status = NULL, stage7_at = NULL,
               stage8_status = NULL, stage8_at = NULL,
-              extra_fields = extra_fields ${stripExpr}
-        WHERE id = $1`, [companyId]);
+              extra_fields = jsonb_set(
+                extra_fields ${stripExpr},
+                '{website_rejected}',
+                CASE WHEN $2::text = '' THEN coalesce(extra_fields->'website_rejected','[]'::jsonb)
+                     ELSE coalesce(extra_fields->'website_rejected','[]'::jsonb) || to_jsonb($2::text) END,
+                true)
+        WHERE id = $1`, [companyId, badHost]);
   });
   await recomputeBellScoreForCompany(companyId);
   return { removedContacts, removedPeople };

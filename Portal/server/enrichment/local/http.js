@@ -221,7 +221,20 @@ export async function isAllowed(url) {
  *   { ok, status, finalUrl, html, text, links, title, meta, mailto, tel, error }
  * ok=false means "soft skip this page" (timeout, non-html, http error, robots).
  */
-export async function fetchPage(url, { timeoutMs = DEFAULT_TIMEOUT_MS, respectRobots = true } = {}) {
+// Errors worth a retry — transient network/timeout, not "the page said no".
+const TRANSIENT_RX = /^(timeout|fetch_error|fetch failed|http_5\d\d)/i;
+
+export async function fetchPage(url, opts = {}) {
+  const { retries = 0, retryDelayMs = 800 } = opts;
+  let res = await fetchPageOnce(url, opts);
+  for (let attempt = 0; attempt < retries && !res.ok && TRANSIENT_RX.test(res.error || ''); attempt++) {
+    await new Promise(r => setTimeout(r, retryDelayMs * (attempt + 1)));
+    res = await fetchPageOnce(url, opts);
+  }
+  return res;
+}
+
+async function fetchPageOnce(url, { timeoutMs = DEFAULT_TIMEOUT_MS, respectRobots = true } = {}) {
   const blank = { ok: false, status: 0, finalUrl: url, html: '', text: '', links: [], title: null, meta: {}, mailto: [], tel: [] };
 
   if (respectRobots && !(await isAllowed(url))) {
