@@ -154,14 +154,39 @@ let _searchCount = 0;
 let _searchBlockStreak = 0;
 let _searchDisabled = false;
 let _searchDisabledReason = null;
+let _searchResults = 0;     // total organic results yielded across the run (diagnostic)
 
 /** Reset the search rate-limit guard at the start of a run. */
 export function beginSearchSession() {
-  _searchCount = 0; _searchBlockStreak = 0; _searchDisabled = false; _searchDisabledReason = null;
+  _searchCount = 0; _searchBlockStreak = 0; _searchDisabled = false; _searchDisabledReason = null; _searchResults = 0;
 }
 /** Snapshot for end-of-run logging. */
 export function searchState() {
-  return { count: _searchCount, disabled: _searchDisabled, reason: _searchDisabledReason };
+  return { count: _searchCount, results: _searchResults, disabled: _searchDisabled, reason: _searchDisabledReason };
+}
+
+// Search engines wrap organic links in their own redirect URLs. Unwrap them to
+// the real destination, otherwise SEARCH_SKIP_HOSTS throws away every result.
+function resolveResultUrl(raw) {
+  let u;
+  try { u = new URL(raw); } catch { return null; }
+  const host = u.hostname.replace(/^www\./, '').toLowerCase();
+  // DuckDuckGo: //duckduckgo.com/l/?uddg=<encoded-url>
+  if (host.endsWith('duckduckgo.com') && u.pathname.startsWith('/l/')) {
+    const t = u.searchParams.get('uddg');
+    if (t) { try { return decodeURIComponent(t); } catch { return null; } }
+    return null;
+  }
+  // Bing: /ck/a?...&u=a1<base64url>
+  if (host.endsWith('bing.com') && u.pathname.startsWith('/ck/')) {
+    const b = u.searchParams.get('u');
+    if (b) {
+      const s = b.replace(/^a1/, '').replace(/-/g, '+').replace(/_/g, '/');
+      try { const dec = Buffer.from(s, 'base64').toString('utf8'); if (/^https?:\/\//i.test(dec)) return dec; } catch { /* fall through */ }
+    }
+    return null;
+  }
+  return u.toString();
 }
 
 /**
@@ -216,9 +241,11 @@ export async function searchWeb(query, { limit = 6, timeoutMs = 20_000 } = {}) {
       const out = [];
       const seenHost = new Set();
       for (const raw of hrefs) {
+        const resolved = resolveResultUrl(raw);    // unwrap engine redirect
+        if (!resolved) continue;
         let host, clean;
         try {
-          const u = new URL(raw);
+          const u = new URL(resolved);
           host = u.hostname.replace(/^www\./, '').toLowerCase();
           u.hash = ''; u.search = '';
           clean = u.toString();
@@ -229,7 +256,7 @@ export async function searchWeb(query, { limit = 6, timeoutMs = 20_000 } = {}) {
         out.push(clean);
         if (out.length >= limit) break;
       }
-      if (out.length) { _searchBlockStreak = 0; return out; }   // healthy result resets streak
+      if (out.length) { _searchBlockStreak = 0; _searchResults += out.length; return out; }   // healthy result resets streak
     } catch { /* try next engine */ }
     finally {
       try { await page?.close(); } catch {}

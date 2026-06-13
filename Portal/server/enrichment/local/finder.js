@@ -284,7 +284,7 @@ export async function enrichCompanies(companies, jobLog = null) {
     await closeRenderer();
   }
   const ss = searchState();
-  if (ss.disabled) jobLog?.(`  ⚠ Search ${ss.reason === 'blocked' ? 'was rate-limited' : 'hit its per-run cap'} (${ss.count} searches) — remaining companies used domain-guessing only.`);
+  if (hasBrowser) jobLog?.(`  Search diagnostic: ${ss.count} searches ran, returned ${ss.results} candidate result(s)${ss.disabled ? ` · DISABLED (${ss.reason})` : ''}.`);
   jobLog?.(`  ▸ Found ${done} website(s); ${noData} not found.`);
   return { done, no_data: noData, failed, usd: 0 };
 }
