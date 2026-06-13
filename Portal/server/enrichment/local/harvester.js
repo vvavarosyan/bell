@@ -122,10 +122,10 @@ export async function enrichCompany(company) {
 
   await markStage(company.id, 'running');
 
-  // 1) Homepage — plain fetch first (fast, $0). If it comes back as a near-empty
-  // JS shell, re-render it with a headless browser (if one is installed). The
-  // whole site is then crawled in the same mode.
-  let home = await fetchPage(homeUrl);
+  // 1) Homepage — plain fetch first (fast, $0; 1 retry on transient errors). If
+  // it comes back as a near-empty JS shell, re-render it with a headless browser
+  // (if one is installed). The whole site is then crawled in the same mode.
+  let home = await fetchPage(homeUrl, { retries: 1 });
   let renderMode = false;
   let renderTried = false;
 
@@ -137,6 +137,11 @@ export async function enrichCompany(company) {
   }
 
   if (!home.ok) {
+    // robots-blocked is a polite skip, not a failure — record it quietly.
+    if (home.error === 'robots_disallow') {
+      await markStage(company.id, 'no_data', { stage7_skip_reason: 'robots' });
+      return { status: 'no_data', reason: 'robots', usd: 0 };
+    }
     await markStage(company.id, 'failed', { stage7_error: home.error || 'home_unreachable' });
     return { status: 'failed', reason: home.error || 'home_unreachable', usd: 0 };
   }

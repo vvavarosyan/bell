@@ -145,6 +145,25 @@ export async function renderPage(url, { timeoutMs = 22_000, settleMs = 1500 } = 
 // marketplaces, encyclopedias, government portals. Skipped in search results.
 const SEARCH_SKIP_HOSTS = /(^|\.)(linkedin\.com|facebook\.com|instagram\.com|twitter\.com|x\.com|youtube\.com|tiktok\.com|wikipedia\.org|yelp\.com|yellowpages|bing\.com|google\.|duckduckgo\.com|microsoft\.com|amazon\.|glassdoor\.|indeed\.|crunchbase\.com|zoominfo\.com|dnb\.com|bloomberg\.com|traduora|qataryellowpages|qatarbusinessdirectory|gov\.qa|moci\.gov|qfc\.qa|qfz\.gov|baladiya)/i;
 
+// Signs a search engine is challenging us rather than returning results.
+const BLOCK_RX = /(captcha|unusual traffic|verify you are (a )?human|are you a robot|automated queries|anomaly|too many requests|access denied)/i;
+
+// Rate-limit guard state for one harvest run (reset by beginSearchSession()).
+const SEARCH_CAP = Number(process.env.BELL_SEARCH_CAP || 120);
+let _searchCount = 0;
+let _searchBlockStreak = 0;
+let _searchDisabled = false;
+let _searchDisabledReason = null;
+
+/** Reset the search rate-limit guard at the start of a run. */
+export function beginSearchSession() {
+  _searchCount = 0; _searchBlockStreak = 0; _searchDisabled = false; _searchDisabledReason = null;
+}
+/** Snapshot for end-of-run logging. */
+export function searchState() {
+  return { count: _searchCount, disabled: _searchDisabled, reason: _searchDisabledReason };
+}
+
 /**
  * Search the web for `query` via the shared headless browser and return up to
  * `limit` organic result URLs (company-site candidates). Tries Bing first, then
@@ -154,6 +173,12 @@ const SEARCH_SKIP_HOSTS = /(^|\.)(linkedin\.com|facebook\.com|instagram\.com|twi
 export async function searchWeb(query, { limit = 6, timeoutMs = 20_000 } = {}) {
   const pw = loadPlaywright();
   if (!pw || _launchFailed) return [];
+  if (_searchDisabled) return [];                       // rate-limited for this run
+  if (_searchCount >= SEARCH_CAP) {                     // per-run budget exhausted
+    _searchDisabled = true; _searchDisabledReason = 'cap_reached';
+    return [];
+  }
+  _searchCount++;
 
   const engines = [
     { url: 'https://www.bing.com/search?q=' + encodeURIComponent(query), sel: '#b_results .b_algo a[href^="http"]' },
@@ -176,6 +201,17 @@ export async function searchWeb(query, { limit = 6, timeoutMs = 20_000 } = {}) {
       await page.goto(eng.url, { waitUntil: 'domcontentloaded', timeout: timeoutMs });
       await page.waitForTimeout(1200);
 
+      // Detect a block/captcha page before trusting the results.
+      const bodyText = (await page.evaluate(() => document.body?.innerText || '').catch(() => '')).slice(0, 2000);
+      if (BLOCK_RX.test(bodyText)) {
+        _searchBlockStreak++;
+        // Exponential backoff, then disable search for the rest of the run if
+        // the engines keep challenging us (protects the Mac's IP overnight).
+        await new Promise(r => setTimeout(r, Math.min(15_000, 2000 * _searchBlockStreak)));
+        if (_searchBlockStreak >= 3) { _searchDisabled = true; _searchDisabledReason = 'blocked'; }
+        continue;   // try the next engine
+      }
+
       const hrefs = await page.$$eval(eng.sel, (els) => els.map(a => a.href)).catch(() => []);
       const out = [];
       const seenHost = new Set();
@@ -193,7 +229,7 @@ export async function searchWeb(query, { limit = 6, timeoutMs = 20_000 } = {}) {
         out.push(clean);
         if (out.length >= limit) break;
       }
-      if (out.length) return out;
+      if (out.length) { _searchBlockStreak = 0; return out; }   // healthy result resets streak
     } catch { /* try next engine */ }
     finally {
       try { await page?.close(); } catch {}

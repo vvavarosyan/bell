@@ -19,7 +19,7 @@
 import { query } from '../../db.js';
 import { recomputeBellScoreForCompany } from '../../assembly/bell_score.js';
 import { fetchPage, hostOf, pool } from './http.js';
-import { searchWeb, rendererAvailable, closeRenderer } from './render.js';
+import { searchWeb, rendererAvailable, closeRenderer, beginSearchSession, searchState } from './render.js';
 
 export const STAGE_LABEL = 'Local Engine 1 — Website Finder';
 export const TOOL_NAME   = 'local_website_finder';
@@ -169,10 +169,13 @@ export async function enrichCompany(company) {
   }
   await markStage(company.id, 'running');
 
+  // Domains we've previously cleared as wrong for this company — never re-save.
+  const rejected = rejectedSet(company);
+
   // 1) Domain guessing — fetch all candidates in parallel (https first wave,
   // then http for any that failed), then accept the first that verifies in
   // priority order. Much faster than sequential, and trims not_found latency.
-  const cands = domainCandidates(company.name);
+  const cands = domainCandidates(company.name).filter(d => !rejected.has(d.toLowerCase()));
   if (cands.length) {
     const httpsPages = await Promise.all(
       cands.map(d => fetchPage('https://' + d, { respectRobots: false, timeoutMs: 7000 }).catch(() => null)),
@@ -200,7 +203,8 @@ export async function enrichCompany(company) {
   if (await rendererAvailable()) {
     const results = await searchWeb(`${company.name} Qatar official website`, { limit: 6 });
     for (const url of results) {
-      const page = await fetchPage(url, { respectRobots: false, timeoutMs: 9000 });
+      if (rejected.has((hostOf(url) || '').toLowerCase())) continue;
+      const page = await fetchPage(url, { respectRobots: false, timeoutMs: 9000, retries: 1 });
       if (verifyMatch(page, company, { fromGuess: false })) {
         // Save the site root, not the deep result URL.
         let root = page.finalUrl;
@@ -214,7 +218,20 @@ export async function enrichCompany(company) {
   return { status: 'no_data', reason: 'not_found' };
 }
 
+/** Set of hosts previously cleared as wrong for this company (lower-cased). */
+function rejectedSet(company) {
+  const raw = company?.extra_fields?.website_rejected;
+  const arr = Array.isArray(raw) ? raw : [];
+  return new Set(arr.map(h => String(h).toLowerCase()));
+}
+
 async function saveWebsite(company, website, method) {
+  // Defensive: never save a host we've already rejected for this company.
+  const host = (hostOf(website) || '').toLowerCase();
+  if (host && rejectedSet(company).has(host)) {
+    await markStage(company.id, 'no_data', { stage8_skip_reason: 'rejected_host' });
+    return { status: 'no_data', reason: 'rejected_host' };
+  }
   await query(
     `UPDATE companies
         SET website = $2,
@@ -248,6 +265,7 @@ export async function enrichCompanies(companies, jobLog = null) {
   let done = 0, noData = 0, failed = 0, finished = 0;
   const total = companies.length;
   const hasBrowser = await rendererAvailable();
+  beginSearchSession();   // reset the search rate-limit guard for this run
   jobLog?.(`  Concurrency: ${CONCURRENCY} · Search tier: ${hasBrowser ? 'headless search enabled' : 'domain-guessing only (install headless browser for search)'}`);
   try {
     await pool(companies, CONCURRENCY, async (c) => {
@@ -265,6 +283,8 @@ export async function enrichCompanies(companies, jobLog = null) {
   } finally {
     await closeRenderer();
   }
+  const ss = searchState();
+  if (ss.disabled) jobLog?.(`  ⚠ Search ${ss.reason === 'blocked' ? 'was rate-limited' : 'hit its per-run cap'} (${ss.count} searches) — remaining companies used domain-guessing only.`);
   jobLog?.(`  ▸ Found ${done} website(s); ${noData} not found.`);
   return { done, no_data: noData, failed, usd: 0 };
 }
