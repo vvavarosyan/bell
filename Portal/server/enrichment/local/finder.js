@@ -140,10 +140,6 @@ export function verifyMatch(page, company, { fromGuess }) {
   if (REDIRECT_TRAP_HOSTS.test(host)) return false;
 
   const domainSlug = host.split('.')[0] || '';
-  const joined = tokens.join('');
-  const domainMatchesName = tokens.some(t => t.length >= 4 && domainSlug.includes(t))
-    || (joined.length >= 4 && domainSlug.includes(joined));
-  const hits = tokenHits(page, tokens);
 
   if (fromGuess) {
     // Only accept a guess for a DISTINCTIVE name (coined / full-name domain).
@@ -153,9 +149,15 @@ export function verifyMatch(page, company, { fromGuess }) {
     return true;
   }
 
-  // Search result: the domain is unrelated to the name, so require real overlap.
-  const need = tokens.length <= 1 ? 1 : 2;
-  return domainMatchesName || hits >= need;
+  // Search result: the domain is UNRELATED to the name by design, so a domain
+  // substring match is meaningless (calculator.io "matches" Cal Royal). Verify
+  // by CONTENT — the page must actually mention the company's distinctive words.
+  const sig = tokens.filter(t => t.length >= 4);
+  const blob = ((page.title || '') + ' ' + (page.text || '')).toLowerCase();
+  const pageHits = sig.filter(t => blob.includes(t)).length;
+  if (sig.length >= 2) return pageHits >= 2;                       // ≥2 distinctive words on the page
+  if (sig.length === 1) return blob.includes(sig[0]) && domainSlug.includes(sig[0]);  // single-word: need both
+  return false;                                                    // nothing distinctive to verify against
 }
 
 // ---------------------------------------------------------------------------

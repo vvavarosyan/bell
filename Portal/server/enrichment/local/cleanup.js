@@ -32,9 +32,16 @@ function classify(co, hasContacts, hasPeople) {
 
   const tokens = significantTokens(co.name);
   const domainSlug = host.split('.')[0] || '';
-  // Search-method finds were verified by page content we can't re-check
-  // statically; only flag them if the host is a trap (handled above).
+
+  // A guess must still be distinctive.
   if (co.method === 'guess' && !distinctiveGuess(tokens, domainSlug)) return 'wrong';
+
+  // Either method: if the domain shares NO distinctive word with the name, it's
+  // almost certainly the wrong site (calculator.io for "Cal Royal", mercedes for
+  // "G & E Industrial"). Static heuristic — can't re-check page content here.
+  const related = distinctiveGuess(tokens, domainSlug)
+    || tokens.some(t => t.length >= 5 && domainSlug.includes(t));
+  if (!related) return 'wrong';
 
   if (!hasContacts && !hasPeople) return 'empty';
   return 'ok';
