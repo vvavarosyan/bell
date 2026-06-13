@@ -37,15 +37,14 @@ function classify(co, hasContacts, hasPeople) {
     // A guess must still be distinctive (full-name / coined-token domain).
     if (!distinctiveGuess(tokens, domainSlug)) return 'wrong';
   } else {
-    // A search find must be brand-is-the-domain on a DISTINCTIVE (non-generic)
-    // word, or a full-name domain — same rule the live verifier now uses.
-    // Catches trustwallet / titannepal / smart.com / bayut etc. Can't re-check
-    // page content statically, so this is the domain-side of that test.
+    // A search find must satisfy the conservative rule: ≥2 distinctive words,
+    // reflected in the domain (full-name domain or ≥2 distinctive words in slug).
+    // Flags single-short-word collisions (fiba/excel/lama/closed) already saved.
     const distinctive = tokens.filter(t => t.length >= 4 && !GENERIC_WORDS.has(t));
-    const brand = distinctive.some(t => domainSlug === t || (domainSlug.startsWith(t) && domainSlug.length - t.length <= 2));
     const dj = distinctive.join('');
-    const fullName = dj.length >= 6 && domainSlug.includes(dj);
-    if (!brand && !fullName) return 'wrong';
+    const domHasJoin = dj.length >= 6 && domainSlug.includes(dj);
+    const domHasTwo  = distinctive.filter(t => domainSlug.includes(t)).length >= 2;
+    if (distinctive.length < 2 || (!domHasJoin && !domHasTwo)) return 'wrong';
   }
 
   if (!hasContacts && !hasPeople) return 'empty';

@@ -10,6 +10,7 @@ import {
   stageList,
 } from '../enrichment/orchestrator.js';
 import { auditFinderFinds, cleanupFinderFinds } from '../enrichment/local/cleanup.js';
+import { listCandidates, countPending, decideCandidate } from '../enrichment/local/candidates.js';
 
 const router = Router();
 
@@ -119,6 +120,26 @@ router.post('/sweep', async (req, res, next) => {
         jobs.fail(job.id, err);
       }
     })();
+  } catch (err) { next(err); }
+});
+
+// --- Website candidate review queue (search finds awaiting approval) ---------
+router.get('/website-candidates', async (req, res, next) => {
+  try {
+    const status = ['pending', 'approved', 'rejected', 'all'].includes(req.query.status) ? req.query.status : 'pending';
+    res.json({ rows: await listCandidates(status) });
+  } catch (err) { next(err); }
+});
+
+router.get('/website-candidates/count', async (req, res, next) => {
+  try { res.json({ count: await countPending() }); } catch (err) { next(err); }
+});
+
+router.post('/website-candidates/:id/decide', async (req, res, next) => {
+  try {
+    const admin = (await query(`SELECT value FROM settings WHERE key='admin_email'`)).rows[0]?.value || 'admin@local';
+    const result = await decideCandidate(Number(req.params.id), req.body?.action, admin);
+    res.json(result);
   } catch (err) { next(err); }
 });
 

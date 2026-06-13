@@ -147,6 +147,34 @@ export function distinctiveGuess(tokens, domainSlug) {
   return false;
 }
 
+/**
+ * MODERATE bar for SEARCH candidates that go to the human review queue (not
+ * auto-saved). Looser than the auto verifier — it surfaces plausible matches
+ * (the reviewer filters the rest) but still blocks obvious noise (a page that
+ * doesn't mention any distinctive company word, or a domain unrelated to it).
+ * Returns a short reason string if worthy, else null.
+ */
+export function candidateReason(page, company) {
+  if (!page || !page.ok) return null;
+  if (isParked(page)) return null;
+  const host = hostOf(page.finalUrl) || '';
+  if (!host || REDIRECT_TRAP_HOSTS.test(host)) return null;
+
+  const tokens = significantTokens(company.name);
+  const distinctive = tokens.filter(t => t.length >= 4 && !GENERIC_WORDS.has(t));
+  if (!distinctive.length) return null;                  // nothing distinctive to match on
+
+  const slug = host.split('.')[0] || '';
+  const blob = ((page.title || '') + ' ' + (page.text || '')).toLowerCase();
+  const onPage = distinctive.filter(t => blob.includes(t));
+  if (!onPage.length) return null;                       // page doesn't mention the company at all
+
+  const domRelated = distinctive.some(t => slug.includes(t));
+  if (domRelated && onPage.length >= 1) return `domain+${onPage.length} word(s)`;
+  if (onPage.length >= 2) return `${onPage.length} words on page`;
+  return null;
+}
+
 export function verifyMatch(page, company, { fromGuess }) {
   if (!page || !page.ok) return false;
   if (isParked(page)) return false;
@@ -167,26 +195,22 @@ export function verifyMatch(page, company, { fromGuess }) {
     return true;
   }
 
-  // Search result: the domain is UNRELATED to the name by design. Company names
-  // share GENERIC words (technology, trust, smart, building…) with unrelated
-  // global sites, so matching those causes false accepts (Titan→titannepal,
-  // Trust 360→trustwallet). The reliable signal: the company's DISTINCTIVE word
-  // must essentially BE the domain (Haeco→haeco.com), not merely appear inside a
-  // different one. Plus the page must mention it.
+  // Search result (CONSERVATIVE policy, chosen 2026-06-13): a single short word
+  // like "fiba", "excel", "lama" or "closed" is a famous OTHER company's domain,
+  // and name-only matching can't tell them apart. So we trust a search result
+  // ONLY when the company has ≥2 DISTINCTIVE (non-generic) words that both appear
+  // on the page AND are reflected in the domain (full-name domain, or ≥2
+  // distinctive words in the slug). Drops single-brand recall for precision.
   const distinctive = tokens.filter(t => t.length >= 4 && !GENERIC_WORDS.has(t));
-  if (!distinctive.length) return false;                  // only generic words → unverifiable
+  if (distinctive.length < 2) return false;
   const blob = ((page.title || '') + ' ' + (page.text || '')).toLowerCase();
   const onPage = distinctive.filter(t => blob.includes(t));
+  if (onPage.length < 2) return false;
 
-  // (a) brand-is-the-domain: a distinctive word equals the slug (or the slug is
-  //     that word + a ≤2-char tail), and it appears on the page.
-  if (onPage.some(t => domainSlug === t || (domainSlug.startsWith(t) && domainSlug.length - t.length <= 2))) return true;
-
-  // (b) full-name domain: slug contains the joined distinctive words + ≥2 on page.
   const dj = distinctive.join('');
-  if (dj.length >= 6 && domainSlug.includes(dj) && onPage.length >= 2) return true;
-
-  return false;
+  const domHasJoin = dj.length >= 6 && domainSlug.includes(dj);          // full-name domain
+  const domHasTwo  = distinctive.filter(t => domainSlug.includes(t)).length >= 2;
+  return domHasJoin || domHasTwo;
 }
 
 // ---------------------------------------------------------------------------
@@ -230,23 +254,36 @@ export async function enrichCompany(company) {
     }
   }
 
-  // 2) Search fallback (headless browser). Verify each candidate strictly.
+  // 2) Search fallback (headless browser). Search results are fuzzier than
+  // guesses (name collisions), so the best plausible one is PROPOSED to the
+  // human review queue — not auto-saved. The reviewer approves/rejects.
   if (await rendererAvailable()) {
     const results = await searchWeb(`${company.name} Qatar official website`, { limit: 6 });
     for (const url of results) {
       if (rejected.has((hostOf(url) || '').toLowerCase())) continue;
       const page = await fetchPage(url, { respectRobots: false, timeoutMs: 9000, retries: 1 });
-      if (verifyMatch(page, company, { fromGuess: false })) {
-        // Save the site root, not the deep result URL.
+      const reason = candidateReason(page, company);
+      if (reason) {
         let root = page.finalUrl;
         try { const u = new URL(page.finalUrl); u.pathname = '/'; u.search = ''; u.hash = ''; root = u.toString().replace(/\/$/, ''); } catch {}
-        return await saveWebsite(company, root, 'search');
+        await proposeCandidate(company.id, root, 'search:' + reason);
+        await markStage(company.id, 'candidate', { stage8_candidate: root });
+        return { status: 'candidate', candidate: root };
       }
     }
   }
 
   await markStage(company.id, 'no_data', { stage8_checked_at: new Date().toISOString() });
   return { status: 'no_data', reason: 'not_found' };
+}
+
+/** Queue a search-found URL for human review (one pending row per url). */
+async function proposeCandidate(companyId, url, reason) {
+  await query(`
+    INSERT INTO website_candidates (company_id, candidate_url, reason, status)
+    VALUES ($1, $2, $3, 'pending')
+    ON CONFLICT (company_id, candidate_url) DO NOTHING
+  `, [companyId, url, reason]);
 }
 
 /** Set of hosts previously cleared as wrong for this company (lower-cased). */
@@ -293,7 +330,7 @@ async function markStage(companyId, status, extras = null) {
 // ---------------------------------------------------------------------------
 
 export async function enrichCompanies(companies, jobLog = null) {
-  let done = 0, noData = 0, failed = 0, finished = 0;
+  let done = 0, noData = 0, failed = 0, candidates = 0, finished = 0;
   const total = companies.length;
   const hasBrowser = await rendererAvailable();
   beginSearchSession();   // reset the search rate-limit guard for this run
@@ -302,10 +339,14 @@ export async function enrichCompanies(companies, jobLog = null) {
     await pool(companies, CONCURRENCY, async (c) => {
       try {
         const r = await enrichCompany(c);
-        if (r.status === 'done') done++; else noData++;
-        const tag = r.status === 'done' ? '✓' : '·';
+        if (r.status === 'done') done++;
+        else if (r.status === 'candidate') candidates++;
+        else noData++;
+        const tag = r.status === 'done' ? '✓' : (r.status === 'candidate' ? '⊕' : '·');
         jobLog?.(`  ${tag} [${++finished}/${total}] ${c.name}` +
-          (r.website ? ` → ${r.website} (${r.method})` : ` — ${r.reason || 'not found'}`));
+          (r.website ? ` → ${r.website} (${r.method})`
+            : r.candidate ? ` → candidate: ${r.candidate} (review)`
+            : ` — ${r.reason || 'not found'}`));
       } catch (err) {
         failed++;
         jobLog?.(`  ✗ [${++finished}/${total}] ${c.name} — ${err.message}`);
@@ -316,6 +357,6 @@ export async function enrichCompanies(companies, jobLog = null) {
   }
   const ss = searchState();
   if (hasBrowser) jobLog?.(`  Search diagnostic: ${ss.count} searches ran, returned ${ss.results} candidate result(s)${ss.disabled ? ` · DISABLED (${ss.reason})` : ''}.`);
-  jobLog?.(`  ▸ Found ${done} website(s); ${noData} not found.`);
-  return { done, no_data: noData, failed, usd: 0 };
+  jobLog?.(`  ▸ Found ${done} website(s) (auto) · ${candidates} candidate(s) for review · ${noData} not found.`);
+  return { done, candidates, no_data: noData, failed, usd: 0 };
 }

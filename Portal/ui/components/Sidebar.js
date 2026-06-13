@@ -47,6 +47,7 @@ export const NAV_SECTIONS = [
       // for every customer; visible on admin.bell.qa.
       { id: 'sources',     label: 'Sources',     icon: 'sources',  placeholder: false, visibility: ['platform_admin'] },
       { id: 'detail-requests', label: 'Detail Requests', icon: 'inbox', placeholder: false, visibility: ['platform_admin'] },
+      { id: 'website-candidates', label: 'Website Review', icon: 'globe', placeholder: false, visibility: ['platform_admin'] },
       { id: 'approvals',   label: 'Research Approvals', icon: 'research', placeholder: false, visibility: ['platform_admin'] },
       { id: 'recent-jobs', label: 'Recent Jobs', icon: 'history',  placeholder: false, visibility: ['platform_admin'] },
       { id: 'sync',        label: 'Sync to Bell.qa', icon: 'sync', placeholder: false, visibility: ['platform_admin'] },
@@ -72,7 +73,7 @@ export const ADMIN_ONLY_NAV_IDS = new Set([
 // app.bell.qa AND admin.bell.qa to avoid dead 403 links. Mirrors the 'local'
 // tier in server/lib/capabilities.js.
 export const LOCAL_ENGINE_NAV_IDS = new Set([
-  'sources', 'recent-jobs', 'sync', 'dedup-queue', 'approvals',
+  'sources', 'recent-jobs', 'sync', 'dedup-queue', 'approvals', 'website-candidates',
 ]);
 
 /** True if an item should be shown to a user with the given role, in this mode. */
@@ -92,6 +93,7 @@ export const NAV_IDS = NAV_SECTIONS.flatMap(s => s.items.map(i => i.id));
 
 const ICONS = {
   inbox:     html`<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 12h-6l-2 3h-4l-2-3H2"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg>`,
+  globe:     html`<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><path d="M2 12h20M12 2a15 15 0 0 1 0 20M12 2a15 15 0 0 0 0 20"/></svg>`,
   feed:      html`<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 11a9 9 0 0 1 9 9"/><path d="M4 4a16 16 0 0 1 16 16"/><circle cx="5" cy="19" r="1" fill="currentColor"/></svg>`,
   insights:  html`<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="3 17 9 11 13 15 21 7"/><polyline points="14 7 21 7 21 14"/></svg>`,
   map:       html`<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 4l-6 2v14l6-2 6 2 6-2V4l-6 2-6-2z"/><path d="M9 4v14"/><path d="M15 6v14"/></svg>`,
