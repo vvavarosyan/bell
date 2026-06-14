@@ -7,10 +7,12 @@ import {
   runStageForCompanies,
   runFullEnrichment,
   runHarvestSweep,
+  runLocalEnginesForCompanies,
   stageList,
 } from '../enrichment/orchestrator.js';
 import { auditFinderFinds, cleanupFinderFinds } from '../enrichment/local/cleanup.js';
 import { listCandidates, countPending, decideCandidate } from '../enrichment/local/candidates.js';
+import { createLookup, runLookup, listLookups, approveLookup, enrichMatchLookup, rejectLookup } from '../enrichment/local/manual_lookup.js';
 
 const router = Router();
 
@@ -70,13 +72,33 @@ router.post('/run', async (req, res, next) => {
       return;
     }
 
+    if (mode === 'local') {
+      // Run all three local engines (Finder → Harvester → Mapper) on exactly
+      // the selected companies, in order. Local-only; $0.
+      const job = jobs.start({ kind: 'enrichment', source: 'local_engines' });
+      res.json({ job_id: job.id, status: job.status });
+      (async () => {
+        try {
+          const result = await runLocalEnginesForCompanies({
+            companyIds: ids,
+            triggeredBy: admin,
+            jobLog: (m) => jobs.log(job.id, m),
+          });
+          jobs.complete(job.id, result);
+        } catch (err) {
+          jobs.fail(job.id, err);
+        }
+      })();
+      return;
+    }
+
     if (mode === 'stage') {
       const n = Number(stage);
       // Stages 1-6 are wired and runnable independently. The Full Enrichment
       // path layers dependency gates between them, but a SINGLE-stage run has
       // no inter-stage prereqs — each stage handles its own input checks
       // (Stage 6 silently skips companies without a website, etc.).
-      if (![1, 2, 3, 4, 5, 6, 7, 8].includes(n)) return res.status(400).json({ error: 'stage must be 1-8' });
+      if (![1, 2, 3, 4, 5, 6, 7, 8, 9].includes(n)) return res.status(400).json({ error: 'stage must be 1-9' });
       const job = jobs.start({ kind: 'enrichment', source: 'stage' + n });
       res.json({ job_id: job.id, status: job.status });
       (async () => {
@@ -95,7 +117,7 @@ router.post('/run', async (req, res, next) => {
       return;
     }
 
-    return res.status(400).json({ error: 'mode must be "stage" or "full"' });
+    return res.status(400).json({ error: 'mode must be "stage", "full", or "local"' });
   } catch (err) { next(err); }
 });
 
@@ -123,6 +145,85 @@ router.post('/sweep', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+// GET /api/enrichment/harvest-history?limit= — past local-engine runs, newest
+// first, with the structured result so the UI can render summary cards. Covers
+// the automatic Harvest Sweep, the manual "Engines 1–3 on selected" run, and
+// individual engine stages. Reads persisted job_runs (survives restarts).
+router.get('/harvest-history', async (req, res, next) => {
+  try {
+    const limit = Math.min(Number(req.query.limit ?? 50), 200);
+    const r = await query(`
+      SELECT id, source, status, started_at, completed_at, total_messages, result, error, triggered_by
+        FROM job_runs
+       WHERE kind = 'enrichment'
+         AND source IN ('harvest_sweep','local_engines','stage7','stage8','stage9','manual_lookup')
+       ORDER BY started_at DESC NULLS LAST
+       LIMIT $1
+    `, [limit]);
+    res.json({ rows: r.rows });
+  } catch (err) { next(err); }
+});
+
+// --- Manual Company Lookup (type a name → engines find everything → approve) --
+// POST /api/enrichment/manual-lookup { name } — starts a background lookup.
+router.post('/manual-lookup', async (req, res, next) => {
+  try {
+    const name = String(req.body?.name || '').trim();
+    if (name.length < 2) return res.status(400).json({ error: 'name required' });
+    const admin = (await query(`SELECT value FROM settings WHERE key='admin_email'`)).rows[0]?.value || 'admin@local';
+    const lookupId = await createLookup(name, admin);
+    const job = jobs.start({ kind: 'enrichment', source: 'manual_lookup' });
+    res.json({ job_id: job.id, lookup_id: lookupId, status: job.status });
+    (async () => {
+      try {
+        const result = await runLookup(lookupId, name, { jobLog: (m) => jobs.log(job.id, m) });
+        jobs.complete(job.id, { lookup_id: lookupId, ...result });
+      } catch (err) { jobs.fail(job.id, err); }
+    })();
+  } catch (err) { next(err); }
+});
+
+// GET /api/enrichment/manual-lookups?status=
+router.get('/manual-lookups', async (req, res, next) => {
+  try {
+    const allowed = ['running', 'pending', 'matched', 'approved', 'rejected', 'error', 'all'];
+    const status = allowed.includes(req.query.status) ? req.query.status : 'all';
+    res.json({ rows: await listLookups(status) });
+  } catch (err) { next(err); }
+});
+
+// POST /api/enrichment/manual-lookups/:id/decide { action: 'approve' | 'reject' }
+// Approve runs in the background (it creates + enriches a real company); reject
+// is immediate.
+router.post('/manual-lookups/:id/decide', async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) return res.status(400).json({ error: 'bad id' });
+    const admin = (await query(`SELECT value FROM settings WHERE key='admin_email'`)).rows[0]?.value || 'admin@local';
+    const action = req.body?.action;
+    if (action === 'approve') {
+      const job = jobs.start({ kind: 'enrichment', source: 'manual_lookup' });
+      res.json({ job_id: job.id });
+      (async () => {
+        try { jobs.complete(job.id, await approveLookup(id, admin, { jobLog: (m) => jobs.log(job.id, m) })); }
+        catch (err) { jobs.fail(job.id, err); }
+      })();
+      return;
+    }
+    if (action === 'enrich_match') {
+      const job = jobs.start({ kind: 'enrichment', source: 'manual_lookup' });
+      res.json({ job_id: job.id });
+      (async () => {
+        try { jobs.complete(job.id, await enrichMatchLookup(id, admin, { jobLog: (m) => jobs.log(job.id, m) })); }
+        catch (err) { jobs.fail(job.id, err); }
+      })();
+      return;
+    }
+    if (action === 'reject') return res.json(await rejectLookup(id, admin));
+    return res.status(400).json({ error: 'action must be "approve", "enrich_match", or "reject"' });
+  } catch (err) { next(err); }
+});
+
 // --- Website candidate review queue (search finds awaiting approval) ---------
 router.get('/website-candidates', async (req, res, next) => {
   try {
@@ -140,6 +241,35 @@ router.post('/website-candidates/:id/decide', async (req, res, next) => {
     const admin = (await query(`SELECT value FROM settings WHERE key='admin_email'`)).rows[0]?.value || 'admin@local';
     const result = await decideCandidate(Number(req.params.id), req.body?.action, admin);
     res.json(result);
+  } catch (err) { next(err); }
+});
+
+// GET /api/enrichment/relationships/:companyId — Engine 3 network edges for a
+// company, in BOTH directions (as source and as target), for the drawer.
+router.get('/relationships/:companyId', async (req, res, next) => {
+  try {
+    const id = Number(req.params.companyId);
+    if (!Number.isFinite(id)) return res.status(400).json({ error: 'bad company id' });
+    const out = await query(`
+      SELECT r.id, r.relation_type, r.discovered_via, r.confidence, r.country_status,
+             r.target_name, r.target_domain, r.source_url, r.updated_at,
+             r.target_company_id, r.target_candidate_id,
+             tc.name AS target_company_name, tc.bin AS target_company_bin,
+             rc.kind AS candidate_kind
+        FROM company_relationships r
+        LEFT JOIN companies tc ON tc.id = r.target_company_id
+        LEFT JOIN research_candidates rc ON rc.id = r.target_candidate_id
+       WHERE r.source_company_id = $1
+       ORDER BY r.relation_type, r.confidence DESC NULLS LAST, r.target_name`, [id]);
+    const incoming = await query(`
+      SELECT r.id, r.relation_type, r.discovered_via, r.confidence,
+             sc.id AS source_company_id, sc.name AS source_company_name, sc.bin AS source_company_bin,
+             r.updated_at
+        FROM company_relationships r
+        JOIN companies sc ON sc.id = r.source_company_id
+       WHERE r.target_company_id = $1
+       ORDER BY r.relation_type, sc.name`, [id]);
+    res.json({ outgoing: out.rows, incoming: incoming.rows });
   } catch (err) { next(err); }
 });
 

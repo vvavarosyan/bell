@@ -279,7 +279,7 @@ export function PeopleTab({ mode = 'local-admin' } = {}) {
 function PhotoCell({ person }) {
   const url = person?.profile_picture_url;
   if (url) {
-    return html`<img src=${url} class="company-logo" style=${{width:'24px',height:'24px'}} alt="" loading="lazy" />`;
+    return html`<img src=${url} class="company-logo" style=${{width:'24px',height:'24px'}} alt="" loading="lazy" referrerpolicy="no-referrer" onError=${(e) => { e.currentTarget.style.display = 'none'; }} />`;
   }
   const initial = (person?.full_name || '?').trim().charAt(0).toUpperCase() || '?';
   let h = 0;

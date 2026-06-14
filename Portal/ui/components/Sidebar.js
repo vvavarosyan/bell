@@ -48,8 +48,10 @@ export const NAV_SECTIONS = [
       { id: 'sources',     label: 'Sources',     icon: 'sources',  placeholder: false, visibility: ['platform_admin'] },
       { id: 'detail-requests', label: 'Detail Requests', icon: 'inbox', placeholder: false, visibility: ['platform_admin'] },
       { id: 'website-candidates', label: 'Website Review', icon: 'globe', placeholder: false, visibility: ['platform_admin'] },
+      { id: 'manual-lookup', label: 'Manual Lookup', icon: 'search', placeholder: false, visibility: ['platform_admin'] },
       { id: 'approvals',   label: 'Research Approvals', icon: 'research', placeholder: false, visibility: ['platform_admin'] },
       { id: 'recent-jobs', label: 'Recent Jobs', icon: 'history',  placeholder: false, visibility: ['platform_admin'] },
+      { id: 'harvest-history', label: 'Harvest History', icon: 'history', placeholder: false, visibility: ['platform_admin'] },
       { id: 'sync',        label: 'Sync to Bell.qa', icon: 'sync', placeholder: false, visibility: ['platform_admin'] },
       { id: 'billing',     label: 'Billing',     icon: 'history',  placeholder: false, visibility: 'all' },
       { id: 'account',     label: 'Settings',    icon: 'gear',     placeholder: false, visibility: 'all' },
@@ -74,6 +76,7 @@ export const ADMIN_ONLY_NAV_IDS = new Set([
 // tier in server/lib/capabilities.js.
 export const LOCAL_ENGINE_NAV_IDS = new Set([
   'sources', 'recent-jobs', 'sync', 'dedup-queue', 'approvals', 'website-candidates',
+  'manual-lookup', 'harvest-history',
 ]);
 
 /** True if an item should be shown to a user with the given role, in this mode. */
@@ -102,6 +105,7 @@ const ICONS = {
   people:    html`<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="9" cy="8" r="3"/><path d="M3 21v-2a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v2"/><circle cx="17" cy="9" r="2.5"/><path d="M21 21v-1.5a3.5 3.5 0 0 0-3.5-3.5"/></svg>`,
   briefcase: html`<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="7" width="20" height="14" rx="2"/><path d="M9 7V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v3"/></svg>`,
   database:  html`<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v6c0 1.7 3.6 3 8 3s8-1.3 8-3V5"/><path d="M4 11v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"/></svg>`,
+  search:    html`<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>`,
   crm:       html`<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 18 0 9 9 0 0 0-18 0z"/><path d="M12 7v5l3 2"/></svg>`,
   research:  html`<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-5-5"/></svg>`,
   team:      html`<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="3"/><circle cx="5" cy="12" r="2"/><circle cx="19" cy="12" r="2"/><path d="M3 19a3 3 0 0 1 4-2.8"/><path d="M21 19a3 3 0 0 0-4-2.8"/><path d="M6 21v-1a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v1"/></svg>`,

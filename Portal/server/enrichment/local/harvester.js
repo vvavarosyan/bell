@@ -24,19 +24,20 @@ import { query } from '../../db.js';
 import { upsertContact } from '../../lib/contacts.js';
 import { recomputeBellScoreForCompany } from '../../assembly/bell_score.js';
 import { inferSeniority } from '../seniority.js';
-import { fetchPage, toRootUrl, sameHost, pool } from './http.js';
+import { fetchPage, toRootUrl, sameHost, hostOf, pool } from './http.js';
 import { renderPage, rendererAvailable, closeRenderer } from './render.js';
 import {
-  findEmails, findPhones, findSocials,
+  findEmails, findPhones, findSocials, preferOwnEmails,
   guessAddress, extractTeam, extractPartners, pickLogo,
+  inferIndustry, extractFoundedYear, bestDescription,
 } from './extract.js';
 
 export const STAGE_LABEL = 'Local Engine 2 — Website Harvester';
 export const TOOL_NAME   = 'local_website_harvester';
 
-const MAX_PAGES        = 7;      // homepage + up to 6 discovered pages
+const MAX_PAGES        = 9;      // homepage + up to 8 discovered pages (incl. partners/clients)
 const JS_SHELL_CHARS   = 400;    // homepage text shorter than this ⇒ JS-rendered shell
-const CONCURRENCY      = Number(process.env.BELL_HARVESTER_CONCURRENCY || 5);
+const CONCURRENCY      = Number(process.env.BELL_HARVESTER_CONCURRENCY || 7);
 const SOURCE           = 'stage7-website';
 
 // Page-path hints, grouped by what we expect to mine there.
@@ -66,6 +67,9 @@ const GUESS_PATHS = [
   { path: '/about-us',   kind: 'about'   },
   { path: '/our-team',   kind: 'team'    },
   { path: '/team',       kind: 'team'    },
+  { path: '/partners',    kind: 'partner' },
+  { path: '/clients',     kind: 'partner' },
+  { path: '/our-clients', kind: 'partner' },
 ];
 
 function guessPages(homeUrl) {
@@ -171,13 +175,22 @@ export async function enrichCompany(company) {
   const allMailto = pages.flatMap(p => p.page.mailto);
   const allTel    = pages.flatMap(p => p.page.tel);
 
-  // 4) Extract.
-  const emails  = [...new Set([...allMailto, ...findEmails(allText)])];
-  const phones  = findPhones(allText, allTel);
+  // 4) Extract. Keep contacts that plausibly belong to THIS company:
+  //    - emails: same domain as the site, or webmail (drops footer-credit /
+  //      client emails on other companies' domains);
+  //    - phones: deduped by digits (collapses format variants), capped;
+  //    - socials: capped per platform inside findSocials.
+  const siteDomain = (hostOf(home.finalUrl) || '').replace(/^www\./, '');
+  const emails  = preferOwnEmails([...new Set([...allMailto, ...findEmails(allText)])], siteDomain, 12);
+  const phones  = findPhones(allText, allTel).slice(0, 10);
   const socials = findSocials(allText, allLinks);
   const address = guessAddress(allText);
   const logo    = pickLogo(pages[0].page.meta);
-  const description = pages[0].page.meta.description || null;
+  const homeMeta = pages[0].page.meta || {};
+  const description = bestDescription(homeMeta, allText);
+  const keywords = homeMeta.keywords || null;
+  const industry = inferIndustry(`${homeMeta.title || ''} ${description || ''} ${keywords || ''} ${allText.slice(0, 4000)}`);
+  const foundedYear = extractFoundedYear(allText);
 
   // Team people only from team/about pages (least noisy).
   const teamPages = pages.filter(p => p.kind === 'team' || p.kind === 'about');
@@ -185,11 +198,15 @@ export async function enrichCompany(company) {
     ? dedupeByName(teamPages.flatMap(p => extractTeam(p.page.text).map(t => ({ ...t, url: p.url }))))
     : [];
 
-  // Partners only from partner pages.
+  // Partners/clients: dedicated partner pages (whole page is the logo wall),
+  // PLUS a "partners / clients / trusted by" SECTION on the homepage or about
+  // page — that's where most sites (e.g. Q7Software Solutions) list them.
   const partnerPages = pages.filter(p => p.kind === 'partner');
-  const partners = partnerPages.length
-    ? [...new Set(partnerPages.flatMap(p => extractPartners(p.page.html)))].slice(0, 60)
-    : [];
+  const sectionPages = pages.filter(p => p.kind === 'home' || p.kind === 'about');
+  const partners = [...new Set([
+    ...partnerPages.flatMap(p => extractPartners(p.page.html)),
+    ...sectionPages.flatMap(p => extractPartners(p.page.html, 60, { sectionOnly: true })),
+  ])].slice(0, 60);
 
   // 5) Persist contacts (provenance = the page each was found on, best-effort).
   const homeProv = pages[0].url;
@@ -208,7 +225,7 @@ export async function enrichCompany(company) {
   }
 
   // 6) Company-level fields (only fill blanks — never overwrite curated data).
-  await fillCompanyBlanks(company.id, { address, logo, description });
+  await fillCompanyBlanks(company.id, { address, logo, description, industry, foundedYear, keywords });
 
   // 7) People + partners.
   const peopleAdded = await persistTeam(company.id, team);
@@ -268,7 +285,7 @@ function dedupeByName(rows) {
 }
 
 /** Only set address / website logo / description when the column is currently empty. */
-async function fillCompanyBlanks(companyId, { address, logo, description }) {
+async function fillCompanyBlanks(companyId, { address, logo, description, industry, foundedYear, keywords }) {
   if (address) {
     await query(
       `UPDATE companies SET address = $2
@@ -276,9 +293,23 @@ async function fillCompanyBlanks(companyId, { address, logo, description }) {
       [companyId, address.slice(0, 300)],
     );
   }
+  if (industry) {
+    await query(
+      `UPDATE companies SET industry = $2
+       WHERE id = $1 AND (industry IS NULL OR btrim(industry) = '')`,
+      [companyId, String(industry).slice(0, 80)],
+    );
+  }
+  if (foundedYear) {
+    await query(
+      `UPDATE companies SET founded_year = $2 WHERE id = $1 AND founded_year IS NULL`,
+      [companyId, foundedYear],
+    );
+  }
   const extra = {};
   if (logo)        extra.website_logo_url    = logo;
   if (description) extra.website_description  = description.slice(0, 1000);
+  if (keywords)    extra.website_keywords     = String(keywords).slice(0, 500);
   if (Object.keys(extra).length) {
     // jsonb || only adds/overwrites these keys; existing fields untouched.
     await query(

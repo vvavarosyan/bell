@@ -52,6 +52,10 @@ const STAGE_INFO = {
     short: 'Engine 1 · Find Website',
     desc:  'Local Engine 1 — Website Finder (Bell\'s own engine, $0). Finds the official website for companies that have none: guesses domains from the company name, then falls back to a headless web search; only saves a site that verifies against the name. Run this before Engine 2.',
   },
+  9: {
+    short: 'Engine 3 · Map Network',
+    desc:  'Local Engine 3 — Network Mapper (Bell\'s own engine, $0). Maps each company\'s business network: partners & clients (from its partner pages + outbound logo links), affiliates / parent / subsidiary (from about-page text), and competitors (same-industry Qatar companies + a web search). New companies are routed by country — confirmed-Qatar auto-enters Bell, non-Qatar goes to the International holding pen, uncertain goes to pending approval. Run after Engine 2.',
+  },
 };
 const FULL_ENRICHMENT_TOOLTIP =
   'Run all 6 stages in dependency order: Stage 1 + Stage 5 in parallel first, then Stages 2/3/4 once a LinkedIn URL is found, then Stage 6 once a website is known. Companies without LinkedIn after Stage 1 skip 2/3/4 to save credits.';
@@ -214,7 +218,9 @@ export function CompaniesTab({ archivedMode: initialArchived = false, mode = 'lo
     if (ids.length === 0) return;
     try {
       const r = await api.runEnrichment({ mode, stage, company_ids: ids });
-      const title = mode === 'full' ? `Full Enrichment · ${ids.length}` : `Stage ${stage} · ${ids.length}`;
+      const title = mode === 'full'  ? `Full Enrichment · ${ids.length}`
+                  : mode === 'local' ? `Engines 1–3 · ${ids.length}`
+                  : `Stage ${stage} · ${ids.length}`;
       setActiveJob({ id: r.job_id, title });
       toast(`${title} started`);
     } catch (err) { toast(err.message, 'error'); }
@@ -344,8 +350,10 @@ export function CompaniesTab({ archivedMode: initialArchived = false, mode = 'lo
           </button>
           ${isLocalEngine ? html`
             <span class="bulk-divider" style=${{ opacity: 0.4, margin: '0 2px' }}>│</span>
+            <button class="accent" onClick=${() => runEnrich({ mode: 'local' })} title="Run all three local engines on the selected companies, in order: Engine 1 (Find Website) → Engine 2 (Harvest Site) → Engine 3 (Map Network). $0, idempotent.">Engines 1–3 ▶</button>
             <button class="accent" onClick=${() => runEnrich({ mode: 'stage', stage: 8 })} title=${STAGE_INFO[8]?.desc}>${STAGE_INFO[8].short} ▶</button>
             <button class="accent" onClick=${() => runEnrich({ mode: 'stage', stage: 7 })} title=${STAGE_INFO[7]?.desc}>${STAGE_INFO[7].short} ▶</button>
+            <button class="accent" onClick=${() => runEnrich({ mode: 'stage', stage: 9 })} title=${STAGE_INFO[9]?.desc}>${STAGE_INFO[9].short} ▶</button>
           ` : null}
         ` : null}
         <button class="accent" onClick=${runBulkReveal} title="Reveal contact details · 1 credit each (already-revealed are free)">Reveal contacts ▶</button>

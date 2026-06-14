@@ -158,6 +158,8 @@ const COMPANY_GROUPS = [
       ['stage8_at',     '   at'],
       ['stage7_status', 'Local Engine 2 — Website Harvester'],
       ['stage7_at',     '   at'],
+      ['stage9_status', 'Local Engine 3 — Network Mapper'],
+      ['stage9_at',     '   at'],
     ],
   },
   {
@@ -282,6 +284,7 @@ export function CompanyDetail({ companyId, onMutated, onDeleted, canHardDelete =
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [similar, setSimilar] = useState([]);
+  const [rels, setRels] = useState(null);
   const [tab, setTab] = useState('company');
   const bodyRef = useRef(null);
 
@@ -298,18 +301,20 @@ export function CompanyDetail({ companyId, onMutated, onDeleted, canHardDelete =
   };
 
   useEffect(() => {
-    if (!companyId) { setData(null); setSimilar([]); return; }
+    if (!companyId) { setData(null); setSimilar([]); setRels(null); return; }
     let cancelled = false;
     (async () => {
       setLoading(true);
       try {
-        const [r, sim] = await Promise.all([
+        const [r, sim, rel] = await Promise.all([
           api.company(companyId),
           api.similarBySource(companyId).catch(() => ({ rows: [] })),
+          isLocalEngine ? api.relationships(companyId).catch(() => ({ outgoing: [], incoming: [] })) : Promise.resolve({ outgoing: [], incoming: [] }),
         ]);
         if (!cancelled) {
           setData(r);
           setSimilar(sim.rows || []);
+          setRels(rel);
         }
       } catch (err) {
         if (!cancelled) toast('Load failed: ' + err.message, 'error');
@@ -383,7 +388,7 @@ export function CompanyDetail({ companyId, onMutated, onDeleted, canHardDelete =
             ${c.needs_review ? html`<span class="pill" style=${{borderColor:'rgb(91 140 255)',color:'rgb(91 140 255)'}} title="Disappeared from a source — needs an admin decision">needs review</span>` : null}
           </div>
         </div>
-        <div style=${{gap:'6px', alignSelf:'flex-start', display: isLocalEngine ? 'flex' : 'none'}}>
+        <div style=${{gap:'6px', alignSelf:'flex-start', flexShrink: 0, display: isLocalEngine ? 'flex' : 'none'}}>
           <button
             class="linkbtn"
             style=${{padding:'4px 10px', borderRadius:'5px',
@@ -471,7 +476,7 @@ export function CompanyDetail({ companyId, onMutated, onDeleted, canHardDelete =
       </div>
 
       <div class="detail-body" ref=${bodyRef}>
-        ${tab === 'company' ? html`<${CompanyTab} company=${c} extra=${extra} similar=${similar} contacts=${data.contacts || []} onReload=${reload} needsReveal=${needsReveal} onReveal=${revealContacts} isUser=${isUser} isLocalEngine=${isLocalEngine} />` : null}
+        ${tab === 'company' ? html`<${CompanyTab} company=${c} extra=${extra} similar=${similar} relationships=${rels} contacts=${data.contacts || []} onReload=${reload} needsReveal=${needsReveal} onReveal=${revealContacts} isUser=${isUser} isLocalEngine=${isLocalEngine} />` : null}
         ${tab === 'people'  ? html`<${PeopleView}  people=${data.people} isUser=${isUser} onReveal=${revealPerson} />` : null}
         ${tab === 'intel'   ? html`<${IntelTab} financials=${data.financials || []} shareholders=${data.shareholders || []} partnerships=${data.partnerships || []} />` : null}
         ${tab === 'legal'   ? html`<${LegalTab}    sources=${sources} extra=${extra} isUser=${isUser} />` : null}
@@ -480,7 +485,7 @@ export function CompanyDetail({ companyId, onMutated, onDeleted, canHardDelete =
   `;
 }
 
-function CompanyTab({ company, extra, similar, contacts, onReload, needsReveal = false, onReveal, isUser = false, isLocalEngine = false }) {
+function CompanyTab({ company, extra, similar, relationships, contacts, onReload, needsReveal = false, onReveal, isUser = false, isLocalEngine = false }) {
   const saveField = async (field, value) => {
     try {
       await api.updateCompany(company.id, { [field]: value });
@@ -622,6 +627,16 @@ function CompanyTab({ company, extra, similar, contacts, onReload, needsReveal =
         </section>
       `)}
 
+      ${(extra.website_description || extra.website_keywords) ? html`
+        <section class="group" key="from-website">
+          <h3>From the website</h3>
+          <dl>
+            ${extra.website_description ? html`<div class="kv"><dt>Description</dt><dd>${extra.website_description}</dd></div>` : null}
+            ${extra.website_keywords ? html`<div class="kv"><dt>Keywords</dt><dd>${extra.website_keywords}</dd></div>` : null}
+          </dl>
+        </section>
+      ` : null}
+
       ${Object.keys(linkedinExtras).length > 0 ? html`
         <section class="group" key="more-linkedin">
           <h3>More LinkedIn details</h3>
@@ -681,8 +696,76 @@ function CompanyTab({ company, extra, similar, contacts, onReload, needsReveal =
           </ul>
         </section>
       ` : null}
+
+      ${isLocalEngine ? html`<${NetworkSection} relationships=${relationships} />` : null}
     </div>
   `;
+}
+
+// Engine 3 — the company's mapped business network. Admin/local-only: edges can
+// point at International / pending candidates that customers must never see, so
+// the whole section is gated to the local engine.
+const REL_GROUPS = [
+  ['partner',    'Partners & clients'],
+  ['client',     'Clients'],
+  ['parent',     'Parent / owner'],
+  ['affiliate',  'Affiliates'],
+  ['subsidiary', 'Subsidiaries'],
+  ['competitor', 'Competitors'],
+];
+const COUNTRY_BADGE = {
+  qatar:     { label: 'Qatar · live',     color: 'var(--green)' },
+  existing:  { label: 'in Bell',          color: 'var(--green)' },
+  non_qatar: { label: 'International',     color: 'var(--amber)' },
+  uncertain: { label: 'pending',          color: 'rgb(91 140 255)' },
+};
+
+function NetworkSection({ relationships }) {
+  const out = relationships?.outgoing || [];
+  const inc = relationships?.incoming || [];
+  if (!out.length && !inc.length) {
+    return html`<section class="group" key="network"><h3>Network (Engine 3)</h3>
+      <div class="muted small">No relationships mapped yet. Run Engine 3 · Map Network.</div></section>`;
+  }
+  const byType = (t) => out.filter(r => r.relation_type === t);
+  return html`
+    <section class="group" key="network" style=${{borderColor:'var(--accent, #5b8cff)'}}>
+      <h3>Network (Engine 3) — ${out.length} edge${out.length === 1 ? '' : 's'}</h3>
+      ${REL_GROUPS.map(([type, label]) => {
+        const rows = byType(type);
+        if (!rows.length) return null;
+        return html`
+          <div key=${type} style=${{marginBottom:'8px'}}>
+            <div class="muted small" style=${{marginBottom:'3px', textTransform:'uppercase', letterSpacing:'.04em'}}>${label} (${rows.length})</div>
+            <ul class="similar-list">
+              ${rows.map(r => {
+                const badge = COUNTRY_BADGE[r.country_status] || null;
+                const name = r.target_company_name || r.target_name;
+                return html`<li key=${r.id}>
+                  <div class="similar-row" style=${{display:'flex', gap:'6px', alignItems:'center', flexWrap:'wrap'}}>
+                    ${r.target_company_id
+                      ? html`<strong>${name}</strong>${r.target_company_bin ? html`<span class="muted small">${r.target_company_bin}</span>` : null}`
+                      : html`<span>${name}</span>`}
+                    ${r.target_domain ? html`<a class="muted small" href=${'https://' + r.target_domain} target="_blank" rel="noreferrer">${r.target_domain}</a>` : null}
+                    ${badge ? html`<span class="pill" style=${{borderColor:badge.color, color:badge.color, fontSize:'10px'}}>${badge.label}</span>` : null}
+                    <span class="muted small">· ${r.discovered_via || ''}${r.confidence ? ' · ' + r.confidence : ''}</span>
+                  </div>
+                </li>`;
+              })}
+            </ul>
+          </div>`;
+      })}
+      ${inc.length ? html`
+        <div style=${{marginTop:'6px'}}>
+          <div class="muted small" style=${{marginBottom:'3px', textTransform:'uppercase', letterSpacing:'.04em'}}>Referenced by (${inc.length})</div>
+          <ul class="similar-list">
+            ${inc.map(r => html`<li key=${'in'+r.id}>
+              <div class="similar-row"><strong>${r.source_company_name}</strong>
+                <span class="muted small"> — lists this company as ${r.relation_type}</span></div>
+            </li>`)}
+          </ul>
+        </div>` : null}
+    </section>`;
 }
 
 function PeopleView({ people, isUser = false, onReveal }) {

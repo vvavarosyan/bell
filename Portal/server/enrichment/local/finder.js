@@ -24,7 +24,7 @@ import { searchWeb, rendererAvailable, closeRenderer, beginSearchSession, search
 export const STAGE_LABEL = 'Local Engine 1 — Website Finder';
 export const TOOL_NAME   = 'local_website_finder';
 
-const CONCURRENCY = Number(process.env.BELL_FINDER_CONCURRENCY || 6);
+const CONCURRENCY = Number(process.env.BELL_FINDER_CONCURRENCY || 8);
 const TLDS = ['com', 'com.qa', 'qa', 'net'];
 
 // Words stripped from a company name before slugifying to a domain.
@@ -74,22 +74,48 @@ export function significantTokens(name) {
     .filter(t => t && t.length >= 2 && !LEGAL_STOP.has(t) && !/^\d+$/.test(t));
 }
 
+// For DOMAIN generation we keep descriptor words ("solutions", "trading",
+// "services") and geo ("qatar", "doha") — they're usually IN the real domain —
+// and drop only legal forms + connectors. This is why "Q7Software Solutions"
+// must yield q7softwaresolutions.com, not just q7software.com.
+const FULLSLUG_DROP = new Set([
+  'llc', 'wll', 'qfz', 'qstp', 'fzc', 'fze', 'fzco', 'fzllc', 'plc', 'ltd', 'limited',
+  'inc', 'corp', 'co', 'est', 'sa', 'spc', 'psc', 'qpsc', 'qsc', 'bsc', 'spa', 'gmbh',
+  'pvt', 'the', 'and', 'for', 'of', 'a', 'an',
+]);
+
+/** Full-name slug: every meaningful token joined (only legal forms/connectors dropped). */
+export function fullNameSlug(name) {
+  const toks = String(name || '')
+    .toLowerCase()
+    .replace(/&/g, ' and ')
+    .replace(/[^a-z0-9\s]/g, ' ')
+    .split(/\s+/)
+    .filter(t => t && !FULLSLUG_DROP.has(t));
+  const slug = toks.join('');
+  return (slug.length >= 6 && slug.length <= 40) ? slug : null;
+}
+
 /** Candidate domain slugs (most-distinctive first). */
 export function nameSlugs(name) {
   const toks = significantTokens(name);
-  if (!toks.length) return [];
   const slugs = [];
-  const all = toks.join('');
-  if (all.length >= 3 && all.length <= 30) slugs.push(all);
-  if (toks.length >= 2) {
-    const two = (toks[0] + toks[1]);
-    if (two.length >= 4 && two.length <= 30 && two !== all) slugs.push(two);
-  }
-  if (toks.length === 1 && toks[0].length >= 4) { /* already in `all` */ }
-  // Acronym for 3+ word names (e.g. "Qatar National Bank" → qnb) — only if short.
-  if (toks.length >= 3) {
-    const acr = toks.map(t => t[0]).join('');
-    if (acr.length >= 3 && acr.length <= 5) slugs.push(acr);
+  // Full-name domain FIRST — it's the single most common real domain
+  // (e.g. q7softwaresolutions.com, binjumahmarine.com).
+  const full = fullNameSlug(name);
+  if (full) slugs.push(full);
+  if (toks.length) {
+    const all = toks.join('');
+    if (all.length >= 3 && all.length <= 30 && !slugs.includes(all)) slugs.push(all);
+    if (toks.length >= 2) {
+      const two = (toks[0] + toks[1]);
+      if (two.length >= 4 && two.length <= 30 && !slugs.includes(two)) slugs.push(two);
+    }
+    // Acronym for 3+ word names (e.g. "Qatar National Bank" → qnb) — only if short.
+    if (toks.length >= 3) {
+      const acr = toks.map(t => t[0]).join('');
+      if (acr.length >= 3 && acr.length <= 5 && !slugs.includes(acr)) slugs.push(acr);
+    }
   }
   return [...new Set(slugs)];
 }

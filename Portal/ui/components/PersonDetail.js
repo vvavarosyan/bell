@@ -71,7 +71,7 @@ function logoCircle(person, size = 44) {
   for (const ch of String(person?.full_name || '')) h = (h * 31 + ch.charCodeAt(0)) | 0;
   const hue = Math.abs(h) % 360;
   if (url) {
-    return html`<img src=${url} class="company-logo" style=${{width:size+'px',height:size+'px'}} alt="photo" loading="lazy" />`;
+    return html`<img src=${url} class="company-logo" style=${{width:size+'px',height:size+'px'}} alt="photo" loading="lazy" referrerpolicy="no-referrer" onError=${(e) => { e.currentTarget.style.display = 'none'; }} />`;
   }
   return html`<span class="company-logo placeholder"
     style=${{width:size+'px', height:size+'px', background:`hsl(${hue}, 45%, 35%)`, fontSize:Math.round(size*0.5)+'px'}}
