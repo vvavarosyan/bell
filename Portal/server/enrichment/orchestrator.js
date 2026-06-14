@@ -17,6 +17,7 @@ import * as stage5 from './stages/stage5.js';
 import * as stage6 from './stages/stage6.js';
 import * as stage7 from './local/harvester.js';
 import * as stage8 from './local/finder.js';
+import * as stage9 from './local/relationships.js';
 
 const STAGES = {
   1: { module: stage1, label: 'Stage 1 — LinkedIn Discovery',         tool: 'firecrawl_spark_pro' },
@@ -27,6 +28,7 @@ const STAGES = {
   6: { module: stage6, label: 'Stage 6 — Website Contacts',           tool: 'firecrawl_website_scrape' },
   7: { module: stage7, label: 'Local Engine 2 — Website Harvester',   tool: 'local_website_harvester' },
   8: { module: stage8, label: 'Local Engine 1 — Website Finder',      tool: 'local_website_finder' },
+  9: { module: stage9, label: 'Local Engine 3 — Network Mapper',      tool: 'local_relationship_mapper' },
 };
 
 // (No more placeholders — every stage is implemented.)
@@ -38,7 +40,7 @@ function stageInfo(stage) {
 
 /** All stages with implemented flag and label — for the UI. */
 export function stageList() {
-  return [1, 2, 3, 4, 5, 6, 7, 8].map(n => ({
+  return [1, 2, 3, 4, 5, 6, 7, 8, 9].map(n => ({
     stage: n,
     label:  (STAGES[n] || PLACEHOLDERS[n]).label,
     implemented: !!STAGES[n],
@@ -361,17 +363,74 @@ export async function runHarvestSweep({ limit = 100, triggeredBy = null, jobLog 
     jobLog?.(`  Phase 2 — no un-harvested companies with a website. Skipping.`);
   }
 
+  // Phase 3 — map the business network (partners/affiliates/competitors) for
+  // companies that have a website but were never mapped (includes any harvested
+  // in Phase 2). Run AFTER harvest so logos/partner pages are already known.
+  const mapRows = await query(
+    `SELECT id FROM companies
+      WHERE COALESCE(archived, false) = false AND is_active IS NOT false
+        AND website IS NOT NULL AND btrim(website) <> ''
+        AND stage9_at IS NULL
+      ORDER BY bell_score ASC, id ASC
+      LIMIT $1`, [cap]);
+  const mapIds = mapRows.rows.map(r => r.id);
+  let mapped = { done: 0, no_data: 0, failed: 0 };
+  if (mapIds.length) {
+    jobLog?.(`  Phase 3 — Engine 3 (Network Mapper) on ${mapIds.length} company(ies) with a website…`);
+    mapped = await safeRun(() => runStageForCompanies({ stage: 9, companyIds: mapIds, triggeredBy, jobLog: (m) => jobLog?.('  [E3] ' + m) })).then(unwrap);
+  } else {
+    jobLog?.(`  Phase 3 — no un-mapped companies with a website. Skipping.`);
+  }
+
   // How much frontier remains, so the admin knows whether to run again.
   const remain = await query(
     `SELECT
        (SELECT count(*) FROM companies WHERE COALESCE(archived,false)=false AND is_active IS NOT false AND (website IS NULL OR btrim(website)='') AND stage8_at IS NULL) AS find_left,
-       (SELECT count(*) FROM companies WHERE COALESCE(archived,false)=false AND is_active IS NOT false AND website IS NOT NULL AND btrim(website)<>'' AND stage7_at IS NULL) AS harvest_left`);
-  const { find_left, harvest_left } = remain.rows[0] || {};
-  jobLog?.(`▸▸▸ Sweep complete. Found ${find?.done || 0} site(s); harvested ${harvest?.done || 0}. Remaining — to find: ${find_left}, to harvest: ${harvest_left}.`);
+       (SELECT count(*) FROM companies WHERE COALESCE(archived,false)=false AND is_active IS NOT false AND website IS NOT NULL AND btrim(website)<>'' AND stage7_at IS NULL) AS harvest_left,
+       (SELECT count(*) FROM companies WHERE COALESCE(archived,false)=false AND is_active IS NOT false AND website IS NOT NULL AND btrim(website)<>'' AND stage9_at IS NULL) AS map_left`);
+  const { find_left, harvest_left, map_left } = remain.rows[0] || {};
+  jobLog?.(`▸▸▸ Sweep complete. Found ${find?.done || 0} site(s); harvested ${harvest?.done || 0}; mapped ${mapped?.done || 0}. Remaining — to find: ${find_left}, to harvest: ${harvest_left}, to map: ${map_left}.`);
 
   return {
     found: find?.done || 0, find_attempted: findIds.length,
     harvested: harvest?.done || 0, harvest_attempted: harvestIds.length,
-    find_left: Number(find_left || 0), harvest_left: Number(harvest_left || 0),
+    mapped: mapped?.done || 0, map_attempted: mapIds.length,
+    find_left: Number(find_left || 0), harvest_left: Number(harvest_left || 0), map_left: Number(map_left || 0),
+  };
+}
+
+/**
+ * Run all three LOCAL engines (Engine 1 Website Finder → Engine 2 Website
+ * Harvester → Engine 3 Network Mapper) over a SPECIFIC, admin-selected set of
+ * companies — the manual counterpart to the automatic Harvest Sweep. Unlike the
+ * sweep (which picks the frontier itself by Bell Score), this runs on exactly
+ * the ids passed in, in order, so a freshly-found website is harvested and
+ * mapped in the same pass. Each engine no-ops on companies it can't act on
+ * (Finder skips those that already have a site; Harvester/Mapper skip those with
+ * none). Fully local, $0, idempotent.
+ */
+export async function runLocalEnginesForCompanies({ companyIds, triggeredBy = null, jobLog = null }) {
+  const ids = (companyIds || []).map(Number).filter(Number.isFinite);
+  jobLog?.(`▸▸▸ Local Engines 1–3 on ${ids.length} selected compan${ids.length === 1 ? 'y' : 'ies'}`);
+  if (!ids.length) {
+    jobLog?.(`  ⊘ No companies selected.`);
+    return { selected: 0, found: 0, harvested: 0, mapped: 0 };
+  }
+
+  jobLog?.(`  Engine 1 — Website Finder (acts only on companies with no site)…`);
+  const find = await safeRun(() => runStageForCompanies({ stage: 8, companyIds: ids, triggeredBy, jobLog: (m) => jobLog?.('  [E1] ' + m) })).then(unwrap);
+
+  jobLog?.(`  Engine 2 — Website Harvester…`);
+  const harvest = await safeRun(() => runStageForCompanies({ stage: 7, companyIds: ids, triggeredBy, jobLog: (m) => jobLog?.('  [E2] ' + m) })).then(unwrap);
+
+  jobLog?.(`  Engine 3 — Network Mapper…`);
+  const mapped = await safeRun(() => runStageForCompanies({ stage: 9, companyIds: ids, triggeredBy, jobLog: (m) => jobLog?.('  [E3] ' + m) })).then(unwrap);
+
+  jobLog?.(`▸▸▸ Done. Found ${find?.done || 0} site(s); harvested ${harvest?.done || 0}; mapped ${mapped?.done || 0}.`);
+  return {
+    selected: ids.length,
+    found: find?.done || 0, find_attempted: find?.total || 0,
+    harvested: harvest?.done || 0, harvest_attempted: harvest?.total || 0,
+    mapped: mapped?.done || 0, map_attempted: mapped?.total || 0,
   };
 }

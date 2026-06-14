@@ -36,6 +36,44 @@ export function findEmails(text) {
   return out;
 }
 
+// Free webmail providers. A company contact on one of these is legit (many
+// Qatar SMEs use webmail), but an email on a DIFFERENT company's domain is
+// almost always a footer credit ("site by webteck.com"), a client, or a
+// partner — not the company's own address.
+const FREEMAIL = new Set([
+  'gmail.com', 'googlemail.com', 'hotmail.com', 'hotmail.co.uk', 'outlook.com',
+  'live.com', 'yahoo.com', 'yahoo.co.uk', 'ymail.com', 'icloud.com', 'me.com',
+  'aol.com', 'protonmail.com', 'proton.me', 'mail.com', 'gmx.com', 'zoho.com',
+]);
+
+export function emailDomain(email) {
+  const m = String(email || '').toLowerCase().match(/@([^@\s]+)$/);
+  return m ? m[1] : '';
+}
+
+/**
+ * Keep only emails that plausibly belong to THIS company: same registrable
+ * domain as the site, or a free-webmail address. Drops emails on other company
+ * domains (the classic "designed by webteck.com" / client-email pollution).
+ * Own-domain first, then webmail, capped. If no site domain is known, returns
+ * the deduped input (capped).
+ */
+export function preferOwnEmails(emails, siteDomain = '', cap = 12) {
+  const list = [...new Set((emails || []).map(e => String(e).toLowerCase()))];
+  const sd = String(siteDomain || '').toLowerCase().replace(/^www\./, '');
+  if (!sd) return list.slice(0, cap);
+  const ranked = [];
+  for (const e of list) {
+    const d = emailDomain(e);
+    const own  = d === sd || d.endsWith('.' + sd) || sd.endsWith('.' + d);
+    const free = FREEMAIL.has(d);
+    if (!own && !free) continue;                 // other-company domain → drop
+    ranked.push({ e, rank: own ? 0 : 1 });
+  }
+  ranked.sort((a, b) => a.rank - b.rank);
+  return ranked.slice(0, cap).map(x => x.e);
+}
+
 // ===========================================================================
 // Phones
 // ===========================================================================
@@ -64,23 +102,27 @@ function acceptPhone(rawMatch, fullText, matchIndex) {
 export function findPhones(text, telLinks = []) {
   const seen = new Set();
   const out = [];
-  const push = (display, value) => {
-    if (!value || seen.has(value)) return;
-    seen.add(value);
-    out.push({ display, value });
+  // Dedup by DIGITS ONLY, so the same number in different formats
+  // (+447340337123, (+44)7340337123, 447340337123, "UK: +44 7340 337123")
+  // collapses into ONE entry instead of three.
+  const push = (display, digits, hadPlus) => {
+    if (!digits || seen.has(digits)) return;
+    seen.add(digits);
+    out.push({ display, value: (hadPlus ? '+' : '') + digits });
   };
   // tel: links are high-confidence — accept directly.
   for (const t of telLinks || []) {
-    const digits = String(t).replace(/[^\d]/g, '');
+    const s = String(t).trim();
+    const digits = s.replace(/[^\d]/g, '');
     if (digits.length < 8 || digits.length > 15) continue;
-    push(String(t).trim(), (String(t).trim().startsWith('+') ? '+' : '') + digits);
+    push(s, digits, s.startsWith('+'));
   }
   if (text) {
     for (const m of text.matchAll(PHONE_RX)) {
       const raw = m[0], idx = m.index ?? 0;
       if (!acceptPhone(raw, text, idx)) continue;
-      const digits = raw.replace(/[^\d]/g, '');
-      push(raw.trim(), (raw.trim().startsWith('+') ? '+' : '') + digits);
+      const trimmed = raw.trim();
+      push(trimmed, trimmed.replace(/[^\d]/g, ''), trimmed.startsWith('+'));
     }
   }
   return out;
@@ -105,6 +147,8 @@ const SOCIAL_JUNK = /\/(sharer|share|intent|home|login|signup|hashtag|explore|po
 export function findSocials(text, links = []) {
   const out = [];
   const seen = new Set();
+  const counts = {};
+  const PER_PLATFORM = 3;   // a real company rarely has >3 profiles per network
   const haystack = (text || '') + '\n' + (links || []).join('\n');
   for (const { name, rx } of SOCIAL_PATTERNS) {
     for (const raw of haystack.match(rx) || []) {
@@ -120,6 +164,9 @@ export function findSocials(text, links = []) {
       if (/facebook\.com\/(people|pages|pg|groups|watch|marketplace|events|profile\.php|sharer)\/?$/i.test(clean)) continue;
       if (seen.has(clean)) continue;
       seen.add(clean);
+      // Cap per platform so a page full of partner/team/share links can't flood
+      // the record with dozens of Facebooks/Instagrams.
+      if ((counts[name] = (counts[name] || 0) + 1) > PER_PLATFORM) continue;
       out.push({ network: name, url: clean });
     }
   }
@@ -232,21 +279,36 @@ const PARTNER_ALT_JUNK = /\b(logo|icon|image|photo|banner|placeholder|avatar|fac
  * attributes (logo walls) and prominent link text. Returns string[] (names).
  * Conservative — stored for review, never auto-merged.
  */
-export function extractPartners(html, cap = 60) {
+export function extractPartners(html, cap = 60, { sectionOnly = false } = {}) {
   if (!html) return [];
   const seen = new Set();
   const out = [];
-  for (const m of html.matchAll(/<img\b[^>]*\balt\s*=\s*["']([^"']+)["']/gi)) {
-    let alt = m[1].replace(/\s+/g, ' ').trim();
-    alt = alt.replace(/\s*(logo|icon|image)\s*$/i, '').trim();
-    if (alt.length < 2 || alt.length > 60) continue;
-    if (PARTNER_ALT_JUNK.test(alt)) continue;
-    if (!/[A-Za-z؀-ۿ]/.test(alt)) continue;
-    const key = alt.toLowerCase();
-    if (seen.has(key)) continue;
-    seen.add(key);
-    out.push(alt);
-    if (out.length >= cap) break;
+  const pull = (region) => {
+    for (const m of region.matchAll(/<img\b[^>]*\balt\s*=\s*["']([^"']+)["']/gi)) {
+      let alt = m[1].replace(/\s+/g, ' ').trim();
+      alt = alt.replace(/\s*(logo|icon|image)\s*$/i, '').trim();
+      if (alt.length < 2 || alt.length > 60) continue;
+      if (PARTNER_ALT_JUNK.test(alt)) continue;
+      if (!/[A-Za-z؀-ۿ]/.test(alt)) continue;
+      const key = alt.toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(alt);
+      if (out.length >= cap) return;
+    }
+  };
+  if (sectionOnly) {
+    // For a general page (homepage/about), only pull logos that sit within a
+    // "partners / clients / trusted by / sponsors / brands" section — avoids
+    // grabbing hero/banner images as fake partners.
+    const rx = /\b(our\s+partners?|our\s+clients?|our\s+customers?|valued\s+clients?|trusted\s+by|partners?|clients?|sponsors?|brands?\s+we\s+work\s+with|we\s+work\s+with)\b/gi;
+    let m;
+    while ((m = rx.exec(html)) && out.length < cap) {
+      pull(html.slice(m.index, m.index + 6000));
+    }
+  } else {
+    // Dedicated partners page — the whole page is the logo wall.
+    pull(html);
   }
   return out;
 }
@@ -262,4 +324,72 @@ export function pickLogo(meta) {
   if (!cand) return null;
   if (/\.(svg|png|jpe?g|webp|ico|gif)(\?|$)/i.test(cand) || /og:image|image|logo|icon/i.test(cand)) return cand;
   return cand;  // accept anyway — better than nothing
+}
+
+// ===========================================================================
+// Industry / founded year / description  (richer company profile)
+// ===========================================================================
+
+// Keyword → industry map for a precision-first guess. Checked against the page
+// title + meta description + keywords + body text. Conservative.
+const INDUSTRY_KEYWORDS = {
+  'Information Technology': ['software', 'web development', 'app development', 'mobile app', 'saas', ' erp ', ' crm ', 'cloud', 'cyber security', 'cybersecurity', 'it solutions', 'it services', 'information technology', 'digital solutions', 'web design', 'data analytics', 'software solutions'],
+  'Construction & Contracting': ['contracting', 'construction', 'civil works', ' mep ', 'fit-out', 'fit out', 'joinery', 'infrastructure', 'turnkey'],
+  'Oil & Gas': ['oil and gas', 'oil & gas', 'petroleum', 'drilling', 'offshore', 'refinery', 'upstream', 'downstream'],
+  'Healthcare': ['medical center', 'clinic', 'hospital', 'healthcare', 'pharmacy', 'dental', 'nursing', 'diagnostic', 'polyclinic'],
+  'Engineering': ['engineering services', 'mechanical engineering', 'electrical engineering', 'consulting engineers', 'mep engineering'],
+  'Logistics & Transport': ['logistics', 'freight', 'shipping', 'cargo', 'warehousing', 'supply chain', 'customs clearance', 'freight forwarding'],
+  'Marketing & Advertising': ['advertising', 'marketing agency', 'branding', 'signage', 'printing press', 'digital marketing', 'media production'],
+  'Hospitality & F&B': ['restaurant', 'catering', 'hospitality', 'food and beverage', ' f&b '],
+  'Real Estate': ['real estate', 'property management', 'realty', 'leasing', 'brokerage'],
+  'Consulting': ['consultancy', 'management consulting', 'advisory services', 'business consulting'],
+  'Manufacturing': ['manufacturing', 'fabrication', 'production facility', 'factory'],
+  'Trading & Distribution': ['trading', 'import & export', 'import and export', 'distributor', 'wholesale', 'general supplies'],
+  'Security Services': ['security services', 'surveillance', 'cctv', 'manpower security'],
+  'Facilities & Cleaning': ['facilities management', 'cleaning services', 'pest control', 'maintenance services'],
+  'Education & Training': ['training center', 'academy', 'institute', 'e-learning', 'educational'],
+  'Automotive': ['automotive', 'spare parts', 'auto repair', 'tyres', 'car service'],
+};
+
+/** Best-guess industry from a text blob, or null if nothing clearly matches. */
+export function inferIndustry(blob) {
+  const hay = ' ' + String(blob || '').toLowerCase().replace(/\s+/g, ' ') + ' ';
+  if (hay.length < 6) return null;
+  let best = null, bestN = 0;
+  for (const [industry, kws] of Object.entries(INDUSTRY_KEYWORDS)) {
+    let n = 0;
+    for (const kw of kws) if (hay.includes(kw)) n++;
+    if (n > bestN) { bestN = n; best = industry; }
+  }
+  return bestN >= 1 ? best : null;
+}
+
+/** First credible "founded/established YYYY" year on the page (1900..now), or null. */
+export function extractFoundedYear(text) {
+  if (!text) return null;
+  const now = new Date().getFullYear();
+  const rx = /\b(?:established|founded|incorporated|operating since|in business since|since|est\.?)\s*(?:in)?\s*[:\-]?\s*((?:19|20)\d{2})\b/gi;
+  let m;
+  while ((m = rx.exec(text))) {
+    const y = Number(m[1]);
+    if (y >= 1900 && y <= now) return y;
+  }
+  return null;
+}
+
+/**
+ * Best one-line company description: the meta/og description if present, else
+ * the first substantial, sentence-like line from the page text (80–400 chars).
+ */
+export function bestDescription(meta, text) {
+  const md = (meta && meta.description ? String(meta.description) : '').trim();
+  if (md.length >= 40) return md.slice(0, 500);
+  for (const lineRaw of String(text || '').split(/\n+/)) {
+    const line = lineRaw.trim();
+    if (line.length < 80 || line.length > 400) continue;
+    if (!/[a-z]/i.test(line)) continue;
+    if (!/\b(we|our|is a|provides?|offers?|specialis|specializ|leading|established|company|services|solutions)\b/i.test(line)) continue;
+    return line.slice(0, 500);
+  }
+  return md || null;
 }

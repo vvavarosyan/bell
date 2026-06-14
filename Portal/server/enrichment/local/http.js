@@ -129,7 +129,7 @@ export function extractMailtoTel(html) {
 
 /** Pull <title> + a small map of useful <meta>/<link rel> values. */
 export function extractMeta(html, baseUrl) {
-  const meta = { title: null, description: null, ogImage: null, ogSiteName: null, icon: null };
+  const meta = { title: null, description: null, keywords: null, ogImage: null, ogSiteName: null, icon: null };
   if (!html) return meta;
 
   const t = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
@@ -139,6 +139,7 @@ export function extractMeta(html, baseUrl) {
   meta.description = grab(/<meta[^>]+name\s*=\s*["']description["'][^>]+content\s*=\s*["']([^"']*)["']/i)
                   || grab(/<meta[^>]+property\s*=\s*["']og:description["'][^>]+content\s*=\s*["']([^"']*)["']/i);
   meta.ogSiteName  = grab(/<meta[^>]+property\s*=\s*["']og:site_name["'][^>]+content\s*=\s*["']([^"']*)["']/i);
+  meta.keywords    = grab(/<meta[^>]+name\s*=\s*["']keywords["'][^>]+content\s*=\s*["']([^"']*)["']/i);
 
   const ogImg = grab(/<meta[^>]+property\s*=\s*["']og:image(?::url)?["'][^>]+content\s*=\s*["']([^"']*)["']/i)
              || grab(/<meta[^>]+name\s*=\s*["']twitter:image["'][^>]+content\s*=\s*["']([^"']*)["']/i);

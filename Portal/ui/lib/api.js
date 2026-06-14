@@ -115,7 +115,13 @@ export const api = {
   websiteCandidates:      (status = 'pending') => request('/api/enrichment/website-candidates?status=' + status),
   websiteCandidatesCount: () => request('/api/enrichment/website-candidates/count'),
   decideWebsiteCandidate: (id, action) => request(`/api/enrichment/website-candidates/${id}/decide`, { method: 'POST', body: JSON.stringify({ action }) }),
+  relationships:          (companyId) => request('/api/enrichment/relationships/' + companyId),
   enrichmentJob:          (id, since = 0) => request(`/api/enrichment/jobs/${id}?since=${since}`),
+  harvestHistory:         (limit = 50) => request('/api/enrichment/harvest-history?limit=' + limit),
+  // Manual Company Lookup — type a name, local engines find everything, approve/reject.
+  manualLookups:          (status = 'all') => request('/api/enrichment/manual-lookups?status=' + status),
+  startManualLookup:      (name) => request('/api/enrichment/manual-lookup', { method: 'POST', body: JSON.stringify({ name }) }),
+  decideManualLookup:     (id, action) => request(`/api/enrichment/manual-lookups/${id}/decide`, { method: 'POST', body: JSON.stringify({ action }) }),
 
   // Assembly (Phase 5)
   assemblyStats:          () => request('/api/assembly/stats'),
