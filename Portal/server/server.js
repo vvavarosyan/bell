@@ -49,6 +49,7 @@ import feedRouter              from './routes/feed.js';
 import crmRouter               from './routes/crm.js';
 import crmInboundRouter        from './routes/crm_inbound.js';
 import detailRequestsRouter    from './routes/detail_requests.js';
+import notificationsRouter     from './routes/notifications.js';
 import { requireAuth, requireRole, requireActiveSubscription } from './lib/auth.js';
 import { getKey } from './keychain.js';
 
@@ -160,6 +161,9 @@ app.use('/api/stats',      requireAuth, statsRouter);
 app.use('/api/credits',    requireAuth, creditsRouter);
 // Account — the signed-in user's own profile / notifications / preferences.
 app.use('/api/account',    requireAuth, accountRouter);
+// Notifications — in-app center + admin announcement broadcast. requireAuth only
+// (no subscription gate) so the header bell always loads, like credits/stats.
+app.use('/api/notifications', requireAuth, notificationsRouter);
 
 // Local-engine-only tools — these read local directory files and/or originate
 // canonical data, so they run ONLY on Val's Mac (blocked on app AND admin).

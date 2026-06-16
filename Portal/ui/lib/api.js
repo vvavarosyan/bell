@@ -123,6 +123,13 @@ export const api = {
   startManualLookup:      (name) => request('/api/enrichment/manual-lookup', { method: 'POST', body: JSON.stringify({ name }) }),
   decideManualLookup:     (id, action) => request(`/api/enrichment/manual-lookups/${id}/decide`, { method: 'POST', body: JSON.stringify({ action }) }),
 
+  // Notifications
+  notifications:            (params = {}) => request('/api/notifications?' + new URLSearchParams(params)),
+  notificationsUnread:      () => request('/api/notifications/unread-count'),
+  markNotificationRead:     (id) => request(`/api/notifications/${id}/read`, { method: 'POST', body: '{}' }),
+  markAllNotificationsRead: () => request('/api/notifications/read-all', { method: 'POST', body: '{}' }),
+  sendAnnouncement:         (body) => request('/api/notifications/announce', { method: 'POST', body: JSON.stringify(body) }),
+
   // Assembly (Phase 5)
   assemblyStats:          () => request('/api/assembly/stats'),
   assemblyAudit:          () => request('/api/assembly/audit'),
