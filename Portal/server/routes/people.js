@@ -139,7 +139,12 @@ router.get('/', async (req, res, next) => {
              profile_picture_url,
              extra_fields, bell_score,
              is_revealed, revealed_at,
-             created_at, updated_at, archived
+             created_at, updated_at, archived,
+             (SELECT c.name FROM person_companies pc
+                JOIN companies c ON c.id = pc.company_id
+               WHERE pc.person_id = people.id
+               ORDER BY pc.is_current DESC NULLS LAST, pc.start_date DESC NULLS LAST
+               LIMIT 1) AS current_company
       FROM people
       ${whereSql}
       ORDER BY bell_score DESC, id DESC
