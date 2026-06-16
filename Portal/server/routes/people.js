@@ -40,6 +40,9 @@ export async function maskPeople(req, rows) {
   for (const r of rows) {
     const ok = revealed.has(Number(r.id));
     r.revealed_by_tenant = ok;
+    // Photos are ADMIN-ONLY — never exposed to customers (admins bypass this
+    // path via bypassesCredits above). Customers see initials avatars.
+    r.profile_picture_url = null;
     if (!ok) {
       // Keep AVAILABILITY (so the user sees what exists) but hide the VALUE.
       r.email_locked = !!r.email;

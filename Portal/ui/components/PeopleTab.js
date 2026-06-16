@@ -277,15 +277,18 @@ export function PeopleTab({ mode = 'local-admin' } = {}) {
 }
 
 function PhotoCell({ person }) {
+  // The photo URL is ADMIN-ONLY (the API strips it for customers, who get
+  // initials). When present, show the photo layered over the initials base so
+  // an expired LinkedIn URL falls back to initials.
   const url = person?.profile_picture_url;
-  if (url) {
-    return html`<img src=${url} class="company-logo" style=${{width:'24px',height:'24px'}} alt="" loading="lazy" referrerpolicy="no-referrer" onError=${(e) => { e.currentTarget.style.display = 'none'; }} />`;
-  }
   const initial = (person?.full_name || '?').trim().charAt(0).toUpperCase() || '?';
   let h = 0;
   for (const ch of String(person?.full_name || '')) h = (h * 31 + ch.charCodeAt(0)) | 0;
   const hue = Math.abs(h) % 360;
-  return html`<span class="company-logo placeholder"
-    style=${{width:'24px', height:'24px', background:`hsl(${hue}, 45%, 35%)`, fontSize:'12px'}}
-  >${initial}</span>`;
+  const phStyle = { width:'24px', height:'24px', background:`hsl(${hue}, 45%, 35%)`, fontSize:'12px' };
+  if (!url) return html`<span class="company-logo placeholder" style=${phStyle}>${initial}</span>`;
+  return html`<span style=${{position:'relative', display:'inline-block', width:'24px', height:'24px', verticalAlign:'middle'}}>
+    <span class="company-logo placeholder" style=${{...phStyle, position:'absolute', inset:0}}>${initial}</span>
+    <img src=${url} class="company-logo" style=${{position:'absolute', inset:0, width:'24px', height:'24px'}} alt="" loading="lazy" referrerpolicy="no-referrer" onError=${(e) => { e.currentTarget.style.display = 'none'; }} />
+  </span>`;
 }

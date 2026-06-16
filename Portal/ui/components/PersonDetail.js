@@ -65,17 +65,19 @@ const PROFILE_GROUPS = [
 ];
 
 function logoCircle(person, size = 44) {
+  // Photo URL is ADMIN-ONLY (API strips it for customers → initials). When
+  // present, layer the photo over the initials base; an expired URL → initials.
   const url = person?.profile_picture_url;
   const initial = (person?.full_name || '?').trim().charAt(0).toUpperCase() || '?';
   let h = 0;
   for (const ch of String(person?.full_name || '')) h = (h * 31 + ch.charCodeAt(0)) | 0;
   const hue = Math.abs(h) % 360;
-  if (url) {
-    return html`<img src=${url} class="company-logo" style=${{width:size+'px',height:size+'px'}} alt="photo" loading="lazy" referrerpolicy="no-referrer" onError=${(e) => { e.currentTarget.style.display = 'none'; }} />`;
-  }
-  return html`<span class="company-logo placeholder"
-    style=${{width:size+'px', height:size+'px', background:`hsl(${hue}, 45%, 35%)`, fontSize:Math.round(size*0.5)+'px'}}
-  >${initial}</span>`;
+  const phStyle = { width:size+'px', height:size+'px', background:`hsl(${hue}, 45%, 35%)`, fontSize:Math.round(size*0.5)+'px' };
+  if (!url) return html`<span class="company-logo placeholder" style=${phStyle}>${initial}</span>`;
+  return html`<span style=${{position:'relative', display:'inline-block', width:size+'px', height:size+'px'}}>
+    <span class="company-logo placeholder" style=${{...phStyle, position:'absolute', inset:0}}>${initial}</span>
+    <img src=${url} class="company-logo" style=${{position:'absolute', inset:0, width:size+'px', height:size+'px'}} alt="photo" loading="lazy" referrerpolicy="no-referrer" onError=${(e) => { e.currentTarget.style.display = 'none'; }} />
+  </span>`;
 }
 
 export function PersonDetail({ personId, onMutated, isUser = false }) {
