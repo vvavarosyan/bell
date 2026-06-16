@@ -92,7 +92,7 @@ function websiteUrl(c) {
   return /^https?:\/\//i.test(s) ? s : 'https://' + s;
 }
 
-export function ContactIcons({ company }) {
+export function ContactIcons({ company, showWebsite = true }) {
   const email     = pickEmail(company);
   const phone     = pickPhone(company);
   const emailCt   = countByType(company, 'email') || (company.email ? 1 : 0);
@@ -107,8 +107,8 @@ export function ContactIcons({ company }) {
   const phoneLocked = !phone && (!!company.phone_locked || phoneCt > 0);
 
   const items = [
-    { key: 'website',   label: 'Website',   href: website,
-      has: !!website, count: 0, tooltipExtra: website },
+    ...(showWebsite ? [{ key: 'website', label: 'Website', href: website,
+      has: !!website, count: 0, tooltipExtra: website }] : []),
     { key: 'email',     label: 'Email',     href: email ? 'mailto:' + email : null,
       has: !!email || emailLocked, locked: emailLocked, count: emailCt, tooltipExtra: email },
     { key: 'phone',     label: 'Phone',     href: phone ? 'tel:' + String(phone).replace(/\s+/g, '') : null,

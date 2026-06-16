@@ -203,10 +203,13 @@ export function PeopleTab({ mode = 'local-admin' } = {}) {
         <table class="grid">
           <colgroup>
             <col style=${{width:'30px'}} />
-            <col style=${{width:'38px'}} />
-            <col style=${{width:'220px'}} />
-            <col />
-            <col style=${{width:'140px'}} />
+            <col style=${{width:'34px'}} />
+            <col style=${{width:'200px'}} />
+            <col style=${{width:'230px'}} />
+            <col style=${{width:'122px'}} />
+            <col style=${{width:'58px'}} />
+            <col style=${{width:'96px'}} />
+            <col style=${{width:'auto'}} />
           </colgroup>
           <thead>
             <tr>
@@ -217,10 +220,13 @@ export function PeopleTab({ mode = 'local-admin' } = {}) {
               <th>Name</th>
               <th>Headline</th>
               <th>Contacts</th>
+              <th>Score</th>
+              <th>${isUser ? 'Reveal' : ''}</th>
+              <th class="flex"></th>
             </tr>
           </thead>
           <tbody>
-            ${rows.length === 0 && !loading ? html`<tr><td colSpan="5" class="empty">No people yet. They appear after Stage 3 (LinkedIn employees) enrichment.</td></tr>` : null}
+            ${rows.length === 0 && !loading ? html`<tr><td colSpan="8" class="empty">No people yet. They appear after Stage 3 (LinkedIn employees) enrichment.</td></tr>` : null}
             ${rows.map(r => html`
               <tr
                 key=${r.id}
@@ -242,17 +248,19 @@ export function PeopleTab({ mode = 'local-admin' } = {}) {
                   formatter=${(name) => html`
                     <div class="name-cell">
                       <div class="name-cell-main">${name || html`<span style=${{color:'var(--text-dim)'}}>—</span>`}</div>
-                      <div style=${{display:'flex', alignItems:'center', gap:'6px', flexWrap:'wrap'}}>
-                        <${BellScore} score=${r.bell_score} />
-                        ${(r.sources && r.sources.length) ? html`<${SourceBadges} sources=${r.sources} compact=${true} />` : null}
-                      </div>
+                      ${r.current_company ? html`<div class="muted small" style=${{whiteSpace:'nowrap', overflow:'hidden', textOverflow:'ellipsis', maxWidth:'100%'}}>${r.current_company}</div>` : null}
                     </div>
                   `}
                 />
                 <${EditableCell} value=${r.headline}  readOnly=${isUser} onSave=${(v) => update(r.id, 'headline', v)} />
-                <td>${isUser && !r.revealed_by_tenant
-                  ? html`<span class="contact-locked-cell"><${ContactIcons} company=${r} /><button class="reveal-btn" onClick=${(e) => { e.stopPropagation(); revealRow(r.id); }}>Reveal · 1</button></span>`
-                  : html`<${ContactIcons} company=${r} />`}</td>
+                <td><${ContactIcons} company=${r} showWebsite=${false} /></td>
+                <td class="bellscore"><${BellScore} score=${r.bell_score} bar=${false} /></td>
+                <td class="stages-cell">${isUser
+                  ? (r.revealed_by_tenant
+                      ? html`<span class="revealed-badge">✓ revealed</span>`
+                      : html`<button class="reveal-btn" onClick=${(e) => { e.stopPropagation(); revealRow(r.id); }}>Reveal · 1</button>`)
+                  : null}</td>
+                <td class="flex"></td>
               </tr>
             `)}
           </tbody>
@@ -276,19 +284,26 @@ export function PeopleTab({ mode = 'local-admin' } = {}) {
   `;
 }
 
+function initialsOf(name) {
+  const parts = String(name || '').trim().split(/\s+/).filter(Boolean);
+  if (!parts.length) return '?';
+  if (parts.length === 1) return parts[0].charAt(0).toUpperCase();
+  return (parts[0].charAt(0) + parts[parts.length - 1].charAt(0)).toUpperCase();
+}
+
 function PhotoCell({ person }) {
   // The photo URL is ADMIN-ONLY (the API strips it for customers, who get
   // initials). When present, show the photo layered over the initials base so
   // an expired LinkedIn URL falls back to initials.
   const url = person?.profile_picture_url;
-  const initial = (person?.full_name || '?').trim().charAt(0).toUpperCase() || '?';
+  const init = initialsOf(person?.full_name);
   let h = 0;
   for (const ch of String(person?.full_name || '')) h = (h * 31 + ch.charCodeAt(0)) | 0;
   const hue = Math.abs(h) % 360;
-  const phStyle = { width:'24px', height:'24px', background:`hsl(${hue}, 45%, 35%)`, fontSize:'12px' };
-  if (!url) return html`<span class="company-logo placeholder" style=${phStyle}>${initial}</span>`;
+  const phStyle = { width:'24px', height:'24px', background:`hsl(${hue}, 45%, 35%)`, fontSize: init.length > 1 ? '9px' : '12px' };
+  if (!url) return html`<span class="company-logo placeholder" style=${phStyle}>${init}</span>`;
   return html`<span style=${{position:'relative', display:'inline-block', width:'24px', height:'24px', verticalAlign:'middle'}}>
-    <span class="company-logo placeholder" style=${{...phStyle, position:'absolute', inset:0}}>${initial}</span>
+    <span class="company-logo placeholder" style=${{...phStyle, position:'absolute', inset:0}}>${init}</span>
     <img src=${url} class="company-logo" style=${{position:'absolute', inset:0, width:'24px', height:'24px'}} alt="" loading="lazy" referrerpolicy="no-referrer" onError=${(e) => { e.currentTarget.style.display = 'none'; }} />
   </span>`;
 }
