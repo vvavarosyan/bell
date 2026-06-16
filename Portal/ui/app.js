@@ -34,6 +34,8 @@ import { DetailRequestsTab } from './components/DetailRequestsTab.js';
 import { WebsiteCandidatesTab } from './components/WebsiteCandidatesTab.js';
 import { HarvestHistoryTab } from './components/HarvestHistoryTab.js';
 import { ManualLookupTab } from './components/ManualLookupTab.js';
+import { NotificationBell } from './components/NotificationBell.js';
+import { AnnouncementsTab } from './components/AnnouncementsTab.js';
 
 // Maps a sidebar nav id to a renderable view. Items not listed here fall back
 // to a ComingSoon placeholder with the item's label.
@@ -56,6 +58,7 @@ const VIEWS = {
   'website-candidates': { Component: WebsiteCandidatesTab },
   'manual-lookup': { Component: ManualLookupTab },
   'harvest-history': { Component: HarvestHistoryTab },
+  'announcements': { Component: AnnouncementsTab },
   'deep-data':   { Component: DeepDataTab },
   'sync':        { Component: SyncTab },
   // Archived is reachable via deep-link/sidebar too
@@ -80,6 +83,7 @@ const LABELS = {
   'website-candidates': 'Website Review',
   'manual-lookup': 'Manual Lookup',
   'harvest-history': 'Harvest History',
+  'announcements': 'Announcements',
   'team': 'Team',
 };
 
@@ -174,14 +178,17 @@ function App({ initialUser, initialTenant, mode }) {
               <span><b>$${stats.usd_total.toFixed(2)}</b> spent</span>
             </div>
           ` : null}
-          ${credits ? html`
-            <div class="credit-pill" title=${credits.unlimited ? 'Internal / admin — unlimited credits' : `${credits.plan || ''} plan · ${(credits.monthly_allotment ?? 0).toLocaleString()} credits/month`}>
-              <span class="credit-dot"></span>
-              ${credits.unlimited
-                ? html`<b>Unlimited</b> credits`
-                : html`<b>${(credits.balance ?? 0).toLocaleString()}</b> credits`}
-            </div>
-          ` : null}
+          <div style=${{ display: 'flex', alignItems: 'center', gap: '10px', marginLeft: 'auto' }}>
+            ${credits && mode?.mode !== 'user' ? html`
+              <div class="credit-pill" title=${credits.unlimited ? 'Internal / admin — unlimited credits' : `${credits.plan || ''} plan · ${(credits.monthly_allotment ?? 0).toLocaleString()} credits/month`}>
+                <span class="credit-dot"></span>
+                ${credits.unlimited
+                  ? html`<b>Unlimited</b> credits`
+                  : html`<b>${(credits.balance ?? 0).toLocaleString()}</b> credits`}
+              </div>
+            ` : null}
+            <${NotificationBell} />
+          </div>
         </div>
 
         ${Active

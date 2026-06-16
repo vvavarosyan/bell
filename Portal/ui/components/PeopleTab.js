@@ -205,9 +205,9 @@ export function PeopleTab({ mode = 'local-admin' } = {}) {
             <col style=${{width:'30px'}} />
             <col style=${{width:'34px'}} />
             <col style=${{width:'200px'}} />
-            <col style=${{width:'230px'}} />
-            <col style=${{width:'122px'}} />
-            <col style=${{width:'58px'}} />
+            <col style=${{width:'220px'}} />
+            <col style=${{width:'142px'}} />
+            <col style=${{width:'62px'}} />
             <col style=${{width:'96px'}} />
             <col style=${{width:'auto'}} />
           </colgroup>
