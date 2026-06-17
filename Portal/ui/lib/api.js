@@ -129,6 +129,8 @@ export const api = {
   markNotificationRead:     (id) => request(`/api/notifications/${id}/read`, { method: 'POST', body: '{}' }),
   markAllNotificationsRead: () => request('/api/notifications/read-all', { method: 'POST', body: '{}' }),
   sendAnnouncement:         (body) => request('/api/notifications/announce', { method: 'POST', body: JSON.stringify(body) }),
+  listAnnouncements:        () => request('/api/notifications/announcements'),
+  recallAnnouncement:       (id) => request(`/api/notifications/announcements/${id}/recall`, { method: 'POST', body: '{}' }),
 
   // Assembly (Phase 5)
   assemblyStats:          () => request('/api/assembly/stats'),
