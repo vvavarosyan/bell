@@ -12,7 +12,7 @@ import { Router } from 'express';
 import { Webhook } from 'svix';
 import { query, withTransaction } from '../db.js';
 import { requireAuth, getModeInfo, orgRoleToBell } from '../lib/auth.js';
-import { createNotification } from '../lib/notifications.js';
+import { ensureWelcome } from '../lib/notifications.js';
 
 const router = Router();
 
@@ -24,6 +24,9 @@ router.get('/mode', (req, res) => {
 // GET /api/auth/me  — authenticated; returns the current user + tenant
 router.get('/me', requireAuth, (req, res) => {
   res.json({ user: req.user, tenant: req.tenant });
+  // One-time welcome on first app load — reliable regardless of which webhook
+  // provisioned the user. Idempotent + non-blocking.
+  ensureWelcome(req.user).catch(() => {});
 });
 
 // ----- Clerk webhook handler ------------------------------------------------
@@ -134,23 +137,11 @@ async function handleUserCreated(clerkUser) {
     console.log(`[auth] provisioned user ${primaryEmail} as ${role} of tenant '${tenantName}' (id=${tenantId})`);
   });
 
-  // Welcome notification (in-app + branded email) — once per user, best-effort
-  // (never breaks signup if it fails).
+  // Welcome (in-app + branded email) — best-effort + idempotent. Also fired on
+  // first app load via /me, so it's reliable regardless of webhook delivery.
   try {
-    const u = await query(`SELECT id FROM users WHERE clerk_user_id = $1`, [clerkUserId]);
-    if (u.rows.length) {
-      const uid = u.rows[0].id;
-      const seen = await query(`SELECT 1 FROM notifications WHERE user_id = $1 AND type = 'welcome' LIMIT 1`, [uid]);
-      if (!seen.rows.length) {
-        await createNotification({
-          tenantId, userId: uid, category: 'account', type: 'welcome',
-          title: `Welcome to Bell, ${firstName || 'there'}!`,
-          body: 'Your account is ready — explore Qatar companies, reveal verified contacts, and track live market intelligence, all in one place.',
-          link: '/market-feed', icon: 'megaphone',
-          email: true, recipientEmail: primaryEmail.toLowerCase(),
-        });
-      }
-    }
+    const u = await query(`SELECT id, tenant_id, full_name, email FROM users WHERE clerk_user_id = $1`, [clerkUserId]);
+    if (u.rows.length) await ensureWelcome(u.rows[0]);
   } catch (err) { console.error('[auth] welcome notification failed:', err.message); }
 }
 

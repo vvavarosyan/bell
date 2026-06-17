@@ -50,6 +50,7 @@ import crmRouter               from './routes/crm.js';
 import crmInboundRouter        from './routes/crm_inbound.js';
 import detailRequestsRouter    from './routes/detail_requests.js';
 import notificationsRouter     from './routes/notifications.js';
+import emailTemplatesRouter     from './routes/email_templates.js';
 import { requireAuth, requireRole, requireActiveSubscription } from './lib/auth.js';
 import { getKey } from './keychain.js';
 
@@ -193,6 +194,7 @@ app.get('/api/settings/public-token/:name', requireAuth, async (req, res, next) 
 });
 
 app.use('/api/settings',           ...adminOnly, settingsRouter);
+app.use('/api/email-templates',    ...adminOnly, emailTemplatesRouter);
 
 // Self-gating / public routers (handle their own auth internally):
 //   auth   → /mode is public; /me requires a token
