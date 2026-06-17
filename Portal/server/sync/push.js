@@ -96,14 +96,19 @@ async function pushDeletions(base, token, summary) {
 // columns; table/watermark/selfRef come from the trusted MIRROR_TABLES constant.
 // When a self-referential FK exists, order canonical/standalone rows (selfRef IS
 // NULL) first so a duplicate never references a not-yet-inserted canonical.
-async function selectRows(table, watermarkCol, wm, selfRef) {
+async function selectRows(table, watermarkCol, wm, selfRef, full = false) {
   const order = selfRef
     ? `("${selfRef}" IS NOT NULL), "${watermarkCol}"`
     : `"${watermarkCol}"`;
-  const r = await query(
-    `SELECT * FROM "${table}" WHERE "${watermarkCol}" > $1 ORDER BY ${order}`,
-    [wm]
-  );
+  // A full/reset push mirrors EVERY row. An incremental push takes rows changed
+  // since the watermark — PLUS any row whose watermark is NULL. A plain
+  // `watermarkCol > wm` silently DROPS NULL-watermark rows (NULL > x is never
+  // true), which is how contacts / employment links inserted without an
+  // updated_at went missing on prod after a rebuild.
+  const sql = full
+    ? `SELECT * FROM "${table}" ORDER BY ${order} NULLS FIRST`
+    : `SELECT * FROM "${table}" WHERE ("${watermarkCol}" > $1 OR "${watermarkCol}" IS NULL) ORDER BY ${order} NULLS FIRST`;
+  const r = await query(sql, full ? [] : [wm]);
   return r.rows;
 }
 
@@ -162,7 +167,7 @@ export async function runPush({ full = false, reset = false } = {}) {
   }
 
   for (const { name, watermark, selfRef } of MIRROR_TABLES) {
-    const rows = await selectRows(name, watermark, wm, selfRef);
+    const rows = await selectRows(name, watermark, wm, selfRef, full || reset);
     let upserted = 0, skipped = 0;
     for (let i = 0; i < rows.length; i += CHUNK_SIZE) {
       const chunk = rows.slice(i, i + CHUNK_SIZE);
