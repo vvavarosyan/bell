@@ -145,14 +145,6 @@ export function MarketFeedTab() {
             <span class="feed-stat"><b>${(stats.linked_today || 0).toLocaleString()}</b> linked</span>
           ` : null}
         </div>
-        ${stats ? html`
-          <div class="feed-bdi-stats" title="The scale and freshness of Bell Data Intelligence">
-            <div class="feed-bdi-stat"><b>${(stats.bdi_companies || 0).toLocaleString()}</b><span>Companies</span></div>
-            <div class="feed-bdi-stat"><b>${(stats.bdi_people || 0).toLocaleString()}</b><span>People</span></div>
-            <div class="feed-bdi-stat"><b>${(stats.bdi_datapoints || 0).toLocaleString()}</b><span>Data points</span></div>
-            <div class="feed-bdi-stat feed-bdi-fresh"><b>${(stats.bdi_fresh_7d || 0).toLocaleString()}</b><span>Updated this week</span></div>
-          </div>
-        ` : null}
         ${stats && stats.engine_enabled === false ? html`
           <div class="feed-warn">News engine is off on this server. Set <code>BDI_NEWS_ENGINE=1</code> on the production portal service.</div>
         ` : null}
@@ -219,6 +211,15 @@ export function MarketFeedTab() {
 
       <!-- Trending sidebar -->
       <aside class="feed-aside">
+        ${stats ? html`
+          <div class="feed-aside-title">Bell Data Intelligence</div>
+          <div class="feed-bdi-stats" title="The scale and freshness of Bell Data Intelligence">
+            <div class="feed-bdi-stat"><b>${(stats.bdi_companies || 0).toLocaleString()}</b><span>Companies</span></div>
+            <div class="feed-bdi-stat"><b>${(stats.bdi_people || 0).toLocaleString()}</b><span>People</span></div>
+            <div class="feed-bdi-stat"><b>${(stats.bdi_datapoints || 0).toLocaleString()}</b><span>Data points</span></div>
+            <div class="feed-bdi-stat feed-bdi-fresh"><b>${(stats.bdi_fresh_7d || 0).toLocaleString()}</b><span>Updated · 7d</span></div>
+          </div>
+        ` : null}
         <div class="feed-aside-title">Trending companies</div>
         ${trending.length === 0 ? html`<div class="muted small">Nothing trending yet.</div>` :
           trending.map(c => html`

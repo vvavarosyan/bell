@@ -28,6 +28,7 @@ export function AnnouncementsTab() {
   const [body, setBody]     = useState('');
   const [link, setLink]     = useState('');
   const [allTenants, setAll] = useState(true);
+  const [emailToo, setEmailToo] = useState(false);
   const [sending, setSending] = useState(false);
   const [rows, setRows]     = useState([]);
   const [busy, setBusy]     = useState(() => new Set());
@@ -45,7 +46,7 @@ export function AnnouncementsTab() {
     try {
       const r = await api.sendAnnouncement({
         title: title.trim(), body: body.trim() || undefined,
-        link: link.trim() || undefined, all_tenants: allTenants,
+        link: link.trim() || undefined, all_tenants: allTenants, email: emailToo,
       });
       toast(`Sent to ${r.sent} user${r.sent === 1 ? '' : 's'}`);
       window.dispatchEvent(new Event('bdi:notifications-changed'));
@@ -93,10 +94,16 @@ export function AnnouncementsTab() {
           </div>
 
           <div style=${{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '12px', borderTop: '1px solid var(--border)', paddingTop: '14px' }}>
-            <label style=${{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', color: 'var(--text-muted)' }}>
-              <input type="checkbox" checked=${allTenants} onChange=${e => setAll(e.target.checked)} />
-              Send to <strong style=${{ color: 'var(--text)' }}>all users on the platform</strong> (off = your organization only)
-            </label>
+            <div style=${{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+              <label style=${{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', color: 'var(--text-muted)' }}>
+                <input type="checkbox" checked=${allTenants} onChange=${e => setAll(e.target.checked)} />
+                Send to <strong style=${{ color: 'var(--text)' }}>all users on the platform</strong> (off = your organization only)
+              </label>
+              <label style=${{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', color: 'var(--text-muted)' }}>
+                <input type="checkbox" checked=${emailToo} onChange=${e => setEmailToo(e.target.checked)} />
+                Also send by <strong style=${{ color: 'var(--text)' }}>email</strong> (branded template)
+              </label>
+            </div>
             <button class="accent" onClick=${send} disabled=${sending}>${sending ? 'Sending…' : 'Send announcement ▶'}</button>
           </div>
         </div>

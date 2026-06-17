@@ -54,11 +54,12 @@ router.post('/announce', async (req, res, next) => {
     const body = req.body?.body ? String(req.body.body) : null;
     const link = req.body?.link ? String(req.body.link) : null;
     const platform = req.body?.all_tenants !== false;   // default: whole platform
+    const emailToo = req.body?.email === true;
     const tenantId = platform ? null : req.user.tenant_id;
     const announcementId = await createAnnouncement({
       scope: platform ? 'platform' : 'tenant', tenantId, title, body, link, createdBy: req.user.email,
     });
-    const sent = await broadcast({ tenantId, title, body, link, announcementId });
+    const sent = await broadcast({ tenantId, title, body, link, announcementId, email: emailToo });
     await setAnnouncementSent(announcementId, sent);
     res.json({ ok: true, announcement_id: announcementId, sent });
   } catch (err) { next(err); }

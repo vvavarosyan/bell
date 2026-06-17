@@ -11,6 +11,7 @@ import { Router } from 'express';
 import { query } from '../db.js';
 import { requireRole } from '../lib/auth.js';
 import { getNewsState } from '../news/engine.js';
+import { getDataPointsCached } from '../lib/datapoints.js';
 
 const router = Router();
 
@@ -106,16 +107,12 @@ router.get('/stats', async (req, res, next) => {
         (SELECT count(*)::int FROM companies WHERE is_active = true) AS bdi_companies,
         (SELECT count(*)::int FROM people)                            AS bdi_people,
         ((SELECT count(*) FROM companies WHERE updated_at > now() - interval '7 days')
-         + (SELECT count(*) FROM people WHERE updated_at > now() - interval '7 days'))::int AS bdi_fresh_7d,
-        ((SELECT count(*) FROM companies)
-         + (SELECT count(*) FROM people)
-         + (SELECT count(*) FROM company_contacts)
-         + (SELECT count(*) FROM person_companies)
-         + (SELECT count(*) FROM person_contacts))::bigint AS bdi_datapoints
+         + (SELECT count(*) FROM people WHERE updated_at > now() - interval '7 days'))::int AS bdi_fresh_7d
     `);
     const news = getNewsState();
     res.json({
       ...r.rows[0],
+      bdi_datapoints: await getDataPointsCached(),   // every populated field, cached
       scanning: !!news.poller?.scanning,
       engine_enabled: !!news.enabled,
       last_poll_at: news.poller?.last_poll_at || null,
