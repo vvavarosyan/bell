@@ -137,6 +137,7 @@ export const api = {
   saveEmailTemplate:        (key, body) => request('/api/email-templates/' + key, { method: 'PUT', body: JSON.stringify(body) }),
   resetEmailTemplate:       (key) => request(`/api/email-templates/${key}/reset`, { method: 'POST', body: '{}' }),
   previewEmailTemplate:     (body) => request('/api/email-templates/preview', { method: 'POST', body: JSON.stringify(body) }),
+  testEmailTemplate:        (key, body) => request(`/api/email-templates/${key}/test`, { method: 'POST', body: JSON.stringify(body) }),
 
   // Assembly (Phase 5)
   assemblyStats:          () => request('/api/assembly/stats'),

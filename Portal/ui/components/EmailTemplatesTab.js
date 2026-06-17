@@ -52,6 +52,15 @@ export function EmailTemplatesTab() {
     try { await api.resetEmailTemplate(key); toast('Reset to default'); loadTpl(key); loadList(); }
     catch (err) { toast('Reset failed: ' + err.message, 'error'); }
   };
+  const sendTest = async () => {
+    const to = window.prompt('Send a test email to which address?');
+    if (!to || !to.trim()) return;
+    try {
+      const r = await api.testEmailTemplate(key, { subject, html: body, to: to.trim() });
+      if (r.ok) toast('Test email sent to ' + r.to);
+      else toast('Not sent: ' + (r.error || 'unknown reason'), 'error');
+    } catch (err) { toast('Failed: ' + err.message, 'error'); }
+  };
 
   const inputBase = { background: 'var(--bg-elev-2)', color: 'var(--text)', border: '1px solid var(--border)', borderRadius: '6px' };
 
@@ -64,6 +73,7 @@ export function EmailTemplatesTab() {
         </select>
         <span class="muted small">Saved edits go live for new emails. Edit on admin.bell.qa to affect production.</span>
         <span class="spacer"></span>
+        <button onClick=${sendTest} title="Send a real test email of the current content to an address">Send test…</button>
         <button onClick=${reset} title="Revert to the built-in default template">Reset to default</button>
         <button class="accent" onClick=${save} disabled=${saving}>${saving ? 'Saving…' : 'Save'}</button>
       </div>

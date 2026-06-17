@@ -64,14 +64,26 @@ export async function ensureWelcome(user) {
   if (!user?.id) return false;
   const seen = await query(`SELECT 1 FROM notifications WHERE user_id = $1 AND type = 'welcome' LIMIT 1`, [user.id]);
   if (seen.rows.length) return false;
+  // Make sure we have an email even if the caller passed a partial user object.
+  let email = user.email;
+  if (!email) {
+    const r = await query(`SELECT email FROM users WHERE id = $1`, [user.id]);
+    email = r.rows[0]?.email || null;
+  }
   const first = String(user.full_name || '').trim().split(/\s+/)[0] || 'there';
+  const title = `Welcome to Bell, ${first}!`;
+  const body = 'Your account is ready — explore Qatar companies, reveal verified contacts, and track live market intelligence, all in one place.';
   await createNotification({
     tenantId: user.tenant_id, userId: user.id, category: 'account', type: 'welcome',
-    title: `Welcome to Bell, ${first}!`,
-    body: 'Your account is ready — explore Qatar companies, reveal verified contacts, and track live market intelligence, all in one place.',
-    link: '/market-feed', icon: 'megaphone',
-    email: true, recipientEmail: user.email,
+    title, body, link: '/market-feed', icon: 'megaphone',
   });
+  // Send + log the welcome email explicitly so its outcome is visible in logs.
+  if (email) {
+    const ok = await notifyEmail({ to: email, title, body, link: '/market-feed' });
+    console.log(`[notifications] welcome email → ${email}: ${ok ? 'sent' : 'NOT sent (Resend key on this service? provider configured?)'}`);
+  } else {
+    console.log(`[notifications] welcome: no email on file for user ${user.id}`);
+  }
   return true;
 }
 

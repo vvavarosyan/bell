@@ -8,8 +8,27 @@ import { Router } from 'express';
 import {
   listTemplatesForEditor, getTemplateForEditor, saveTemplate, resetTemplate, renderPreview,
 } from '../lib/email/template.js';
+import { sendEmail, emailProviderConfigured } from '../lib/email.js';
 
 const router = Router();
+
+// POST /api/email-templates/:key/test { to, subject, html } — send a REAL test
+// email of the current editor content. Returns a clear reason if it can't send,
+// so the admin can diagnose (e.g. Resend key missing on this service).
+router.post('/:key/test', async (req, res, next) => {
+  try {
+    const to = String(req.body?.to || req.user?.email || '').trim();
+    if (!to) return res.json({ ok: false, error: 'No recipient address.' });
+    if (!(await emailProviderConfigured())) {
+      return res.json({ ok: false, error: 'Email provider (Resend) is not configured on this service.' });
+    }
+    const r = renderPreview({ subject: req.body?.subject, html: req.body?.html });
+    await sendEmail({ to, subject: '[Bell test] ' + (r.subject || 'Email template'), html: r.html });
+    res.json({ ok: true, to });
+  } catch (err) {
+    res.json({ ok: false, error: err.message });
+  }
+});
 
 router.get('/', async (req, res, next) => {
   try { res.json({ rows: await listTemplatesForEditor() }); }
