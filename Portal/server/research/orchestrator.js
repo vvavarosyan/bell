@@ -17,6 +17,7 @@ import { schemaFor } from './schemas.js';
 import { buildPrompt, buildAnchorUrls } from './prompts.js';
 import { persistReport } from './parser.js';
 import { ingestDerivedEntities, ingestCompanyFacts } from './ingest.js';
+import { notifyTenant } from '../lib/notifications.js';
 
 // Soft estimate so the UI can show "ETA ~X min". Firecrawl Agent typically
 // completes in 2-5 minutes; we round to 4.
@@ -218,6 +219,25 @@ export async function advanceJob(jobId) {
       ]);
       return { ...result, snowball, facts };
     });
+    // Notify the commissioning tenant that their report is ready.
+    try {
+      const j = await query(
+        `SELECT rj.tenant_id,
+                COALESCE(rj.target_label, c.name, p.full_name, 'your target') AS label
+           FROM research_jobs rj
+           LEFT JOIN companies c ON c.id = rj.target_company_id
+           LEFT JOIN people    p ON p.id = rj.target_person_id
+          WHERE rj.id = $1`, [jobId]);
+      const row = j.rows[0];
+      if (row?.tenant_id) {
+        notifyTenant(row.tenant_id, {
+          category: 'engagement', type: 'research_ready',
+          title: 'Your research report is ready',
+          body: `The deep research report on ${row.label} is complete and ready to view.`,
+          link: '/research', icon: 'research', email: true,
+        }).catch(() => {});
+      }
+    } catch (e) { console.error('[research] ready notification failed:', e.message); }
     return { id: jobId, status: 'ready', ...persisted };
   } catch (err) {
     await failJob(jobId, SAFE_FAIL, 'Parse/ingest failed: ' + err.message);

@@ -87,6 +87,18 @@ export async function ensureWelcome(user) {
   return true;
 }
 
+/** Notify every active user of a tenant (in-app + optional email). Returns count. */
+export async function notifyTenant(tenantId, { category = 'system', type = null, title, body = null, link = null, icon = null, email = false } = {}) {
+  if (!tenantId || !title) return 0;
+  const users = await query(`SELECT id, email FROM users WHERE tenant_id = $1 AND is_active = true`, [tenantId]);
+  let n = 0;
+  for (const u of users.rows) {
+    await createNotification({ tenantId, userId: u.id, category, type, title, body, link, icon, email, recipientEmail: u.email });
+    n++;
+  }
+  return n;
+}
+
 /** Recent notifications for a user (newest first). */
 export async function listForUser(userId, { limit = 30, offset = 0 } = {}) {
   const r = await query(

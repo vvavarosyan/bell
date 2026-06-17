@@ -6,6 +6,7 @@ import Stripe from 'stripe';
 import { query, withTransaction } from '../db.js';
 import { requireAuth } from '../lib/auth.js';
 import { PLANS, planById, stripePriceId, planByStripePrice } from '../config/plans.js';
+import { notifyTenant } from '../lib/notifications.js';
 
 const router = Router();
 
@@ -380,14 +381,28 @@ async function handleInvoicePaid(inv) {
      WHERE id = $1
   `, [t.id]);
   console.log(`[billing] tenant ${t.id} invoice paid plan=${plan.id} — credits via monthly grant`);
+  notifyTenant(t.id, {
+    category: 'account', type: 'payment_succeeded',
+    title: 'Subscription renewed',
+    body: 'Your payment went through and your credits for the new period are ready.',
+    link: '/billing', icon: 'megaphone',
+  }).catch(() => {});
 }
 
 async function handleInvoiceFailed(inv) {
-  await query(`
+  const r = await query(`
     UPDATE tenants SET subscription_status = 'past_due'
      WHERE stripe_customer_id = $1
+   RETURNING id
   `, [inv.customer]);
   console.log(`[billing] invoice payment failed for customer ${inv.customer} — marked past_due`);
+  const tid = r.rows[0]?.id;
+  if (tid) notifyTenant(tid, {
+    category: 'account', type: 'payment_failed',
+    title: 'Payment failed',
+    body: "We couldn't process your subscription payment. Please update your billing details to keep your access active.",
+    link: '/billing', icon: 'megaphone', email: true,
+  }).catch(() => {});
 }
 
 // ---------------------------------------------------------------------------

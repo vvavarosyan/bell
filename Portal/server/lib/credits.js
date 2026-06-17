@@ -12,6 +12,7 @@
 
 import { query, withTransaction } from '../db.js';
 import { planById } from '../config/plans.js';
+import { notifyTenant } from './notifications.js';
 
 const PERIOD_MS = 30 * 24 * 60 * 60 * 1000;
 
@@ -80,9 +81,30 @@ export async function getRevealedSet(tenantId, entityType, ids) {
  * Reveal a single entity for a tenant. Charges 1 credit if not already revealed.
  * Returns { revealed, charged, already, balance, insufficient }.
  */
+// Notify the tenant's users when a charge takes their balance across a low
+// threshold (once per crossing). Fire-and-forget; never blocks a reveal.
+async function lowCreditCheck(tenantId, after, charged) {
+  if (!charged) return;
+  const before = after + charged;
+  for (const T of [0, 10]) {
+    if (before > T && after <= T) {
+      const out = T === 0;
+      notifyTenant(tenantId, {
+        category: 'account', type: out ? 'credits_out' : 'credits_low',
+        title: out ? "You're out of credits" : `Credits running low — ${after} left`,
+        body: out
+          ? 'Top up to keep revealing contacts and running research (1 credit per reveal).'
+          : `You have ${after} credit${after === 1 ? '' : 's'} remaining. Top up to avoid interruptions.`,
+        link: '/billing', icon: 'megaphone', email: true,
+      }).catch(() => {});
+      break;
+    }
+  }
+}
+
 export async function revealOne(tenantId, entityType, entityId, actor) {
   await ensureMonthlyGrant(tenantId);
-  return withTransaction(async (client) => {
+  const result = await withTransaction(async (client) => {
     const exists = await client.query(
       `SELECT 1 FROM tenant_reveals WHERE tenant_id = $1 AND entity_type = $2 AND entity_id = $3`,
       [tenantId, entityType, entityId]
@@ -112,6 +134,8 @@ export async function revealOne(tenantId, entityType, entityId, actor) {
     );
     return { revealed: true, charged: 1, already: false, balance: newBal, insufficient: false };
   });
+  lowCreditCheck(tenantId, result.balance, result.charged);
+  return result;
 }
 
 /**
@@ -122,7 +146,7 @@ export async function revealOne(tenantId, entityType, entityId, actor) {
 export async function revealBulk(tenantId, entityType, ids, actor) {
   await ensureMonthlyGrant(tenantId);
   const unique = [...new Set(ids.map(Number).filter(Number.isFinite))];
-  return withTransaction(async (client) => {
+  const result = await withTransaction(async (client) => {
     const balRow = await client.query(
       `SELECT credit_balance FROM tenants WHERE id = $1 FOR UPDATE`, [tenantId]
     );
@@ -163,6 +187,8 @@ export async function revealBulk(tenantId, entityType, ids, actor) {
       balance,
     };
   });
+  lowCreditCheck(tenantId, result.balance, result.charged);
+  return result;
 }
 
 /**
