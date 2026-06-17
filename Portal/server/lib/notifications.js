@@ -24,8 +24,8 @@ export async function notifyEmail({ to, title, body, link }) {
     const ctaUrl = link
       ? (/^https?:\/\//i.test(link) ? link : APP_URL + (link.startsWith('/') ? link : '/' + link))
       : APP_URL;
-    const html = renderAnnouncementEmail({ title, body: body || '', ctaText: 'Open Bell', ctaUrl });
-    await sendEmail({ to, subject: title, html });
+    const { subject, html } = await renderAnnouncementEmail({ title, body: body || '', ctaText: 'Open Bell', ctaUrl });
+    await sendEmail({ to, subject: subject || title, html });
     return true;
   } catch (err) {
     console.error('[notifications] email send failed:', err.message);
@@ -57,6 +57,22 @@ export async function notifyUserById(userId, opts = {}) {
   if (!u.rows.length) return null;
   const row = u.rows[0];
   return createNotification({ tenantId: row.tenant_id, userId: row.id, recipientEmail: row.email, ...opts });
+}
+
+/** One-time welcome (in-app + branded email). Idempotent + best-effort. */
+export async function ensureWelcome(user) {
+  if (!user?.id) return false;
+  const seen = await query(`SELECT 1 FROM notifications WHERE user_id = $1 AND type = 'welcome' LIMIT 1`, [user.id]);
+  if (seen.rows.length) return false;
+  const first = String(user.full_name || '').trim().split(/\s+/)[0] || 'there';
+  await createNotification({
+    tenantId: user.tenant_id, userId: user.id, category: 'account', type: 'welcome',
+    title: `Welcome to Bell, ${first}!`,
+    body: 'Your account is ready — explore Qatar companies, reveal verified contacts, and track live market intelligence, all in one place.',
+    link: '/market-feed', icon: 'megaphone',
+    email: true, recipientEmail: user.email,
+  });
+  return true;
 }
 
 /** Recent notifications for a user (newest first). */

@@ -36,6 +36,7 @@ import { HarvestHistoryTab } from './components/HarvestHistoryTab.js';
 import { ManualLookupTab } from './components/ManualLookupTab.js';
 import { NotificationBell } from './components/NotificationBell.js';
 import { AnnouncementsTab } from './components/AnnouncementsTab.js';
+import { EmailTemplatesTab } from './components/EmailTemplatesTab.js';
 
 // Maps a sidebar nav id to a renderable view. Items not listed here fall back
 // to a ComingSoon placeholder with the item's label.
@@ -59,6 +60,7 @@ const VIEWS = {
   'manual-lookup': { Component: ManualLookupTab },
   'harvest-history': { Component: HarvestHistoryTab },
   'announcements': { Component: AnnouncementsTab },
+  'email-templates': { Component: EmailTemplatesTab },
   'deep-data':   { Component: DeepDataTab },
   'sync':        { Component: SyncTab },
   // Archived is reachable via deep-link/sidebar too
@@ -84,6 +86,7 @@ const LABELS = {
   'manual-lookup': 'Manual Lookup',
   'harvest-history': 'Harvest History',
   'announcements': 'Announcements',
+  'email-templates': 'Email Templates',
   'team': 'Team',
 };
 

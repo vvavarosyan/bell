@@ -48,6 +48,7 @@ export const NAV_SECTIONS = [
       { id: 'sources',     label: 'Sources',     icon: 'sources',  placeholder: false, visibility: ['platform_admin'] },
       { id: 'detail-requests', label: 'Detail Requests', icon: 'inbox', placeholder: false, visibility: ['platform_admin'] },
       { id: 'announcements', label: 'Announcements', icon: 'megaphone', placeholder: false, visibility: ['platform_admin'] },
+      { id: 'email-templates', label: 'Email Templates', icon: 'mail', placeholder: false, visibility: ['platform_admin'] },
       { id: 'website-candidates', label: 'Website Review', icon: 'globe', placeholder: false, visibility: ['platform_admin'] },
       { id: 'manual-lookup', label: 'Manual Lookup', icon: 'search', placeholder: false, visibility: ['platform_admin'] },
       { id: 'approvals',   label: 'Research Approvals', icon: 'research', placeholder: false, visibility: ['platform_admin'] },
@@ -67,7 +68,7 @@ export const NAV_SECTIONS = [
 // we also hide them from the nav to avoid dead 403 links — even for a
 // platform_admin who happens to be on app.bell.qa.
 export const ADMIN_ONLY_NAV_IDS = new Set([
-  'sources', 'recent-jobs', 'sync', 'settings', 'dedup-queue', 'announcements',
+  'sources', 'recent-jobs', 'sync', 'settings', 'dedup-queue', 'announcements', 'email-templates',
 ]);
 
 // LOCAL-ENGINE-ONLY tools. These read local directory files and/or originate
@@ -108,6 +109,7 @@ const ICONS = {
   database:  html`<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v6c0 1.7 3.6 3 8 3s8-1.3 8-3V5"/><path d="M4 11v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"/></svg>`,
   search:    html`<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-4.3-4.3"/></svg>`,
   megaphone: html`<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m3 11 18-5v12L3 14v-3z"/><path d="M11.6 16.8a3 3 0 1 1-5.8-1.6"/></svg>`,
+  mail:      html`<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3 7 9 6 9-6"/></svg>`,
   crm:       html`<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 12a9 9 0 1 0 18 0 9 9 0 0 0-18 0z"/><path d="M12 7v5l3 2"/></svg>`,
   research:  html`<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="M21 21l-5-5"/></svg>`,
   team:      html`<svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="3"/><circle cx="5" cy="12" r="2"/><circle cx="19" cy="12" r="2"/><path d="M3 19a3 3 0 0 1 4-2.8"/><path d="M21 19a3 3 0 0 0-4-2.8"/><path d="M6 21v-1a4 4 0 0 1 4-4h4a4 4 0 0 1 4 4v1"/></svg>`,
