@@ -363,11 +363,11 @@ html, body {
 .news-overlay { position: fixed; inset: 0; background: rgba(0,0,0,.5); z-index: 60; display: flex; justify-content: flex-end; }
 .news-drawer { width: min(900px, 96vw); height: 100%; background: var(--bg-elev); border-left: 1px solid var(--border); overflow-y: auto; position: relative; animation: newsslide .18s ease; }
 
-/* Bell Data Intelligence scale/freshness stats band (Market Feed) */
-.feed-bdi-stats { display: flex; flex-wrap: wrap; gap: 10px; margin: 12px 0 6px; }
-.feed-bdi-stat { flex: 1 1 130px; min-width: 118px; background: var(--bg-elev); border: 1px solid var(--border); border-radius: 10px; padding: 12px 14px; display: flex; flex-direction: column; gap: 3px; }
-.feed-bdi-stat b { font-size: 21px; line-height: 1; color: var(--text); font-feature-settings: "tnum"; }
-.feed-bdi-stat span { font-size: 10.5px; color: var(--text-muted); text-transform: uppercase; letter-spacing: .6px; }
+/* Bell Data Intelligence scale/freshness stats (Market Feed sidebar) */
+.feed-bdi-stats { display: flex; flex-wrap: wrap; gap: 8px; margin: 4px 0 18px; }
+.feed-bdi-stat { flex: 1 1 96px; min-width: 90px; background: var(--bg-elev-2, var(--bg-elev)); border: 1px solid var(--border); border-radius: 9px; padding: 10px 11px; display: flex; flex-direction: column; gap: 2px; }
+.feed-bdi-stat b { font-size: 17px; line-height: 1; color: var(--text); font-feature-settings: "tnum"; white-space: nowrap; }
+.feed-bdi-stat span { font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: .5px; }
 .feed-bdi-stat.feed-bdi-fresh b { color: var(--green, #6fcf97); }
 @keyframes newsslide { from { transform: translateX(20px); opacity: .6; } to { transform: none; opacity: 1; } }
 .news-close { position: absolute; top: 12px; right: 12px; z-index: 2; width: 30px; height: 30px; border-radius: 50%; border: 1px solid var(--border); background: var(--bg); color: var(--text-muted); cursor: pointer; }

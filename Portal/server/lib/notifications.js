@@ -10,11 +10,34 @@
 //   system       — sync/maintenance/system messages
 
 import { query } from '../db.js';
+import { sendEmail, emailProviderConfigured } from './email.js';
+import { renderAnnouncementEmail } from './email/template.js';
+
+const APP_URL = (process.env.BELL_APP_URL || 'https://app.bell.qa').replace(/\/$/, '');
+
+// Send a notification as a branded email. Returns false (never throws) if the
+// provider isn't configured or the send fails — so it's safe to fire-and-forget.
+export async function notifyEmail({ to, title, body, link }) {
+  if (!to) return false;
+  try {
+    if (!(await emailProviderConfigured())) return false;
+    const ctaUrl = link
+      ? (/^https?:\/\//i.test(link) ? link : APP_URL + (link.startsWith('/') ? link : '/' + link))
+      : APP_URL;
+    const html = renderAnnouncementEmail({ title, body: body || '', ctaText: 'Open Bell', ctaUrl });
+    await sendEmail({ to, subject: title, html });
+    return true;
+  } catch (err) {
+    console.error('[notifications] email send failed:', err.message);
+    return false;
+  }
+}
 
 /** Create one notification for one recipient. Returns the new id. */
 export async function createNotification({
   tenantId, userId, category = 'system', type = null,
   title, body = null, link = null, icon = null, data = null, announcementId = null,
+  email = false, recipientEmail = null,
 }) {
   if (!userId || !title) throw new Error('createNotification: userId and title required');
   const r = await query(
@@ -23,7 +46,17 @@ export async function createNotification({
      RETURNING id`,
     [tenantId, userId, category, type, title, body, link, icon, data ? JSON.stringify(data) : null, announcementId],
   );
+  // Optional email channel — fire-and-forget so it never blocks/fails the in-app notif.
+  if (email && recipientEmail) notifyEmail({ to: recipientEmail, title, body, link }).catch(() => {});
   return r.rows[0].id;
+}
+
+/** Notify one user by id (looks up their email for the optional email channel). */
+export async function notifyUserById(userId, opts = {}) {
+  const u = await query(`SELECT id, tenant_id, email FROM users WHERE id = $1 AND is_active = true`, [userId]);
+  if (!u.rows.length) return null;
+  const row = u.rows[0];
+  return createNotification({ tenantId: row.tenant_id, userId: row.id, recipientEmail: row.email, ...opts });
 }
 
 /** Recent notifications for a user (newest first). */
@@ -66,14 +99,14 @@ export async function markAllRead(userId) {
  * Broadcast one announcement to every active user — all tenants (tenantId=null)
  * or a single tenant. Used by admin announcements. Returns the number sent.
  */
-export async function broadcast({ tenantId = null, title, body = null, link = null, category = 'announcement', type = 'announcement', icon = 'megaphone', announcementId = null }) {
+export async function broadcast({ tenantId = null, title, body = null, link = null, category = 'announcement', type = 'announcement', icon = 'megaphone', announcementId = null, email = false }) {
   if (!title) throw new Error('broadcast: title required');
   const where  = tenantId ? `WHERE is_active = true AND tenant_id = $1` : `WHERE is_active = true`;
   const params = tenantId ? [tenantId] : [];
-  const users = await query(`SELECT id, tenant_id FROM users ${where}`, params);
+  const users = await query(`SELECT id, tenant_id, email FROM users ${where}`, params);
   let n = 0;
   for (const u of users.rows) {
-    await createNotification({ tenantId: u.tenant_id, userId: u.id, category, type, title, body, link, icon, announcementId });
+    await createNotification({ tenantId: u.tenant_id, userId: u.id, category, type, title, body, link, icon, announcementId, email, recipientEmail: u.email });
     n++;
   }
   return n;

@@ -12,6 +12,7 @@ import { Router } from 'express';
 import { Webhook } from 'svix';
 import { query, withTransaction } from '../db.js';
 import { requireAuth, getModeInfo, orgRoleToBell } from '../lib/auth.js';
+import { createNotification } from '../lib/notifications.js';
 
 const router = Router();
 
@@ -132,6 +133,25 @@ async function handleUserCreated(clerkUser) {
 
     console.log(`[auth] provisioned user ${primaryEmail} as ${role} of tenant '${tenantName}' (id=${tenantId})`);
   });
+
+  // Welcome notification (in-app + branded email) — once per user, best-effort
+  // (never breaks signup if it fails).
+  try {
+    const u = await query(`SELECT id FROM users WHERE clerk_user_id = $1`, [clerkUserId]);
+    if (u.rows.length) {
+      const uid = u.rows[0].id;
+      const seen = await query(`SELECT 1 FROM notifications WHERE user_id = $1 AND type = 'welcome' LIMIT 1`, [uid]);
+      if (!seen.rows.length) {
+        await createNotification({
+          tenantId, userId: uid, category: 'account', type: 'welcome',
+          title: `Welcome to Bell, ${firstName || 'there'}!`,
+          body: 'Your account is ready — explore Qatar companies, reveal verified contacts, and track live market intelligence, all in one place.',
+          link: '/market-feed', icon: 'megaphone',
+          email: true, recipientEmail: primaryEmail.toLowerCase(),
+        });
+      }
+    }
+  } catch (err) { console.error('[auth] welcome notification failed:', err.message); }
 }
 
 async function handleUserUpdated(clerkUser) {
