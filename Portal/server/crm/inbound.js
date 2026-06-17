@@ -8,6 +8,7 @@
 import { query } from '../db.js';
 import { logActivity } from '../lib/crm.js';
 import { sendEmail, getFromAddress } from '../lib/email.js';
+import { createNotification } from '../lib/notifications.js';
 
 // Pull the crm_emails id out of a "reply+<id>@…" recipient string.
 export function parseReplyId(recipient) {
@@ -64,6 +65,22 @@ export async function processInboundReply({ emailId, fromAddr, subject, text }) 
         text: `${from} replied to your Bell outreach:\n\n${body}`,
       });
     } catch (e) { console.warn('[crm-inbound] forward failed:', e.message); }
+  }
+
+  // In-app notification to the rep who sent the outreach.
+  if (o.sent_by) {
+    try {
+      const u = await query(
+        `SELECT id FROM users WHERE lower(email) = lower($1) AND tenant_id = $2 AND is_active = true LIMIT 1`,
+        [o.sent_by, o.tenant_id]);
+      if (u.rows.length) {
+        await createNotification({
+          tenantId: o.tenant_id, userId: u.rows[0].id, category: 'engagement', type: 'crm_reply',
+          title: `New reply from ${from}`, body: String(subj).slice(0, 140),
+          link: '/crm', icon: 'crm',
+        });
+      }
+    } catch (e) { console.warn('[crm-inbound] notify failed:', e.message); }
   }
 
   return { matched: true, record_id: o.record_id };
