@@ -14,14 +14,14 @@ import { query } from '../db.js';
 /** Create one notification for one recipient. Returns the new id. */
 export async function createNotification({
   tenantId, userId, category = 'system', type = null,
-  title, body = null, link = null, icon = null, data = null,
+  title, body = null, link = null, icon = null, data = null, announcementId = null,
 }) {
   if (!userId || !title) throw new Error('createNotification: userId and title required');
   const r = await query(
-    `INSERT INTO notifications (tenant_id, user_id, category, type, title, body, link, icon, data)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb)
+    `INSERT INTO notifications (tenant_id, user_id, category, type, title, body, link, icon, data, announcement_id)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9::jsonb, $10)
      RETURNING id`,
-    [tenantId, userId, category, type, title, body, link, icon, data ? JSON.stringify(data) : null],
+    [tenantId, userId, category, type, title, body, link, icon, data ? JSON.stringify(data) : null, announcementId],
   );
   return r.rows[0].id;
 }
@@ -66,15 +66,46 @@ export async function markAllRead(userId) {
  * Broadcast one announcement to every active user — all tenants (tenantId=null)
  * or a single tenant. Used by admin announcements. Returns the number sent.
  */
-export async function broadcast({ tenantId = null, title, body = null, link = null, category = 'announcement', type = 'announcement', icon = 'megaphone' }) {
+export async function broadcast({ tenantId = null, title, body = null, link = null, category = 'announcement', type = 'announcement', icon = 'megaphone', announcementId = null }) {
   if (!title) throw new Error('broadcast: title required');
   const where  = tenantId ? `WHERE is_active = true AND tenant_id = $1` : `WHERE is_active = true`;
   const params = tenantId ? [tenantId] : [];
   const users = await query(`SELECT id, tenant_id FROM users ${where}`, params);
   let n = 0;
   for (const u of users.rows) {
-    await createNotification({ tenantId: u.tenant_id, userId: u.id, category, type, title, body, link, icon });
+    await createNotification({ tenantId: u.tenant_id, userId: u.id, category, type, title, body, link, icon, announcementId });
     n++;
   }
   return n;
+}
+
+// --- Announcements (tracked broadcasts; recallable) ------------------------
+
+export async function createAnnouncement({ scope = 'tenant', tenantId = null, title, body = null, link = null, createdBy = null }) {
+  const r = await query(
+    `INSERT INTO announcements (scope, tenant_id, title, body, link, created_by)
+     VALUES ($1, $2, $3, $4, $5, $6) RETURNING id`,
+    [scope, tenantId, title, body, link, createdBy],
+  );
+  return r.rows[0].id;
+}
+
+export async function setAnnouncementSent(id, count) {
+  await query(`UPDATE announcements SET sent_count = $2 WHERE id = $1`, [id, count]);
+}
+
+export async function listAnnouncements({ limit = 50 } = {}) {
+  const r = await query(
+    `SELECT id, scope, tenant_id, title, body, link, sent_count, created_by, created_at, recalled_at
+       FROM announcements ORDER BY created_at DESC LIMIT $1`,
+    [Math.min(Number(limit) || 50, 200)],
+  );
+  return r.rows;
+}
+
+// Recall: remove every notification this announcement created + mark it recalled.
+export async function recallAnnouncement(id) {
+  const del = await query(`DELETE FROM notifications WHERE announcement_id = $1`, [id]);
+  await query(`UPDATE announcements SET recalled_at = now() WHERE id = $1`, [id]);
+  return del.rowCount;
 }

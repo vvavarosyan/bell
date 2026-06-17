@@ -153,12 +153,14 @@ export function PeopleTab({ mode = 'local-admin' } = {}) {
   return html`
     <div class="grid-toolbar">
       <input
-        type="text" placeholder=${archivedMode ? "Search archived people..." : "Search name, email, specialty, license..."}
+        type="text" placeholder=${archivedMode ? "Search archived people..." : "Search name, email, specialty…"}
         value=${q} onChange=${e => { setQ(e.target.value); setOffset(0); }}
+        style=${{ minWidth: '160px', flex: '0 1 200px' }}
       />
       <input
         type="text" placeholder="Employer company…"
         value=${company} onChange=${e => { setCompany(e.target.value); setOffset(0); }}
+        style=${{ minWidth: '150px', flex: '0 1 170px' }}
       />
       <select
         title="Filter by source"

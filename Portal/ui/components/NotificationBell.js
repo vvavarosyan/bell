@@ -57,7 +57,7 @@ export function NotificationBell() {
   // Poll the unread count (cheap) every 45s, plus on a custom event.
   useEffect(() => {
     refreshCount();
-    const t = setInterval(refreshCount, 45000);
+    const t = setInterval(refreshCount, 15000);
     const onChange = () => refreshCount();
     window.addEventListener('bdi:notifications-changed', onChange);
     return () => { clearInterval(t); window.removeEventListener('bdi:notifications-changed', onChange); };

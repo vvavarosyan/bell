@@ -101,7 +101,17 @@ router.get('/stats', async (req, res, next) => {
         (SELECT count(*)::int FROM news_items WHERE created_at > now() - interval '24 hours') AS items_today,
         (SELECT count(*)::int FROM feed_events WHERE occurred_at > now() - interval '24 hours') AS events_today,
         (SELECT count(*)::int FROM feed_events WHERE array_length(linked_company_ids,1) > 0
-            AND occurred_at > now() - interval '24 hours') AS linked_today
+            AND occurred_at > now() - interval '24 hours') AS linked_today,
+        -- Bell Data Intelligence freshness/scale (shown to users in Market Feed)
+        (SELECT count(*)::int FROM companies WHERE is_active = true) AS bdi_companies,
+        (SELECT count(*)::int FROM people)                            AS bdi_people,
+        ((SELECT count(*) FROM companies WHERE updated_at > now() - interval '7 days')
+         + (SELECT count(*) FROM people WHERE updated_at > now() - interval '7 days'))::int AS bdi_fresh_7d,
+        ((SELECT count(*) FROM companies)
+         + (SELECT count(*) FROM people)
+         + (SELECT count(*) FROM company_contacts)
+         + (SELECT count(*) FROM person_companies)
+         + (SELECT count(*) FROM person_contacts))::bigint AS bdi_datapoints
     `);
     const news = getNewsState();
     res.json({

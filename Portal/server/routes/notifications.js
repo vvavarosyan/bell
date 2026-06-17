@@ -2,7 +2,10 @@
 // admin announcement broadcast. Mounted behind requireAuth, so req.user is set.
 
 import { Router } from 'express';
-import { listForUser, unreadCount, markRead, markAllRead, broadcast } from '../lib/notifications.js';
+import {
+  listForUser, unreadCount, markRead, markAllRead, broadcast,
+  createAnnouncement, setAnnouncementSent, listAnnouncements, recallAnnouncement,
+} from '../lib/notifications.js';
 
 const router = Router();
 
@@ -50,9 +53,32 @@ router.post('/announce', async (req, res, next) => {
     if (!title) return res.status(400).json({ error: 'title required' });
     const body = req.body?.body ? String(req.body.body) : null;
     const link = req.body?.link ? String(req.body.link) : null;
-    const tenantId = req.body?.all_tenants === false ? req.user.tenant_id : null;
-    const sent = await broadcast({ tenantId, title, body, link });
-    res.json({ ok: true, sent });
+    const platform = req.body?.all_tenants !== false;   // default: whole platform
+    const tenantId = platform ? null : req.user.tenant_id;
+    const announcementId = await createAnnouncement({
+      scope: platform ? 'platform' : 'tenant', tenantId, title, body, link, createdBy: req.user.email,
+    });
+    const sent = await broadcast({ tenantId, title, body, link, announcementId });
+    await setAnnouncementSent(announcementId, sent);
+    res.json({ ok: true, announcement_id: announcementId, sent });
+  } catch (err) { next(err); }
+});
+
+// GET /api/notifications/announcements — list sent announcements (admin).
+router.get('/announcements', async (req, res, next) => {
+  try {
+    if (req.user.role !== 'platform_admin') return res.status(403).json({ error: 'forbidden' });
+    res.json({ rows: await listAnnouncements({ limit: 50 }) });
+  } catch (err) { next(err); }
+});
+
+// POST /api/notifications/announcements/:id/recall — remove an announcement's
+// notifications from every recipient (admin).
+router.post('/announcements/:id/recall', async (req, res, next) => {
+  try {
+    if (req.user.role !== 'platform_admin') return res.status(403).json({ error: 'forbidden' });
+    const removed = await recallAnnouncement(Number(req.params.id));
+    res.json({ ok: true, removed });
   } catch (err) { next(err); }
 });
 
