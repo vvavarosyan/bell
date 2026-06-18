@@ -12,6 +12,11 @@
 // poison the database with junk. People/partners are returned as *candidates*;
 // the harvester decides how to persist them.
 
+import {
+  normalizePhone, cleanCompanySocials, rankCompanyEmails,
+  looksLikeName as dqLooksLikeName, isHeadingTitle,
+} from '../../lib/dataquality.js';
+
 // ===========================================================================
 // Emails
 // ===========================================================================
@@ -59,19 +64,11 @@ export function emailDomain(email) {
  * the deduped input (capped).
  */
 export function preferOwnEmails(emails, siteDomain = '', cap = 12) {
-  const list = [...new Set((emails || []).map(e => String(e).toLowerCase()))];
-  const sd = String(siteDomain || '').toLowerCase().replace(/^www\./, '');
-  if (!sd) return list.slice(0, cap);
-  const ranked = [];
-  for (const e of list) {
-    const d = emailDomain(e);
-    const own  = d === sd || d.endsWith('.' + sd) || sd.endsWith('.' + d);
-    const free = FREEMAIL.has(d);
-    if (!own && !free) continue;                 // other-company domain → drop
-    ranked.push({ e, rank: own ? 0 : 1 });
-  }
-  ranked.sort((a, b) => a.rank - b.rank);
-  return ranked.slice(0, cap).map(x => x.e);
+  // Delegate to the shared ranker (server/lib/dataquality.js): keeps own-domain,
+  // Qatar-ISP, and free-webmail addresses — own-domain first so the caller can
+  // mark index 0 as primary — and drops emails on a DIFFERENT company's domain
+  // (the classic "designed by webteck.com" / client-email pollution).
+  return rankCompanyEmails(emails, siteDomain).slice(0, cap);
 }
 
 // ===========================================================================
@@ -100,31 +97,21 @@ function acceptPhone(rawMatch, fullText, matchIndex) {
 }
 
 export function findPhones(text, telLinks = []) {
+  // Validate EVERY candidate through the shared phone validator
+  // (server/lib/dataquality.js): a real Qatar number is +974 + 8 digits, and
+  // well-formed international (+CC) numbers are kept. Bare 9/10-digit strings
+  // like "320-2446-483" or "(40778730) 17" are rejected as scraping junk.
+  // Dedup by the canonical E.164 form so one number in several formats = 1 row.
   const seen = new Set();
   const out = [];
-  // Dedup by DIGITS ONLY, so the same number in different formats
-  // (+447340337123, (+44)7340337123, 447340337123, "UK: +44 7340 337123")
-  // collapses into ONE entry instead of three.
-  const push = (display, digits, hadPlus) => {
-    if (!digits || seen.has(digits)) return;
-    seen.add(digits);
-    out.push({ display, value: (hadPlus ? '+' : '') + digits });
+  const push = (raw) => {
+    const norm = normalizePhone(raw);
+    if (!norm || seen.has(norm.e164)) return;
+    seen.add(norm.e164);
+    out.push({ display: norm.display, value: norm.e164 });
   };
-  // tel: links are high-confidence — accept directly.
-  for (const t of telLinks || []) {
-    const s = String(t).trim();
-    const digits = s.replace(/[^\d]/g, '');
-    if (digits.length < 8 || digits.length > 15) continue;
-    push(s, digits, s.startsWith('+'));
-  }
-  if (text) {
-    for (const m of text.matchAll(PHONE_RX)) {
-      const raw = m[0], idx = m.index ?? 0;
-      if (!acceptPhone(raw, text, idx)) continue;
-      const trimmed = raw.trim();
-      push(trimmed, trimmed.replace(/[^\d]/g, ''), trimmed.startsWith('+'));
-    }
-  }
+  for (const t of telLinks || []) push(t);                 // tel: links
+  if (text) for (const m of text.matchAll(PHONE_RX)) push(m[0]);
   return out;
 }
 
@@ -144,33 +131,24 @@ const SOCIAL_PATTERNS = [
 // Social handles that are platform chrome, not the company's own profile.
 const SOCIAL_JUNK = /\/(sharer|share|intent|home|login|signup|hashtag|explore|policies|help|about|privacy)\b/i;
 
-export function findSocials(text, links = []) {
-  const out = [];
-  const seen = new Set();
-  const counts = {};
-  const PER_PLATFORM = 3;   // a real company rarely has >3 profiles per network
+export function findSocials(text, links = [], opts = {}) {
+  // Pull candidate URLs out of the page, then hand them to the shared cleaner
+  // (server/lib/dataquality.js): it canonicalizes per platform, merges
+  // twitter/x/tweeter, dedups numeric-vs-slug LinkedIn pages, drops personal
+  // /in/ profiles + known third-party "designed by" handles (teepublic,
+  // zozo-themes…), and caps per platform. Passing companyName/siteDomain lets
+  // it recognise which handles actually belong to this company.
   const haystack = (text || '') + '\n' + (links || []).join('\n');
-  for (const { name, rx } of SOCIAL_PATTERNS) {
-    for (const raw of haystack.match(rx) || []) {
-      let clean = raw.replace(/[)\].,'"]+$/, '');
-      if (SOCIAL_JUNK.test(clean)) continue;
-      try { const u = new URL(clean); u.search = ''; u.hash = ''; clean = u.toString().replace(/\/$/, '').toLowerCase(); }
-      catch { clean = clean.toLowerCase(); }
-      // Drop bare profile roots (e.g. instagram.com/ with no handle).
-      if (/(facebook|instagram|twitter|x|tiktok|youtube|linkedin)\.com\/?$/i.test(clean)) continue;
-      // Drop Facebook generic section roots with no specific handle after them.
-      // (Real profiles are facebook.com/people/Name/12345 — those have a handle
-      // and are kept; a bare .../people, .../pages, .../groups is navigation.)
-      if (/facebook\.com\/(people|pages|pg|groups|watch|marketplace|events|profile\.php|sharer)\/?$/i.test(clean)) continue;
-      if (seen.has(clean)) continue;
-      seen.add(clean);
-      // Cap per platform so a page full of partner/team/share links can't flood
-      // the record with dozens of Facebooks/Instagrams.
-      if ((counts[name] = (counts[name] || 0) + 1) > PER_PLATFORM) continue;
-      out.push({ network: name, url: clean });
-    }
+  const raw = [];
+  for (const { rx } of SOCIAL_PATTERNS) {
+    for (const m of haystack.match(rx) || []) raw.push(m);
   }
-  return out;
+  const { kept } = cleanCompanySocials(raw, {
+    companyName: opts.companyName || '',
+    siteDomain: opts.siteDomain || '',
+    strictAffinity: !!opts.strictAffinity,
+  });
+  return kept.map((k) => ({ network: k.network, url: k.url }));
 }
 
 // ===========================================================================
@@ -204,17 +182,12 @@ const ROLE_RX = /\b(c[efo]o|cto|cmo|coo|chief|founder|co-?founder|owner|presiden
 const NAME_TOKEN = /^[A-Z][a-zA-Z'’.-]+$/;
 const NAME_JUNK = /\b(home|about|contact|services|products|news|blog|careers?|team|menu|copyright|all rights|privacy|terms|cookie|subscribe|newsletter|read more|learn more|view|click|email|phone)\b/i;
 
+// Delegate to the shared, hardened name check (server/lib/dataquality.js):
+// rejects section headings like "Our Company" / "Our History" / "Meet The Team"
+// that the old two-capitalised-words rule let through, while still allowing
+// middle initials ("Clifford W Lasrado") and Arabic-style particles.
 function looksLikeName(s) {
-  if (!s || NAME_JUNK.test(s)) return false;
-  if (ROLE_RX.test(s)) return false;   // a job title (e.g. "Chief Executive Officer") is not a name
-  const toks = s.trim().split(/\s+/);
-  if (toks.length < 2 || toks.length > 4) return false;
-  let nameTokens = 0;
-  for (const t of toks) {
-    if (NAME_TOKEN.test(t.replace(/[.,]$/, ''))) nameTokens++;
-    else if (!/^(bin|al|el|de|van|von|della|abu|the|of)$/i.test(t)) return false;
-  }
-  return nameTokens >= 2;
+  return dqLooksLikeName(s);
 }
 
 function cleanTitle(s) {
@@ -233,6 +206,7 @@ export function extractTeam(text, cap = 40) {
   const seen = new Set();
 
   const tryAdd = (name, title) => {
+    if (isHeadingTitle(title)) return;                 // "Chairman's Message" is a section, not a person
     const key = name.toLowerCase().replace(/[^a-z]/g, '');
     if (!key || seen.has(key)) return;
     seen.add(key);

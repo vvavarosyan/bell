@@ -1,0 +1,119 @@
+======================================================================
+  BELL DATA-QUALITY CLEANUP — DRY-RUN
+  2026-06-18T17:46:33.034Z
+======================================================================
+
+Scanned: 189642 companies, 16697 people
+
+CHANGES (would be made):
+  Phones    — deleted 7910 invalid/dup, normalized 40093
+  Socials   — deleted 951 dup/personal/third-party, canonicalized 1828
+  Emails    — deleted 809 other-domain, re-pointed primary on 4254
+  Websites  — fixed 9430 markdown/broken URLs
+  People    — deleted 275 non-person "headings"
+  Titles    — cleared 41 bogus shared exec titles
+
+Sample contact changes:
+  · website: https://www.aqiliusai.com/ → https://www.aqiliusai.com
+  · email✗ info@aselsan.com.qa (other-domain)
+  · website: https://www.bakerhughes.com/ → https://www.bakerhughes.com
+  · website: https://www.barzanholdings.com/ → https://www.barzanholdings.com
+  · website: https://biteback.net/ → https://biteback.net
+  · phone✗ 707-280-7322
+  · email✗ /cdn-cgi/l/email-protection#2e44475d454f424f6e4c414f5c4a5c41… (other-domain)
+  · website: https://bsporty.com/ → https://bsporty.com
+  · website: https://www.cisco.com/ → https://www.cisco.com
+  · phone✗ 888-852-2726
+  · phone✗ 800-553-2447
+  · phone✗ 866-606-1866
+  · phone✗ 18888522726
+  · phone✗ 1 800 553 2447
+  · phone✗ 1 866 606 1866
+  · phone✗ 1 800-553-6387
+  · phone✗ 100 - 249 
+ 250 - 4
+  · phone✗ 99 
+ 500 - 999 
+ 1
+  · phone✗ 9999 
+ 10000
+  · website: https://www.classtap.com/ → https://www.classtap.com
+  · phone✗ 20220116-1
+  · phone✗ 20200115-1
+  · website: https://compugence.com/ → https://compugence.com
+  · website: http://www.conocophillips.com/ → http://www.conocophillips.com
+  · phone✗ 2812931000
+  · phone✗ 77079-2703
+  · phone✗ 77252-2197
+  · phone✗ 918-661-0905
+  · website: https://micetribe.com/ → https://micetribe.com
+  · email✗ info@contactless.io (other-domain)
+  · website: https://cyfirm.com/ → https://cyfirm.com
+  · email✗ /cdn-cgi/l/email-protection#c6abb5afa4b4a7aeafab86a5bfa0afb4… (other-domain)
+  · website: https://cypherlearning.com/ → https://cypherlearning.com
+  · social✗ https://www.linkedin.com/in/natalie-mccullough-304bb
+  · social✗ https://www.linkedin.com/in/eriknierenberg
+  · social✗ https://x.com/cypherlearning
+  · website: https://denovosciences.ai/ → https://denovosciences.ai
+  · email✗ /cdn-cgi/l/email-protection#88e0e7fee9e3e1e5f2c8ecede6e7fee7… (other-domain)
+  · website: https://enable.tech/ → https://enable.tech
+  · website: http://www.esqstp.com/ → http://www.esqstp.com
+  · email✗ info@es-qstp.com (other-domain)
+  · phone✗ 77389-1425
+  · phone✗ 1-800-903-9966
+  · phone✗ 1-888-944-2227
+  · phone✗ 1-866-460-5350
+  · phone✗ 85062-8001
+  · phone✗ 57117-6404
+  · phone✗ 1 800-627-3427
+  · phone✗ 1 800-624-5140
+  · phone✗ 1 800-950-6157
+  · phone✗ 60197-5727
+  · phone✗ 1-800-344-4355
+  · phone✗ 1-866-379-1010
+  · phone✗ 1-800-350-9102
+  · phone✗ 85062-8072
+  · phone✗ 57117-7032
+  · phone✗ 1-866-462-8646
+  · phone✗ 1-888-739-2730
+  · phone✗ 1-800-243-9966
+  · phone✗ 1 888 299 2883
+
+Sample people removed:
+  · #118 "Al Asmakh Facilities Management"
+  · #2000011222 "Who We Are"
+  · #2000011235 "Why Choose Us"
+  · #2000011260 "Our Channels"
+  · #2000011336 "Why We’re Different"
+  · #2000011360 "Our Partners"
+  · #2000011366 "What's New"
+  · #2000011388 "The PetroPipe Story"
+  · #2000011432 "Board of Directors"
+  · #2000011434 "Why Choose Us"
+  · #2000011441 "Our Partners"
+  · #2000011470 "Our Mission"
+  · #2000011530 "The Academy"
+  · #2000011575 "Success Story"
+  · #2000011578 "Our Vision"
+  · #2000011579 "Our Partners"
+  · #2000011580 "Our Awesome Clients"
+  · #2000011597 "Who We Are"
+  · #2000011599 "Our Apps"
+  · #2000011634 "What Makes Us Different"
+  · #2000011640 "The Fischer Advantage"
+  · #2000011682 "Board of Directors"
+  · #2000011684 "Our Leaders"
+  · #2000011686 "Our Leaders"
+  · #2000011690 "How To Buy"
+
+Sample exec-title clears:
+  · company #200: cleared 6× "Managing Director"
+  · company #41866: cleared 5× "Chief Executive Officer"
+  · company #141609: cleared 3× "Chief Operating Officer"
+  · company #152128: cleared 4× "ceo"
+  · company #159577: cleared 9× "Managing Director"
+  · company #188216: cleared 7× "President & CEO"
+  · company #188870: cleared 7× "President & CEO"
+
+No changes were written. Re-run with  --apply  to make these changes.
+======================================================================

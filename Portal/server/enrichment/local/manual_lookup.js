@@ -195,7 +195,7 @@ async function crawlAndExtract(siteUrl, jobLog) {
   const siteDomain = (hostOf(home.finalUrl) || '').replace(/^www\./, '');
   const emails  = preferOwnEmails([...new Set([...allMailto, ...findEmails(allText)])], siteDomain, 12);
   const phones  = findPhones(allText, allTel).slice(0, 10).map(p => p.display || p.value);
-  const socials = findSocials(allText, allLinks).slice(0, 20).map(s => ({ network: s.network, url: s.url }));
+  const socials = findSocials(allText, allLinks, { companyName: name, siteDomain }).slice(0, 20).map(s => ({ network: s.network, url: s.url }));
   const address = guessAddress(allText);
   const logo    = pickLogo(pages[0].page.meta || {});
   const homeMeta = pages[0].page.meta || {};
