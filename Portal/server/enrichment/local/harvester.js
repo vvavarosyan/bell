@@ -183,7 +183,7 @@ export async function enrichCompany(company) {
   const siteDomain = (hostOf(home.finalUrl) || '').replace(/^www\./, '');
   const emails  = preferOwnEmails([...new Set([...allMailto, ...findEmails(allText)])], siteDomain, 12);
   const phones  = findPhones(allText, allTel).slice(0, 10);
-  const socials = findSocials(allText, allLinks);
+  const socials = findSocials(allText, allLinks, { companyName: company.name, siteDomain });
   const address = guessAddress(allText);
   const logo    = pickLogo(pages[0].page.meta);
   const homeMeta = pages[0].page.meta || {};
