@@ -155,6 +155,11 @@ router.get('/', async (req, res, next) => {
       params.push(req.query.source);
       where.push(`EXISTS (SELECT 1 FROM company_sources cs WHERE cs.company_id = companies.id AND cs.source = $${params.length})`);
     }
+    // industry filter — exact match on the normalized industry label
+    if (req.query.industry) {
+      params.push(req.query.industry);
+      where.push(`companies.industry = $${params.length}`);
+    }
     for (const k of ['stage1','stage2','stage3','stage4','stage5']) {
       if (req.query[k]) {
         params.push(req.query[k]);
@@ -175,7 +180,7 @@ router.get('/', async (req, res, next) => {
              is_active, status_normalized,
              primary_registration_no, incorporation_date,
              website, email, phone, address, city, country,
-             industry, sector, employee_count, founded_year,
+             industry, sector, employee_count, employee_count_range, founded_year,
              linkedin_url, linkedin_logo_url,
              stage1_status, stage1_at,
              stage2_status, stage2_at,
@@ -273,6 +278,20 @@ router.get('/map', async (req, res, next) => {
 // GET /api/companies/:id — full row including extra_fields + linked sources
 // Includes raw_payload from EVERY source so the detail drawer shows every
 // JSON field that was ever scraped.
+// Distinct industries (for the companies-list filter dropdown), most-common first.
+router.get('/industries', async (req, res, next) => {
+  try {
+    const r = await query(
+      `SELECT industry, count(*)::int AS n
+         FROM companies
+        WHERE industry IS NOT NULL AND industry <> '' AND archived = false
+        GROUP BY industry
+        ORDER BY n DESC, industry ASC
+        LIMIT 300`);
+    res.json({ rows: r.rows });
+  } catch (err) { next(err); }
+});
+
 router.get('/:id', async (req, res, next) => {
   try {
     const id = Number(req.params.id);

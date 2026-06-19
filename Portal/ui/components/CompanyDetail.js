@@ -38,6 +38,7 @@ const COMPANY_FIELD_META = {
   latitude:                { type: 'number' },
   longitude:               { type: 'number' },
   employee_count:          { type: 'number' },
+  __employees:             { editable: false },   // merged exact+range display (read-only)
   linkedin_followers:      { type: 'number' },
   gmaps_rating:            { type: 'number' },
   gmaps_reviews_count:     { type: 'number' },
@@ -109,8 +110,7 @@ const COMPANY_GROUPS = [
       ['industry', 'Industry'],
       ['sector', 'Sector'],
       ['sub_sector', 'Sub-sector'],
-      ['employee_count', 'Employees'],
-      ['employee_count_range', 'Employees (range)'],
+      ['__employees', 'Employees'],
       ['company_size_category', 'Size category'],
     ],
   },
@@ -493,6 +493,12 @@ function CompanyTab({ company, extra, similar, relationships, contacts, onReload
       onReload?.();
     } catch (err) { toast('Save failed: ' + err.message, 'error'); throw err; }
   };
+  // Merge the two employee fields into ONE "Employees" line. Showing both
+  // "Employees: 56,331" and "Employees (range): 10001+" was confusing — now we
+  // show the exact count when known (range as a secondary), else the range.
+  company.__employees = (!isEmptyValue(company.employee_count))
+    ? Number(company.employee_count).toLocaleString() + (!isEmptyValue(company.employee_count_range) ? ` · ${company.employee_count_range}` : '')
+    : (!isEmptyValue(company.employee_count_range) ? String(company.employee_count_range) : null);
   // The Stage 1 result card (chosen URL + "Candidates considered" with raw
   // Firecrawl guesses) was removed 2026-05-23 per Val. Those candidate slugs
   // are guesses, not verified data, and shouldn't be surfaced in a customer-

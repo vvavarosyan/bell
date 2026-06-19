@@ -254,7 +254,16 @@ export function PeopleTab({ mode = 'local-admin' } = {}) {
                     </div>
                   `}
                 />
-                <${EditableCell} value=${r.headline}  readOnly=${isUser} onSave=${(v) => update(r.id, 'headline', v)} />
+                <${EditableCell}
+                  value=${r.headline}
+                  readOnly=${isUser}
+                  onSave=${(v) => update(r.id, 'headline', v)}
+                  formatter=${(h) => h
+                    ? h
+                    : (r.current_title
+                        ? html`<span class="muted" title="Current role (no headline set)">${r.current_title}</span>`
+                        : html`<span style=${{color:'var(--text-dim)'}}>—</span>`)}
+                />
                 <td><${ContactIcons} company=${r} showWebsite=${false} /></td>
                 <td class="bellscore"><${BellScore} score=${r.bell_score} bar=${false} /></td>
                 <td class="stages-cell">${isUser

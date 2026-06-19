@@ -50,6 +50,7 @@ export const api = {
   stageProgress:          () => request('/api/stats/stage-progress'),
 
   companies:              (q = {}) => request('/api/companies?' + new URLSearchParams(q)),
+  companyIndustries:      () => request('/api/companies/industries'),
   companiesMap:           () => request('/api/companies/map'),
   publicToken:            (name) => request('/api/settings/public-token/' + name),
   company:                (id) => request('/api/companies/' + id),
@@ -174,9 +175,12 @@ export const api = {
   crmAddRecord:           (entity_type, entity_id) => request('/api/crm/records', { method: 'POST', body: JSON.stringify({ entity_type, entity_id }) }),
   crmUpdateRecord:        (id, body) => request('/api/crm/records/' + id, { method: 'PATCH', body: JSON.stringify(body) }),
   crmAddNote:             (id, body) => request(`/api/crm/records/${id}/notes`, { method: 'POST', body: JSON.stringify({ body }) }),
+  crmUpdateNote:          (id, body) => request('/api/crm/notes/' + id, { method: 'PATCH', body: JSON.stringify({ body }) }),
+  crmDeleteNote:          (id) => request('/api/crm/notes/' + id, { method: 'DELETE' }),
   crmAddTask:             (id, body) => request(`/api/crm/records/${id}/tasks`, { method: 'POST', body: JSON.stringify(body) }),
   crmTasks:               (q = {}) => request('/api/crm/tasks?' + new URLSearchParams(q)),
   crmUpdateTask:          (id, body) => request('/api/crm/tasks/' + id, { method: 'PATCH', body: JSON.stringify(body) }),
+  crmDeleteTask:          (id) => request('/api/crm/tasks/' + id, { method: 'DELETE' }),
   crmSendEmail:           (id, body) => request(`/api/crm/records/${id}/email`, { method: 'POST', body: JSON.stringify(body) }),
   crmTemplates:           () => request('/api/crm/templates'),
   crmSaveTemplate:        (body) => request('/api/crm/templates', { method: 'POST', body: JSON.stringify(body) }),
@@ -192,6 +196,7 @@ export const api = {
   crmPipeline:            () => request('/api/crm/pipeline'),
   crmCreateDeal:          (body) => request('/api/crm/deals', { method: 'POST', body: JSON.stringify(body) }),
   crmUpdateDeal:          (id, body) => request('/api/crm/deals/' + id, { method: 'PATCH', body: JSON.stringify(body) }),
+  crmDeleteDeal:          (id) => request('/api/crm/deals/' + id, { method: 'DELETE' }),
 
   // Deep Data (Qatar Open Data)
   openDataStats:          () => request('/api/open-data/stats'),

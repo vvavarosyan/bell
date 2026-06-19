@@ -21,9 +21,27 @@ import { useState, useEffect, useRef } from 'react';
 import { html } from '../lib/html.js';
 import { formatValue, fmtNumber } from '../lib/format.js';
 
+// Pull a usable URL out of a value that may be a bare domain or a markdown link
+// (some scraped websites are stored as "[www.x.com](https://www.x.com)").
+function extractUrl(value) {
+  let s = String(value == null ? '' : value).trim();
+  if (!s) return null;
+  const md = s.match(/\((https?:\/\/[^)\s]+)\)/) || s.match(/\]\(([^)\s]+)\)/);
+  if (md) s = md[1].trim();
+  if (/^https?:\/\//i.test(s)) return s;
+  if (/^[\w-]+(\.[\w-]+)+([/?#]|$)/i.test(s)) return 'https://' + s.replace(/^\/+/, '');
+  return null;
+}
+
 function fmtDisplay(value, type) {
   if (value === null || value === undefined || value === '') {
     return html`<span class="muted">—</span>`;
+  }
+  // URL fields render as a clickable button even when the stored value is a
+  // bare domain or markdown link (so e.g. a website never shows as dead text).
+  if (type === 'url') {
+    const href = extractUrl(value);
+    if (href) return html`<a class="url-btn" href=${href} target="_blank" rel="noreferrer" title=${href}>Open ↗</a>`;
   }
   if (type === 'boolean') {
     return value
