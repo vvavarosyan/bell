@@ -87,7 +87,7 @@ function logoCircle(person, size = 44) {
   </span>`;
 }
 
-export function PersonDetail({ personId, onMutated, isUser = false }) {
+export function PersonDetail({ personId, onMutated, onDeleted, isUser = false, isLocalEngine = false }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [tab, setTab] = useState('profile');
@@ -170,6 +170,22 @@ export function PersonDetail({ personId, onMutated, isUser = false }) {
             } catch (err) { toast(err.message, 'error'); }
           }}
         >${p.archived ? 'Unarchive' : 'Archive'}</button>` : null}
+        ${isLocalEngine ? html`<button
+          class="linkbtn"
+          style=${{alignSelf:'flex-start', padding:'4px 10px', borderRadius:'5px',
+                  background:'transparent', border:'1px solid rgba(232,142,168,0.45)', color:'rgb(232 142 168)', fontSize:'11px'}}
+          title="Permanently delete this person and their links. Syncs the deletion to production on the next push."
+          onClick=${async () => {
+            if (!window.confirm(`PERMANENTLY DELETE "${p.full_name}"?\n\nThis removes the person and all their employment links + contacts. Use for wrong/junk entries (e.g. a page heading that became a person).\n\nThis cannot be undone and will sync the deletion to production on the next push.`)) return;
+            try {
+              await api.deletePerson(p.id);
+              toast(`Deleted "${p.full_name}" permanently`);
+              onDeleted?.();
+            } catch (err) {
+              toast(/admin_only/i.test(err.message) ? 'Only admins can permanently delete' : /local/i.test(err.message) ? 'Delete from the local engine' : 'Delete failed: ' + err.message, 'error');
+            }
+          }}
+        >Delete</button>` : null}
       </div>
 
       <div class="detail-tabs">

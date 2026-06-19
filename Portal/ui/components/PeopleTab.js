@@ -281,7 +281,9 @@ export function PeopleTab({ mode = 'local-admin' } = {}) {
       <${PersonDetail}
         personId=${openedId}
         onMutated=${load}
+        onDeleted=${() => { setOpenedId(null); load(); }}
         isUser=${isUser}
+        isLocalEngine=${mode === 'local-admin'}
       />
     </div>
 
