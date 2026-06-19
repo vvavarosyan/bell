@@ -201,10 +201,13 @@ router.patch('/notes/:id', async (req, res, next) => {
     if (!body) return res.status(400).json({ error: 'empty_note' });
     const r = await query(
       `UPDATE crm_notes SET body=$1, updated_at=now() WHERE id=$2 AND tenant_id=$3
-       RETURNING id, author_email, body, created_at, updated_at`,
+       RETURNING id, record_id, author_email, body, created_at, updated_at`,
       [body, id, tenantId(req)]
     );
     if (!r.rows.length) return res.status(404).json({ error: 'not_found' });
+    if (r.rows[0].record_id) await logActivity(null, tenantId(req), r.rows[0].record_id, 'note', {
+      actorUserId: actorUserId(req), actorEmail: actorEmail(req), summary: 'Note edited',
+    });
     res.json(r.rows[0]);
   } catch (err) { next(err); }
 });
@@ -213,8 +216,11 @@ router.patch('/notes/:id', async (req, res, next) => {
 router.delete('/notes/:id', async (req, res, next) => {
   try {
     const id = Number(req.params.id);
-    const r = await query(`DELETE FROM crm_notes WHERE id=$1 AND tenant_id=$2 RETURNING id`, [id, tenantId(req)]);
+    const r = await query(`DELETE FROM crm_notes WHERE id=$1 AND tenant_id=$2 RETURNING record_id`, [id, tenantId(req)]);
     if (!r.rows.length) return res.status(404).json({ error: 'not_found' });
+    if (r.rows[0].record_id) await logActivity(null, tenantId(req), r.rows[0].record_id, 'note', {
+      actorUserId: actorUserId(req), actorEmail: actorEmail(req), summary: 'Note deleted',
+    });
     res.json({ ok: true });
   } catch (err) { next(err); }
 });
@@ -299,8 +305,11 @@ router.patch('/tasks/:id', async (req, res, next) => {
 router.delete('/tasks/:id', async (req, res, next) => {
   try {
     const id = Number(req.params.id);
-    const r = await query(`DELETE FROM crm_tasks WHERE id=$1 AND tenant_id=$2 RETURNING id`, [id, tenantId(req)]);
+    const r = await query(`DELETE FROM crm_tasks WHERE id=$1 AND tenant_id=$2 RETURNING record_id, title`, [id, tenantId(req)]);
     if (!r.rows.length) return res.status(404).json({ error: 'not_found' });
+    if (r.rows[0].record_id) await logActivity(null, tenantId(req), r.rows[0].record_id, 'task', {
+      actorUserId: actorUserId(req), actorEmail: actorEmail(req), summary: 'Task deleted: ' + (r.rows[0].title || ''),
+    });
     res.json({ ok: true });
   } catch (err) { next(err); }
 });
@@ -476,8 +485,11 @@ router.patch('/deals/:id', async (req, res, next) => {
 router.delete('/deals/:id', async (req, res, next) => {
   try {
     const id = Number(req.params.id);
-    const r = await query(`DELETE FROM crm_deals WHERE id=$1 AND tenant_id=$2 RETURNING id`, [id, tenantId(req)]);
+    const r = await query(`DELETE FROM crm_deals WHERE id=$1 AND tenant_id=$2 RETURNING record_id, title`, [id, tenantId(req)]);
     if (!r.rows.length) return res.status(404).json({ error: 'not_found' });
+    if (r.rows[0].record_id) await logActivity(null, tenantId(req), r.rows[0].record_id, 'deal', {
+      actorUserId: actorUserId(req), actorEmail: actorEmail(req), summary: 'Deal deleted: ' + (r.rows[0].title || ''),
+    });
     res.json({ ok: true });
   } catch (err) { next(err); }
 });

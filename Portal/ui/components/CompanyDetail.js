@@ -493,11 +493,11 @@ function CompanyTab({ company, extra, similar, relationships, contacts, onReload
       onReload?.();
     } catch (err) { toast('Save failed: ' + err.message, 'error'); throw err; }
   };
-  // Merge the two employee fields into ONE "Employees" line. Showing both
-  // "Employees: 56,331" and "Employees (range): 10001+" was confusing — now we
-  // show the exact count when known (range as a secondary), else the range.
+  // ONE "Employees" line. Prefer the exact headcount (e.g. 56,331); only fall
+  // back to LinkedIn's coarse size bracket (e.g. "10001+") when no exact count
+  // exists. (Showing both was redundant — the bracket just buckets the count.)
   company.__employees = (!isEmptyValue(company.employee_count))
-    ? Number(company.employee_count).toLocaleString() + (!isEmptyValue(company.employee_count_range) ? ` · ${company.employee_count_range}` : '')
+    ? Number(company.employee_count).toLocaleString()
     : (!isEmptyValue(company.employee_count_range) ? String(company.employee_count_range) : null);
   // The Stage 1 result card (chosen URL + "Candidates considered" with raw
   // Firecrawl guesses) was removed 2026-05-23 per Val. Those candidate slugs

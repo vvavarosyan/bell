@@ -283,7 +283,8 @@ export function CompaniesTab({ archivedMode: initialArchived = false, mode = 'lo
       <select value=${sourceFilter} onChange=${e => { setSourceFilter(e.target.value); setOffset(0); }}>
         ${SOURCE_OPTIONS.map(s => html`<option key=${s} value=${s}>${s ? s : 'All sources'}</option>`)}
       </select>
-      <select value=${industryFilter} onChange=${e => { setIndustryFilter(e.target.value); setOffset(0); }} title="Filter by industry">
+      <select value=${industryFilter} onChange=${e => { setIndustryFilter(e.target.value); setOffset(0); }} title="Filter by industry"
+        style=${{ maxWidth: '150px', flex: '0 0 auto' }}>
         <option value="">All industries</option>
         ${industries.map(i => html`<option key=${i.industry} value=${i.industry}>${i.industry}${i.n ? ` (${i.n})` : ''}</option>`)}
       </select>
