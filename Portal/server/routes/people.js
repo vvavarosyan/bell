@@ -144,7 +144,11 @@ router.get('/', async (req, res, next) => {
                 JOIN companies c ON c.id = pc.company_id
                WHERE pc.person_id = people.id
                ORDER BY pc.is_current DESC NULLS LAST, pc.start_date DESC NULLS LAST
-               LIMIT 1) AS current_company
+               LIMIT 1) AS current_company,
+             (SELECT pc.title FROM person_companies pc
+               WHERE pc.person_id = people.id AND pc.title IS NOT NULL AND pc.title <> ''
+               ORDER BY pc.is_current DESC NULLS LAST, pc.start_date DESC NULLS LAST
+               LIMIT 1) AS current_title
       FROM people
       ${whereSql}
       ORDER BY bell_score DESC, id DESC

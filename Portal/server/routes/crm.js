@@ -193,6 +193,32 @@ router.post('/records/:id/notes', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+// PATCH /api/crm/notes/:id  { body }  — edit a note's text
+router.patch('/notes/:id', async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    const body = String(req.body?.body || '').trim();
+    if (!body) return res.status(400).json({ error: 'empty_note' });
+    const r = await query(
+      `UPDATE crm_notes SET body=$1, updated_at=now() WHERE id=$2 AND tenant_id=$3
+       RETURNING id, author_email, body, created_at, updated_at`,
+      [body, id, tenantId(req)]
+    );
+    if (!r.rows.length) return res.status(404).json({ error: 'not_found' });
+    res.json(r.rows[0]);
+  } catch (err) { next(err); }
+});
+
+// DELETE /api/crm/notes/:id
+router.delete('/notes/:id', async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    const r = await query(`DELETE FROM crm_notes WHERE id=$1 AND tenant_id=$2 RETURNING id`, [id, tenantId(req)]);
+    if (!r.rows.length) return res.status(404).json({ error: 'not_found' });
+    res.json({ ok: true });
+  } catch (err) { next(err); }
+});
+
 // POST /api/crm/records/:id/tasks  { title, description?, due_at?, assignee_user_id? }
 router.post('/records/:id/tasks', async (req, res, next) => {
   try {
@@ -266,6 +292,16 @@ router.patch('/tasks/:id', async (req, res, next) => {
       });
     }
     res.json(r.rows[0]);
+  } catch (err) { next(err); }
+});
+
+// DELETE /api/crm/tasks/:id
+router.delete('/tasks/:id', async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    const r = await query(`DELETE FROM crm_tasks WHERE id=$1 AND tenant_id=$2 RETURNING id`, [id, tenantId(req)]);
+    if (!r.rows.length) return res.status(404).json({ error: 'not_found' });
+    res.json({ ok: true });
   } catch (err) { next(err); }
 });
 
@@ -433,6 +469,16 @@ router.patch('/deals/:id', async (req, res, next) => {
       `UPDATE crm_deals SET ${sets.join(', ')} WHERE id=$${params.length-1} AND tenant_id=$${params.length}
        RETURNING id, stage_id, status, value_num`, params);
     res.json(r.rows[0]);
+  } catch (err) { next(err); }
+});
+
+// DELETE /api/crm/deals/:id
+router.delete('/deals/:id', async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    const r = await query(`DELETE FROM crm_deals WHERE id=$1 AND tenant_id=$2 RETURNING id`, [id, tenantId(req)]);
+    if (!r.rows.length) return res.status(404).json({ error: 'not_found' });
+    res.json({ ok: true });
   } catch (err) { next(err); }
 });
 

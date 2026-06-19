@@ -493,6 +493,8 @@ function RecordDrawer({ recordId, onClose, onChanged }) {
   const [seqList, setSeqList] = useState([]);
   const [selSeq, setSelSeq] = useState('');
   const [openEmail, setOpenEmail] = useState(null);
+  const [editingNote, setEditingNote] = useState(null);
+  const [editNoteText, setEditNoteText] = useState('');
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -542,6 +544,29 @@ function RecordDrawer({ recordId, onClose, onChanged }) {
     try { await api.crmUpdateTask(t.id, { status: t.status === 'done' ? 'open' : 'done' }); await load(); onChanged?.(); }
     catch (err) { toast('Task update failed: ' + err.message, 'error'); }
   };
+  const removeTask = async (id) => {
+    if (!window.confirm('Delete this task?')) return;
+    try { await api.crmDeleteTask(id); await load(); onChanged?.(); }
+    catch (err) { toast('Delete failed: ' + err.message, 'error'); }
+  };
+  const removeDeal = async (id) => {
+    if (!window.confirm('Delete this deal?')) return;
+    try { await api.crmDeleteDeal(id); await load(); onChanged?.(); }
+    catch (err) { toast('Delete failed: ' + err.message, 'error'); }
+  };
+  const beginEditNote = (n) => { setEditingNote(n.id); setEditNoteText(n.body || ''); };
+  const saveEditNote = async () => {
+    const text = editNoteText.trim(); if (!text) return;
+    try { await api.crmUpdateNote(editingNote, text); setEditingNote(null); setEditNoteText(''); await load(); onChanged?.(); }
+    catch (err) { toast('Save failed: ' + err.message, 'error'); }
+  };
+  const removeNote = async (id) => {
+    if (!window.confirm('Delete this note?')) return;
+    try { await api.crmDeleteNote(id); await load(); onChanged?.(); }
+    catch (err) { toast('Delete failed: ' + err.message, 'error'); }
+  };
+  // Small inline row action button (✎ / ✕).
+  const ROW_X = { background: 'transparent', border: 'none', color: 'var(--text-dim)', cursor: 'pointer', fontSize: '12px', padding: '0 3px', lineHeight: 1, flexShrink: 0 };
   const openCompose = async () => {
     setEmTo(data?.suggested_to || '');
     setComposing(true);
@@ -676,6 +701,7 @@ function RecordDrawer({ recordId, onClose, onChanged }) {
                   <span style=${{ flex: 1, fontSize: '12.5px', color: 'var(--text)' }}>${d.title}</span>
                   ${d.value_num != null ? html`<span style=${{ fontSize: '11px', color: 'var(--accent-bright)' }}>${money(d.value_num, d.currency)}</span>` : null}
                   <span style=${{ fontSize: '10.5px', color: d.status === 'won' ? 'rgb(111 207 151)' : d.status === 'lost' ? 'rgb(232 142 168)' : 'var(--text-dim)' }}>${d.stage_name || d.status}</span>
+                  <button title="Delete deal" onClick=${() => removeDeal(d.id)} style=${ROW_X}>✕</button>
                 </div>`)}
             <button onClick=${addDeal} style=${{ marginTop: '8px', background: 'transparent', border: '1px solid var(--border)', color: 'var(--text-muted)', borderRadius: '6px', padding: '6px 12px', fontSize: '12px', cursor: 'pointer' }}>+ New deal</button>
 
@@ -692,6 +718,7 @@ function RecordDrawer({ recordId, onClose, onChanged }) {
                   <input type="checkbox" checked=${t.status === 'done'} onChange=${() => toggleTask(t)} />
                   <span style=${{ flex: 1, fontSize: '12.5px', color: 'var(--text)', textDecoration: t.status === 'done' ? 'line-through' : 'none', opacity: t.status === 'done' ? 0.55 : 1 }}>${t.title}</span>
                   ${t.due_at ? html`<span style=${{ fontSize: '10.5px', color: 'var(--text-dim)' }}>${new Date(t.due_at).toLocaleDateString()}</span>` : null}
+                  <button title="Delete task" onClick=${() => removeTask(t.id)} style=${ROW_X}>✕</button>
                 </div>`)}
 
             <!-- Notes -->
@@ -703,8 +730,21 @@ function RecordDrawer({ recordId, onClose, onChanged }) {
               <button onClick=${addNote} style=${{ alignSelf: 'flex-end', background: 'var(--accent)', border: '1px solid var(--accent)', color: '#fff', borderRadius: '6px', padding: '7px 14px', fontSize: '12px', fontWeight: 600, cursor: 'pointer' }}>Save</button>
             </div>
             ${(data.notes || []).map(n => html`<div key=${n.id} style=${{ padding: '8px 10px', marginBottom: '6px', background: 'rgba(255,255,255,0.02)', border: '1px solid var(--border)', borderRadius: '8px' }}>
-                <div style=${{ fontSize: '12.5px', color: 'var(--text)', lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>${n.body}</div>
-                <div style=${{ fontSize: '10px', color: 'var(--text-dim)', marginTop: '5px' }}>${n.author_email || 'someone'} · ${timeAgo(n.created_at)}</div>
+                ${editingNote === n.id ? html`
+                  <textarea value=${editNoteText} onChange=${e => setEditNoteText(e.target.value)}
+                    style=${{ width: '100%', background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border)', color: 'var(--text)', padding: '7px 9px', borderRadius: '6px', fontSize: '12.5px', minHeight: '52px', resize: 'vertical', fontFamily: 'inherit', boxSizing: 'border-box' }}></textarea>
+                  <div style=${{ display: 'flex', gap: '6px', marginTop: '6px' }}>
+                    <button onClick=${saveEditNote} style=${{ background: 'var(--accent)', border: '1px solid var(--accent)', color: '#fff', borderRadius: '5px', padding: '4px 12px', fontSize: '11.5px', fontWeight: 600, cursor: 'pointer' }}>Save</button>
+                    <button onClick=${() => { setEditingNote(null); setEditNoteText(''); }} style=${{ background: 'transparent', border: '1px solid var(--border)', color: 'var(--text-muted)', borderRadius: '5px', padding: '4px 10px', fontSize: '11.5px', cursor: 'pointer' }}>Cancel</button>
+                  </div>
+                ` : html`
+                  <div style=${{ display: 'flex', alignItems: 'flex-start', gap: '8px' }}>
+                    <div style=${{ flex: 1, fontSize: '12.5px', color: 'var(--text)', lineHeight: 1.5, whiteSpace: 'pre-wrap' }}>${n.body}</div>
+                    <button title="Edit note" onClick=${() => beginEditNote(n)} style=${ROW_X}>✎</button>
+                    <button title="Delete note" onClick=${() => removeNote(n.id)} style=${ROW_X}>✕</button>
+                  </div>
+                  <div style=${{ fontSize: '10px', color: 'var(--text-dim)', marginTop: '5px' }}>${n.author_email || 'someone'} · ${timeAgo(n.created_at)}${n.updated_at && n.updated_at !== n.created_at ? ' · edited' : ''}</div>
+                `}
               </div>`)}
 
             <!-- Activity timeline -->

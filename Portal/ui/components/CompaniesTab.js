@@ -79,6 +79,8 @@ export function CompaniesTab({ archivedMode: initialArchived = false, mode = 'lo
   const [q, setQ] = useState('');
   const [status, setStatus] = useState('');
   const [sourceFilter, setSourceFilter] = useState('');
+  const [industryFilter, setIndustryFilter] = useState('');
+  const [industries, setIndustries] = useState([]);
   const [loading, setLoading] = useState(false);
   const [selected, setSelected] = useState(() => new Set());
   const [activeJob, setActiveJob] = useState(null);
@@ -96,12 +98,13 @@ export function CompaniesTab({ archivedMode: initialArchived = false, mode = 'lo
       if (q.trim())     params.q = q.trim();
       if (status)       params.status = status;
       if (sourceFilter) params.source = sourceFilter;
+      if (industryFilter) params.industry = industryFilter;
       const r = await api.companies(params);
       setRows(r.rows);
       setTotal(r.total);
     } catch (err) { toast('Load failed: ' + err.message, 'error'); }
     finally { if (!silent) setLoading(false); }
-  }, [limit, offset, q, status, sourceFilter, archivedMode, reviewMode]);
+  }, [limit, offset, q, status, sourceFilter, industryFilter, archivedMode, reviewMode]);
 
   // Keep a live count of the review queue for the tab badge (local engine only).
   const refreshReviewCount = useCallback(async () => {
@@ -114,6 +117,9 @@ export function CompaniesTab({ archivedMode: initialArchived = false, mode = 'lo
   useEffect(() => { refreshReviewCount(); }, [refreshReviewCount, rows]);
 
   useEffect(() => { load(); }, [load]);
+
+  // Industry filter options (distinct industries, most-common first).
+  useEffect(() => { api.companyIndustries().then(r => setIndustries(r.rows || [])).catch(() => {}); }, []);
 
   // Auto-open the first row once after every load if nothing's selected.
   useEffect(() => {
@@ -132,7 +138,7 @@ export function CompaniesTab({ archivedMode: initialArchived = false, mode = 'lo
 
   // Also clear selection whenever the user changes search/filters/page —
   // selection is per visible context, not a global running set.
-  useEffect(() => { setSelected(new Set()); }, [q, status, sourceFilter, offset]);
+  useEffect(() => { setSelected(new Set()); }, [q, status, sourceFilter, industryFilter, offset]);
 
   // Cross-tab navigation. Opening a company from elsewhere routes to
   // /companies?id=<id>; we pick that up here and open it in the drawer.
@@ -276,6 +282,10 @@ export function CompaniesTab({ archivedMode: initialArchived = false, mode = 'lo
       </select>
       <select value=${sourceFilter} onChange=${e => { setSourceFilter(e.target.value); setOffset(0); }}>
         ${SOURCE_OPTIONS.map(s => html`<option key=${s} value=${s}>${s ? s : 'All sources'}</option>`)}
+      </select>
+      <select value=${industryFilter} onChange=${e => { setIndustryFilter(e.target.value); setOffset(0); }} title="Filter by industry">
+        <option value="">All industries</option>
+        ${industries.map(i => html`<option key=${i.industry} value=${i.industry}>${i.industry}${i.n ? ` (${i.n})` : ''}</option>`)}
       </select>
       ${loading ? html`<span class="count">loading…</span>` : html`<${Pagination} total=${total} limit=${limit} offset=${offset} onChange=${setOffset} />`}
       <span class="spacer"></span>
