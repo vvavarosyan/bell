@@ -222,19 +222,41 @@ export async function applyBatch(table, rows) {
       console.warn(`[sync] batch upsert ${table} sub-chunk failed (${err.message}); per-row fallback`);
     }
 
-    // 2) Per-row fallback inside a transaction with savepoints.
+    // 2) Per-row fallback inside a transaction with savepoints. For the contact
+    // tables, also "make room" for the secondary UNIQUE constraints that an
+    // id-keyed upsert can't resolve: a STALE prod row (a different id) may still
+    // hold the (parent,type,value) slot or the single-primary slot this incoming
+    // row claims — e.g. after the local cleanup deleted a duplicate or re-pointed
+    // which email is primary. The incoming row is authoritative (exact mirror),
+    // so we evict/clear the conflicting prod row before the id-keyed upsert.
+    const parentCol = table === 'company_contacts' ? 'company_id'
+                    : table === 'person_contacts'  ? 'person_id'  : null;
     await withTransaction(async (client) => {
       const single = buildUpsertSQL(table, cols, 1);
       for (let i = 0; i < slice.length; i++) {
+        const r = slice[i];
         try {
           await client.query('SAVEPOINT row_sp');
-          await client.query(single, flatten(cols, meta, [slice[i]]));
+          if (parentCol && r[parentCol] != null) {
+            // free the (parent, type, value) slot held by a different id
+            await client.query(
+              `DELETE FROM ${q(table)} WHERE ${q(parentCol)} = $1 AND type = $2 AND value = $3 AND id <> $4`,
+              [r[parentCol], r.type, r.value, r.id]);
+            // free the single-primary slot if this row claims primary
+            if (r.is_primary === true) {
+              await client.query(
+                `UPDATE ${q(table)} SET is_primary = false
+                  WHERE ${q(parentCol)} = $1 AND type = $2 AND is_primary = true AND id <> $3`,
+                [r[parentCol], r.type, r.id]);
+            }
+          }
+          await client.query(single, flatten(cols, meta, [r]));
           await client.query('RELEASE SAVEPOINT row_sp');
           upserted++;
         } catch (err) {
           await client.query('ROLLBACK TO SAVEPOINT row_sp');
           if (errors.length < MAX_REPORTED_ERRORS) {
-            errors.push({ id: slice[i]?.id, error: err.message });
+            errors.push({ id: r?.id, error: err.message });
           }
         }
       }

@@ -164,6 +164,11 @@ export async function runPush({ full = false, reset = false } = {}) {
       summary.pull = { error: err.message };
       if (summary.errors.length < 50) summary.errors.push({ phase: 'pull', error: err.message });
     }
+    // Apply hard-deletes BEFORE the upserts. A locally-deleted duplicate must be
+    // gone from prod before we upsert the surviving row onto its now-freed
+    // UNIQUE (company_id, type, value) slot — otherwise the survivor collides
+    // with the stale dupe and gets skipped. (Deletions used to run last.)
+    await pushDeletions(base, token, summary);
   }
 
   for (const { name, watermark, selfRef } of MIRROR_TABLES) {
@@ -183,12 +188,10 @@ export async function runPush({ full = false, reset = false } = {}) {
     summary.total_skipped  += skipped;
   }
 
-  // Propagate hard-deletes. A full rebuild already wiped + repopulated prod, so
-  // the tombstones are moot then — just clear them. Otherwise apply them.
+  // On a reset, prod was wiped + repopulated, so any tombstones are moot — just
+  // clear them. (Non-reset deletions were already applied before the upserts.)
   if (reset) {
     await query(`DELETE FROM sync_deletions`).catch(() => {});
-  } else {
-    await pushDeletions(base, token, summary);
   }
 
   await setSetting(SETTINGS_WATERMARK, startedAt);
