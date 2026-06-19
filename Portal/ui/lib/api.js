@@ -79,6 +79,7 @@ export const api = {
   person:                 (id) => request('/api/people/' + id),
   updatePerson:           (id, body) => request('/api/people/' + id, { method: 'PATCH', body: JSON.stringify(body) }),
   archivePerson:          (id, archived) => request(`/api/people/${id}/archive`, { method: 'POST', body: JSON.stringify({ archived }) }),
+  deletePerson:           (id) => request('/api/people/' + id, { method: 'DELETE' }),
   revealPerson:           (id) => request(`/api/people/${id}/reveal`, { method: 'POST', body: '{}' }),
   // Detail requests
   requestDetails:         (companyId, note) => request('/api/detail-requests', { method: 'POST', body: JSON.stringify({ company_id: companyId, note }) }),

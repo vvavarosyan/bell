@@ -203,7 +203,10 @@ async function run() {
     for (const c of cos.rows) {
       const plan = planCompanyContacts(c, byCo.get(c.id) || [], { strictSocials });
       tallyCompany(R, plan);
-      if (apply) await applyCompanyPlan(withTransaction, tombstone, c.id, plan);
+      if (apply) {
+        try { await applyCompanyPlan(withTransaction, tombstone, c.id, plan); }
+        catch (e) { R.errors++; if (R.errorSamples.length < 25) R.errorSamples.push(`company #${c.id}: ${e.message}`); }
+      }
       processed++;
       if (limitArg && processed >= limitArg) break;
     }
@@ -224,10 +227,12 @@ async function run() {
       R.peopleDeleted++;
       if (R.peopleSamples.length < 25) R.peopleSamples.push(`#${p.id} "${trunc(p.full_name, 40)}"`);
       if (apply) {
-        await withTransaction(async (client) => {
-          await client.query(`DELETE FROM people WHERE id = $1`, [p.id]);   // cascades children locally + on prod
-          await tombstone(client, 'people', p.id);
-        });
+        try {
+          await withTransaction(async (client) => {
+            await client.query(`DELETE FROM people WHERE id = $1`, [p.id]);   // cascades children locally + on prod
+            await tombstone(client, 'people', p.id);
+          });
+        } catch (e) { R.errors++; if (R.errorSamples.length < 25) R.errorSamples.push(`person #${p.id}: ${e.message}`); }
       }
     }
   }
@@ -245,7 +250,8 @@ async function run() {
     R.execTitlesCleared += clearIds.length;
     if (R.execSamples.length < 20) R.execSamples.push(`company #${row.company_id}: cleared ${clearIds.length}× "${trunc(firstSingular(pcRows), 30)}"`);
     if (apply) {
-      await query(`UPDATE person_companies SET title = NULL, updated_at = now() WHERE id = ANY($1::bigint[])`, [clearIds]);
+      try { await query(`UPDATE person_companies SET title = NULL, updated_at = now() WHERE id = ANY($1::bigint[])`, [clearIds]); }
+      catch (e) { R.errors++; if (R.errorSamples.length < 25) R.errorSamples.push(`titles co#${row.company_id}: ${e.message}`); }
     }
   }
 
@@ -264,6 +270,15 @@ async function applyCompanyPlan(withTransaction, tombstone, companyId, plan) {
       !plan.websiteUpdate && plan.emailSetPrimary == null && !plan.emailClearPrimary.length) return;
 
   await withTransaction(async (client) => {
+    // DELETE first (+ tombstone) so removing a duplicate frees its UNIQUE
+    // (company_id, type, value) slot BEFORE we normalize another row onto the
+    // same canonical value — e.g. a company with both tweeter.com/x and
+    // x.com/x, which both canonicalize to x.com/x. (Doing updates first hit the
+    // unique constraint and aborted the whole run.)
+    for (const id of delIds) {
+      await client.query(`DELETE FROM company_contacts WHERE id=$1`, [id]);
+      await tombstone(client, 'company_contacts', id);
+    }
     for (const u of plan.phoneUpdate) {
       await client.query(`UPDATE company_contacts SET value=$2, value_display=$3, updated_at=now() WHERE id=$1`,
         [u.id, u.value, u.display]);
@@ -271,10 +286,6 @@ async function applyCompanyPlan(withTransaction, tombstone, companyId, plan) {
     for (const u of plan.socialUpdate) {
       await client.query(`UPDATE company_contacts SET value=$2, value_display=$2, source_label=$3, updated_at=now() WHERE id=$1`,
         [u.id, u.value, u.network]);
-    }
-    for (const id of delIds) {
-      await client.query(`DELETE FROM company_contacts WHERE id=$1`, [id]);
-      await tombstone(client, 'company_contacts', id);
     }
     for (const id of plan.emailClearPrimary) {
       await client.query(`UPDATE company_contacts SET is_primary=false, updated_at=now() WHERE id=$1`, [id]);
@@ -300,7 +311,8 @@ function newReport() {
     emailDeleted: 0, emailRepointed: 0,
     websiteFixed: 0,
     peopleDeleted: 0, execTitlesCleared: 0,
-    contactSamples: [], peopleSamples: [], execSamples: [],
+    errors: 0,
+    contactSamples: [], peopleSamples: [], execSamples: [], errorSamples: [],
   };
 }
 function tallyCompany(R, plan) {
@@ -331,7 +343,9 @@ function finishReport(R) {
   L.push(`  Websites  — fixed ${R.websiteFixed} markdown/broken URLs`);
   L.push(`  People    — deleted ${R.peopleDeleted} non-person "headings"`);
   L.push(`  Titles    — cleared ${R.execTitlesCleared} bogus shared exec titles`);
+  if (R.errors) L.push(`  ⚠ Errors  — ${R.errors} record(s) skipped (isolated, did NOT stop the run)`);
   L.push('');
+  if (R.errorSamples.length) { L.push('Sample errors (skipped, safe to ignore unless many):'); for (const s of R.errorSamples) L.push('  · ' + s); L.push(''); }
   if (R.contactSamples.length) { L.push('Sample contact changes:'); for (const s of R.contactSamples) L.push('  · ' + s); L.push(''); }
   if (R.peopleSamples.length)  { L.push('Sample people removed:');   for (const s of R.peopleSamples)  L.push('  · ' + s); L.push(''); }
   if (R.execSamples.length)    { L.push('Sample exec-title clears:'); for (const s of R.execSamples)    L.push('  · ' + s); L.push(''); }

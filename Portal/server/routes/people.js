@@ -421,4 +421,22 @@ router.post('/dedupe-person-companies', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+// DELETE /api/people/:id — PERMANENT hard delete (local engine, platform_admin).
+// Mirrors the company delete: purge a wrong/junk person (e.g. a "Board of
+// Directors" heading that slipped in from a site scrape). person_companies /
+// person_contacts cascade; the deletion mirrors to prod on the next push via a
+// sync_deletions tombstone. (Blocked off-local by the router.use gate above.)
+router.delete('/:id', async (req, res, next) => {
+  try {
+    if (req.user?.role !== 'platform_admin') return res.status(403).json({ error: 'admin_only' });
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) return res.status(400).json({ error: 'invalid_id' });
+    const result = await query('DELETE FROM people WHERE id = $1 RETURNING id, full_name', [id]);
+    if (!result.rows.length) return res.status(404).json({ error: 'not_found' });
+    await query(`INSERT INTO sync_deletions (table_name, row_id) VALUES ('people', $1)`, [id])
+      .catch((e) => console.warn('[people] tombstone insert failed for', id, '—', e.message));
+    res.json({ deleted: result.rows[0].id, name: result.rows[0].full_name });
+  } catch (err) { next(err); }
+});
+
 export default router;
