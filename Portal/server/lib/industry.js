@@ -87,6 +87,16 @@ export function mapLabelToCanonical(label) {
   return out;
 }
 
+/** The definitive LABEL_MAP keywords that appear in a label (e.g. "real estate"
+ *  for "real estate agencies") — used by search to tell a category query from a
+ *  company-name query. */
+export function industryKeywordsIn(label) {
+  const hay = ' ' + String(label || '').toLowerCase().replace(/\s+/g, ' ') + ' ';
+  const out = [];
+  for (const [, kws] of LABEL_MAP) for (const k of kws) if (hay.includes(k)) out.push(k.trim());
+  return out;
+}
+
 function arrText(v) {
   if (v == null) return '';
   if (Array.isArray(v)) return v.join(', ');

@@ -57,46 +57,44 @@ router.get('/stage-progress', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-// GET /api/stats/overview — rich database overview for admin (totals, contact
-// completeness, who's missing email/phone, source + industry breakdown,
-// freshness, data points). platform_admin only.
+// GET /api/stats/overview — database overview for admin. ACTIVE companies only
+// (archived rows are excluded everywhere). platform_admin only.
 router.get('/overview', async (req, res, next) => {
   try {
     if (req.user?.role !== 'platform_admin') return res.status(403).json({ error: 'admin_only' });
 
-    const [co, pj, cc, ccA, pc, src, ind, dataPoints] = await Promise.all([
+    const [co, pj, cc, pc, src, ind, dataPoints] = await Promise.all([
       query(`
         SELECT
           count(*)::int                                                                            AS total,
-          count(*) FILTER (WHERE is_active)::int                                                   AS active,
-          count(*) FILTER (WHERE archived)::int                                                    AS archived,
           count(*) FILTER (WHERE bin IS NOT NULL)::int                                              AS assembled,
-          count(*) FILTER (WHERE is_active AND website IS NOT NULL AND btrim(website::text) <> '')::int AS active_with_website,
           count(*) FILTER (WHERE website IS NOT NULL AND btrim(website::text) <> '')::int           AS with_website,
           count(*) FILTER (WHERE linkedin_url IS NOT NULL)::int                                     AS with_linkedin,
           count(*) FILTER (WHERE (industries IS NOT NULL AND array_length(industries,1) > 0)
                               OR (industry IS NOT NULL AND btrim(industry) <> ''))::int             AS with_industry,
           count(*) FILTER (WHERE updated_at > now() - interval '7 days')::int                       AS updated_7d,
           count(*) FILTER (WHERE updated_at > now() - interval '30 days')::int                      AS updated_30d
-        FROM companies`),
+        FROM companies WHERE archived = false`),
       query(`
         SELECT
-          (SELECT count(*) FROM people)::int                                                     AS people_total,
-          (SELECT count(*) FROM people WHERE updated_at > now() - interval '7 days')::int        AS people_7d,
-          (SELECT count(DISTINCT person_id) FROM person_companies)::int                          AS people_with_employment,
-          (SELECT count(*) FROM people WHERE is_revealed)::int                                    AS people_revealed,
-          (SELECT count(DISTINCT company_id) FROM person_companies)::int                          AS companies_with_people,
-          (SELECT count(*) FROM jobs)::int                                                       AS jobs_total,
-          (SELECT count(*) FROM jobs WHERE is_active)::int                                       AS jobs_active`),
-      query(`SELECT type, count(DISTINCT company_id)::int AS companies_with, count(*)::int AS total
-               FROM company_contacts WHERE type IN ('email','phone','social') GROUP BY type`),
+          (SELECT count(*) FROM people WHERE archived = false)::int                                                   AS people_total,
+          (SELECT count(*) FROM people WHERE archived = false AND updated_at > now() - interval '7 days')::int        AS people_7d,
+          (SELECT count(*) FROM people p WHERE p.archived = false
+              AND EXISTS (SELECT 1 FROM person_companies pc WHERE pc.person_id = p.id))::int                          AS people_with_employment,
+          (SELECT count(*) FROM people WHERE archived = false AND is_revealed)::int                                   AS people_revealed,
+          (SELECT count(DISTINCT pc.company_id) FROM person_companies pc JOIN companies c ON c.id = pc.company_id
+              WHERE c.archived = false)::int                                                                          AS companies_with_people,
+          (SELECT count(*) FROM jobs j JOIN companies c ON c.id = j.company_id WHERE c.archived = false)::int         AS jobs_total,
+          (SELECT count(*) FROM jobs j JOIN companies c ON c.id = j.company_id WHERE c.archived = false AND j.is_active)::int AS jobs_active`),
       query(`SELECT cc.type, count(DISTINCT cc.company_id)::int AS companies_with, count(*)::int AS total
                FROM company_contacts cc JOIN companies c ON c.id = cc.company_id
-              WHERE c.is_active = true AND cc.type IN ('email','phone','social') GROUP BY cc.type`),
-      query(`SELECT type, count(DISTINCT person_id)::int AS people_with, count(*)::int AS total
-               FROM person_contacts WHERE type IN ('email','phone') GROUP BY type`),
-      query(`SELECT source, count(DISTINCT company_id)::int AS companies
-               FROM company_sources GROUP BY source ORDER BY companies DESC`),
+              WHERE c.archived = false AND cc.type IN ('email','phone','social') GROUP BY cc.type`),
+      query(`SELECT pcc.type, count(DISTINCT pcc.person_id)::int AS people_with, count(*)::int AS total
+               FROM person_contacts pcc JOIN people p ON p.id = pcc.person_id
+              WHERE p.archived = false AND pcc.type IN ('email','phone') GROUP BY pcc.type`),
+      query(`SELECT cs.source, count(DISTINCT cs.company_id)::int AS companies
+               FROM company_sources cs JOIN companies c ON c.id = cs.company_id
+              WHERE c.archived = false GROUP BY cs.source ORDER BY companies DESC`),
       query(`SELECT ind AS industry, count(*)::int AS n FROM (
                  SELECT unnest(coalesce(NULLIF(industries, '{}'), ARRAY[industry])) AS ind
                    FROM companies WHERE archived = false) t
@@ -104,9 +102,8 @@ router.get('/overview', async (req, res, next) => {
       getDataPointsCached().catch(() => null),
     ]);
 
-    const ccByType  = Object.fromEntries(cc.rows.map((r) => [r.type, r]));
-    const ccAByType = Object.fromEntries(ccA.rows.map((r) => [r.type, r]));
-    const pcByType  = Object.fromEntries(pc.rows.map((r) => [r.type, r]));
+    const ccByType = Object.fromEntries(cc.rows.map((r) => [r.type, r]));
+    const pcByType = Object.fromEntries(pc.rows.map((r) => [r.type, r]));
     const C = co.rows[0];
 
     res.json({
@@ -119,11 +116,6 @@ router.get('/overview', async (req, res, next) => {
         socials_total: ccByType.social?.total || 0,
         without_email: C.total - (ccByType.email?.companies_with || 0),
         without_phone: C.total - (ccByType.phone?.companies_with || 0),
-      },
-      company_contacts_active: {
-        with_email: ccAByType.email?.companies_with || 0, emails_total: ccAByType.email?.total || 0,
-        with_phone: ccAByType.phone?.companies_with || 0, phones_total: ccAByType.phone?.total || 0,
-        socials_total: ccAByType.social?.total || 0,
       },
       person_contacts: {
         with_email: pcByType.email?.people_with || 0, emails_total: pcByType.email?.total || 0,
