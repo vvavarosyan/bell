@@ -1,130 +1,104 @@
 ======================================================================
   BELL DATA-QUALITY CLEANUP — APPLY
-  2026-06-19T16:18:01.782Z
+  2026-06-20T11:12:31.778Z
 ======================================================================
 
-Scanned: 189643 companies, 16960 people
+Scanned: 189645 companies, 36307 people
 
 CHANGES (applied):
-  Phones    — deleted 7896 invalid/dup, normalized 40091
-  Socials   — deleted 951 dup/personal/third-party, canonicalized 1826
-  Emails    — deleted 808 other-domain, re-pointed primary on 4252
-  Websites  — fixed 10078 markdown/broken URLs
-  People    — deleted 275 non-person "headings"
-  Titles    — cleared 41 bogus shared exec titles
+  Phones    — deleted 0 invalid/dup, normalized 2
+  Socials   — deleted 0 dup/personal/third-party, canonicalized 0
+  Emails    — deleted 3 other-domain, re-pointed primary on 119
+  Websites  — fixed 1776 markdown/broken URLs
+  People    — deleted 19 non-person "headings"
+  Titles    — cleared 12 bogus shared exec titles
 
 Sample contact changes:
-  · website: https://cypherlearning.com/ → https://cypherlearning.com
-  · social✗ https://www.linkedin.com/in/natalie-mccullough-304bb
-  · social✗ https://www.linkedin.com/in/eriknierenberg
-  · social✗ https://x.com/cypherlearning
-  · website: https://denovosciences.ai/ → https://denovosciences.ai
-  · email✗ /cdn-cgi/l/email-protection#88e0e7fee9e3e1e5f2c8ecede6e7fee7… (other-domain)
-  · website: https://enable.tech/ → https://enable.tech
-  · website: http://www.esqstp.com/ → http://www.esqstp.com
-  · email✗ info@es-qstp.com (other-domain)
-  · phone✗ 77389-1425
-  · phone✗ 1-800-903-9966
-  · phone✗ 1-888-944-2227
-  · phone✗ 1-866-460-5350
-  · phone✗ 85062-8001
-  · phone✗ 57117-6404
-  · phone✗ 1 800-627-3427
-  · phone✗ 1 800-624-5140
-  · phone✗ 1 800-950-6157
-  · phone✗ 60197-5727
-  · phone✗ 1-800-344-4355
-  · phone✗ 1-866-379-1010
-  · phone✗ 1-800-350-9102
-  · phone✗ 85062-8072
-  · phone✗ 57117-7032
-  · phone✗ 1-866-462-8646
-  · phone✗ 1-888-739-2730
-  · phone✗ 1-800-243-9966
-  · phone✗ 1 888 299 2883
-  · phone✗ 1 888 968 3776
-  · phone✗ 1 800 582 3645
-  · phone✗ 01 0800 907 3900
-  · phone✗ 0800 1 0710
-  · phone✗ 01 800 091 1155
-  · phone✗ 0800 5553776
-  · phone✗ 1-800-252-1800
-  · phone✗ 1-781-575-2058
-  · phone✗ 02940-3006
-  · phone✗ 62 811 103 6999
-  · email✗ maya.s.alshaa@exxonmobil.com (other-domain)
-  · email✗ recruiting.doha@exxonmobil.com (other-domain)
-  · email✗ qatar@exxonmobil.com (other-domain)
-  · email✗ capital.markets@exxonmobil.com (other-domain)
-  · email✗ investor.relations@exxonmobil.com (other-domain)
-  · email✗ shareholderrelations@exxonmobil.com (other-domain)
-  · website: https://www.fuego.qa/ → https://www.fuego.qa
-  · website: https://www.gamyra.co/ → https://www.gamyra.co
-  · website: https://www.gbiinc.com/ → https://www.gbiinc.com
-  · phone✗ 123) 456-789
-  · social✗ https://qa.linkedin.com/company/gulf-bridge-international
-  · website: https://www.gab.qa/ → https://www.gab.qa
-  · email✗ /cdn-cgi/l/email-protection#bed7d0d8d1fed9dfdc90cfdf (other-domain)
-  · website: https://www.gord.qa/ → https://www.gord.qa
-  · phone✗ 4141 5000
-  3
-  · phone✗ 2026 (22)
-
- 2025 (70
-  · phone✗ 2024 (77)
-
- 2023 (76
-  · phone✗ 2022 (66)
-
- 2021 (37
-  · phone✗ 2020 (28)
-
- 2019 (33
-  · phone✗ 2018 (39)
-
- 2017 (44
-  · phone✗ 2016 (37)
-
- 2015 (23
-  · phone✗ 2014 (15)
-
- 2013 (15
+  · website: http://transtechnology.net/ → http://transtechnology.net
+  · website: https://innovationtechnology.com/ → https://innovationtechnology.com
+  · website: https://protectioninsurance.com/ → https://protectioninsurance.com
+  · website: https://businessconglomerate.com/ → https://businessconglomerate.com
+  · website: https://mediaproduction.net/ → https://mediaproduction.net
+  · website: http://www.freestonestrategies.com/ → http://www.freestonestrategies.com
+  · website: https://akdenizproje.com/ → https://akdenizproje.com
+  · website: https://binthamergarage.com/ → https://binthamergarage.com
+  · website: https://blacleaf.com/ → https://blacleaf.com
+  · website: https://solasmarineservices.com/ → https://solasmarineservices.com
+  · website: https://www.modrnmarketing.com/ → https://www.modrnmarketing.com
+  · website: http://wizkidz.com.qa/ → http://wizkidz.com.qa
+  · website: https://outlook.live.com/mail/ → https://outlook.live.com/mail
+  · website: http://alsadaf.qa/ → http://alsadaf.qa
+  · website: https://imperialconsulting.com/ → https://imperialconsulting.com
+  · website: https://www.construction.com/ → https://www.construction.com
+  · website: https://alkhuzaei.com/ → https://alkhuzaei.com
+  · website: https://infiniteevents.com/ → https://infiniteevents.com
+  · website: https://aldarproperties.com/ → https://aldarproperties.com
+  · website: https://cognyst.com/ → https://cognyst.com
+  · website: https://arabinsurance.com/ → https://arabinsurance.com
+  · website: https://towerproject.com/ → https://towerproject.com
+  · website: https://digitalsystems.com/ → https://digitalsystems.com
+  · website: https://khourystand.net/ → https://khourystand.net
+  · website: https://arkanbusiness.com/ → https://arkanbusiness.com
+  · website: http://globalelite.com/ → http://globalelite.com
+  · website: http://futureline.com/ → http://futureline.com
+  · website: http://imperialcommercial.com/ → http://imperialcommercial.com
+  · website: https://aegissecuritysystems.com/ → https://aegissecuritysystems.com
+  · website: https://glittersalon.com/ → https://glittersalon.com
+  · website: https://mayorka.com/ → https://mayorka.com
+  · website: https://lavenderlaundry.com/ → https://lavenderlaundry.com
+  · website: https://lavalin.com/ → https://lavalin.com
+  · website: https://foursquaredesigns.com/ → https://foursquaredesigns.com
+  · website: https://mycrown.net/ → https://mycrown.net
+  · website: https://brooklyn.com/ → https://brooklyn.com
+  · website: https://speedyasset.com/ → https://speedyasset.com
+  · website: https://almillennium.com/ → https://almillennium.com
+  · website: https://www.fullcolor.com/ → https://www.fullcolor.com
+  · website: https://galacticsolution.com/ → https://galacticsolution.com
+  · website: https://eastgate.com/ → https://eastgate.com
+  · website: https://qualityplus.com/ → https://qualityplus.com
+  · website: https://intouchrelocations.com/ → https://intouchrelocations.com
+  · website: https://lusailmedia.com/ → https://lusailmedia.com
+  · website: https://parisnails.com/ → https://parisnails.com
+  · website: https://entotox.com/ → https://entotox.com
+  · website: https://exotica.com/ → https://exotica.com
+  · website: https://www.nasseralalienterprises.com/ → https://www.nasseralalienterprises.com
+  · website: https://woodland.com/ → https://woodland.com
+  · website: https://intralink.net/ → https://intralink.net
+  · website: https://busulaiman.com/ → https://busulaiman.com
+  · website: https://unitedseas.net/ → https://unitedseas.net
+  · website: http://alrafaq.com/ → http://alrafaq.com
+  · website: https://alamina.qa/ → https://alamina.qa
+  · website: https://www.lighting.philips.com/ → https://www.lighting.philips.com
+  · website: https://almalik.com/ → https://almalik.com
+  · website: https://globalsystem.net/ → https://globalsystem.net
+  · website: https://alfarasha.com/ → https://alfarasha.com
+  · website: https://alkooheji.com/ → https://alkooheji.com
+  · website: http://rumaihi.com/ → http://rumaihi.com
 
 Sample people removed:
-  · #118 "Al Asmakh Facilities Management"
-  · #2000011222 "Who We Are"
-  · #2000011235 "Why Choose Us"
-  · #2000011260 "Our Channels"
-  · #2000011336 "Why We’re Different"
-  · #2000011360 "Our Partners"
-  · #2000011366 "What's New"
-  · #2000011388 "The PetroPipe Story"
-  · #2000011432 "Board of Directors"
-  · #2000011434 "Why Choose Us"
-  · #2000011441 "Our Partners"
-  · #2000011470 "Our Mission"
-  · #2000011530 "The Academy"
-  · #2000011575 "Success Story"
-  · #2000011578 "Our Vision"
-  · #2000011579 "Our Partners"
-  · #2000011580 "Our Awesome Clients"
-  · #2000011597 "Who We Are"
-  · #2000011599 "Our Apps"
-  · #2000011634 "What Makes Us Different"
-  · #2000011640 "The Fischer Advantage"
-  · #2000011682 "Board of Directors"
-  · #2000011684 "Our Leaders"
-  · #2000011686 "Our Leaders"
-  · #2000011690 "How To Buy"
+  · #2000018749 "Misr Insurance Company - Egypt"
+  · #2000018759 "Qatari private shareholding company"
+  · #2000018761 "Qatari Public Shareholding Company"
+  · #2000018765 "listed Company"
+  · #2000019304 "1-Metito Utilities Limited, 2- Alattyia …"
+  · #2000019325 "Construction Development Company"
+  · #2000019330 "Mohammed Sultan Mohammed Al-Jaber, Osama…"
+  · #2000020049 "Qatar Industrial Manufacturing Company"
+  · #2000020452 "CONTACT PERSON"
+  · #2000020645 "Construction Development Company & Fiore…"
+  · #2000020648 "Construction Development Company"
+  · #2000023059 "Dr. Moopens Healthcare Management Servic…"
+  · #2000023990 "CONTACT PERSON"
+  · #2000035593 "LINKS MANAGEMENT SERVICES LLC"
+  · #2000012152 "Victoria Porter" (template)
+  · #2000012153 "Maria Flynn" (template)
+  · #2000012154 "Gina Kennedy" (template)
+  · #2000014223 "David Fox" (template)
+  · #2000017139 "Keliam U. Uison" (template)
 
 Sample exec-title clears:
-  · company #200: cleared 6× "Managing Director"
-  · company #41866: cleared 5× "Chief Executive Officer"
-  · company #141609: cleared 3× "Managing Director"
-  · company #152128: cleared 4× "ceo"
-  · company #159577: cleared 9× "Managing Director"
-  · company #188216: cleared 7× "President & CEO"
-  · company #188870: cleared 7× "President & CEO"
+  · company #177827: cleared 8× "Chief Executive Officer"
+  · company #180630: cleared 4× "Managing Director"
 
 Changes applied. Run a sync push to mirror them to production.
 ======================================================================

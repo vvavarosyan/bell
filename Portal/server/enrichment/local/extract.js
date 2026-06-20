@@ -14,8 +14,7 @@
 
 import {
   normalizePhone, cleanCompanySocials, rankCompanyEmails,
-  looksLikeName as dqLooksLikeName, isHeadingTitle,
-  isTemplatePersonTitle, isPlaceholderName,
+  looksLikeName as dqLooksLikeName, isHeadingTitle, isFakePerson,
 } from '../../lib/dataquality.js';
 
 // ===========================================================================
@@ -208,8 +207,7 @@ export function extractTeam(text, cap = 40) {
 
   const tryAdd = (name, title) => {
     if (isHeadingTitle(title)) return;                 // "Chairman's Message" is a section, not a person
-    if (isTemplatePersonTitle(title)) return;          // "CEO at Google" — website-template placeholder
-    if (isPlaceholderName(name)) return;               // "John Doe" / "Team Member"
+    if (isFakePerson({ name, title })) return;         // "CEO @ Google" / "Platform Certified" — template placeholder
     const key = name.toLowerCase().replace(/[^a-z]/g, '');
     if (!key || seen.has(key)) return;
     seen.add(key);

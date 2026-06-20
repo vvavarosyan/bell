@@ -342,17 +342,47 @@ export function isSingularExecTitle(title) {
   return SINGULAR_EXEC.test(String(title || '').trim());
 }
 
-// Website-template placeholder people: demo team sections ship with fake staff
-// like "Name — CEO at Google". A title that places the person at a big EXTERNAL
-// brand is a template artifact, not a real employee of a Qatar company.
-const TEMPLATE_EMPLOYER = /\bat\s+(google|facebook|meta|microsoft|apple|amazon|twitter|x corp|linkedin|instagram|netflix|tesla|youtube|spotify|uber|airbnb|samsung|ibm|oracle|adobe|salesforce|tiktok|snapchat|pinterest|envato|themeforest)\b/i;
-export function isTemplatePersonTitle(title) {
-  return TEMPLATE_EMPLOYER.test(String(title || ''));
+// ── Fake / website-template "people" ───────────────────────────────────────
+// Qatar company sites are often built from themes that ship with DEMO staff —
+// e.g. eight "people" all titled "CEO @ Google" at a media firm, or non-people
+// like "Platform Certified" / "Google Marketing". These poison the People data.
+// We detect them three ways: (1) the name isn't a real person, (2) the title /
+// bio claims they work at a big EXTERNAL brand, (3) classic placeholder text.
+
+// Big external brands a Qatar company's own staff would not be an executive of.
+const EXTERNAL_BRANDS =
+  'google|alphabet|meta|facebook|instagram|whatsapp|microsoft|apple|amazon|aws|' +
+  'twitter|linkedin|netflix|tesla|spacex|youtube|spotify|uber|lyft|airbnb|' +
+  'samsung|huawei|ibm|oracle|sap|adobe|salesforce|tiktok|bytedance|snapchat|' +
+  'pinterest|paypal|stripe|shopify|wordpress|envato|themeforest|fiverr|upwork|' +
+  'alibaba|tencent|nvidia|intel|cisco|nike|adidas|disney|harvard|stanford|mit';
+
+// A title/bio that claims employment AT a big external brand — "CEO @ Google",
+// "Director of Google Services", "Head at Meta". A skill mention like "Google
+// Ads", "of Google Analytics", "with Google Cloud" is NOT matched: "@ brand" is
+// always an employer claim, while "at/of brand" only counts when the brand is
+// NOT followed by one of its product names. ("with"/"across"/"using" aren't
+// employer connectors, so skill bios pass.)
+const _BRAND = `(?:${EXTERNAL_BRANDS})`;
+const _PRODUCT = '(?:ads|adwords|analytics|cloud|workspace|maps|drive|suite|sheets|docs|search|console|tag|azure|office|365|teams|dynamics|business|developer|partner|certified|api|merchant)';
+const FAKE_EMPLOYER_RX = new RegExp(`@\\s*${_BRAND}\\b|(?:\\bat\\s+|\\bof\\s+)${_BRAND}\\b(?!\\s+${_PRODUCT})`, 'i');
+
+// Business / service words that mean a "name" field isn't a real person.
+const NON_PERSON_NAME_RX = /\b(google|meta|facebook|microsoft|apple|amazon|marketing|certified|platform|solutions?|services?|digital|agency|adwords|seo|technolog\w*|software|consult\w*|advertis\w*|holding|enterprises?)\b/i;
+
+const PLACEHOLDER_NAME = /\b(john|jane)\s+doe\b|lorem\s+ipsum|your\s+name\b|first\s*name|last\s*name|team\s+member\b|full\s+name\b|sample\s+(name|person)/i;
+export function isPlaceholderName(name) { return PLACEHOLDER_NAME.test(String(name || '')); }
+
+/** True for a website-template / placeholder "person" that isn't a real employee. */
+export function isFakePerson({ name = '', title = '', headline = '' } = {}) {
+  if (isPlaceholderName(name)) return true;
+  if (NON_PERSON_NAME_RX.test(name)) return true;                       // "Google Marketing", "Platform Certified"
+  if (FAKE_EMPLOYER_RX.test(`${title}  ${headline}`)) return true;      // "CEO @ Google", "Director of Google Services"
+  return false;
 }
-const PLACEHOLDER_NAME = /\b(john|jane)\s+doe\b|lorem\s+ipsum|your\s+name\b|first\s*name|team\s+member\b|full\s+name\b/i;
-export function isPlaceholderName(name) {
-  return PLACEHOLDER_NAME.test(String(name || ''));
-}
+
+/** Back-compat: a title that claims employment at a big external brand. */
+export function isTemplatePersonTitle(title) { return FAKE_EMPLOYER_RX.test(String(title || '')); }
 
 // ===========================================================================
 // Website — strip markdown / junk, return a clean URL
