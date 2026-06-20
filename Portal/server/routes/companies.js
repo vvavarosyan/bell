@@ -14,6 +14,7 @@ import { revealOne, revealBulk, getRevealedSet, bypassesCredits } from '../lib/c
 import { denyUnlessLocalEngine } from '../lib/auth.js';
 import { addRevealedToCrm } from '../lib/crm.js';
 import { normalizeName } from '../ingest/normalize.js';
+import { mapLabelToCanonical, industryKeywordsIn } from '../lib/industry.js';
 
 // Escape LIKE wildcards in user input so a literal % or _ doesn't widen the match.
 function likeEscape(s) { return String(s).replace(/[\\%_]/g, '\\$&'); }
@@ -133,9 +134,29 @@ router.get('/', async (req, res, next) => {
       const tokenConds = [];
       for (const t of tokens) { params.push('%' + likeEscape(t) + '%'); tokenConds.push(`companies.search_blob LIKE $${params.length}`); }
       const tokenBranch = tokenConds.length ? ` OR (${tokenConds.join(' AND ')})` : '';
+      // Industry-synonym matching: when the query reads as a CATEGORY (every
+      // meaningful token is an industry word or a generic category word — e.g.
+      // "beauty salons", "all law firms", "oil and gas companies"), also match
+      // companies TAGGED with that industry (reusing the industry label-mapper).
+      // Skipped for name-like queries (a distinctive token like "doha"/"faisal"
+      // isn't a category word), so a company-name search doesn't explode into
+      // its whole sector.
+      const CATEGORY_RX = /^(firm|establish|agenc|servic|provider|shop|store|cent|outlet|vendor|supplier|dealer|enterprise)/;
+      const synInd = mapLabelToCanonical(qLower);
+      const synKws = industryKeywordsIn(qLower);
+      const isCategoryToken = (t) => CATEGORY_RX.test(t) || mapLabelToCanonical(t).length > 0 || synKws.some((k) => k.includes(t));
+      let synBranch = '';
+      if (synInd.length && tokens.length > 0 && tokens.every(isCategoryToken)) {
+        const ors = [];
+        for (const it of synInd) {
+          params.push(it); ors.push(`companies.industries @> ARRAY[$${params.length}]::text[]`);
+          params.push(it); ors.push(`companies.industry = $${params.length}`);
+        }
+        synBranch = ` OR ${ors.join(' OR ')}`;
+      }
       where.push(
         `(companies.search_blob LIKE $${pLike}` +
-        `${tokenBranch} ` +
+        `${tokenBranch}${synBranch} ` +
         `OR (char_length($${pNorm}) >= 3 AND companies.name_normalized % $${pNorm}))`
       );
       // Rank: exact normalized name, then substring hits, then fuzzy closeness.
