@@ -1,0 +1,111 @@
+==================================================================
+  BELL INDUSTRY RE-DERIVATION — APPLIED
+  2026-06-20T04:36:33.017Z
+==================================================================
+
+Companies scanned:        189645
+Would change:             55336  (29%)
+  …of which multi-industry: 18758
+Skipped (admin-locked):   0
+
+New PRIMARY-industry distribution (changed rows):
+    20443  Construction & Contracting
+     7952  Healthcare
+     7456  Trading & Distribution
+     2176  Hospitality & F&B
+     1539  Banking & Finance
+     1446  Telecommunications
+     1404  Information Technology
+     1310  Logistics & Transport
+     1213  Textiles & Garments
+     1155  Oil & Gas
+      965  Marketing & Advertising
+      883  Facilities & Cleaning
+      747  Beauty & Wellness
+      723  Real Estate
+      661  Automotive
+      591  Manufacturing
+      574  Consulting
+      528  Retail
+      485  Travel & Tourism
+      467  Agriculture & Fisheries
+      393  Jewellery & Gold
+      376  Engineering
+      354  Furniture & Interior
+      339  Education & Training
+      315  Security Services
+      236  Manpower & Recruitment
+      117  Pharmaceuticals
+      112  Insurance
+       98  Media & Entertainment
+       94  Chemicals & Plastics
+       59  Sports & Recreation
+       39  Aviation & Aerospace
+       37  Energy & Utilities
+       13  Legal Services
+        2  Non-profit Organization Management
+        2  Facilities Services
+        2  Hospitality
+        2  Construction
+        2  Facilities Management
+        1  Information Technology & Services
+        1  Staffing & Recruiting
+        1  Research
+        1  Transportation/Trucking/Railroad
+        1  Outsourcing/Offshoring
+        1  Airport Management
+        1  Logistics
+        1  Government & Public Sector
+        1  Retail/Real Estate
+        1  Real Estate/Trading
+        1  Investment Holding
+        1  Investment
+        1  HVAC & Indoor Air Quality
+        1  Business Services
+        1  Hospitality & Tourism
+        1  Research & Certification
+        1  Aluminum & Metal Facades
+        1  Interior Fit-out
+        1  Carpentry & Joinery
+        1  eSports & Gaming
+        1  Information Technology / Metaverse
+        1  Business Networking
+        1  Business Consulting and Services
+        1  Business Consulting / Company Setup Services
+        1  Unspecified
+        1  Diversified conglomerate (Real Estate, Hospitality, Travel, FM, Technology)
+
+Sample changes (old primary → new tags · company):
+  · (blank)                → Information Technology   ·   Blue Future
+  · (blank)                → Telecommunications + Information Technology   ·   Bravent
+  · (blank)                → Telecommunications + Information Technology   ·   Cisco QSTP-LLC
+  · Oil & Gas              → Oil & Gas   ·   ConocoPhillips Water Technology Ltd QSTP
+  · (blank)                → Telecommunications + Information Technology   ·   Contactless
+  · Hospitality & F&B      → Telecommunications + Information Technology   ·   Cypher Learning QSTP-LLC
+  · Information Technology → Information Technology + Security Services   ·   Cytomate
+  · (blank)                → Telecommunications + Information Technology   ·   Dakkaken Group
+  · Telecommunications     → Telecommunications + Information Technology   ·   Engineering Solutions QSTP-LLC
+  · (blank)                → Telecommunications + Information Technology   ·   Fuego Digital Media QSTP-LLC
+  · Education & Training   → Telecommunications + Information Technology   ·   Gamyra Tech QSTP-LLC
+  · Information Technology → Telecommunications + Information Technology   ·   GBI QSTP-LLC
+  · (blank)                → Telecommunications + Information Technology   ·   iHorizons QSTP-LLC
+  · (blank)                → Healthcare   ·   Invicure
+  · (blank)                → Telecommunications + Information Technology   ·   Kamkalima
+  · (blank)                → Telecommunications + Information Technology   ·   Khayal Production
+  · (blank)                → Telecommunications + Information Technology   ·   Maktapp QSTP-LLC
+  · (blank)                → Healthcare   ·   Meddy QSTP-LLC
+  · (blank)                → Telecommunications + Information Technology   ·   MEEZA QSTP-LLC
+  · (blank)                → Telecommunications + Information Technology   ·   Microsoft QSTP-LLC
+  · Healthcare             → Healthcare   ·   MindBridgeXR
+  · Information Technology → Information Technology   ·   NovomAI
+  · Information Technology → Information Technology   ·   Odysense
+  · (blank)                → Healthcare   ·   Precision Cellular Storage
+  · Information Technology → Telecommunications + Information Technology   ·   Qatar University QSTP-B
+  · (blank)                → Telecommunications + Information Technology   ·   QNEXUS QSTP-LLC
+  · (blank)                → Healthcare   ·   RapidDx Biotech
+  · Information Technology → Information Technology   ·   RFxAI
+  · (blank)                → Healthcare   ·   Rimads QSTP-LLC
+  · Information Technology → Information Technology   ·   SkyStruct
+
+Applied. Run a sync push to mirror the new industries to production.
+==================================================================

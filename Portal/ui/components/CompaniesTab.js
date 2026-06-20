@@ -12,6 +12,7 @@ import { CompanyLogo } from './CompanyLogo.js';
 import { SourceRecordsLine } from './SourceRecordsLine.js';
 import { ContactIcons } from './ContactIcons.js';
 import { BellScore } from './BellScore.js';
+import { CompanyFilters, EMPTY_FILTERS, countActiveFilters } from './CompanyFilters.js';
 
 const STATUS_OPTIONS = ['', 'active', 'inactive', 'suspended', 'withdrawn', 'in_liquidation', 'frozen', 'deregistered', 'not_licensed', 'unknown'];
 const SOURCE_OPTIONS = ['', 'QFC', 'QFZ', 'MOCI', 'QSTP', 'QSE', 'QCCI', 'MoPH', 'Tasmu'];
@@ -77,9 +78,8 @@ export function CompaniesTab({ archivedMode: initialArchived = false, mode = 'lo
   const [limit] = useState(100);
   const [offset, setOffset] = useState(0);
   const [q, setQ] = useState('');
-  const [status, setStatus] = useState('');
-  const [sourceFilter, setSourceFilter] = useState('');
-  const [industryFilter, setIndustryFilter] = useState('');
+  const [filters, setFilters] = useState(EMPTY_FILTERS);
+  const [showFilters, setShowFilters] = useState(false);
   const [industries, setIndustries] = useState([]);
   const [loading, setLoading] = useState(false);
   const [selected, setSelected] = useState(() => new Set());
@@ -95,16 +95,27 @@ export function CompaniesTab({ archivedMode: initialArchived = false, mode = 'lo
       const params = { limit, offset };
       if (reviewMode) params.review = 'true';
       else            params.archived = archivedMode ? 'true' : 'false';
-      if (q.trim())     params.q = q.trim();
-      if (status)       params.status = status;
-      if (sourceFilter) params.source = sourceFilter;
-      if (industryFilter) params.industry = industryFilter;
+      if (q.trim())   params.q = q.trim();
+      const f = filters;
+      if (f.industries.length) params.industries = f.industries.join(',');
+      if (f.statuses.length)   params.statuses   = f.statuses.join(',');
+      if (f.sources.length)    params.sources    = f.sources.join(',');
+      if (f.empBuckets.length) params.emp_buckets = f.empBuckets.join(',');
+      if (String(f.city).trim()) params.city = f.city.trim();
+      if (f.foundedMin) params.founded_min = f.foundedMin;
+      if (f.foundedMax) params.founded_max = f.foundedMax;
+      if (f.scoreMin)   params.score_min   = f.scoreMin;
+      if (f.hasWebsite)  params.has_website  = '1';
+      if (f.hasEmail)    params.has_email    = '1';
+      if (f.hasPhone)    params.has_phone    = '1';
+      if (f.hasLinkedin) params.has_linkedin = '1';
+      if (f.hasPeople)   params.has_people   = '1';
       const r = await api.companies(params);
       setRows(r.rows);
       setTotal(r.total);
     } catch (err) { toast('Load failed: ' + err.message, 'error'); }
     finally { if (!silent) setLoading(false); }
-  }, [limit, offset, q, status, sourceFilter, industryFilter, archivedMode, reviewMode]);
+  }, [limit, offset, q, filters, archivedMode, reviewMode]);
 
   // Keep a live count of the review queue for the tab badge (local engine only).
   const refreshReviewCount = useCallback(async () => {
@@ -138,7 +149,7 @@ export function CompaniesTab({ archivedMode: initialArchived = false, mode = 'lo
 
   // Also clear selection whenever the user changes search/filters/page —
   // selection is per visible context, not a global running set.
-  useEffect(() => { setSelected(new Set()); }, [q, status, sourceFilter, industryFilter, offset]);
+  useEffect(() => { setSelected(new Set()); }, [q, filters, offset]);
 
   // Cross-tab navigation. Opening a company from elsewhere routes to
   // /companies?id=<id>; we pick that up here and open it in the drawer.
@@ -269,6 +280,8 @@ export function CompaniesTab({ archivedMode: initialArchived = false, mode = 'lo
     setArchiveMode(next); setOffset(0); setSelected(new Set()); setOpenedId(null);
   };
 
+  const activeFilterCount = countActiveFilters(filters);
+
   return html`
     <div class="grid-toolbar">
       <input
@@ -277,17 +290,12 @@ export function CompaniesTab({ archivedMode: initialArchived = false, mode = 'lo
         value=${q}
         onChange=${e => { setQ(e.target.value); setOffset(0); }}
       />
-      <select value=${status} onChange=${e => { setStatus(e.target.value); setOffset(0); }}>
-        ${STATUS_OPTIONS.map(s => html`<option key=${s} value=${s}>${s ? s : 'All statuses'}</option>`)}
-      </select>
-      <select value=${sourceFilter} onChange=${e => { setSourceFilter(e.target.value); setOffset(0); }}>
-        ${SOURCE_OPTIONS.map(s => html`<option key=${s} value=${s}>${s ? s : 'All sources'}</option>`)}
-      </select>
-      <select value=${industryFilter} onChange=${e => { setIndustryFilter(e.target.value); setOffset(0); }} title="Filter by industry"
-        style=${{ maxWidth: '150px', flex: '0 0 auto' }}>
-        <option value="">All industries</option>
-        ${industries.map(i => html`<option key=${i.industry} value=${i.industry}>${i.industry}${i.n ? ` (${i.n})` : ''}</option>`)}
-      </select>
+      <button
+        class=${'toolbar-toggle' + (activeFilterCount > 0 ? ' accent' : '')}
+        onClick=${() => setShowFilters(true)}
+        title="Advanced filters — industry, status, source, size, completeness, location, score"
+        style=${{ whiteSpace: 'nowrap' }}
+      >☰ Filters${activeFilterCount > 0 ? ` · ${activeFilterCount}` : ''}</button>
       ${loading ? html`<span class="count">loading…</span>` : html`<${Pagination} total=${total} limit=${limit} offset=${offset} onChange=${setOffset} />`}
       <span class="spacer"></span>
       ${isLocalEngine && !isUser && archiveMode === 'active' ? html`
@@ -317,6 +325,21 @@ export function CompaniesTab({ archivedMode: initialArchived = false, mode = 'lo
         `)}
       </div>
     </div>
+
+    ${showFilters ? html`<${CompanyFilters}
+      value=${filters}
+      industries=${industries}
+      onApply=${(f) => { setFilters(f); setOffset(0); }}
+      onClose=${() => setShowFilters(false)}
+    />` : null}
+
+    ${activeFilterCount > 0 ? html`
+      <div class="filter-chips" style=${{ display: 'flex', flexWrap: 'wrap', gap: '6px', margin: '8px 0 0', alignItems: 'center' }}>
+        ${buildChips(filters, setFilters, setOffset)}
+        <button onClick=${() => { setFilters(EMPTY_FILTERS); setOffset(0); }}
+          style=${{ fontSize: '11px', color: 'var(--text-dim)', background: 'transparent', border: 'none', cursor: 'pointer', textDecoration: 'underline' }}>Clear all</button>
+      </div>
+    ` : null}
 
     ${finderAudit ? html`
       <div class="audit-panel" style=${{ margin: '8px 0', padding: '10px 12px', border: '1px solid var(--border)', borderRadius: '8px', background: 'var(--surface-2, rgba(0,0,0,0.03))' }}>
@@ -476,6 +499,32 @@ export function CompaniesTab({ archivedMode: initialArchived = false, mode = 'lo
       onComplete=${() => load()}
     />` : null}
   `;
+}
+
+// Active-filter chips shown under the toolbar (each removable; plus Clear all).
+function chipEl(label, onRemove) {
+  return html`<span style=${{ display: 'inline-flex', alignItems: 'center', gap: '6px', padding: '3px 9px', borderRadius: '999px', border: '1px solid var(--border)', background: 'rgba(255,255,255,0.05)', fontSize: '11px', color: 'var(--text-muted)' }}>
+    ${label}
+    <button onClick=${onRemove} title="Remove" style=${{ background: 'transparent', border: 'none', color: 'var(--text-dim)', cursor: 'pointer', fontSize: '13px', lineHeight: 1, padding: 0 }}>×</button>
+  </span>`;
+}
+function buildChips(f, setFilters, setOffset) {
+  const out = [];
+  const after = () => setOffset(0);
+  const rmFromArr = (key, v) => () => { setFilters((s) => ({ ...s, [key]: s[key].filter((x) => x !== v) })); after(); };
+  const clearKey = (key, empty) => () => { setFilters((s) => ({ ...s, [key]: empty })); after(); };
+  for (const v of f.industries) out.push(chipEl(v, rmFromArr('industries', v)));
+  for (const v of f.statuses)   out.push(chipEl('status: ' + v, rmFromArr('statuses', v)));
+  for (const v of f.sources)    out.push(chipEl('source: ' + v, rmFromArr('sources', v)));
+  for (const v of f.empBuckets) out.push(chipEl(v + ' emp', rmFromArr('empBuckets', v)));
+  if (String(f.city).trim()) out.push(chipEl('city: ' + f.city, clearKey('city', '')));
+  if (f.foundedMin) out.push(chipEl('founded ≥ ' + f.foundedMin, clearKey('foundedMin', '')));
+  if (f.foundedMax) out.push(chipEl('founded ≤ ' + f.foundedMax, clearKey('foundedMax', '')));
+  if (f.scoreMin)   out.push(chipEl('score ≥ ' + f.scoreMin, clearKey('scoreMin', '')));
+  for (const [k, label] of [['hasWebsite', 'has website'], ['hasEmail', 'has email'], ['hasPhone', 'has phone'], ['hasLinkedin', 'has LinkedIn'], ['hasPeople', 'has people']]) {
+    if (f[k]) out.push(chipEl(label, clearKey(k, false)));
+  }
+  return out;
 }
 
 export function ArchivedCompaniesTab({ mode = 'local-admin' } = {}) {

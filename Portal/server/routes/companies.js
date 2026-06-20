@@ -174,6 +174,52 @@ router.get('/', async (req, res, next) => {
       params.push(req.query.industry);
       where.push(`(companies.industries @> ARRAY[$${params.length}]::text[] OR companies.industry = $${params.length})`);
     }
+    // ---- Advanced filter panel params (all optional, AND-combined) ----------
+    const csv = (v) => String(v || '').split(',').map((s) => s.trim()).filter(Boolean);
+    // multi-select industry tags
+    const indList = csv(req.query.industries);
+    if (indList.length) {
+      params.push(indList);
+      where.push(`(companies.industries && $${params.length}::text[] OR companies.industry = ANY($${params.length}::text[]))`);
+    }
+    // multi-select status
+    const statusList = csv(req.query.statuses);
+    if (statusList.length) {
+      params.push(statusList);
+      where.push(`status_normalized = ANY($${params.length}::text[])`);
+    }
+    // multi-select source
+    const sourceList = csv(req.query.sources);
+    if (sourceList.length) {
+      params.push(sourceList);
+      where.push(`EXISTS (SELECT 1 FROM company_sources cs WHERE cs.company_id = companies.id AND cs.source = ANY($${params.length}::text[]))`);
+    }
+    // employee-size buckets (OR of ranges over employee_count)
+    const EMP_BUCKETS = { '1-10': [1, 10], '11-50': [11, 50], '51-200': [51, 200], '201-1000': [201, 1000], '1001-5000': [1001, 5000], '5000+': [5001, null] };
+    const empSel = csv(req.query.emp_buckets);
+    if (empSel.length) {
+      const ors = [];
+      for (const b of empSel) {
+        const r = EMP_BUCKETS[b]; if (!r) continue;
+        if (r[1] == null) { params.push(r[0]); ors.push(`companies.employee_count >= $${params.length}`); }
+        else { params.push(r[0]); const lo = params.length; params.push(r[1]); ors.push(`companies.employee_count BETWEEN $${lo} AND $${params.length}`); }
+      }
+      if (ors.length) where.push(`(${ors.join(' OR ')})`);
+    }
+    if (req.query.city) {
+      params.push('%' + likeEscape(String(req.query.city).toLowerCase()) + '%');
+      where.push(`lower(companies.city) LIKE $${params.length}`);
+    }
+    if (req.query.founded_min) { params.push(Number(req.query.founded_min)); where.push(`companies.founded_year >= $${params.length}`); }
+    if (req.query.founded_max) { params.push(Number(req.query.founded_max)); where.push(`companies.founded_year <= $${params.length}`); }
+    if (req.query.score_min)   { params.push(Number(req.query.score_min));   where.push(`companies.bell_score >= $${params.length}`); }
+    // data-completeness toggles
+    if (req.query.has_website  === '1') where.push(`companies.website IS NOT NULL AND btrim(companies.website::text) <> ''`);
+    if (req.query.has_linkedin === '1') where.push(`companies.linkedin_url IS NOT NULL`);
+    if (req.query.has_email    === '1') where.push(`(companies.email IS NOT NULL OR EXISTS (SELECT 1 FROM company_contacts cc WHERE cc.company_id = companies.id AND cc.type = 'email'))`);
+    if (req.query.has_phone    === '1') where.push(`(companies.phone IS NOT NULL OR EXISTS (SELECT 1 FROM company_contacts cc WHERE cc.company_id = companies.id AND cc.type = 'phone'))`);
+    if (req.query.has_people   === '1') where.push(`EXISTS (SELECT 1 FROM person_companies pc WHERE pc.company_id = companies.id)`);
+
     for (const k of ['stage1','stage2','stage3','stage4','stage5']) {
       if (req.query[k]) {
         params.push(req.query[k]);
