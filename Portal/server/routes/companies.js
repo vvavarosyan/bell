@@ -121,8 +121,21 @@ router.get('/', async (req, res, next) => {
       const pLike = params.length;
       params.push(qNorm);
       const pNorm = params.length;
+      // Industry/sector-aware matching: drop filler words and de-pluralize so a
+      // query like "all banks", "beauty industry" or "beauty salons" matches the
+      // industry/sector text held in search_blob ("banking & finance", "beauty &
+      // wellness"). Each remaining token must appear in the blob (AND), which
+      // keeps multi-word searches precise.
+      const STOP = new Set(['all','the','in','of','and','or','to','for','qatar','industry','industries','sector','sectors','company','companies','business','businesses','list','show','me','find','any','with','that','are','our','their']);
+      const tokens = qLower.split(/[^a-z0-9&]+/)
+        .filter((t) => t.length >= 2 && !STOP.has(t))
+        .map((t) => (t.length > 3 && t.endsWith('s') && !t.endsWith('ss')) ? t.slice(0, -1) : t);
+      const tokenConds = [];
+      for (const t of tokens) { params.push('%' + likeEscape(t) + '%'); tokenConds.push(`companies.search_blob LIKE $${params.length}`); }
+      const tokenBranch = tokenConds.length ? ` OR (${tokenConds.join(' AND ')})` : '';
       where.push(
-        `(companies.search_blob LIKE $${pLike} ` +
+        `(companies.search_blob LIKE $${pLike}` +
+        `${tokenBranch} ` +
         `OR (char_length($${pNorm}) >= 3 AND companies.name_normalized % $${pNorm}))`
       );
       // Rank: exact normalized name, then substring hits, then fuzzy closeness.

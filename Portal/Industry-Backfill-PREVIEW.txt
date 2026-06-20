@@ -1,0 +1,78 @@
+================================================================
+  BELL INDUSTRY BACKFILL — DRY-RUN
+  2026-06-19T22:25:20.895Z
+================================================================
+
+Companies with no industry scanned: 185700
+Would be filled (confident match):  56803  (31%)
+Left blank (no confident match):    128897
+
+Distribution of the filled industries:
+    25361  Construction & Contracting
+     7271  Trading & Distribution
+     3971  Healthcare
+     2458  Hospitality & F&B
+     2295  Banking & Finance
+     2047  Logistics & Transport
+     1860  Engineering
+     1151  Automotive
+     1091  Textiles & Garments
+      914  Manufacturing
+      908  Information Technology
+      769  Retail
+      752  Beauty & Wellness
+      694  Real Estate
+      685  Oil & Gas
+      605  Furniture & Interior
+      525  Travel & Tourism
+      522  Education & Training
+      411  Agriculture & Fisheries
+      408  Consulting
+      378  Marketing & Advertising
+      357  Facilities & Cleaning
+      341  Jewellery & Gold
+      203  Media & Entertainment
+      169  Pharmaceuticals
+      165  Sports & Recreation
+      131  Security Services
+       99  Insurance
+       91  Energy & Utilities
+       73  Telecommunications
+       58  Aviation & Aerospace
+       29  Chemicals & Plastics
+       11  Legal Services
+
+Sample classifications (industry ← company name):
+  · Banking & Finance  ←  Barzan Holdings QSTP-LLC
+  · Oil & Gas  ←  ConocoPhillips Water Technology Ltd QSTP-B
+  · Information Technology  ←  Cytomate
+  · Telecommunications  ←  Engineering Solutions QSTP-LLC
+  · Information Technology  ←  iHorizons QSTP-LLC
+  · Banking & Finance  ←  Precision Cellular Storage
+  · Construction & Contracting  ←  SIEMENS QSTP-B
+  · Sports & Recreation  ←  Sports Vector
+  · Information Technology  ←  Sustainable Carbon Technologies
+  · Aviation & Aerospace  ←  THALES QSTP-LLC
+  · Oil & Gas  ←  TOTAL E&P Golfe Limited QSTP-B
+  · Information Technology  ←  Updive CCS
+  · Construction & Contracting  ←  VFarms
+  · Engineering  ←  IRISS QFZ Branch
+  · Information Technology  ←  Tradeshift QFZ LLC
+  · Manufacturing  ←  Doha Craft Boat Manufacturing QFZ LLC
+  · Aviation & Aerospace  ←  Sabena technics BOD QFZ Branch
+  · Logistics & Transport  ←  GWC Logistics QFZ Branch
+  · Information Technology  ←  QELP Services QFZ LLC
+  · Oil & Gas  ←  Brooq Petrochemical Company QFZ LLC
+  · Manufacturing  ←  Iktifaa Resin Industry QFZ Branch
+  · Information Technology  ←  Volkswagen Group Middle East QFZ LLC
+  · Logistics & Transport  ←  Gulf Agency Co Qatar QFZ Branch
+  · Manufacturing  ←  Permian Wax QFZ LLC
+  · Manufacturing  ←  Yokogawa Qatar QFZ LLC
+  · Aviation & Aerospace  ←  AY Tech QFZ LLC
+  · Consulting  ←  Asia Star Consultancy QFZ LLC
+  · Logistics & Transport  ←  DHL Qatar Limited QFZ Branch
+  · Manufacturing  ←  Wasco Coatings Middle East QFZ LLC
+  · Information Technology  ←  Incture Technologies QFZ LLC
+
+No changes written. Re-run with  --apply  to fill these in.
+================================================================

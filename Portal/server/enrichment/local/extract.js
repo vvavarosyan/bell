@@ -304,59 +304,63 @@ export function pickLogo(meta) {
 // Industry / founded year / description  (richer company profile)
 // ===========================================================================
 
-// Keyword → industry map for a precision-first guess. Checked against the page
-// title + meta description + keywords + body text. Conservative.
-// Keyword → industry map for a precision-first guess, tuned for Qatar company
-// names + site text. Includes single industry-defining words (reliable in a
-// company name like "Al Faisal Trading") and multi-word phrases. Ordered most-
-// specific first so a tie resolves to the more specific category.
+// DEFINITIVE industry markers — phrases that, on their own, unambiguously
+// indicate a single industry. Deliberately CONSERVATIVE: ambiguous words like
+// "trading", "investment", "holding", "industries", "services", "technologies"
+// are intentionally excluded because they appear across many industries and
+// caused wrong guesses. Better to leave a company blank than mislabel it.
 const INDUSTRY_KEYWORDS = {
-  'Oil & Gas': ['oil and gas', 'oil & gas', 'petroleum', 'petrochemical', 'drilling', 'offshore', 'refinery', 'upstream', 'downstream', ' lng ', 'oilfield', 'wellhead', 'fuel'],
-  'Engineering': ['engineering services', 'mechanical engineering', 'electrical engineering', 'consulting engineers', 'mep engineering', 'electromechanical', ' hvac ', 'technical services', 'engineering consultancy', 'engineering'],
-  'Construction & Contracting': ['contracting', 'contractor', 'construction', 'civil works', 'civil engineering', ' mep ', 'fit-out', 'fit out', 'joinery', 'infrastructure', 'turnkey', 'builders', 'scaffolding', 'concrete', 'piling', 'steel structure', 'road works'],
-  'Information Technology': ['software', 'web development', 'app development', 'mobile app', 'saas', ' erp ', ' crm ', 'cloud computing', 'cyber security', 'cybersecurity', 'it solutions', 'it services', 'information technology', 'digital solutions', 'web design', 'data analytics', 'software solutions', 'technologies', 'tech solutions', 'network solutions', 'smart solutions'],
-  'Telecommunications': ['telecom', 'telecommunication', 'telecommunications', 'fiber optic', 'satellite communication'],
-  'Pharmaceuticals': ['pharmaceutical', 'pharma ', 'medicines manufacturing'],
-  'Healthcare': ['medical center', 'medical centre', 'clinic', 'hospital', 'healthcare', 'health care', 'pharmacy', 'dental', 'nursing', 'diagnostic', 'polyclinic', 'medical supplies', 'surgical', 'physiotherapy', 'optical', 'medical equipment'],
-  'Banking & Finance': ['bank', 'banking', 'financial services', 'investment company', 'investment', 'holding', 'asset management', 'islamic finance', 'wealth management', 'money exchange', 'exchange house', 'capital markets', 'microfinance'],
+  'Oil & Gas': ['oil and gas', 'oil & gas', 'petroleum', 'petrochemical', 'oilfield', ' lng ', 'natural gas'],
+  'Engineering': ['engineering consultancy', 'consulting engineers', 'mechanical engineering', 'electrical engineering', 'electromechanical'],
+  'Construction & Contracting': ['contracting', 'general contracting', 'construction company', 'building contracting', 'civil construction'],
+  'Information Technology': ['software development', 'software solutions', 'information technology', 'it solutions', 'web development', 'cyber security', 'cybersecurity'],
+  'Telecommunications': ['telecommunication', 'telecommunications'],
+  'Pharmaceuticals': ['pharmaceutical'],
+  'Healthcare': ['medical center', 'medical centre', 'polyclinic', 'hospital', 'dental clinic', 'medical clinic', 'health center', 'health centre', 'pharmacy', 'medical supplies', 'diagnostic center'],
+  'Banking & Finance': [' bank ', 'banking', 'islamic bank', 'investment bank'],
   'Insurance': ['insurance', 'takaful', 'reinsurance'],
-  'Real Estate': ['real estate', 'property management', 'properties', 'realty', 'real-estate', 'property developer', 'leasing'],
-  'Logistics & Transport': ['logistics', 'freight', 'shipping', 'cargo', 'warehousing', 'supply chain', 'customs clearance', 'freight forwarding', 'transport', 'transportation', 'clearing and forwarding', 'movers and packers', 'courier'],
-  'Trading & Distribution': ['trading', 'import & export', 'import and export', 'import export', 'distributor', 'distribution', 'wholesale', 'general supplies', 'general trading', 'traders'],
-  'Retail': ['retail', 'supermarket', 'hypermarket', 'showroom', 'boutique', 'department store', 'shopping mall', 'fashion retail'],
-  'Chemicals & Plastics': ['chemicals', 'paints and coatings', 'plastics', 'polymer', 'rubber products', 'adhesives'],
-  'Manufacturing': ['manufacturing', 'fabrication', 'production facility', 'factory', 'industries', 'industrial', 'manufacturer'],
-  'Automotive': ['automotive', 'spare parts', 'auto repair', 'tyres', 'car service', 'motors', 'car rental', 'rent a car', 'auto garage'],
-  'Marketing & Advertising': ['advertising', 'marketing agency', 'branding', 'signage', 'printing press', 'digital marketing', 'media production', 'public relations', 'exhibitions and events'],
-  'Media & Entertainment': ['broadcasting', 'film production', 'films', 'film ', 'cinema', 'publishing house', 'entertainment', 'television production'],
-  'Hospitality & F&B': ['restaurant', 'catering', 'hospitality', 'food and beverage', ' f&b ', 'hotel', 'cafeteria', 'bakery', 'coffee shop'],
-  'Travel & Tourism': ['travel agency', 'tourism', 'tours and travel', 'travel and tours', 'holidays', 'ticketing'],
-  'Consulting': ['consultancy', 'management consulting', 'advisory services', 'business consulting', 'consultants'],
-  'Legal Services': ['law firm', 'legal services', 'advocates', 'legal consultancy', 'attorneys'],
-  'Security Services': ['security services', 'surveillance', 'cctv', 'manpower security', 'guarding services'],
-  'Facilities & Cleaning': ['facilities management', 'cleaning services', 'pest control', 'maintenance services', 'landscaping', 'manpower supply'],
-  'Education & Training': ['training center', 'training centre', 'academy', 'institute', 'e-learning', 'educational', 'kindergarten', 'nursery school', 'tuition'],
-  'Energy & Utilities': ['power generation', 'electricity', 'water treatment', 'solar energy', 'renewable energy', 'district cooling', 'desalination'],
-  'Agriculture & Fisheries': ['agriculture', 'farming', 'livestock', 'fisheries', 'poultry', 'agricultural', 'greenhouse'],
-  'Aviation & Aerospace': ['aviation', 'airline', 'aircraft', 'aerospace', 'ground handling'],
-  'Furniture & Interior': ['furniture', 'interior design', 'interior decoration', 'upholstery', 'carpentry'],
-  'Textiles & Garments': ['textiles', 'garments', 'tailoring', 'uniforms', 'readymade garments', 'embroidery'],
-  'Beauty & Wellness': ['beauty salon', 'spa and wellness', 'cosmetics', 'perfumes', 'barber'],
-  'Jewellery & Gold': ['jewellery', 'jewelry', 'gold trading', 'watches and jewellery'],
-  'Sports & Recreation': ['sports', 'fitness center', 'gym ', 'sporting goods'],
+  'Real Estate': ['real estate', 'real-estate', 'property management', 'property developer'],
+  'Logistics & Transport': ['logistics', 'freight forwarding', 'cargo services', 'shipping and clearing', 'customs clearance'],
+  'Trading & Distribution': ['general trading', 'trading and distribution', 'trading & distribution', 'import and export', 'import & export'],
+  'Retail': ['supermarket', 'hypermarket', 'department store', 'shopping mall'],
+  'Chemicals & Plastics': ['paints and coatings', 'plastic manufacturing', 'chemical industries'],
+  'Manufacturing': ['manufacturing', 'fabrication factory', 'production facility'],
+  'Automotive': ['automotive', 'car rental', 'rent a car', 'auto spare parts', 'car showroom'],
+  'Marketing & Advertising': ['advertising', 'marketing agency', 'branding agency', 'signage and printing'],
+  'Media & Entertainment': ['film production', 'television production', 'broadcasting', 'production house'],
+  'Hospitality & F&B': ['restaurant', 'catering services', 'catering company', 'hotel and resort', 'coffee shop'],
+  'Travel & Tourism': ['travel agency', 'tours and travel', 'travel and tours', 'travel & tours', 'tourism company'],
+  'Legal Services': ['law firm', 'legal consultancy', 'law office', 'advocates and legal'],
+  'Security Services': ['security services', 'security solutions', 'manpower security'],
+  'Facilities & Cleaning': ['facilities management', 'cleaning services', 'pest control'],
+  'Education & Training': ['training center', 'training centre', 'training institute'],
+  'Energy & Utilities': ['power generation', 'water treatment', 'solar energy', 'renewable energy', 'district cooling', 'desalination'],
+  'Agriculture & Fisheries': ['agriculture', 'poultry farm', 'fisheries'],
+  'Aviation & Aerospace': ['aviation', 'aircraft maintenance', 'ground handling'],
+  'Furniture & Interior': ['interior design', 'interior decoration', 'furniture manufacturing', 'furniture trading'],
+  'Textiles & Garments': ['tailoring', 'readymade garments', 'garments manufacturing'],
+  'Beauty & Wellness': ['beauty salon', 'beauty saloon', 'spa and wellness', 'ladies salon', 'gents salon'],
+  'Jewellery & Gold': ['jewellery', 'jewelry'],
 };
 
-/** Best-guess industry from a text blob, or null if nothing clearly matches. */
+/**
+ * CONSERVATIVE industry classifier. Returns an industry ONLY when the text
+ * contains a definitive marker for EXACTLY ONE industry — otherwise null, so we
+ * leave the company blank rather than guess (Val: only the ones we're 100% sure
+ * of). An authoritative industry from an upload / LinkedIn is set by the caller
+ * and overwrites; this only ever proposes a value for an otherwise-blank row.
+ */
 export function inferIndustry(blob) {
   const hay = ' ' + String(blob || '').toLowerCase().replace(/\s+/g, ' ') + ' ';
   if (hay.length < 6) return null;
-  let best = null, bestN = 0;
-  for (const [industry, kws] of Object.entries(INDUSTRY_KEYWORDS)) {
-    let n = 0;
-    for (const kw of kws) if (hay.includes(kw)) n++;
-    if (n > bestN) { bestN = n; best = industry; }
+  // "Trading & Contracting" is a Qatar catch-all spanning two industries — don't
+  // force it into one.
+  if (/\btrading\b/.test(hay) && /\bcontracting\b/.test(hay)) return null;
+  const matched = new Set();
+  for (const [industry, phrases] of Object.entries(INDUSTRY_KEYWORDS)) {
+    for (const p of phrases) { if (hay.includes(p)) { matched.add(industry); break; } }
   }
-  return bestN >= 1 ? best : null;
+  return matched.size === 1 ? [...matched][0] : null;
 }
 
 /** First credible "founded/established YYYY" year on the page (1900..now), or null. */
