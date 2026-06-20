@@ -34,7 +34,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
   normalizePhone, parseSocialUrl, cleanCompanySocials, rankCompanyEmails,
-  looksLikeName, isSingularExecTitle, cleanWebsiteUrl,
+  looksLikeName, isSingularExecTitle, cleanWebsiteUrl, isFakePerson,
 } from '../lib/dataquality.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -218,14 +218,20 @@ async function run() {
   lastId = 0;
   for (;;) {
     const ppl = await query(
-      `SELECT id, full_name FROM people WHERE id > $1 ORDER BY id LIMIT $2`, [lastId, BATCH]);
+      `SELECT p.id, p.full_name, p.headline,
+              (SELECT string_agg(coalesce(pc.title, ''), ' || ') FROM person_companies pc
+                 WHERE pc.person_id = p.id) AS title
+         FROM people p WHERE p.id > $1 ORDER BY p.id LIMIT $2`, [lastId, BATCH]);
     if (!ppl.rows.length) break;
     lastId = ppl.rows[ppl.rows.length - 1].id;
     R.peopleScanned += ppl.rows.length;
-    const junk = ppl.rows.filter((p) => isJunkPersonName(p.full_name));
+    // Delete non-person "headings" (Our Company…) AND fake/template people
+    // ("CEO @ Google", "Director of Google Services", "Platform Certified"…).
+    const junk = ppl.rows.filter((p) =>
+      isJunkPersonName(p.full_name) || isFakePerson({ name: p.full_name, title: p.title, headline: p.headline }));
     for (const p of junk) {
       R.peopleDeleted++;
-      if (R.peopleSamples.length < 25) R.peopleSamples.push(`#${p.id} "${trunc(p.full_name, 40)}"`);
+      if (R.peopleSamples.length < 25) R.peopleSamples.push(`#${p.id} "${trunc(p.full_name, 34)}"${p.title ? ' · ' + trunc(p.title, 22) : ''}`);
       if (apply) {
         try {
           await withTransaction(async (client) => {
@@ -234,27 +240,6 @@ async function run() {
           });
         } catch (e) { R.errors++; if (R.errorSamples.length < 25) R.errorSamples.push(`person #${p.id}: ${e.message}`); }
       }
-    }
-  }
-
-  // ===== Template / placeholder people (e.g. "CEO at Google") ==============
-  // Demo team sections ship with fake staff whose title places them at a big
-  // external brand — a website-template artifact, not a real employee.
-  const tmplRx = '\\mat\\s+(google|facebook|meta|microsoft|apple|amazon|twitter|linkedin|instagram|netflix|tesla|youtube|spotify|uber|airbnb|samsung|ibm|oracle|adobe|salesforce|tiktok|snapchat|envato)\\M';
-  const tmpl = await query(
-    `SELECT DISTINCT p.id, p.full_name
-       FROM people p JOIN person_companies pc ON pc.person_id = p.id
-      WHERE pc.title ~* $1 OR coalesce(p.headline, '') ~* $1`, [tmplRx]).catch(() => ({ rows: [] }));
-  for (const p of tmpl.rows) {
-    R.peopleDeleted++;
-    if (R.peopleSamples.length < 25) R.peopleSamples.push(`#${p.id} "${trunc(p.full_name, 36)}" (template)`);
-    if (apply) {
-      try {
-        await withTransaction(async (client) => {
-          await client.query(`DELETE FROM people WHERE id = $1`, [p.id]);
-          await tombstone(client, 'people', p.id);
-        });
-      } catch (e) { R.errors++; if (R.errorSamples.length < 25) R.errorSamples.push(`tmpl person #${p.id}: ${e.message}`); }
     }
   }
 
