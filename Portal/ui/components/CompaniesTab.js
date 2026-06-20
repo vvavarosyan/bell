@@ -326,13 +326,6 @@ export function CompaniesTab({ archivedMode: initialArchived = false, mode = 'lo
       </div>
     </div>
 
-    ${showFilters ? html`<${CompanyFilters}
-      value=${filters}
-      industries=${industries}
-      onApply=${(f) => { setFilters(f); setOffset(0); }}
-      onClose=${() => setShowFilters(false)}
-    />` : null}
-
     ${activeFilterCount > 0 ? html`
       <div class="filter-chips" style=${{ display: 'flex', flexWrap: 'wrap', gap: '6px', margin: '8px 0 0', alignItems: 'center' }}>
         ${buildChips(filters, setFilters, setOffset)}
@@ -399,6 +392,14 @@ export function CompaniesTab({ archivedMode: initialArchived = false, mode = 'lo
     ${reviewMode ? html`<div class="view-banner review-banner">⚠ Review queue — companies that disappeared from a source and need a decision.</div>` : null}
 
     <div class="grid-pane">
+      ${showFilters ? html`<div class="bdi-filter-anchor">
+        <${CompanyFilters}
+          value=${filters}
+          industries=${industries}
+          onApply=${(f) => { setFilters(f); setOffset(0); }}
+          onClose=${() => setShowFilters(false)}
+        />
+      </div>` : null}
       <div class="grid-wrap">
         <table class="grid">
           <colgroup>
