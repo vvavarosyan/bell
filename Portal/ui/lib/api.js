@@ -47,6 +47,7 @@ async function request(path, options = {}) {
 export const api = {
   health:                 () => request('/api/health'),
   stats:                  () => request('/api/stats'),
+  statsOverview:          () => request('/api/stats/overview'),
   stageProgress:          () => request('/api/stats/stage-progress'),
 
   companies:              (q = {}) => request('/api/companies?' + new URLSearchParams(q)),
