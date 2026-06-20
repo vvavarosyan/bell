@@ -30,7 +30,9 @@ router.get('/', async (req, res, next) => {
   try {
     const q = String(req.query.q || '').trim().toLowerCase();
     const params = [];
-    let where = 'WHERE t.id <> 1';   // exclude the internal Bell tenant
+    // Exclude the internal Bell tenant + orphan tenants with no users (Clerk-org
+    // / abandoned-signup shells that just clutter the list).
+    let where = 'WHERE t.id <> 1 AND EXISTS (SELECT 1 FROM users u0 WHERE u0.tenant_id = t.id)';
     if (q) {
       params.push('%' + q + '%');
       where += ` AND (lower(t.name) LIKE $${params.length} OR EXISTS (SELECT 1 FROM users u WHERE u.tenant_id = t.id AND lower(u.email) LIKE $${params.length}))`;
@@ -128,6 +130,36 @@ router.post('/:id/notify', async (req, res, next) => {
     const sent = await notifyTenant(id, { category: 'account', type: 'admin_message', title, body, icon: 'megaphone', email });
     await audit(req, id, 'notify', { title, recipients: sent, email });
     res.json({ ok: true, sent });
+  } catch (err) { next(err); }
+});
+
+// DELETE /api/admin/users/:id — permanently delete an account (tenant) and all
+// its data (users, credits, CRM, reveals…) via ON DELETE CASCADE. For clearing
+// test / junk accounts. The internal tenant is protected.
+router.delete('/:id', async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    if (id === 1) return res.status(400).json({ error: 'cannot_delete_internal' });
+    const t = await query(`SELECT name FROM tenants WHERE id = $1`, [id]);
+    if (!t.rows.length) return res.status(404).json({ error: 'not_found' });
+    // Audit with target_tenant_id = NULL so the record survives the cascade.
+    await audit(req, null, 'delete_account', { tenant_id: id, name: t.rows[0].name });
+    await query(`DELETE FROM tenants WHERE id = $1`, [id]);
+    res.json({ ok: true, deleted: t.rows[0].name });
+  } catch (err) { next(err); }
+});
+
+// POST /api/admin/users/:id/impersonate — record the start of a "log in as"
+// session. The UI then sends X-Impersonate-Tenant on subsequent requests; auth
+// honors it only for a real platform_admin.
+router.post('/:id/impersonate', async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    if (id === 1) return res.status(400).json({ error: 'cannot_impersonate_internal' });
+    const t = await query(`SELECT id, name, slug FROM tenants WHERE id = $1`, [id]);
+    if (!t.rows.length) return res.status(404).json({ error: 'not_found' });
+    await audit(req, id, 'impersonate', { tenant: t.rows[0].name });
+    res.json({ ok: true, tenant: t.rows[0] });
   } catch (err) { next(err); }
 });
 

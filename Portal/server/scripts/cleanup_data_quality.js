@@ -237,6 +237,27 @@ async function run() {
     }
   }
 
+  // ===== Template / placeholder people (e.g. "CEO at Google") ==============
+  // Demo team sections ship with fake staff whose title places them at a big
+  // external brand — a website-template artifact, not a real employee.
+  const tmplRx = '\\mat\\s+(google|facebook|meta|microsoft|apple|amazon|twitter|linkedin|instagram|netflix|tesla|youtube|spotify|uber|airbnb|samsung|ibm|oracle|adobe|salesforce|tiktok|snapchat|envato)\\M';
+  const tmpl = await query(
+    `SELECT DISTINCT p.id, p.full_name
+       FROM people p JOIN person_companies pc ON pc.person_id = p.id
+      WHERE pc.title ~* $1 OR coalesce(p.headline, '') ~* $1`, [tmplRx]).catch(() => ({ rows: [] }));
+  for (const p of tmpl.rows) {
+    R.peopleDeleted++;
+    if (R.peopleSamples.length < 25) R.peopleSamples.push(`#${p.id} "${trunc(p.full_name, 36)}" (template)`);
+    if (apply) {
+      try {
+        await withTransaction(async (client) => {
+          await client.query(`DELETE FROM people WHERE id = $1`, [p.id]);
+          await tombstone(client, 'people', p.id);
+        });
+      } catch (e) { R.errors++; if (R.errorSamples.length < 25) R.errorSamples.push(`tmpl person #${p.id}: ${e.message}`); }
+    }
+  }
+
   // ===== Person-companies: shared singular exec titles =====================
   const execCos = await query(
     `SELECT company_id, array_agg(id) AS ids, array_agg(title) AS titles

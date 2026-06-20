@@ -177,6 +177,13 @@ function App({ initialUser, initialTenant, mode }) {
         mode=${mode?.mode || 'local-admin'}
       />
       <main class="app-main">
+        ${(() => { const imp = api.getImpersonation?.(); return imp ? html`
+          <div style=${{ display: 'flex', alignItems: 'center', gap: '12px', padding: '7px 18px', background: 'rgba(232,142,168,0.16)', borderBottom: '1px solid rgba(232,142,168,0.5)', fontSize: '12.5px', color: 'var(--text)' }}>
+            <span>👁 Viewing as <strong>${imp.name}</strong> — impersonating</span>
+            <span style=${{ flex: 1 }}></span>
+            <button onClick=${() => { api.clearImpersonation(); window.location.href = '/'; }}
+              style=${{ background: 'rgb(232 142 168)', border: 'none', color: '#1a1010', borderRadius: '6px', padding: '5px 12px', fontSize: '12px', fontWeight: 600, cursor: 'pointer' }}>Exit impersonation</button>
+          </div>` : null; })()}
         <div class="page-header">
           <div class="page-title">${LABELS[tab] || tab}</div>
           ${stats && mode?.mode !== 'user' ? html`

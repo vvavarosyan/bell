@@ -44,12 +44,13 @@ export function AdminUsersTab() {
       </div>
 
       <table class="grid">
-        <thead><tr><th>Account</th><th>Primary user</th><th>Plan</th><th>Status</th><th>Credits</th><th>Since</th></tr></thead>
+        <thead><tr><th>Account</th><th>Primary user</th><th>Users</th><th>Plan</th><th>Status</th><th>Credits</th><th>Since</th></tr></thead>
         <tbody>
           ${rows.length === 0 && !loading ? html`<tr><td colSpan="6" class="empty">No customer accounts yet.</td></tr>` : null}
           ${rows.map((t) => html`<tr key=${t.id} style=${{ cursor: 'pointer' }} onClick=${() => setOpenId(t.id)}>
             <td><div style=${{ fontWeight: 500 }}>${t.name}</div><div class="muted small">${t.slug}</div></td>
             <td>${t.primary_name ? html`<div>${t.primary_name}</div>` : null}<div class="muted small">${t.primary_email || '—'}</div></td>
+            <td>${fmt(t.user_count)}</td>
             <td style=${{ textTransform: 'capitalize' }}>${t.plan}</td>
             <td><${StatusBadge} tenant=${t} /></td>
             <td>${fmt(t.credit_balance)}</td>
@@ -91,6 +92,21 @@ function UserDrawer({ tenantId, plans, onClose, onChanged }) {
     const n = Math.abs(Math.trunc(Number(delta)));
     if (!n) { toast('Enter a credit amount', 'error'); return; }
     act(() => api.adminUserCredits(tenantId, sign * n, note), `${sign > 0 ? 'Added' : 'Deducted'} ${n} credits`).then(() => { setDelta(''); setNote(''); });
+  };
+  const impersonate = async () => {
+    try {
+      await api.adminImpersonate(tenantId);
+      api.setImpersonation(tenantId, data.tenant.name);
+      toast('Logging in as ' + data.tenant.name + '…');
+      setTimeout(() => { window.location.href = '/'; }, 350);
+    } catch (err) { toast('Impersonation failed: ' + err.message, 'error'); }
+  };
+  const removeAccount = async () => {
+    const typed = window.prompt(`PERMANENTLY delete this account and ALL its data (users, credits, CRM, reveals)?\n\nType the account name to confirm:\n${data.tenant.name}`);
+    if (typed == null) return;
+    if (typed.trim() !== data.tenant.name) { toast('Name did not match — cancelled', 'error'); return; }
+    try { await api.adminUserDelete(tenantId); toast(`Deleted "${data.tenant.name}"`); onClose(); onChanged?.(); }
+    catch (err) { toast(err.message || 'Delete failed', 'error'); }
   };
 
   const t = data?.tenant;
@@ -137,9 +153,14 @@ function UserDrawer({ tenantId, plans, onClose, onChanged }) {
             </div>
 
             <div style=${lbl}>Account</div>
-            ${t.is_active
-              ? html`<button disabled=${busy} onClick=${() => act(() => api.adminUserSuspend(tenantId, true), 'Account suspended')} style=${{ ...btnGhost, borderColor: 'rgba(232,142,168,0.5)', color: 'rgb(232 142 168)' }}>Suspend account</button>`
-              : html`<button disabled=${busy} onClick=${() => act(() => api.adminUserSuspend(tenantId, false), 'Account reactivated')} style=${btn}>Reactivate account</button>`}
+            <div style=${{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+              <button disabled=${busy} onClick=${impersonate} style=${btnGhost} title="View the app exactly as this customer sees it">Log in as</button>
+              ${t.is_active
+                ? html`<button disabled=${busy} onClick=${() => act(() => api.adminUserSuspend(tenantId, true), 'Account suspended')} style=${{ ...btnGhost, borderColor: 'rgba(232,142,168,0.5)', color: 'rgb(232 142 168)' }}>Suspend</button>`
+                : html`<button disabled=${busy} onClick=${() => act(() => api.adminUserSuspend(tenantId, false), 'Account reactivated')} style=${btn}>Reactivate</button>`}
+              <span style=${{ flex: 1 }}></span>
+              <button disabled=${busy} onClick=${removeAccount} style=${{ ...btnGhost, borderColor: 'rgba(232,142,168,0.5)', color: 'rgb(232 142 168)' }} title="Permanently delete this account">Delete account</button>
+            </div>
 
             <div style=${lbl}>Send a message / warning</div>
             <input type="text" placeholder="Title" value=${msgT} onChange=${(e) => setMsgT(e.target.value)} style=${{ ...fld, width: '100%', boxSizing: 'border-box', marginBottom: '8px' }} />

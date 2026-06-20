@@ -1,0 +1,43 @@
+================================================================
+  BELL SOURCE-CONTACTS CONVERSION — DRY-RUN
+  2026-06-20T09:28:24.522Z
+================================================================
+
+Companies with directory contact fields scanned: 41586
+  Phone contacts (Fax/Mobile) to create: 16355  (skipped 288 invalid)
+  People (Contact Person / Owner) to create: 18956  (dry-run counts before dedup)
+
+Samples:
+  · Fax     +974 4458 2295     OMNIA LLC
+  · Fax     +974 4441 6678     Meridian LLC
+  · Contact Person JABOR NASSER J AL-NAIMI    Meridian LLC
+  · Contact Person SH . MOHAMED JASSIM K A AL… Tamam LLC
+  · Contact Person ADEL WAHEED H AL MAJEED    Panacea LLC
+  · Fax     +974 4486 8616     ZamZam LLC
+  · Contact Person MUBARAK AMAN MUBARAK       AMAN International Holding LLC
+  · Contact Person SHEIKH FALEH FAHAD J M ALT… Fortune LLC
+  · Fax     +974 4487 3374     Inspiration LLC
+  · Contact Person WADHA SALEM A A AL-KUWARI  Inspiration LLC
+  · Fax     +974 4442 9183     Al Tamayuz Holding LLC
+  · Contact Person YOUSUF AHMAD H AL-NAAMA    Al Tamayuz Holding LLC
+  · Contact Person SAOUD THAMER M AL - THANI  Vertex International LLC
+  · Fax     +974 4469 9441     Horizon Holdings LLC
+  · Fax     +974 4487 0640     Greenapple LLC
+  · Fax     +974 4465 9166     Strategic solutions LLC
+  · Fax     +974 4432 9119     Silver Arrow LLC
+  · Contact Person ALI MOHAMED ABDULRAHMAN KA… Radius Holdings LLC
+  · Contact Person ABDULLA HASSAN R AL MEHSHA… Summit Group LLC
+  · Fax     +974 4451 5255     Maze LLC
+  · Fax     +974 4435 4888     Black Pearl Holding LLC
+  · Contact Person ISMAIL ABUBAKER AL-MUSLEH  West Bay Holding LLC
+  · Fax     +974 4466 3556     ASAS LLC
+  · Contact Person KALIED ALSADEQI            ASAS LLC
+  · Contact Person OSAMA ABDULLA A N AL-ABDUL… Connect LLC
+  · Fax     +974 4444 3197     Doha Holding Group LLC
+  · Fax     +974 4442 2297     Patron Network LLC
+  · Fax     +974 4455 1177     LUMINOUS HOLDINGS LLC
+  · Contact Person SALEH ABDULLA M S AL-SULAI… LUMINOUS HOLDINGS LLC
+  · Fax     +974 4488 2807     Imperial Holdings LLC
+
+No changes written. Re-run with --apply to create these.
+================================================================
