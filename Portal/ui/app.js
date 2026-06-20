@@ -22,6 +22,7 @@ import { SourcesTab }   from './components/SourcesTab.js';
 import { MapTab }       from './components/MapTab.js';
 import { DedupQueueTab } from './components/DedupQueueTab.js';
 import { RecentJobsTab } from './components/RecentJobsTab.js';
+import { StatsTab }      from './components/StatsTab.js';
 import { ResearchTab }   from './components/ResearchTab.js';
 import { ResearchApprovalsTab } from './components/ResearchApprovalsTab.js';
 import { DeepDataTab }   from './components/DeepDataTab.js';
@@ -47,6 +48,7 @@ const VIEWS = {
   'people':      { Component: PeopleTab },
   'jobs':        { Component: JobsTab },
   'sources':     { Component: SourcesTab },
+  'db-stats':    { Component: StatsTab },
   'settings':    { Component: SettingsTab },
   'billing':     { Component: BillingTab },
   'account':     { Component: AccountTab },
@@ -76,6 +78,7 @@ const LABELS = {
   'map': 'Map',
   'dedup-queue': 'Dedup Queue',
   'recent-jobs': 'Recent Jobs',
+  'db-stats': 'Database',
   'deep-data': 'Deep Data',
   'sync': 'Sync to Bell.qa',
   'crm': 'CRM',
