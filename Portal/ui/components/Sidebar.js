@@ -47,6 +47,7 @@ export const NAV_SECTIONS = [
       // for every customer; visible on admin.bell.qa.
       { id: 'sources',     label: 'Sources',     icon: 'sources',  placeholder: false, visibility: ['platform_admin'] },
       { id: 'db-stats',    label: 'Database',    icon: 'database',  placeholder: false, visibility: ['platform_admin'] },
+      { id: 'admin-users', label: 'Users',       icon: 'team',      placeholder: false, visibility: ['platform_admin'] },
       { id: 'detail-requests', label: 'Detail Requests', icon: 'inbox', placeholder: false, visibility: ['platform_admin'] },
       { id: 'announcements', label: 'Announcements', icon: 'megaphone', placeholder: false, visibility: ['platform_admin'] },
       { id: 'email-templates', label: 'Email Templates', icon: 'mail', placeholder: false, visibility: ['platform_admin'] },
@@ -69,7 +70,7 @@ export const NAV_SECTIONS = [
 // we also hide them from the nav to avoid dead 403 links — even for a
 // platform_admin who happens to be on app.bell.qa.
 export const ADMIN_ONLY_NAV_IDS = new Set([
-  'sources', 'db-stats', 'recent-jobs', 'sync', 'settings', 'dedup-queue', 'announcements', 'email-templates',
+  'sources', 'db-stats', 'admin-users', 'recent-jobs', 'sync', 'settings', 'dedup-queue', 'announcements', 'email-templates',
 ]);
 
 // LOCAL-ENGINE-ONLY tools. These read local directory files and/or originate
