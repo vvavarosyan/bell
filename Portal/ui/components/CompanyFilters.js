@@ -1,7 +1,8 @@
-// Advanced filter panel for the Companies list. A popover of structured filters
-// (industry tags, status, source, employee size, completeness, location, founded
-// year, Bell score) — the kind of faceted filtering serious B2B directories use.
-// The parent owns the committed `value`; this edits a draft and commits on Apply.
+// Advanced filter panel for the Companies list — an in-flow slide-down panel
+// (lives inside the data area, between the sidebar and the drawer) with faceted
+// filters: a searchable industry multi-select, plus status / source / size /
+// completeness / location / founded year / Bell score. The parent owns the
+// committed `value`; this edits a draft and commits on Apply.
 
 import { useState } from 'react';
 import { html } from '../lib/html.js';
@@ -25,74 +26,71 @@ export function countActiveFilters(f) {
 }
 
 const chip = (active, label, onClick) => html`
-  <button onClick=${onClick} class="filter-chip" style=${{
-    padding: '4px 10px', borderRadius: '999px', fontSize: '11.5px', cursor: 'pointer',
-    border: '1px solid ' + (active ? 'var(--accent)' : 'var(--border)'),
-    background: active ? 'var(--accent)' : 'transparent',
-    color: active ? '#fff' : 'var(--text-muted)',
-  }}>${label}</button>`;
+  <button type="button" class=${'filter-chip' + (active ? ' on' : '')} onClick=${onClick}>${label}</button>`;
+
+// Searchable multi-select used for the (long) industry list.
+function IndustryPicker({ options, selected, onToggle }) {
+  const [open, setOpen] = useState(false);
+  const [q, setQ] = useState('');
+  const ql = q.trim().toLowerCase();
+  const filtered = ql ? options.filter((o) => o.industry.toLowerCase().includes(ql)) : options;
+  return html`
+    <div class="bdi-ms">
+      <button type="button" class="bdi-ms-trigger" onClick=${() => setOpen((o) => !o)}>
+        <span>${selected.length ? `${selected.length} selected` : 'Select industries…'}</span>
+        <span class="bdi-ms-caret">${open ? '▴' : '▾'}</span>
+      </button>
+      ${open ? html`
+        <div class="bdi-ms-panel">
+          <input class="bdi-ms-search" type="text" placeholder="Search industries…" value=${q} onChange=${(e) => setQ(e.target.value)} />
+          <div class="bdi-ms-list">
+            ${filtered.length === 0 ? html`<div class="muted small" style=${{ padding: '8px' }}>No match.</div>` : null}
+            ${filtered.map((o) => {
+              const on = selected.includes(o.industry);
+              return html`<label class=${'bdi-ms-opt' + (on ? ' on' : '')} key=${o.industry}>
+                <input type="checkbox" checked=${on} onChange=${() => onToggle(o.industry)} />
+                <span>${o.industry}</span>${o.n ? html`<span class="bdi-ms-n">${o.n}</span>` : null}
+              </label>`;
+            })}
+          </div>
+        </div>` : null}
+      ${selected.length ? html`<div class="bdi-ms-chips">
+        ${selected.map((s) => html`<span class="bdi-ms-chip" key=${s}>${s}<button type="button" onClick=${() => onToggle(s)}>×</button></span>`)}
+      </div>` : null}
+    </div>`;
+}
 
 export function CompanyFilters({ value, industries = [], onApply, onClose }) {
   const [d, setD] = useState(() => ({ ...EMPTY_FILTERS, ...(value || {}) }));
   const toggle = (key, v) => setD((s) => ({ ...s, [key]: s[key].includes(v) ? s[key].filter((x) => x !== v) : [...s[key], v] }));
   const set = (key, v) => setD((s) => ({ ...s, [key]: v }));
-
-  const section = (title, body) => html`
-    <div style=${{ marginBottom: '14px' }}>
-      <div style=${{ fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.08em', fontWeight: 700, color: 'var(--text-dim)', marginBottom: '7px' }}>${title}</div>
-      ${body}
-    </div>`;
-
-  const num = (key, ph) => html`<input type="number" placeholder=${ph} value=${d[key]} onChange=${(e) => set(key, e.target.value)}
-    style=${{ width: '84px', background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border)', color: 'var(--text)', padding: '6px 8px', borderRadius: '6px', fontSize: '12px' }} />`;
+  const num = (key, ph) => html`<input class="bdi-filter-input" type="number" placeholder=${ph} value=${d[key]} onChange=${(e) => set(key, e.target.value)} style=${{ width: '82px' }} />`;
+  const sec = (label, body, full = false) => html`<div class="bdi-filter-sec" style=${full ? { gridColumn: '1 / -1' } : null}>
+    <div class="bdi-filter-label">${label}</div>${body}</div>`;
 
   return html`
-    <div onClick=${onClose} style=${{ position: 'fixed', inset: 0, zIndex: 80 }}>
-      <div onClick=${(e) => e.stopPropagation()} style=${{
-        position: 'absolute', top: '54px', left: '12px', width: 'min(560px, 94vw)', maxHeight: '78vh', overflowY: 'auto',
-        background: 'linear-gradient(180deg, #141a2b, #0f1422)', border: '1px solid var(--border)', borderRadius: '12px',
-        boxShadow: '0 24px 64px rgba(0,0,0,0.55)', padding: '16px 18px',
-      }}>
-        <div style=${{ display: 'flex', alignItems: 'center', marginBottom: '14px' }}>
-          <strong style=${{ fontSize: '14px' }}>Filters</strong>
-          <span style=${{ flex: 1 }}></span>
-          <button class="linkbtn" onClick=${() => setD({ ...EMPTY_FILTERS })}
-            style=${{ fontSize: '11.5px', color: 'var(--text-muted)', background: 'transparent', border: '1px solid var(--border)', borderRadius: '6px', padding: '4px 10px', cursor: 'pointer', marginRight: '6px' }}>Clear all</button>
-          <button onClick=${onClose} style=${{ background: 'transparent', border: '1px solid var(--border)', color: 'var(--text-muted)', width: '26px', height: '26px', borderRadius: '6px', cursor: 'pointer' }}>✕</button>
+    <div class="bdi-filter-drop">
+      <div class="bdi-filter-head">
+        <strong>Filters</strong>
+        <span class="spacer"></span>
+        <button class="bdi-filter-clear" onClick=${() => setD({ ...EMPTY_FILTERS })}>Clear all</button>
+        <button class="bdi-filter-x" onClick=${onClose} title="Close">✕</button>
+      </div>
+      <div class="bdi-filter-body">
+        <div class="bdi-filter-grid">
+          ${sec('Industry', html`<${IndustryPicker} options=${industries} selected=${d.industries} onToggle=${(v) => toggle('industries', v)} />`, true)}
+          ${sec('Status', html`<div class="bdi-chiprow">${STATUS_OPTS.map((s) => chip(d.statuses.includes(s), s, () => toggle('statuses', s)))}</div>`)}
+          ${sec('Source', html`<div class="bdi-chiprow">${SOURCE_OPTS.map((s) => chip(d.sources.includes(s), s, () => toggle('sources', s)))}</div>`)}
+          ${sec('Employee size', html`<div class="bdi-chiprow">${EMP_OPTS.map((s) => chip(d.empBuckets.includes(s), s, () => toggle('empBuckets', s)))}</div>`)}
+          ${sec('Has data', html`<div class="bdi-chiprow">${COMPLETE.map(([k, label]) => chip(d[k], label, () => set(k, !d[k])))}</div>`)}
+          ${sec('Location', html`<input class="bdi-filter-input" type="text" placeholder="City…" value=${d.city} onChange=${(e) => set('city', e.target.value)} style=${{ width: '160px' }} />`)}
+          ${sec('Founded year', html`<div style=${{ display: 'flex', alignItems: 'center', gap: '6px' }}>${num('foundedMin', 'from')}<span class="muted">–</span>${num('foundedMax', 'to')}</div>`)}
+          ${sec('Min Bell score', html`${num('scoreMin', '0–100')}`)}
         </div>
-
-        ${section('Industry', html`<div style=${{ display: 'flex', flexWrap: 'wrap', gap: '6px', maxHeight: '132px', overflowY: 'auto' }}>
-          ${industries.length === 0 ? html`<span class="muted small">No industries yet.</span>` : null}
-          ${industries.map((i) => chip(d.industries.includes(i.industry), `${i.industry}${i.n ? ` (${i.n})` : ''}`, () => toggle('industries', i.industry)))}
-        </div>`)}
-
-        ${section('Status', html`<div style=${{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
-          ${STATUS_OPTS.map((s) => chip(d.statuses.includes(s), s, () => toggle('statuses', s)))}
-        </div>`)}
-
-        ${section('Source', html`<div style=${{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
-          ${SOURCE_OPTS.map((s) => chip(d.sources.includes(s), s, () => toggle('sources', s)))}
-        </div>`)}
-
-        ${section('Employee size', html`<div style=${{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
-          ${EMP_OPTS.map((s) => chip(d.empBuckets.includes(s), s, () => toggle('empBuckets', s)))}
-        </div>`)}
-
-        ${section('Has data', html`<div style=${{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
-          ${COMPLETE.map(([k, label]) => chip(d[k], label, () => set(k, !d[k])))}
-        </div>`)}
-
-        <div style=${{ display: 'flex', gap: '20px', flexWrap: 'wrap' }}>
-          ${section('Location', html`<input type="text" placeholder="City…" value=${d.city} onChange=${(e) => set('city', e.target.value)}
-            style=${{ width: '150px', background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border)', color: 'var(--text)', padding: '6px 9px', borderRadius: '6px', fontSize: '12px' }} />`)}
-          ${section('Founded year', html`<div style=${{ display: 'flex', alignItems: 'center', gap: '6px' }}>${num('foundedMin', 'from')}<span class="muted">–</span>${num('foundedMax', 'to')}</div>`)}
-          ${section('Min Bell score', html`${num('scoreMin', '0–100')}`)}
-        </div>
-
-        <div style=${{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '6px', position: 'sticky', bottom: '-16px', paddingTop: '10px', background: 'linear-gradient(180deg, transparent, #0f1422 40%)' }}>
-          <button onClick=${onClose} style=${{ background: 'transparent', border: '1px solid var(--border)', color: 'var(--text-muted)', borderRadius: '6px', padding: '7px 14px', fontSize: '12px', cursor: 'pointer' }}>Cancel</button>
-          <button onClick=${() => { onApply(d); onClose(); }} style=${{ background: 'var(--accent)', border: '1px solid var(--accent)', color: '#fff', borderRadius: '6px', padding: '7px 18px', fontSize: '12px', fontWeight: 600, cursor: 'pointer' }}>Apply filters</button>
-        </div>
+      </div>
+      <div class="bdi-filter-foot">
+        <button class="bdi-filter-cancel" onClick=${onClose}>Cancel</button>
+        <button class="bdi-filter-apply" onClick=${() => { onApply(d); onClose(); }}>Apply filters</button>
       </div>
     </div>`;
 }

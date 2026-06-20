@@ -291,8 +291,8 @@ export function CompaniesTab({ archivedMode: initialArchived = false, mode = 'lo
         onChange=${e => { setQ(e.target.value); setOffset(0); }}
       />
       <button
-        class=${'toolbar-toggle' + (activeFilterCount > 0 ? ' accent' : '')}
-        onClick=${() => setShowFilters(true)}
+        class=${'toolbar-toggle' + (activeFilterCount > 0 || showFilters ? ' accent' : '')}
+        onClick=${() => setShowFilters(v => !v)}
         title="Advanced filters — industry, status, source, size, completeness, location, score"
         style=${{ whiteSpace: 'nowrap' }}
       >☰ Filters${activeFilterCount > 0 ? ` · ${activeFilterCount}` : ''}</button>
