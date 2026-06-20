@@ -13,6 +13,7 @@ import { MAPPERS } from './mappers.js';
 import { recomputeCompanyStatus } from './recompute_status.js';
 import { normalizeEmail, normalizePhone, isJunkEmail } from '../lib/contacts.js';
 import { ingestMophPractitioners } from './people_moph.js';
+import { deriveIndustries } from '../lib/industry.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const SERVER_DIR = path.dirname(path.dirname(__filename));
@@ -184,11 +185,25 @@ async function upsertBatch(source, slice) {
       if (companyFields.phone != null && !/[1-9]/.test(String(companyFields.phone))) companyFields.phone = null;
       if (companyFields.email != null && !String(companyFields.email).includes('@'))  companyFields.email = null;
 
-      // 1. Look up existing source link
+      // 1. Look up existing source link (+ whether industry is admin-locked)
       const existing = await client.query(
-        `SELECT company_id FROM company_sources WHERE source = $1 AND source_record_id = $2`,
+        `SELECT cs.company_id, c.industry_locked
+           FROM company_sources cs JOIN companies c ON c.id = cs.company_id
+          WHERE cs.source = $1 AND cs.source_record_id = $2`,
         [source, source_record_id]
       );
+
+      // Derive canonical industry tags from this record's signals (name + sector
+      // + source category) so an upload carrying category/industry data sets the
+      // company's industry + industries[] immediately. Skipped when an admin has
+      // locked the industry. Only sets when something is derivable.
+      if (!(existing.rows.length && existing.rows[0].industry_locked)) {
+        const di = deriveIndustries({
+          name: companyFields.name, legal_name: companyFields.legal_name,
+          sector: companyFields.sector, extra: extraFields,
+        });
+        if (di.tags.length) { companyFields.industry = di.primary; companyFields.industries = di.tags; }
+      }
 
       let companyId;
       if (existing.rows.length === 0) {

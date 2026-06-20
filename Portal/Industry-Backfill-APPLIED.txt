@@ -1,11 +1,11 @@
 ================================================================
-  BELL INDUSTRY BACKFILL — DRY-RUN
-  2026-06-20T03:23:01.094Z
+  BELL INDUSTRY BACKFILL — APPLIED
+  2026-06-20T03:29:48.085Z
 ================================================================
 
-Companies with no industry scanned: 185352
-Would be filled (confident match):  21361  (12%)
-Left blank (no confident match):    163991
+Companies with no industry scanned: 185333
+Would be filled (confident match):  21360  (12%)
+Left blank (no confident match):    163973
 
 Distribution of the filled industries:
      9565  Construction & Contracting
@@ -18,7 +18,7 @@ Distribution of the filled industries:
       482  Textiles & Garments
       458  Oil & Gas
       372  Jewellery & Gold
-      314  Logistics & Transport
+      313  Logistics & Transport
       282  Banking & Finance
       276  Agriculture & Fisheries
       272  Marketing & Advertising
@@ -72,5 +72,5 @@ Sample classifications (industry ← company name):
   · Oil & Gas  ←  Power Petroleum Industry Trading QFZ LLC
   · Logistics & Transport  ←  Schenker Logistics QFZ Branch
 
-No changes written. Re-run with  --apply  to fill these in.
+Applied. Run a sync push so the new industries mirror to production.
 ================================================================

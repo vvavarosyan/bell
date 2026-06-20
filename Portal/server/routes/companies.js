@@ -168,10 +168,11 @@ router.get('/', async (req, res, next) => {
       params.push(req.query.source);
       where.push(`EXISTS (SELECT 1 FROM company_sources cs WHERE cs.company_id = companies.id AND cs.source = $${params.length})`);
     }
-    // industry filter — exact match on the normalized industry label
+    // industry filter — match the company's industry TAGS (industries[]), with a
+    // fallback to the legacy primary `industry` column for rows not yet re-derived.
     if (req.query.industry) {
       params.push(req.query.industry);
-      where.push(`companies.industry = $${params.length}`);
+      where.push(`(companies.industries @> ARRAY[$${params.length}]::text[] OR companies.industry = $${params.length})`);
     }
     for (const k of ['stage1','stage2','stage3','stage4','stage5']) {
       if (req.query[k]) {
@@ -294,12 +295,15 @@ router.get('/map', async (req, res, next) => {
 // Distinct industries (for the companies-list filter dropdown), most-common first.
 router.get('/industries', async (req, res, next) => {
   try {
+    // Distinct industry TAGS (unnest industries[]), falling back to the legacy
+    // primary `industry` for rows without tags yet. Most-common first.
     const r = await query(
-      `SELECT industry, count(*)::int AS n
-         FROM companies
-        WHERE industry IS NOT NULL AND industry <> '' AND archived = false
-        GROUP BY industry
-        ORDER BY n DESC, industry ASC
+      `SELECT ind AS industry, count(*)::int AS n
+         FROM (SELECT unnest(coalesce(NULLIF(industries, '{}'), ARRAY[industry])) AS ind
+                 FROM companies WHERE archived = false) t
+        WHERE ind IS NOT NULL AND ind <> ''
+        GROUP BY ind
+        ORDER BY n DESC, ind ASC
         LIMIT 300`);
     res.json({ rows: r.rows });
   } catch (err) { next(err); }
@@ -521,6 +525,13 @@ router.patch('/:id', async (req, res, next) => {
       }
       params.push(value === '' ? null : value);
       setParts.push(`${field} = $${params.length}`);
+    }
+    // A manual industry edit becomes the single tag AND locks the company so the
+    // automatic re-derivation (uploads / backfill) won't overwrite the admin's call.
+    if (Object.prototype.hasOwnProperty.call(updates, 'industry')) {
+      const v = updates.industry === '' ? null : updates.industry;
+      params.push(true);        setParts.push(`industry_locked = $${params.length}`);
+      params.push(v ? [v] : null); setParts.push(`industries = $${params.length}`);
     }
     if (setParts.length === 0) {
       return res.status(400).json({ error: 'no_fields_to_update' });

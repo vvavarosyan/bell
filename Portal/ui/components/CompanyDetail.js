@@ -39,6 +39,7 @@ const COMPANY_FIELD_META = {
   longitude:               { type: 'number' },
   employee_count:          { type: 'number' },
   __employees:             { editable: false },   // merged exact+range display (read-only)
+  __industries:            { editable: false },   // extra industry tags beyond the primary (read-only)
   linkedin_followers:      { type: 'number' },
   gmaps_rating:            { type: 'number' },
   gmaps_reviews_count:     { type: 'number' },
@@ -108,6 +109,7 @@ const COMPANY_GROUPS = [
     label: 'Classification',
     fields: [
       ['industry', 'Industry'],
+      ['__industries', 'Also tagged'],
       ['sector', 'Sector'],
       ['sub_sector', 'Sub-sector'],
       ['__employees', 'Employees'],
@@ -267,10 +269,6 @@ const LEGAL_GROUPS = [
       ['qcci_category',           'Category'],
       ['qcci_sub_category',       'Sub-category'],
       ['qcci_owner_name',         'Owner'],
-      ['qcci_contact_person',     'Contact person'],
-      ['qcci_mobile',             'Mobile'],
-      ['qcci_fax',                'Fax'],
-      ['qcci_po_box',             'PO Box'],
       ['qcci_opening_hours',      'Opening hours'],
       ['qcci_description',        'Description'],
       ['qcci_listing_url',        'Listing URL'],
@@ -499,6 +497,9 @@ function CompanyTab({ company, extra, similar, relationships, contacts, onReload
   company.__employees = (!isEmptyValue(company.employee_count))
     ? Number(company.employee_count).toLocaleString()
     : (!isEmptyValue(company.employee_count_range) ? String(company.employee_count_range) : null);
+  // Extra industry tags beyond the primary (multi-industry companies).
+  const __indTags = Array.isArray(company.industries) ? company.industries.filter(Boolean) : [];
+  company.__industries = __indTags.filter((t) => t !== company.industry).join(' · ') || null;
   // The Stage 1 result card (chosen URL + "Candidates considered" with raw
   // Firecrawl guesses) was removed 2026-05-23 per Val. Those candidate slugs
   // are guesses, not verified data, and shouldn't be surfaced in a customer-
@@ -632,6 +633,18 @@ function CompanyTab({ company, extra, similar, relationships, contacts, onReload
           ` : null}
         </section>
       `)}
+
+      ${(extra.qcci_contact_person || extra.qcci_mobile || extra.qcci_fax || extra.qcci_po_box) ? html`
+        <section class="group" key="directory-contact">
+          <h3>Directory contact</h3>
+          <dl>
+            ${extra.qcci_contact_person ? html`<div class="kv"><dt>Contact person</dt><dd>${extra.qcci_contact_person}</dd></div>` : null}
+            ${extra.qcci_mobile ? html`<div class="kv"><dt>Mobile</dt><dd>${extra.qcci_mobile}</dd></div>` : null}
+            ${extra.qcci_fax ? html`<div class="kv"><dt>Fax</dt><dd>${extra.qcci_fax}</dd></div>` : null}
+            ${extra.qcci_po_box ? html`<div class="kv"><dt>PO Box</dt><dd>${extra.qcci_po_box}</dd></div>` : null}
+          </dl>
+        </section>
+      ` : null}
 
       ${(extra.website_description || extra.website_keywords) ? html`
         <section class="group" key="from-website">
