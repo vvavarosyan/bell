@@ -9,11 +9,18 @@ const BASE = '';
 
 async function authHeaders() {
   const auth = (typeof window !== 'undefined') ? window.__bdiAuth : null;
-  if (!auth?.getToken) return {};
+  // Impersonation: a platform_admin "logged in as" a customer — the server only
+  // honors this for a real platform_admin, so the header alone grants nothing.
+  const extra = {};
+  try {
+    const imp = (typeof localStorage !== 'undefined') && localStorage.getItem('bdi_impersonate');
+    if (imp) extra['X-Impersonate-Tenant'] = String(JSON.parse(imp).id);
+  } catch { /* ignore */ }
+  if (!auth?.getToken) return extra;
   try {
     const token = await auth.getToken();
-    return token ? { 'Authorization': 'Bearer ' + token } : {};
-  } catch { return {}; }
+    return token ? { 'Authorization': 'Bearer ' + token, ...extra } : extra;
+  } catch { return extra; }
 }
 
 async function request(path, options = {}) {
@@ -54,6 +61,11 @@ export const api = {
   adminUserSuspend:       (id, suspend) => request(`/api/admin/users/${id}/suspend`, { method: 'POST', body: JSON.stringify({ suspend }) }),
   adminUserPlan:          (id, plan) => request(`/api/admin/users/${id}/plan`, { method: 'POST', body: JSON.stringify({ plan }) }),
   adminUserNotify:        (id, body) => request(`/api/admin/users/${id}/notify`, { method: 'POST', body: JSON.stringify(body) }),
+  adminUserDelete:        (id) => request('/api/admin/users/' + id, { method: 'DELETE' }),
+  adminImpersonate:       (id) => request(`/api/admin/users/${id}/impersonate`, { method: 'POST' }),
+  setImpersonation:       (id, name) => { try { localStorage.setItem('bdi_impersonate', JSON.stringify({ id, name })); } catch { /* ignore */ } },
+  clearImpersonation:     () => { try { localStorage.removeItem('bdi_impersonate'); } catch { /* ignore */ } },
+  getImpersonation:       () => { try { const v = localStorage.getItem('bdi_impersonate'); return v ? JSON.parse(v) : null; } catch { return null; } },
   stageProgress:          () => request('/api/stats/stage-progress'),
 
   companies:              (q = {}) => request('/api/companies?' + new URLSearchParams(q)),

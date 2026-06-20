@@ -233,6 +233,36 @@ export async function requireAuth(req, res, next) {
     plan:      row.t_plan,
     is_active: row.t_is_active,
   };
+
+  // Impersonation: a real platform_admin acting as a customer tenant (set via the
+  // X-Impersonate-Tenant header by the admin UI). Honored ONLY when the resolved
+  // identity is platform_admin — the header alone grants nothing. Swaps in the
+  // customer's tenant + a NON-admin identity so the app behaves exactly as they
+  // see it (real credit limits etc.); the admin's email is kept in impersonatedBy.
+  const impId = Number(req.headers['x-impersonate-tenant']);
+  if (Number.isFinite(impId) && impId > 0 && req.user.role === 'platform_admin' && impId !== req.user.tenant_id) {
+    try {
+      const imp = await query(
+        `SELECT t.id, t.name, t.slug, t.plan, t.is_active,
+                u.id AS u_id, u.email AS u_email, u.full_name AS u_name, u.role AS u_role
+           FROM tenants t
+           LEFT JOIN LATERAL (SELECT id, email, full_name, role FROM users
+                               WHERE tenant_id = t.id ORDER BY (role = 'owner') DESC, created_at ASC LIMIT 1) u ON true
+          WHERE t.id = $1`, [impId]);
+      if (imp.rows.length) {
+        const it = imp.rows[0];
+        const byEmail = req.user.email;
+        req.impersonating = { by: byEmail, tenant_id: Number(it.id), tenant_name: it.name };
+        req.user = {
+          id: it.u_id ? Number(it.u_id) : 0, tenant_id: Number(it.id),
+          email: it.u_email || ('owner@' + it.slug), full_name: it.u_name || it.name,
+          role: (it.u_role && it.u_role !== 'platform_admin') ? it.u_role : 'owner',
+          is_active: true, impersonatedBy: byEmail,
+        };
+        req.tenant = { id: Number(it.id), name: it.name, slug: it.slug, plan: it.plan, is_active: it.is_active };
+      }
+    } catch (e) { console.error('[auth] impersonation resolve failed:', e.message); }
+  }
   next();
 }
 

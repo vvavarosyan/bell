@@ -342,6 +342,18 @@ export function isSingularExecTitle(title) {
   return SINGULAR_EXEC.test(String(title || '').trim());
 }
 
+// Website-template placeholder people: demo team sections ship with fake staff
+// like "Name — CEO at Google". A title that places the person at a big EXTERNAL
+// brand is a template artifact, not a real employee of a Qatar company.
+const TEMPLATE_EMPLOYER = /\bat\s+(google|facebook|meta|microsoft|apple|amazon|twitter|x corp|linkedin|instagram|netflix|tesla|youtube|spotify|uber|airbnb|samsung|ibm|oracle|adobe|salesforce|tiktok|snapchat|pinterest|envato|themeforest)\b/i;
+export function isTemplatePersonTitle(title) {
+  return TEMPLATE_EMPLOYER.test(String(title || ''));
+}
+const PLACEHOLDER_NAME = /\b(john|jane)\s+doe\b|lorem\s+ipsum|your\s+name\b|first\s*name|team\s+member\b|full\s+name\b/i;
+export function isPlaceholderName(name) {
+  return PLACEHOLDER_NAME.test(String(name || ''));
+}
+
 // ===========================================================================
 // Website — strip markdown / junk, return a clean URL
 // ===========================================================================
