@@ -78,6 +78,7 @@ export function StatsTab() {
 
   const c = data.companies || {};
   const cc = data.company_contacts || {};
+  const cca = data.company_contacts_active || {};
   const pc = data.person_contacts || {};
 
   return html`<div class="overview" style=${{ padding: '20px 22px 40px' }}>
@@ -90,10 +91,19 @@ export function StatsTab() {
 
     <div style=${GRID('190px')}>
       <${StatCard} label="Companies" value=${c.total} sub=${`${fmt(c.active)} active · ${fmt(c.archived)} archived`} />
-      <${StatCard} label="People" value=${data.people?.total} sub=${`${fmt(data.people?.with_employment)} with employment`} />
+      <${StatCard} label="People" value=${data.people?.total} sub=${`${fmt(data.people?.with_employment)} with employment · ${fmt(data.people?.revealed)} revealed`} />
       <${StatCard} label="Jobs" value=${data.jobs?.total} sub=${`${fmt(data.jobs?.active)} active`} />
       <${StatCard} label="Data points" value=${data.data_points} sub="every stored field, counted" />
     </div>
+
+    ${section('Active companies', html`<div style=${GRID('190px')}>
+      <${StatCard} label="Active companies" value=${c.active} sub=${`${fmt(c.assembled)} assembled (BIN) · ${fmt(c.with_people)} with people`} />
+      <${Coverage} label="Active · has email" withN=${cca.with_email} total=${c.active} />
+      <${StatCard} label="Emails · active companies" value=${cca.emails_total} sub=${`across ${fmt(cca.with_email)} companies`} />
+      <${Coverage} label="Active · has phone" withN=${cca.with_phone} total=${c.active} />
+      <${StatCard} label="Phones · active companies" value=${cca.phones_total} sub=${`across ${fmt(cca.with_phone)} companies`} />
+      <${Coverage} label="Active · has website" withN=${c.active_with_website} total=${c.active} />
+    </div>`, 'the active, customer-facing subset')}
 
     ${section('Company contact completeness', html`<div style=${GRID('190px')}>
       <${Coverage} label="Has email" withN=${cc.with_email} total=${c.total} />
