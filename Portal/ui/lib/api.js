@@ -48,6 +48,12 @@ export const api = {
   health:                 () => request('/api/health'),
   stats:                  () => request('/api/stats'),
   statsOverview:          () => request('/api/stats/overview'),
+  adminUsers:             (q = '') => request('/api/admin/users' + (q ? '?' + new URLSearchParams({ q }) : '')),
+  adminUser:              (id) => request('/api/admin/users/' + id),
+  adminUserCredits:       (id, delta, note) => request(`/api/admin/users/${id}/credits`, { method: 'POST', body: JSON.stringify({ delta, note }) }),
+  adminUserSuspend:       (id, suspend) => request(`/api/admin/users/${id}/suspend`, { method: 'POST', body: JSON.stringify({ suspend }) }),
+  adminUserPlan:          (id, plan) => request(`/api/admin/users/${id}/plan`, { method: 'POST', body: JSON.stringify({ plan }) }),
+  adminUserNotify:        (id, body) => request(`/api/admin/users/${id}/notify`, { method: 'POST', body: JSON.stringify(body) }),
   stageProgress:          () => request('/api/stats/stage-progress'),
 
   companies:              (q = {}) => request('/api/companies?' + new URLSearchParams(q)),

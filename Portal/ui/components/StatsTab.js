@@ -80,7 +80,7 @@ export function StatsTab() {
   const cc = data.company_contacts || {};
   const pc = data.person_contacts || {};
 
-  return html`<div class="overview" style=${{ padding: '20px 22px 40px' }}>
+  return html`<div class="overview" style=${{ padding: '20px 22px 40px', flex: '1 1 auto', minHeight: 0, overflowY: 'auto' }}>
     <div style=${{ display: 'flex', alignItems: 'center', gap: '12px', marginBottom: '6px' }}>
       <h2 style=${{ margin: 0, fontSize: '18px' }}>Database Overview</h2>
       <span style=${{ flex: 1 }}></span>

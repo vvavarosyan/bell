@@ -266,15 +266,16 @@ const LEGAL_GROUPS = [
       ['qcci_membership_number',  'Chamber membership #'],
       ['qcci_company_type',       'Company type'],
       ['qcci_location',           'Location'],
-      ['qcci_category',           'Category'],
-      ['qcci_sub_category',       'Sub-category'],
       ['qcci_owner_name',         'Owner'],
-      ['qcci_opening_hours',      'Opening hours'],
-      ['qcci_description',        'Description'],
       ['qcci_listing_url',        'Listing URL'],
     ],
   },
 ];
+
+// Regulatory fields that are internal noise for customers — admin-only.
+const ADMIN_ONLY_LEGAL_FIELDS = new Set([
+  'moci_name_script', 'moci_name_was_missing', 'qcci_listing_url',
+]);
 
 // ============================================================================
 
@@ -343,7 +344,7 @@ export function CompanyDetail({ companyId, onMutated, onDeleted, canHardDelete =
   // Users don't see the raw "Sources" section in Legal — only the regulatory
   // groups that actually have data — so the tab count should match that.
   const legalTabCount = isUser
-    ? LEGAL_GROUPS.filter(g => sources.some(s => s.source === g.source) && g.fields.some(([k]) => !isEmptyValue(extra[k]))).length
+    ? LEGAL_GROUPS.filter(g => sources.some(s => s.source === g.source) && g.fields.some(([k]) => !isEmptyValue(extra[k]) && !ADMIN_ONLY_LEGAL_FIELDS.has(k))).length
     : sources.length;
 
   const revealContacts = async () => {
@@ -634,14 +635,15 @@ function CompanyTab({ company, extra, similar, relationships, contacts, onReload
         </section>
       `)}
 
-      ${(extra.qcci_contact_person || extra.qcci_mobile || extra.qcci_fax || extra.qcci_po_box) ? html`
-        <section class="group" key="directory-contact">
-          <h3>Directory contact</h3>
+      ${(extra.qcci_category || extra.qcci_sub_category || extra.qcci_opening_hours || extra.qcci_description || extra.qcci_po_box) ? html`
+        <section class="group" key="directory-details">
+          <h3>Directory details</h3>
           <dl>
-            ${extra.qcci_contact_person ? html`<div class="kv"><dt>Contact person</dt><dd>${extra.qcci_contact_person}</dd></div>` : null}
-            ${extra.qcci_mobile ? html`<div class="kv"><dt>Mobile</dt><dd>${extra.qcci_mobile}</dd></div>` : null}
-            ${extra.qcci_fax ? html`<div class="kv"><dt>Fax</dt><dd>${extra.qcci_fax}</dd></div>` : null}
+            ${extra.qcci_category ? html`<div class="kv"><dt>Category</dt><dd>${extra.qcci_category}</dd></div>` : null}
+            ${extra.qcci_sub_category ? html`<div class="kv"><dt>Sub-category</dt><dd>${extra.qcci_sub_category}</dd></div>` : null}
             ${extra.qcci_po_box ? html`<div class="kv"><dt>PO Box</dt><dd>${extra.qcci_po_box}</dd></div>` : null}
+            ${extra.qcci_opening_hours ? html`<div class="kv"><dt>Opening hours</dt><dd>${extra.qcci_opening_hours}</dd></div>` : null}
+            ${extra.qcci_description ? html`<div class="kv"><dt>Description</dt><dd>${extra.qcci_description}</dd></div>` : null}
           </dl>
         </section>
       ` : null}
@@ -954,7 +956,7 @@ function LegalTab({ sources, extra, isUser = false }) {
       ` : null}
 
       ${LEGAL_GROUPS.filter(g => visibleSources.has(g.source)).map(g => {
-        const present = g.fields.filter(([k]) => extra[k] !== null && extra[k] !== undefined);
+        const present = g.fields.filter(([k]) => extra[k] !== null && extra[k] !== undefined && !(isUser && ADMIN_ONLY_LEGAL_FIELDS.has(k)));
         if (present.length === 0) return null;
         return html`
           <section class="group" key=${g.source}>

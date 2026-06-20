@@ -16,6 +16,9 @@ import { api } from '../lib/api.js';
 import { toast } from '../lib/toast.js';
 
 // Map an internal source code to a short pretty label
+// Phone type-tags shown as a pill next to the number (like the Primary tag).
+const PHONE_TAGS = new Set(['Fax', 'Mobile', 'WhatsApp', 'Hotline', 'Toll-free']);
+
 const SOURCE_LABEL = {
   'backfill':              'Original',
   'manual':                'Manual',
@@ -118,6 +121,7 @@ function ContactRow({ contact, kind, refId, onChange, readOnly = false }) {
               ? html`<a href=${href} target="_self" rel="noreferrer">${display}</a>`
               : html`<span>${display}</span>`)}
         ${contact.is_primary && !isSocial ? html`<span class="contact-primary-pill" title="Primary">primary</span>` : null}
+        ${!isSocial && PHONE_TAGS.has(contact.source_label) ? html`<span class="contact-primary-pill" style=${{ background: 'transparent', border: '1px solid var(--border)', color: 'var(--text-dim)' }} title=${contact.source_label}>${String(contact.source_label).toLowerCase()}</span>` : null}
       </div>
       <div class="contact-row-meta">
         ${!readOnly && contact.source_label ? html`<span class="muted small">${contact.source_label}</span>` : null}
