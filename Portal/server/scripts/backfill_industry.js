@@ -1,56 +1,34 @@
 // ============================================================================
-// Industry backfill  (existing data)
+// Industry (re)derivation backfill  — existing data
 // ----------------------------------------------------------------------------
-// The companies-list industry filter only catches companies that HAVE an
-// `industry` set — and many don't (no LinkedIn match, never harvested). This
-// fills the blanks by inferring a canonical industry from the strongest text
-// signals already on the row: the company name, LinkedIn industry/specialties,
-// the source-directory categories (QCCI / QSTP / QFZ), and any website text.
+// Recomputes each company's PRIMARY industry + the full industry TAGS from its
+// reliable signals (source-directory category > LinkedIn > strict name/desc
+// inference) via server/lib/industry.js. This both fills blanks AND corrects
+// old wrong guesses (e.g. QNBN "Healthcare" → "Telecommunications", since its
+// QCCI category is "Communication Services").
 //
 // SAFETY
-//   • DRY-RUN by default: nothing is written; it prints how many it WOULD fill
-//     and the per-industry distribution. Add  --apply  to write.
-//   • Only fills rows whose industry is currently empty — never overwrites an
-//     existing (e.g. LinkedIn-sourced) industry.
-//   • Leaves a row blank when nothing matches confidently (no wild guesses).
-//   • Sets updated_at so the change mirrors to prod on the next sync push.
+//   • DRY-RUN by default — prints how many companies would change + the new
+//     distribution. Add  --apply  to write.
+//   • Skips any company with industry_locked = true (an admin override).
+//   • Only writes rows that actually change (so it doesn't needlessly bump
+//     updated_at / re-sync). Never blanks an industry it can't improve.
+//   • Sets updated_at on changed rows so they mirror to prod on the next push.
 //
-// USAGE (run from the Portal directory)
+// USAGE (from the Portal directory)
 //   node server/scripts/backfill_industry.js              # preview
 //   node server/scripts/backfill_industry.js --apply      # write
 //   node server/scripts/backfill_industry.js --limit 2000 # preview a sample
-//   node server/scripts/backfill_industry.js --self-test  # accuracy check, no DB
+//   node server/scripts/backfill_industry.js --self-test  # logic test, no DB
 // ============================================================================
 
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { inferIndustry } from '../enrichment/local/extract.js';
+import { deriveIndustries } from '../lib/industry.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const BATCH = 1000;
-
-function asText(v) {
-  if (v == null) return '';
-  if (Array.isArray(v)) return v.map(asText).join(' ');
-  if (typeof v === 'object') return Object.values(v).map(asText).join(' ');
-  return String(v);
-}
-
-// Build the text blob we run the classifier over, from the row's strongest
-// industry signals (name first — it's the most reliable in Qatar).
-function buildBlob(c) {
-  const x = c.extra_fields || {};
-  return [
-    c.name, c.name, c.legal_name,                       // name weighted (repeated)
-    x.linkedin_industry_v2_taxonomy,
-    c.linkedin_specialties, c.linkedin_description, c.linkedin_headquarters,
-    x.qcci_category, x.qcci_sub_category,
-    x.qstp_category, x.qstp_sector_tags,
-    x.qfz_sectors_raw,
-    x.website_description, x.website_keywords,
-  ].map(asText).join('  \n  ');
-}
 
 function argInt(flag, dflt) {
   const i = process.argv.indexOf(flag);
@@ -59,37 +37,58 @@ function argInt(flag, dflt) {
   return Number.isFinite(n) ? n : dflt;
 }
 
+function sameTags(a, b) {
+  const x = a || [], y = b || [];
+  if (x.length !== y.length) return false;
+  for (let i = 0; i < x.length; i++) if (x[i] !== y[i]) return false;
+  return true;
+}
+
+// Decide the new {primary, tags} for a company row.
+function plan(c) {
+  const d = deriveIndustries({
+    name: c.name, legal_name: c.legal_name, sector: c.sector,
+    description: c.linkedin_description, industry: c.industry, extra: c.extra_fields || {},
+  });
+  if (d.tags.length) return { primary: d.primary, tags: d.tags };
+  // Nothing derivable — keep the existing primary (if any) as a single tag so
+  // the filter still works; never blank what we can't improve.
+  const cur = (c.industry || '').trim();
+  return cur ? { primary: cur, tags: [cur] } : { primary: null, tags: [] };
+}
+
 async function run() {
   const { query } = await import('../db.js');
   const apply = process.argv.includes('--apply');
   const limitArg = argInt('--limit', null);
 
-  let lastId = 0, scanned = 0, filled = 0, processed = 0;
+  let lastId = 0, scanned = 0, changed = 0, processed = 0, multi = 0, lockedSkipped = 0;
   const dist = new Map();
   const samples = [];
 
   for (;;) {
     const r = await query(
-      `SELECT id, name, legal_name, linkedin_description, linkedin_specialties,
-              linkedin_headquarters, extra_fields
-         FROM companies
-        WHERE (industry IS NULL OR btrim(industry) = '') AND id > $1
-        ORDER BY id LIMIT $2`, [lastId, BATCH]);
+      `SELECT id, name, legal_name, sector, industry, industries, industry_locked,
+              linkedin_description, extra_fields
+         FROM companies WHERE id > $1 ORDER BY id LIMIT $2`, [lastId, BATCH]);
     if (!r.rows.length) break;
     lastId = r.rows[r.rows.length - 1].id;
 
     for (const c of r.rows) {
       scanned++;
-      const ind = inferIndustry(buildBlob(c));
-      if (ind) {
-        filled++;
-        dist.set(ind, (dist.get(ind) || 0) + 1);
-        if (samples.length < 30) samples.push(`${ind}  ←  ${String(c.name || '').slice(0, 48)}`);
+      if (c.industry_locked) { lockedSkipped++; processed++; if (limitArg && processed >= limitArg) break; continue; }
+      const { primary, tags } = plan(c);
+      const isChange = (primary !== (c.industry || null)) || !sameTags(tags, c.industries);
+      if (isChange) {
+        changed++;
+        if (tags.length >= 2) multi++;
+        if (primary) dist.set(primary, (dist.get(primary) || 0) + 1);
+        if (samples.length < 30) samples.push(`${(c.industry || '(blank)').slice(0, 22).padEnd(22)} → ${tags.join(' + ') || '(blank)'}   ·   ${String(c.name || '').slice(0, 40)}`);
         if (apply) {
           await query(
-            `UPDATE companies SET industry = $2, updated_at = now()
-              WHERE id = $1 AND (industry IS NULL OR btrim(industry) = '')`,
-            [c.id, String(ind).slice(0, 80)]);
+            `UPDATE companies SET industry = $2, industries = $3, updated_at = now()
+              WHERE id = $1 AND industry_locked = false`,
+            [c.id, primary, tags.length ? tags : null]);
         }
       }
       processed++;
@@ -98,63 +97,54 @@ async function run() {
     if (limitArg && processed >= limitArg) break;
   }
 
-  report({ apply, scanned, filled, dist, samples });
+  report({ apply, scanned, changed, multi, lockedSkipped, dist, samples });
 }
 
-function report({ apply, scanned, filled, dist, samples }) {
+function report({ apply, scanned, changed, multi, lockedSkipped, dist, samples }) {
   const L = [];
-  L.push('='.repeat(64));
-  L.push(`  BELL INDUSTRY BACKFILL — ${apply ? 'APPLIED' : 'DRY-RUN'}`);
+  L.push('='.repeat(66));
+  L.push(`  BELL INDUSTRY RE-DERIVATION — ${apply ? 'APPLIED' : 'DRY-RUN'}`);
   L.push(`  ${new Date().toISOString()}`);
-  L.push('='.repeat(64));
+  L.push('='.repeat(66));
   L.push('');
-  L.push(`Companies with no industry scanned: ${scanned}`);
-  L.push(`Would be filled (confident match):  ${filled}  (${scanned ? Math.round(filled / scanned * 100) : 0}%)`);
-  L.push(`Left blank (no confident match):    ${scanned - filled}`);
+  L.push(`Companies scanned:        ${scanned}`);
+  L.push(`Would change:             ${changed}  (${scanned ? Math.round(changed / scanned * 100) : 0}%)`);
+  L.push(`  …of which multi-industry: ${multi}`);
+  L.push(`Skipped (admin-locked):   ${lockedSkipped}`);
   L.push('');
-  L.push('Distribution of the filled industries:');
-  for (const [ind, n] of [...dist.entries()].sort((a, b) => b[1] - a[1])) {
-    L.push(`  ${String(n).padStart(7)}  ${ind}`);
-  }
+  L.push('New PRIMARY-industry distribution (changed rows):');
+  for (const [ind, n] of [...dist.entries()].sort((a, b) => b[1] - a[1])) L.push(`  ${String(n).padStart(7)}  ${ind}`);
   L.push('');
-  if (samples.length) { L.push('Sample classifications (industry ← company name):'); for (const s of samples) L.push('  · ' + s); L.push(''); }
-  L.push(apply
-    ? 'Applied. Run a sync push so the new industries mirror to production.'
-    : 'No changes written. Re-run with  --apply  to fill these in.');
-  L.push('='.repeat(64));
+  if (samples.length) { L.push('Sample changes (old primary → new tags · company):'); for (const s of samples) L.push('  · ' + s); L.push(''); }
+  L.push(apply ? 'Applied. Run a sync push to mirror the new industries to production.'
+               : 'No changes written. Re-run with  --apply  to write them.');
+  L.push('='.repeat(66));
   const text = L.join('\n');
   console.log('\n' + text + '\n');
   try {
-    const out = path.join(__dirname, '..', '..', `Industry-Backfill-${apply ? 'APPLIED' : 'PREVIEW'}.txt`);
+    const out = path.join(__dirname, '..', '..', `Industry-Rederive-${apply ? 'APPLIED' : 'PREVIEW'}.txt`);
     fs.writeFileSync(out, text);
     console.log('Report saved to: ' + out);
   } catch (e) { console.log('(could not save report: ' + e.message + ')'); }
 }
 
 // ---------------------------------------------------------------------------
-// Self-test (no DB): eyeball classifier accuracy on realistic Qatar names.
-// ---------------------------------------------------------------------------
 function selfTest() {
-  const names = [
-    'Al Faisal Trading & Contracting Co', 'Doha Modern Engineering', 'Qatar Petroleum Services',
-    'Gulf Medical Center', 'Al Jazeera Real Estate', 'Doha Bank', 'Qatar Insurance Company',
-    'Bin Omran Trading & Telecommunication', 'Salam International Investment', 'Aamal Trading and Distribution',
-    'Teyseer Motors', 'Qatar Airways Catering', 'Al Meera Consumer Goods supermarket', 'Milaha Maritime & Logistics',
-    'Doha Petroleum Construction', 'Gulf Pharmacy', 'Al Khalij Cleaning Services', 'Qatar Steel Industries',
-    'Doha Furniture & Interior Decoration', 'Al Wakra Tailoring & Garments', 'Education Above All academy',
-    'Qatar Solar Energy', 'Doha Marble & Chemicals', 'City Center Travel and Tours', 'Al Sraiya Security Services',
-    'Woqod Fuel', 'Ali Bin Ali Automotive spare parts', 'Doha Films production', 'Qatar Cool district cooling',
-    'Al Jaber Jewellery',
+  const cases = [
+    { name: 'Qatar National Broadband Network', sector: 'Communication Services', extra_fields: { qcci_sub_category: 'Communication Services' }, expect: 'Telecommunications' },
+    { name: 'AR Brand Consulting QFZ LLC', sector: 'Professional and Business Services', extra_fields: { qfz_sectors_raw: 'Professional and Business Services' }, expect: 'Consulting' },
+    { name: 'Al Faisal Trading & Contracting Co', sector: 'Trading & Contracting', extra_fields: {}, expectMulti: true },
+    { name: 'Doha Bank', sector: null, extra_fields: { linkedin_industry_v2_taxonomy: 'Banking' }, expect: 'Banking & Finance' },
   ];
-  let matched = 0;
-  console.log('\nIndustry classifier — sample Qatar names:\n');
-  for (const n of names) {
-    const ind = inferIndustry(n);
-    if (ind) matched++;
-    console.log(`  ${ind ? '✓' : '·'}  ${(ind || '(none)').padEnd(26)} ${n}`);
+  let pass = 0, fail = 0;
+  for (const c of cases) {
+    const { primary, tags } = plan({ ...c, industry: null, industries: null });
+    const ok = c.expectMulti ? tags.length >= 2 : primary === c.expect;
+    if (ok) pass++; else { fail++; console.log('  FAIL:', c.name, '→', primary, JSON.stringify(tags)); }
+    console.log(`  ${ok ? '✓' : '✗'} ${c.name}  →  ${JSON.stringify(tags)}`);
   }
-  console.log(`\nmatched ${matched}/${names.length} (${Math.round(matched / names.length * 100)}%)`);
-  process.exit(0);
+  console.log(`\nself-test: ${pass} passed, ${fail} failed`);
+  process.exit(fail ? 1 : 0);
 }
 
 const isMain = process.argv[1] && process.argv[1].endsWith('backfill_industry.js');
