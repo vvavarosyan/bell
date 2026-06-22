@@ -1,108 +1,764 @@
 ======================================================================
   BELL — INDUSTRY COVERAGE AUDIT  (read-only)
-  2026-06-22T11:29:07.390Z
+  2026-06-22T12:42:31.489Z
 ======================================================================
 
 ACTIVE companies scanned:          75792
 
-Classified today (findable):       48556  (64.1%)
-UNCLASSIFIED today (missed):       27236  (35.9%)
+Classified today (findable):       51523  (68%)
+UNCLASSIFIED today (missed):       24269  (32%)
 
 Breakdown of the unclassified:
-  • re-derive would classify:      8   → just run the backfill
-  • unmapped source label:         5266   → FIXABLE: extend the map
+  • re-derive would classify:      0   → just run the backfill
+  • only generic labels left:      2307   → too vague to classify (Services/Industry/…)
   • no industry signal at all:     21962   → needs enrichment
 
 After re-derive + map work, residual TRUE gap (no signal): 21962  (29%)
 
 Projected coverage per industry (after re-derive) — tag counts:
-    18496  Construction & Contracting
-    18056  Trading & Distribution
-     6582  Healthcare
-     2281  Hospitality & F&B
-     2138  Information Technology
+    18946  Construction & Contracting
+    18489  Trading & Distribution
+    17929  Trade
+    11977  Healthcare
+     8494  Contracting
+     7013  Construction Material
+     3284  Construction Contracts
+     2631  Hospitality & F&B
+     2245  Information Technology
+     1946  Facilities & Cleaning
+     1929  Automotive
      1721  Travel & Tourism
-     1606  Real Estate
-     1599  Facilities & Cleaning
+     1700  Tourism
+     1608  Real Estate
      1305  Banking & Finance
      1295  Telecommunications
+     1218  Beauty & Wellness
+     1097  Oil & Gas
      1080  Logistics & Transport
      1075  Media & Entertainment
      1071  Textiles & Garments
-     1062  Oil & Gas
-      933  Beauty & Wellness
+      958  Technology
+      954  Media And Telecommunications
+      909  Restaurants
       904  Marketing & Advertising
-      894  Automotive
-      820  Consulting
+      853  Consulting
+      814  Real Estate Investment
+      672  Building Maintenance
       586  Manufacturing
       573  Retail
+      555  Ready Made Garments
+      522  Transport
+      503  Education & Training
+      490  Advertisment & Publication
+      483  Land Transportation
+      477  Car Service
       473  Agriculture & Fisheries
-      385  Furniture & Interior
-      368  Education & Training
+      461  Gifts
+      436  Commercial Agents
+      434  Furniture & Interior
+      405  Automobile Parts And Oils
       362  Jewellery & Gold
+      356  Telephone Rentals
+      348  Security Services
       345  Engineering
-      285  Security Services
+      338  Ladies Beauty Saloons
+      330  Computer Trades
+      326  Car Repair
+      315  Clothes Laundry & Iron
+      310  Car Rentals
+      304  Cleaning Works & Equipments
+      277  Family Needs
+      260  Agriculture
+      239  Ceramic Floor Tiles
+      237  Barber Shops
+      233  Consulting Works
+      227  Electrical Appliances
+      223  Hospitality Services
       220  Manpower & Recruitment
-      135  Pharmaceuticals
+      220  Manpower Recruitment
+      209  Supermarkets
+      204  Carpets And Furniture
+      202  Aluminium
+      198  Perfumes And Cosmetics
+      197  Banks And Exchange
+      195  Information And Communication Technologies (Ict)
+      188  Jewellery
+      175  Maintenance Of Electronic Devices & Appliances
+      172  Computer Programming
+      169  Freight
+      165  Organizing Exhibitions & Tourism Programmes
+      156  Computers Services
+      155  Pharmaceuticals
+      144  Livestocks
+      135  Kinder Gardens
+      134  Bakeries
+      133  Confectionery & Nuts
+      130  Heavy Duty Machinery
+      130  Engineering Consulting Offices
+      129  Professional And Business Services
       128  Sports & Recreation
+      127  Food Supplies
+      122  Industrial Products And Services
+      122  Petroleum Services
+      120  Toys
       120  Chemicals & Plastics
+      119  Fruit & Vegetables
+      112  Medical Services
+      111  Safety
+      111  Security & Traffic Lights Equipments
+      111  Decoration Equipment Trade
+      107  Oil & Gas Fields Equipments & Spare Parts
+      107  Banquets & Weddings Preparation
+      107  Marble
+      107  Granite
+      107  Tiles & Blocks Trade
+      105  Cafeteria
        96  Aviation & Aerospace
-       83  Insurance
-       42  Energy & Utilities
+       94  Textiles
+       94  Medical Equipment & Hospital Supplies
+       94  Equipment Rentals
+       93  Stationeries
+       93  Internet Services
+       91  Glass & Mirrors
+       87  Computer Programmes Planning
+       86  Insurance
+       84  Electrical & Engineering Consulting
+       84  Pharmaceutical Supplies
+       83  Fresh Fish
+       76  Administrative & Consulting Training Programmes
+       74  Educational Services
+       72  Energy & Utilities
+       71  Car Dealers
+       69  Restaurant & Hotels Management
+       68  Medical Clinics
+       65  Preparing Of Admin. Tech & Marketing Studies
+       65  General Trade
+       64  Kitchenware
+       63  Food Meals Preparing & Delivery
+       63  Leather Products & Bags
+       61  Film Development
+       61  Cloaks & Veils
+       60  Hotels Services
+       60  Motor & Pedal Cycles & Spare Parts
+       59  Dental Clinics
+       57  Marketing
+       56  Insulation Materials
+       54  Educational Centres
+       53  Auto Accessories
+       52  Private Education Schools
+       52  Hotels
+       51  Startup
+       51  Gas
+       51  Oil Fields Equipments Maintenance
+       50  Startups
+       50  Security Systems
+       50  Electrical Home Appliances
+       50  Press Services And Public Relations
+       50  Administrative
+       50  Consulting & Financial Services
+       49  Female Garments
+       47  Exhibition & Conference Organising Equipments
+       47  Home Appliances
+       47  Cafe's
+       47  Gold Repair
+       47  Arts & Drawing
+       46  Games Hall & Recreation City
+       46  Agricultural Services
+       46  Sport Equipment
+       46  School Management
+       45  Professional Services
+       45  Sports Garments
+       45  Air Conditioning Industry
+       45  Carpentry Work
+       44  Anti Fire Fighting Systems Contractors
+       43  Glasses And Lenses
+       41  Rodents & Epidemic Fighting
+       41  Iron And Copper
+       39  Gypson Decoration Production
+       39  Printing Services & Equipments
+       38  General Maintenance
+       38  Marine Services
+       38  Physiotherapy& Massage
+       38  Ladies Saloon Equipment
+       38  Scraps
+       38  Sanitarywares
+       37  Scaffolding & Accessories
+       36  Pharmacies
+       35  Electronic & Electrical Equipment
+       35  Marine Equipment
+       34  Customs Clearance
+       33  Mechanical Equipment
+       33  Power Generators & Transformers
+       33  Ice Cream & Dairy Trade & Distribution
+       33  Petrol Stations
+       33  Bridges & Flyovers Construction Contracting
+       32  Read Mix Industry Equipment
+       32  Air Conditioning Contractors
+       31  Cleaning Detergents & Equipments
+       31  Haj & Umrah Transports
+       30  Installation Of Glass And Aluminium Panels
+       30  Steel Trade
+       30  Automobile Tires And Batteries
+       30  Communication Services
+       30  Novelties
+       30  Audio Video Cassettes & Records
+       30  Electronic Doors
+       30  Open Investments Box
+       29  Logistics And Warehousing
+       29  Industrial Services
+       28  Food And Beverages
+       28  Furniture Industry
+       28  Diving
+       28  Fishing & Marine Equipments
+       27  Air Conditioning Equipments
+       27  Cleaning Equipments Marketing
+       27  Cereals & Feeds
+       26  Construction And Real Estate
+       26  Construction Equipments & Materials
+       26  Lifts & Elevators Installation Works
+       26  Boats & Ships Maintenance
+       26  Falcon Raising Tools
+       26  Airports Construction Contracts
+       26  Dates
+       25  Plastic Bags
+       25  Blankets
+       25  Fashion Design
+       25  Gems
+       25  Precious Stones
+       24  Sea Shipping
+       24  Sewing Machines & Tailoring Materials
+       24  Paints
+       23  General Investment
+       23  Gas & Oil Marketing
+       23  Import & Export
+       22  Consumer Goods
+       22  Industrial Equipments
+       22  Motor Cycle
+       22  Scooters
+       22  & Fishing Boats Rentals
+       22  Bee Honey
+       21  It Consulting
+       21  Communication Equipments
+       21  Herbal Medicine
+       21  Oil
+       21  Water & Sewage Treatment Materials
+       21  Auditing Bureau
+       20  Hotel Equipments And Supplies
+       20  Electrical Cables
+       20  Hospitals
+       20  Rock And Stones Trading
+       20  Gifts And Accessories
+       19  Aerospace And Aviation Activities
+       19  Life Sciences And Medical Services
+       19  Gas & Oil Extraction
+       19  Poultry & Birds
+       19  Cinema & Film Distribution
+       19  Car Park Rentals
+       18  It & Communication
+       18  Equipment Trade
+       18  Electrical Control
+       18  Panels Manufacturing
+       18  Electrical Equipment Repair
+       18  Engineering Materials
+       18  Auto Spare Parts Manufacuring
+       18  Agricultural Investment
+       18  Banks
+       18  Brick Laying Industries
+       18  Newspaper & Magazine Distribution
+       17  Concrete Mould Fab
+       17  Freight & Goods Inspection Equipment
+       17  Photography Equipment & Spare Parts
+       17  Petroleum & Gas Wells Maintenance
+       17  Office Equipments Furniture
+       17  Tents
+       16  Information Technology & Services
+       16  Radiation Materials
+       15  Investment
+       15  Debts Collection
+       15  Auctions
+       15  Pre-fabricated Housing
+       15  Air Transportation
+       14  Marine Activities & Services
+       14  Matress & Bedsheets
+       14  Concrete & Soil Inspection
+       14  Marine
+       14  Air And Land Survey Works
+       14  Cement Plasters Production
+       13  Energy And Environmental Technologies
+       13  Automotive & Transport Equipment
+       13  Patent And Risht Reserve
+       13  Driving Schools
+       13  Export & Import Of Swimming Pools
+       13  Pathological Labs & X-ray
+       13  Car Trading Agents
+       13  Investment And Commerce
+       13  Heat Insulation Production
+       13  Massage And Massage
+       13  Power Stations Import And Operation
+       13  Home Gas Delivery
+       13  Incleation Of Quran
+       13  Accessories
+       13  Paper & Nylon Bags Trade
+       12  Climate
+       12  1. Information And Communication Technologies (Ict) 2. Professional And Business Services
+       12  Operation Maintenance Of Railway Projects And Trains
+       12  Anti Fire Fighting Materials
+       12  Body And Foot Cater
+       12  Installation
+       12  Fix Measure And Control Devices And Equipment
+       12  It Solutions
+       12  Meat & Frozen Poultry
+       12  Accounts Audit Office
+       12  Electrical Equipments Control Equipments Production
+       12  Office Services
+       12  Asphalt Industry
+       12  General Contracting
+       12  Selling Fresh Meat
+       12  Packing & Filling Materials
+       12  Laboratory And Scientific Equipments
+       12  Media
+       11  Mineral Water & Beverages
+       11  Quantity Surey & Cost Managaement
+       11  Lifts
+       11  Birds
+       11  Decorating Fish & Accessories
+       11  Auto Technical Inspection
+       11  Aluminium Manufacturing
+       11  Ice Cream & Dairy Manufacturing
+       11  Ice Making
+       11  Marine & On Shore Journeys
+       11  Domestic Tourism
+       11  Cement Blocks Manufacturing
+       11  Audio & Visual Systems
+       10  Glass Industry
+       10  Car Maintenance Equipments
+       10  Patent Invention Ownership
+       10  Plumbing Works
+       10  Parcels & Documents Despatch
+       10  Pipes Trade
+       10  Raw Material For Soft Drinks
+       10  Cosmetic Industry
+       10  Metal Painting
+       10  Petroleum Exploration
+       10  Power Service
+       10  Economic Feasible Study
+       10  Factories Wastes Collection Services
+       10  Furniture Upholstry
+       10  Boats
+       10  Footwear
+        9  Communications & Radar Stations Establishing
+        9  Petroleum Investment
+        9  Industrial Projects Establishing
+        9  Petrochemical Products
+        9  Consumer Goods & Services
+        9  Sea Ports Maintenance
+        9  Entertainment Towns
+        9  Marble And Blocks Machines Trade
+        8  Environment Pollution Treatment Equipments
+        8  Hospital Furniture
+        8  Cosmetics Materials Industry Machinery
+        8  Road & Playyard Stripping Equipment
+        8  Metal Equipments Trade
+        8  Iron Boxes And Cabinets
+        8  Tobacco And Cigarettes
+        8  Self Services Machines & Equipments
+        8  Food And Beverage
         7  Legal Services
+        7  Food Storing & Freezing
+        7  Industrial Gas Trade
+        7  Banks & Financial Services
+        7  Chemical Equipment & Tools
+        7  Electrical Contracts
+        7  Construction Services
+        7  Roasters
+        7  Production & Publishing Of Directories
+        7  Construction Materials Inspection
+        7  New Doha Airport Consulting Works
+        7  Petroleum Wells Drilling
+        7  Automatic Service Station
+        7  Mechanical Work
+        7  Spices
+        7  Irrigation Systems And Control
+        7  Musical Instruments
+        7  Crystal
+        7  Selling & Buying Used Appliances
+        7  Pets
+        7  Horse Riding & Camel Requirments
+        7  Warehousing And Logistics
+        6  Energy
+        6  Gas Cylinders
+        6  Gym Lounges
+        6  Aircraft Training Services
+        6  Industrials
+        6  Doha Airport Administration & Operation
+        6  Pipes
+        6  Tank
+        6  Equipment And Metals Inspection
+        6  Transportation
+        6  Engineering Constructions
+        6  Cement Manufacturing
+        6  Industrial Gas Manufacturing
+        6  Anti Heat Isolation Materials Industry
+        6  Assets Managements & Maintain
+        6  Metal Coating
+        6  Natural Gas Extraction
+        6  Duty Free Administration
+        6  News Papers (Issue)
+        6  Railway Construction
+        6  Prefabricated Buildings And Installation
+        6  Fertilizers
+        6  Paper Tissues & Sanitary Towels
+        6  Fiber Glass Products
+        6  Auto Paint
+        6  Tourism And Hospitality
+        5  Healthtech
+        5  Human Resource Development
+        5  Back Filling Clearance
+        5  Car Parks Equipments Installation & Trade
+        5  Meat Mincing And Packing
+        5  Cement & Lime
+        5  Electricaly Producing & Water
+        5  Air Conditioning Piped Industry
+        5  Footwear Manufacturing
+        5  Road Construction Contractors
+        5  Design & Fixing Steel Structures
+        5  Fiber Glass Manufacturing
+        5  Food Oil Production
+        5  Furniture Manufacturing
+        5  Home Appliances Manufacturing
+        5  Carton Containers Industry
+        5  Al Uminium Recavery
+        5  Drilling Powder Production
+        5  Translation Services
+        5  Gas & Petroleum Pipes
+        5  Internal Cleaning Contracts
+        5  Planes Maintenance
+        5  Natural Gas Factories Operation
+        5  Dental Laboratories
+        5  Concrete Repair
+        5  Commission
+        5  Printing Press
+        5  Family Skills Development
+        5  Organizing Sports Camp
+        5  Military Uniforms
+        5  Fibre Optics Cables
+        5  Cafe Requirements
+        5  Raw Material For Plastic Industry
+        5  Fish Trading
+        5  Marine Spare Parts
+        5  Solar Equipments Trade
+        5  Asphalt Production & Selling
+        5  Handi Cape Equipment
+        5  Carpentry Equipment
+        5  Computer Software
+        5  Education
+        4  Media And Design Services
+        4  ' Professional And Business Services
+        4  Furniture & Sheets Industry
+        4  Printing Machines
+        4  Seals - Stamps
+        4  Cars & Trailers Chassis Industry
+        4  Oil Discovery
+        4  Crafts Rentals
+        4  Ornament Fish
+        4  Steel Iron Industry
+        4  Wood & Furniture Manufacturing
+        4  Galvanized Iron And Steel Production
+        4  Fire Extinguisher Foam & Equipment Manufacturing
+        4  Carpets Manufacturing
+        4  Glass Wares & Handicrafts
+        4  Hides Tanning
+        4  Convert Natural Gas To Liquid
+        4  Transactions Clearance
+        4  Software Design
+        4  Scientific Research
+        4  Optics Clinics
+        4  Cement Factory Construction
+        4  Navigation Services
+        4  Chemical & Petrochemical Products Treatment
+        4  Poultry & Birds Breeding
+        4  Medical Wastes Treatment
+        4  Metal Structures
+        4  Petro-chemicals
+        4  Air Ports Equipments
+        4  Tourist & Travel Offices
+        4  Cement
+        4  Raw Materials For Rubber Industries & Floors And Recycling
+        4  Swords Trade
+        4  Onshore Equipments
+        4  Stones Crushers Equipment
+        4  Utilities
+        3  Defense
+        3  Enterprise Saas
+        3  Health & Biomed
+        3  Leisure And Hospitality
+        3  1. Industrial Products And Services 2. Professional And Business Services
+        3  ' Industrial Products And Services
+        3  Consumer Goods Professional And Business Services
+        3  Share Investment
+        3  Buying Companies Debts
+        3  Design Of Architectural Complexes
+        3  Quality Systems
+        3  Equipment And Construction Inspection Services
+        3  Enforced Glass & Palothene Industry
+        3  Electrical Systems Joints Industry
+        3  Possesion & Selling Of Electricity& Water Works
+        3  Golleges
+        3  Institutestes & Schools Establishing & Ownership
+        3  Oil Tankers Gas Refinery Maintenance
+        3  Cotton Merchant
+        3  Insurance & Re-insurance
+        3  Financial & Exchange Services
+        3  Fences Manufacturing
+        3  Cement Floor Tiles Industries
+        3  Ethylene& Polyethylene Production
+        3  Extraction Of Oils
+        3  Production Of Artificial Oud And Incens
+        3  Heritage Ships And Boats Manufacturing
+        3  Fishing Nets Industry
+        3  Air Circulation Networks
+        3  Concrete Epopy Fab
+        3  Hanging Roofs Industry
+        3  Ships Agencies
+        3  North Gas Field Project Development
+        3  Damage Evaluation
+        3  Rent Of Stores & Refrigerators For Foodstuff Storing
+        3  Factory Administration
+        3  Safety Training
+        3  Cosmetology Training
+        3  Industrial Financing By Loans
+        3  Al Tarnative Energy Resources Investment
+        3  Cooking Training
+        3  Natural Gas Marketing & Distribution
+        3  Plastic Manufacturing Equipments & Machinery
+        3  Paper Cuts & Pressing
+        3  Hand Tools
+        3  Head Bands & Kaffiyahs
+        3  Horses
+        3  Construction
+        2  Cybersecurity
+        2  2. Automotive And Transport Equipment
+        2  1. Professional And Business Services 2. Consumer Goods
+        2  1. Information And Communication Technologies (Ict)
+        2  1. Food And Beverages 2. Industrial Products And Services
+        2  1. Industrial Products And Services 2. Energy And Environmental Technologies
+        2  Information And Communication Technologies (Ict) Professional And Business Services
+        2  ' Automotive & Transport Equipment
+        2  Information And Communication Technologies (Ict) Industrial Products And Services
+        2  Professional And Business Services Information And Communication Technologies (Ict)
+        2  Telecoms
+        2  Electrieal Transfermer Industry
+        2  Direct Iron Commecce
+        2  Damage Evaluaition
+        2  Industrial Investment
+        2  Recycling Of Petroleum Oils
+        2  Pvc Pipes & Hose Manufacturing
+        2  Production Of Modified Bitumen
+        2  Foam Filling Prodtction
+        2  Carton Industry Through Pressing
+        2  Fibre Glass Concrete Cement Industry
+        2  Gypsum Powder Production & Distribution
+        2  Eggs & Poultry Production
+        2  Cables Hangers Industry
+        2  Al Uminium Profile Production
+        2  Converting Gas To Liquid
+        2  Biscuit Industry
+        2  Chemical Fertilizers Products
+        2  Adhesive Material Production
+        2  Cooling Room Industry
+        2  Hydraulic Carbonite Liquidise Gas Production
+        2  Hejama Works
+        2  Dancing Training Centre
+        2  Caravans Production
+        2  Natural Liquidated Tanker Cart & Design
+        2  Entering Tenders
+        2  Laser Welding Inspection
+        2  Satellite Channel Tv
+        2  Money & Jewellery Transport
+        2  Evaporation Systems Import And Installation
+        2  Building & Industrial Complex Maintenance
+        2  Administration Of Petrochemical Projects
+        2  Horsemanship Training
+        2  Numbers And The Qatarsupervision Evolution
+        2  Renting Of Private Planes To Businessmen
+        2  Aggregate Trade
+        2  Watches
+        2  School Furniture
+        2  Educational Tools And Facilities
+        2  Labour Uniforms
+        2  Conference & Hall Furniture
+        2  Laboratory Tools Trading
+        2  Co-operative Society
+        2  Hotel Furniture
+        2  Soda
+        2  Scales
+        2  Charcoal
+        2  Industry Sand
+        2  Mechanical Tools
+        2  Chemical Industries
+        2  Financial Services
+        1  Fintech
+        1  Ai Drug Discovery
+        1  Biotech
+        1  Deeptech
+        1  E-commerce
+        1  Online Marketplace
+        1  Aviation
+        1  Edtech
+        1  1. Industrial Products And Services 2. Energy And Environmental Technologies 3. Engineering & Electrical Maintenance
+        1  1. Industrial Products And Services
+        1  3. Energy And Environmental Technologies
+        1  4. Information And Communication Technologies (Ict) And 5. Professional And Business Services
+        1  1. Information And Communication Technologies (Ict) 2. Energy And Environmental Technologies
+        1  1. Marine Activities & Services
+        1  2. Aerospace And Aviation Services
+        1  1. Professional And Business Services And Information 2. Communication Technologies (Ict)
+        1  1. Professional And Business Services 2. Construction And Real Estate 3. Consumer Goods
+        1  1. Professional And Business Services And 2. Information And Communication Technologies (Ict)
+        1  1. Information And Communication Technologies (Ict) 2. Professional And Business Services 3. Consumer Goods
+        1  1. Food And Beverages 2. Professional Business Services
+        1  1. Food And Beverages 2. Construction And Real Estate
+        1  1. Information And Communication Technologies (Ict) And 2. Industrial Products And Services
+        1  1. Professional And Business Services 2. Construction And Real Estate
+        1  1. Professional And Business Services 2. Information And Communication Technologies (Ict)
+        1  1. Automotive And Transport Equipment And 2. Information And Communication Technologies (Ict)
+        1  2. Professional And Business Services
+        1  1. Consumer Goods 2. Automotive & Transport Equipment
+        1  1. Information And Communication Technologies (Ict) 2. Media And Design Services
+        1  1. Consumer Goods 2. Food And Beverages
+        1  1. Information And Communication Technologies (Ict) 2. Consumer Goods
+        1  1. Information And Communication Technologies (Ict) 2. Industrial Products And Services
+        1  1. Professional And Business Services 2. Media And Design Services
+        1  1. Aerospace And Aviation Activities 2. Information And Communication Technologies (Ict)
+        1  1. Energy And Environmental Technologies 2. Construction And Real Estate 3. Professional And Business Services
+        1  1. Industrial Products And Services 2.professional And Business Services
+        1  1. Information And Communication Technologies (Ict) 2.logistics And Warehousing
+        1  1. Consumer Goods 2. Professional And Business Services
+        1  1. Proffesional And Business Services 2. Consumer Goods
+        1  1. Construction And Real Estate 2. Professional And Business Services
+        1  1. Professional And Business Services 2. Aerospace And Aviation Activities
+        1  Consumer Goods Information And Communication Technologies (Ict)
+        1  ' Food And Beverages
+        1  ' Aerospace And Aviation Activities
+        1  ' Consumer Goods
+        1  ' Energy And Environmental Technologies
+        1  Life Sciences And Medical Devices
+        1  Industrial Products And Services Logistics And Warehousing
+        1  • Industrial Products And Services • Logistics And Warehousing
+        1  Industrial Products And Services Construction And Real Estate Energy And Environmental Technologies
+        1  Sportstech
+        1  Data
+        1  Defence
+        1  Guarding &Training
+        1  Credit Cards
+        1  Aircrafts Manufacturing
+        1  Navigation Agencies
+        1  Hydrolic Signs Assmbling
+        1  Speeding Radars
+        1  Job Opporitunities Searching
+        1  Hydraulic Cylinders Industry
+        1  Boilers Fab
+        1  Design
+        1  Own And Operate Liquified Natural Gas Plants
+        1  Newspapers & Publishing
+        1  Agriculture Equipments
+        1  Gardens Design And Maintenance
+        1  Steel Structures Installation & Import
+        1  Mechanical Contracts
+        1  Decoration Contractors
+        1  Water Desallination Station Construction
+        1  Oil & Gas Pipes Pipes &Tanks Production
+        1  Valves
+        1  Pumps
+        1  Compressors
+        1  Taps Industry
+        1  Production Of Plastic Bars For Construction
+        1  Plastic Bottles And Boxes For Water Filtering Industry
+        1  Polyethylene Colours Production
+        1  Stones Extraction & Trade
+        1  Tiles Marbles And Block Manufacturing
+        1  Manufacturing Of Medical Solutions & Intravenous Nutrients
+        1  Petrochemical Products Industry
+        1  Readymix Concrete Industry
+        1  Production Of Carton And Plastic Rolls And Packaging
+        1  Keys Industry & Maintenance
+        1  P.v.c Feb
+        1  Insulation Materials Industry
+        1  Paper Product Industry
+        1  Pre-fabricated House Industry
+        1  Artistic Production
+        1  Filter Bags Industry
+        1  Hides
+        1  Skin Tanning Manufacturing
+        1  Black Carbon
+        1  Concrete Roller & Joint Fiiter Fab
+        1  Galvanized Polyester Boards Production
+        1  Anti Rust Carbon Steel Flanges Product
+        1  Formaldyhide & Urea Products
+        1  Aggregate Resulting From Iron Wastes Production
+        1  Dye-houses
+        1  Batteries Distilled Water
+        1  Tailoring And Embroidery
+        1  Swimming Pools Construction & Maintenance
+        1  Technology Net Services
+        1  Manufacturing Of Pipes Joints Fibre Polyser Tanks
+        1  Automic Transfering Money -Atm-
+        1  Natural Gas Ships Operation & Administraion
+        1  Renting & Hiring Fixed Assets
+        1  Formal Dehyde Urea Markering
+        1  Qapco Products Marketing
+        1  ' Logistics And Warehousing
+        1  Cars Glass Treatment
+        1  Industrial Audit And Inspection
+        1  Information Services For Movement Of Aircrafts
+        1  Sailing Boats Training Driving School
+        1  Organizing Horse Endurance Races
+        1  Ice Cream Factory
+        1  Webpages Design
+        1  Rent Of Planes To Air Medical Aid
+        1  Water Treatment Equipment
+        1  Dairy Industry
+        1  Trade In Chocolate
+        1  Water Pumps
+        1  Various Chemical Materials
+        1  Various Foodstuff
+        1  Trade In Gold Bars
+        1  Used Car Trading
+        1  Fire Fighting Vehicles Trade
+        1  Airports & Planes Equipments & System Trade
+        1  Fiber Glass Trade
+        1  Tourist Services
+        1  The Town Hotel
+        1  Marine Operations
+        1  Boilers & Gas Generators Warmly
+        1  Selling Sneakers
+        1  Al Raya Medical Equipment
+        1  Readymade Garments Export
+        1  Spange Iron
+        1  Sauna & Massage Tools Import & Export
+        1  Fibre Glass Cables
+        1  Super Urea Trading
+        1  Caravan Cabins
+        1  Meterological Equipment
+        1  Defence Services & Equipments Imports Works
+        1  Petrol Stations Systems
+        1  Ethylene & Vinyl Marketing
+        1  Oil And Water Leakage Treatment Equipments
+        1  Power Distribution Network
+        1  Green Houses Trade
+        1  Petroleum And Tarmec Trade
+        1  Candles Trade
         1  Government & Public Sector
+        1  Public Sector
+        1  Computer & Network Security
+        1  Shoura Business Group
 
-Top 50 UNMAPPED source labels (on still-unclassified companies):
-  (extend server/lib/industry.js LABEL_MAP to cover these real labels)
-    7616  Services
-    1621  Industry
-     854  Car Service
-     752  Commercial Agents
-     606  Car Repair
-     580  Clothes Laundry & Iron
-     450  Barber Shops
+Top 50 GENERIC labels left blank by design (on still-unclassified companies):
+  (too generic to be a real trade — e.g. "Services", "Industry", "Company")
+    4879  Services
+    1476  Industry
      318  Project & Branches & Management & Supervising
-     244  Kinder Gardens
-     238  Bakeries
-     230  Hosbitality Services
-     160  Internet Services
      156  Commercial Services
-     150  Equipment Rentals
       92  Establishing & Supervising Companies
-      80  Carpentry Work
-      72  Arts & Drawing
-      70  Marine Services
-      70  Physiotherapy& Massage
-      68  Air Conditioning Industry
-      62  Petrol Stations
-      56  Rodents & Epidemic Fighting
-      54  Installation Of Glass And Aluminium Panels
-      48  Startups
-      44  Lifts & Elevators Installation Works
-      40  Auditing Bureau
-      37  Startup
-      36  Car Park Rentals
-      32  Concrete Mould Fab.
-      32  Electrical Equipment Repair
-      28  Debts Collection
-      28  Car Rentals
-      26  Marine, Air And Land Survey Works
-      26  Auctions
-      26  Incleation Of Quran
-      24  Accounts Audit Office
-      22  Climate
-      22  Marine Activities & Services
-      22  Patent And Risht Reserve
-      22  Massage And Massage
-      21  AI, Startups
-      20  Energy and Environmental Technologies
-      20  Quantity Surey & Cost Managaement
-      20  Installation , Fix Measure And Control Devices And Equipment
-      20  Asphalt Industry
-      20  Ice Making
-      18  Company
-      18  Glass Industry
-      18  Patent Invention Ownership
-      18  Plumbing Works
 
 ======================================================================

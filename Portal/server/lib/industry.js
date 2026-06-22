@@ -19,6 +19,17 @@
 // ============================================================================
 
 import { inferIndustry } from '../enrichment/local/extract.js';
+import fs from 'node:fs';
+
+// Curated specific-trade vocabulary (built by scripts/build_trade_vocabulary.js).
+// When present, ONLY these specific trades are emitted as tags; when absent (not
+// yet built) all cleaned trades pass through. Loaded once at module startup.
+let TRADE_VOCAB = null;
+try {
+  const _vraw = fs.readFileSync(new URL('../data/trade_vocab.json', import.meta.url), 'utf8');
+  const _varr = JSON.parse(_vraw);
+  if (Array.isArray(_varr) && _varr.length) TRADE_VOCAB = new Set(_varr);
+} catch { /* no vocabulary file yet — emit all cleaned trades */ }
 
 // The canonical industry vocabulary. Keep labels stable — they're stored and
 // shown in the filter dropdown.
@@ -112,24 +123,77 @@ const GENERIC_CATEGORY = new Set([
   'project & branches & management & supervising', 'establishing & supervising companies',
 ]);
 
+// Bare words that ARE a broad industry — never emit as a separate "specific"
+// trade, because the broad canonical already covers them (avoids "Trade" next to
+// "Trading & Distribution", "Contracting" next to "Construction", etc.).
+const BROAD_SYNONYM = new Set([
+  'trade', 'trading', 'contracting', 'construction', 'tourism', 'technology',
+  'transport', 'transportation', 'agriculture', 'jewellery', 'jewelry', 'media',
+  'retail', 'manufacturing', 'manufacture', 'consulting', 'consultancy', 'insurance',
+  'engineering', 'banking', 'banks', 'marketing', 'advertising', 'advertisement',
+  'education', 'hospitality', 'logistics', 'security', 'automotive', 'automobile',
+  'pharmaceuticals', 'real estate', 'telecommunications', 'telecom', 'aviation',
+  'energy', 'oil', 'gas', 'healthcare', 'health', 'finance', 'financial',
+  'industrial', 'commerce',
+]);
+
+const TYPO_FIX = [
+  [/\bhosbitality\b/gi, 'Hospitality'], [/\bsurey\b/gi, 'Survey'],
+  [/\bmanagaement\b/gi, 'Management'], [/\bmanufacuring\b/gi, 'Manufacturing'],
+];
+
 function titleCaseLabel(s) {
   return s.replace(/\w\S*/g, (t) => t[0].toUpperCase() + t.slice(1).toLowerCase());
 }
 
 /** Normalise a raw source category into a clean specific-trade tag, or null when
- *  it's too generic / short to be a meaningful industry. */
+ *  it's generic, a broad-industry synonym, or too short to be a real trade. */
 export function cleanCategoryLabel(raw) {
-  const s = String(raw || '').replace(/\s+/g, ' ').trim().replace(/[.;:,]+$/, '').trim();
+  let s = String(raw || '').replace(/\s+/g, ' ').trim()
+    .replace(/^[\s'"’.•·\-]+/, '')   // strip leading quotes/bullets/dashes/dots
+    .replace(/^\d+\.\s*/, '')                   // strip a leading "1." numbering
+    .replace(/[.;:,]+$/, '').trim();
   if (s.length < 3) return null;
-  if (GENERIC_CATEGORY.has(s.toLowerCase())) return null;
-  return titleCaseLabel(s).replace(/\bHosbitality\b/g, 'Hospitality');
+  const low = s.toLowerCase();
+  if (GENERIC_CATEGORY.has(low) || BROAD_SYNONYM.has(low)) return null;
+  let out = titleCaseLabel(s);
+  for (const [rx, rep] of TYPO_FIX) out = out.replace(rx, rep);
+  return out;
+}
+
+// Split a raw source label into candidate trade parts — on commas/semicolons/
+// pipes/slashes/bullets AND on "1." "2." numbered-list markers (QFZ sectors).
+function splitLabelParts(label) {
+  return String(label || '')
+    .replace(/[•·]/g, ',')
+    .split(/[,;|/]+|\s\d+\.\s*/)
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+/** All cleaned specific-trade candidates for a company (BEFORE the vocabulary
+ *  filter) — used by deriveIndustries and by the vocabulary builder. */
+export function specificTradesFor(c = {}) {
+  const extra = c.extra || c.extra_fields || {};
+  const labels = [
+    extra.qcci_sub_category, extra.qcci_category, c.sector, extra.qfz_sectors_raw,
+    extra.qstp_category, arrText(extra.qstp_sector_tags), extra.qse_sector,
+    extra.qse_sector_name, extra.moci_activity, extra.moci_main_activity,
+  ];
+  const out = []; const seen = new Set();
+  for (const label of labels) for (const part of splitLabelParts(label)) {
+    const spec = cleanCategoryLabel(part);
+    if (spec && !seen.has(spec)) { seen.add(spec); out.push(spec); }
+  }
+  return out;
 }
 
 /**
  * Derive a company's industry tags + primary from its signals.
  * Produces BOTH levels (Val 2026-06-22): the broad canonical industries AND the
- * company's specific source-directory trade(s) (e.g. "Car Repair", "Carpentry"),
- * so users can filter by either. `primary` stays a broad canonical when known.
+ * company's specific trade(s) (e.g. "Car Repair") — but a specific trade is only
+ * emitted when it's in the curated TRADE_VOCAB (or no vocab is built yet), which
+ * drops one-off / typo'd noise. `primary` stays a broad canonical when known.
  * @param {object} c   { name, legal_name, sector, description, industry, extra }
  * @returns {{ primary: string|null, tags: string[] }}
  */
@@ -137,34 +201,27 @@ export function deriveIndustries(c = {}) {
   const extra = c.extra || c.extra_fields || {};
   const broad = []; const seenB = new Set();
   const addBroad = (x) => { if (x && !seenB.has(x)) { seenB.add(x); broad.push(x); } };
-  const specific = []; const seenS = new Set();
-  const addSpecific = (x) => { if (x && !seenS.has(x)) { seenS.add(x); specific.push(x); } };
 
-  // 1) Source-directory categories → broad canonical(s) AND the specific trade.
+  // 1) Source-directory categories → broad canonical(s).
   const sourceLabels = [
-    extra.qcci_sub_category, extra.qcci_category,
-    c.sector,
-    extra.qfz_sectors_raw,
-    extra.qstp_category, arrText(extra.qstp_sector_tags),
-    extra.qse_sector, extra.qse_sector_name,
-    extra.moci_activity, extra.moci_main_activity,
+    extra.qcci_sub_category, extra.qcci_category, c.sector, extra.qfz_sectors_raw,
+    extra.qstp_category, arrText(extra.qstp_sector_tags), extra.qse_sector,
+    extra.qse_sector_name, extra.moci_activity, extra.moci_main_activity,
   ];
-  for (const label of sourceLabels) {
-    for (const canon of mapLabelToCanonical(label)) addBroad(canon);
-    for (const part of String(label || '').split(/[,;|/]+/)) {
-      const spec = cleanCategoryLabel(part);
-      if (spec) addSpecific(spec);
-    }
-  }
+  for (const label of sourceLabels) for (const canon of mapLabelToCanonical(label)) addBroad(canon);
 
-  // 2) LinkedIn industry label → broad canonical only.
+  // 2) LinkedIn industry label → broad. 3) strict name/desc inference → broad.
   for (const label of [extra.linkedin_industry_v2_taxonomy, extra.linkedin_industry]) {
     for (const canon of mapLabelToCanonical(label)) addBroad(canon);
   }
-
-  // 3) Strict name/description inference → broad only (definitive single match).
   const inferred = inferIndustry(`${c.name || ''}  ${c.legal_name || ''}  ${c.description || extra.website_description || ''}`);
   if (inferred) addBroad(inferred);
+
+  // 4) Specific trades — only those in the curated vocabulary (if built).
+  const specific = [];
+  for (const spec of specificTradesFor(c)) {
+    if (!TRADE_VOCAB || TRADE_VOCAB.has(spec)) specific.push(spec);
+  }
 
   const tags = [...broad, ...specific];
   return { primary: broad[0] || specific[0] || null, tags };
