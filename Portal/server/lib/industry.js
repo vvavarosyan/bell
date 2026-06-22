@@ -68,7 +68,7 @@ const LABEL_MAP = [
   ['Chemicals & Plastics', ['chemical', 'plastic', 'polymer', 'paint', 'coating', 'rubber']],
   ['Automotive', ['automotive', 'vehicle', 'motor', ' auto', 'car service', 'car repair', 'car rental']],
   ['Marketing & Advertising', ['advertis', 'marketing', 'branding', 'public relations', 'signage']],
-  ['Media & Entertainment', ['media', 'broadcast', 'film', 'television', 'publishing', 'entertainment']],
+  ['Media & Entertainment', [' media ', 'broadcast', 'film', 'television', 'publishing', 'entertainment']],
   ['Hospitality & F&B', ['hospitality', 'restaurant', 'food', 'beverage', 'catering', 'hotel', 'cafe', 'bakery', 'baker', 'hosbitality']],
   ['Travel & Tourism', ['travel', 'tourism', ' tour']],
   ['Legal Services', ['legal', ' law', 'advocate', 'attorney']],
@@ -121,6 +121,7 @@ const GENERIC_CATEGORY = new Set([
   'companies', 'general', 'others', 'other', 'miscellaneous', 'misc', 'business',
   'n/a', 'na', 'none', 'unknown', 'establishment', 'various', 'activities',
   'project & branches & management & supervising', 'establishing & supervising companies',
+  'point of interest', 'store', 'premise', 'corporate office',   // generic Google Maps categories
 ]);
 
 // Bare words that ARE a broad industry — never emit as a separate "specific"
@@ -179,6 +180,10 @@ export function specificTradesFor(c = {}) {
     extra.qcci_sub_category, extra.qcci_category, c.sector, extra.qfz_sectors_raw,
     extra.qstp_category, arrText(extra.qstp_sector_tags), extra.qse_sector,
     extra.qse_sector_name, extra.moci_activity, extra.moci_main_activity,
+    extra.gmaps_category, arrText(extra.gmaps_categories),   // Google Maps place category
+    // NOTE: qfc_permitted_activities is long legal PROSE — used for broad industry
+    // mapping only (in deriveIndustries), never as specific trades (it produced junk
+    // fragments like "Shares"/"Foundation Models"/"Special Purpose Company").
   ];
   const out = []; const seen = new Set();
   for (const label of labels) for (const part of splitLabelParts(label)) {
@@ -207,6 +212,8 @@ export function deriveIndustries(c = {}) {
     extra.qcci_sub_category, extra.qcci_category, c.sector, extra.qfz_sectors_raw,
     extra.qstp_category, arrText(extra.qstp_sector_tags), extra.qse_sector,
     extra.qse_sector_name, extra.moci_activity, extra.moci_main_activity,
+    extra.gmaps_category, arrText(extra.gmaps_categories),   // Google Maps place category
+    extra.qfc_permitted_activities,                          // QFC official licensed activities
   ];
   for (const label of sourceLabels) for (const canon of mapLabelToCanonical(label)) addBroad(canon);
 

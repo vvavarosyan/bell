@@ -160,7 +160,7 @@ function selfTest() {
     { label: 'stored company', row: { name: 'X', industry: 'Banking & Finance', industries: ['Banking & Finance'] }, expect: 'stored' },
     { label: 'QCCI category → would-fix', row: { name: 'QNBN', industry: null, industries: null, extra_fields: { qcci_category: 'Communication Services' } }, expect: 'would-fix' },
     { label: 'name marker → would-fix', row: { name: 'Doha Medical Clinic', industry: null, industries: null, extra_fields: {} }, expect: 'would-fix' },
-    { label: 'specific trade label → would-fix (own tag)', row: { name: 'Al Lulu Est', industry: null, industries: null, sector: 'Pearl Diving Services' }, expect: 'would-fix' },
+    { label: 'broad-mapping label → would-fix', row: { name: 'Al Lulu Realty', industry: null, industries: null, sector: 'Real Estate Agencies' }, expect: 'would-fix' },
     { label: 'only generic label → gap-with-label', row: { name: 'Gen Est', industry: null, industries: null, sector: 'Services' }, expect: 'gap-with-label' },
     { label: 'no signal → gap-no-label', row: { name: 'ABC Est', industry: null, industries: null, extra_fields: {} }, expect: 'gap-no-label' },
   ];

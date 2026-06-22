@@ -1,0 +1,58 @@
+======================================================================
+  BELL — NO-INDUSTRY ENRICHMENT DIAGNOSTIC  (read-only)
+  2026-06-22T13:40:36.164Z
+======================================================================
+
+Companies with NO industry: 24269
+
+Best available signal:
+  • Google Maps → broad industry: 4  (0%)  → a re-derive classifies these NOW
+  • Google Maps → trade only:     1  (0%)  → extend LABEL_MAP (top list below)
+  • Website, no category:         2660  (11%)  → needs a website-read pass
+  • Dark (no category, no site):  21604  (89%)  → hardest / external data later
+
+Top 50 Google Maps categories among these (extend LABEL_MAP to bucket them):
+       2  Warehouse
+       2  Chartered accountant
+       2  Construction company
+       1  Lounge bar
+       1  Tour operator
+       1  Lodging
+       1  Tour agency
+       1  Certified public accountant
+       1  Financial audit
+       1  Financial consultant
+       1  Tax consultant
+
+Top extra_fields keys on the website/dark companies (other possible signals):
+   21544  stage8_checked_at
+   18465  moci_cp_number
+   18465  moci_cp_status
+   18465  moci_cr_number
+   18465  moci_cr_status
+   18465  moci_entity_type
+   18465  moci_name_script
+   18465  moci_cp_expiry_date
+   18465  moci_cr_expiry_date
+   18465  moci_name_was_missing
+    3504  qfc_directors
+    3504  qfc_secretary
+    3504  qfc_card_index
+    3504  qfc_scraped_at
+    3504  qfc_entity_type
+    3504  qfc_license_status
+    3504  qfc_date_of_licence
+    3504  qfc_financial_year_end
+    3504  qfc_registration_status
+    3504  qfc_source_listing_page
+    3504  qfc_issued_share_capital
+    3504  qfc_permitted_activities
+    3504  qfc_date_of_incorporation
+    3504  qfc_place_of_incorporation
+    3504  qfc_authorised_share_capital
+
+sample gmaps-broad: qatar airways holidays · STORE GETTCO INTERNATIONAL · Mohammed Bin Nasser Bin Hamad Accounti · LOUIS BERGER
+sample gmaps-trade: Qatar Airways Club
+sample website: emoceans LLC · Uranus Education LLC · La Fleche LLC · OZONE TECHNOLOGIES LLC · Elite Advisory Group LLC
+sample dark: KD LLC · SPOR LLC · Taprano LLC · DD Consulting LLC · Aurelon Entertainment LLC
+======================================================================
