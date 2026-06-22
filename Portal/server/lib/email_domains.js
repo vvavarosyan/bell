@@ -83,11 +83,11 @@ export async function getSendingIdentity(tenantId) {
 
 /** The sending identity for a tenant, auto-provisioning the Bell default if none. */
 export async function resolveSendIdentity(tenantId) {
-  const found = await getSendingIdentity(tenantId);
-  if (found) return found;
+  // ALWAYS ensure/self-heal the Bell identity first (e.g. migrate an old
+  // mail.bell.qa address to the current verified OUTREACH_DOMAIN) — not only
+  // when missing — then resolve the identity to send as.
   const t = await query(`SELECT id, slug, name FROM tenants WHERE id = $1`, [Number(tenantId)]);
-  if (!t.rows.length) return null;
-  await ensureBellIdentity(t.rows[0]);
+  if (t.rows.length) await ensureBellIdentity(t.rows[0]);
   return getSendingIdentity(tenantId);
 }
 

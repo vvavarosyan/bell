@@ -122,7 +122,8 @@ async function processEnrollment(enr) {
   const effReplyTo = inboundReplyTo(emailId) || replyTo;
   let from;
   try {
-    from = formatFrom(await resolveSendIdentity(enr.tenant_id)) || await getFromAddress();
+    try { from = formatFrom(await resolveSendIdentity(enr.tenant_id)); } catch { from = null; }
+    from = from || await getFromAddress();
     const res = await sendEmail({ from, to, replyTo: effReplyTo, subject, text: bodyText });
     await query(`UPDATE crm_emails SET status='sent', provider_message_id=$2, from_email=$3, reply_to=$4, sent_at=now() WHERE id=$1`,
       [emailId, res.id, from, effReplyTo]);

@@ -359,7 +359,9 @@ router.post('/records/:id/email', async (req, res, next) => {
     const effReplyTo = inboundReplyTo(emailId) || replyTo;
 
     try {
-      const from = formatFrom(await resolveSendIdentity(tenantId(req))) || await getFromAddress();
+      let from;
+      try { from = formatFrom(await resolveSendIdentity(tenantId(req))); } catch (e) { console.error('[crm] identity resolve failed:', e.message); }
+      from = from || await getFromAddress();
       const sent = await sendEmail({ from, to, replyTo: effReplyTo, subject, text: bodyText });
       await query(`UPDATE crm_emails SET status='sent', provider_message_id=$2, from_email=$3, reply_to=$4, sent_at=now() WHERE id=$1`,
         [emailId, sent.id, from, effReplyTo]);
@@ -695,7 +697,9 @@ router.post('/records/bulk', async (req, res, next) => {
            LEFT JOIN companies c ON r.entity_type='company' AND c.id=r.entity_id
            LEFT JOIN people    p ON r.entity_type='person'  AND p.id=r.entity_id
           WHERE r.tenant_id=$1 AND r.id = ANY($2::bigint[])`, [tid, ids]);
-      const from = formatFrom(await resolveSendIdentity(tid)) || await getFromAddress();
+      let from;
+      try { from = formatFrom(await resolveSendIdentity(tid)); } catch (e) { console.error('[crm] identity resolve failed:', e.message); }
+      from = from || await getFromAddress();
       const replyTo = actorEmail(req);
       const lim0 = await checkDailyLimit(tid, req.tenant?.plan);
       let remaining = lim0.remaining;
