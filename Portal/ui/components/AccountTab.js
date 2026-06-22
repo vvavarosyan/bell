@@ -9,6 +9,7 @@ import { toast } from '../lib/toast.js';
 const SECTIONS = [
   { id: 'profile',       label: 'Profile' },
   { id: 'email',         label: 'Email' },
+  { id: 'domain',        label: 'Sending domain' },
   { id: 'notifications', label: 'Notifications' },
   { id: 'preferences',   label: 'Preferences' },
   { id: 'security',      label: 'Account & Security' },
@@ -38,6 +39,86 @@ export function AccountTab() {
     catch (e) { toast('Save failed: ' + (e.message || ''), 'error'); }
     finally { setSaving(false); }
   };
+
+  // ---- Sending domain (per-tenant outreach identity) --------------------
+  const [identities, setIdentities] = useState(null);
+  const [domainForm, setDomainForm] = useState({ domain: '', from_email: '' });
+  const [domBusy, setDomBusy] = useState('');
+
+  const loadIdentities = async () => {
+    try { const r = await api.outreachIdentities(); setIdentities(r.identities || []); }
+    catch (e) { toast('Load failed: ' + (e.message || ''), 'error'); setIdentities([]); }
+  };
+  useEffect(() => { if (section === 'domain' && identities === null) loadIdentities(); }, [section]);
+
+  const connectDomain = async () => {
+    const d = (domainForm.domain || '').trim();
+    if (!d) return;
+    setDomBusy('connect');
+    try {
+      await api.outreachConnectDomain(d, (domainForm.from_email || '').trim() || undefined);
+      setDomainForm({ domain: '', from_email: '' });
+      await loadIdentities();
+      toast('Domain added — add the DNS records below, then Verify.');
+    } catch (e) {
+      const m = e.message || '';
+      toast(m.includes('not_configured') ? 'Email sending isn’t set up yet — please contact support.'
+        : m.includes('invalid_domain') ? 'That doesn’t look like a valid domain.' : 'Failed: ' + m, 'error');
+    } finally { setDomBusy(''); }
+  };
+  const verifyDomain = async (id) => {
+    setDomBusy('verify' + id);
+    try {
+      const r = await api.outreachVerifyDomain(id);
+      await loadIdentities();
+      const ok = r.domain?.status === 'verified';
+      toast(ok ? 'Verified! You can now make it your default sender.' : 'Not verified yet — DNS can take up to 48h to propagate.', ok ? 'success' : 'info');
+    } catch (e) { toast('Verify failed: ' + (e.message || ''), 'error'); } finally { setDomBusy(''); }
+  };
+  const removeDomain = async (id) => {
+    if (!confirm('Remove this domain?')) return;
+    try { await api.outreachRemoveDomain(id); await loadIdentities(); toast('Domain removed'); }
+    catch (e) { toast('Remove failed: ' + (e.message || ''), 'error'); }
+  };
+  const makeDefault = async (id) => {
+    try { await api.outreachUpdateIdentity(id, { make_default: true }); await loadIdentities(); toast('Default sender updated'); }
+    catch (e) { toast('Failed: ' + (e.message || ''), 'error'); }
+  };
+
+  const domBadge = { fontSize: '11px', padding: '2px 7px', border: '1px solid var(--border)', marginLeft: '6px', color: 'var(--text-muted)' };
+  const statusColor = (st) => st === 'verified' ? '#3fb950' : st === 'failed' ? '#e5534b' : st === 'active' ? 'var(--accent)' : 'var(--text-muted)';
+  const statusLabel = { active: 'Active', verified: 'Verified', pending: 'Pending verification', failed: 'Verification failed' };
+
+  const renderIdentity = (idn) => html`
+    <div key=${idn.id} style=${{ border: '1px solid var(--border)', background: 'var(--bg-elev)', padding: '12px 14px', marginBottom: '10px' }}>
+      <div style=${{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+        <div>
+          <span style=${{ fontWeight: 600 }}>${idn.from_email}</span>
+          <span style=${domBadge}>${idn.kind === 'bell' ? 'Bell' : 'Custom'}</span>
+          ${idn.is_default ? html`<span style=${{ ...domBadge, color: 'var(--accent)', borderColor: 'var(--accent)' }}>Default</span>` : null}
+        </div>
+        <div style=${{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+          <span style=${{ fontSize: '12px', color: statusColor(idn.status) }}>${statusLabel[idn.status] || idn.status}</span>
+          ${!idn.is_default && (idn.kind === 'bell' || idn.status === 'verified') ? html`<button class="sys-btn" onClick=${() => makeDefault(idn.id)}>Make default</button>` : null}
+          ${idn.kind === 'custom' ? html`<button class="sys-btn" style=${{ color: '#e5534b' }} onClick=${() => removeDomain(idn.id)}>Remove</button>` : null}
+        </div>
+      </div>
+      ${idn.kind === 'custom' && idn.status !== 'verified' ? html`
+        <div style=${{ marginTop: '10px', borderTop: '1px solid var(--border)', paddingTop: '10px' }}>
+          <div class="sys-hint">Add these records at your DNS provider, then click Verify:</div>
+          <table style=${{ width: '100%', fontSize: '12px', borderCollapse: 'collapse', margin: '6px 0' }}>
+            <thead><tr>${['Type', 'Name', 'Value'].map(h => html`<th key=${h} style=${{ textAlign: 'left', padding: '4px 6px', color: 'var(--text-muted)', borderBottom: '1px solid var(--border)' }}>${h}</th>`)}</tr></thead>
+            <tbody>
+              ${(idn.dns_records || []).map((r, i) => html`<tr key=${i}>
+                <td style=${{ padding: '4px 6px', verticalAlign: 'top' }}>${r.type || r.record}</td>
+                <td style=${{ padding: '4px 6px', fontFamily: 'monospace', wordBreak: 'break-all', verticalAlign: 'top' }}>${r.name}</td>
+                <td style=${{ padding: '4px 6px', fontFamily: 'monospace', wordBreak: 'break-all', verticalAlign: 'top' }}>${r.value}</td>
+              </tr>`)}
+            </tbody>
+          </table>
+          <button class="sys-btn" disabled=${domBusy === 'verify' + idn.id} onClick=${() => verifyDomain(idn.id)}>${domBusy === 'verify' + idn.id ? 'Checking…' : 'Verify'}</button>
+        </div>` : null}
+    </div>`;
 
   const field = (k, lbl, opts = {}) => html`
     <div class=${'sys-field' + (opts.full ? ' full' : '')}>
@@ -92,6 +173,27 @@ export function AccountTab() {
           <span><div class="t-title">Append signature to CRM emails</div><div class="t-desc">Automatically add your signature to messages you send.</div></span>
         </label>
         <div class="sys-actions"><button class="sys-btn" disabled=${saving} onClick=${() => save({ profile: data.profile, preferences: data.preferences }, 'Email settings saved')}>${saving ? 'Saving…' : 'Save email settings'}</button></div>
+      </div>`,
+
+    domain: html`
+      <div class="sys-section">
+        <h2>Sending domain</h2>
+        <div class="sys-hint">Where your outreach emails are sent from. You start on a free Bell address — connect your own domain for the best deliverability and to send as your own brand.</div>
+        ${identities === null
+          ? html`<div class="empty">Loading…</div>`
+          : html`
+            <div style=${{ marginTop: '8px' }}>${identities.map(renderIdentity)}</div>
+            <div class="sys-field full" style=${{ marginTop: '18px', borderTop: '1px solid var(--border)', paddingTop: '16px' }}>
+              <label>Connect your own domain</label>
+              <div style=${{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                <input class="sys-input" style=${{ flex: '1 1 200px' }} placeholder="yourcompany.com"
+                  value=${domainForm.domain} onInput=${e => setDomainForm(f => ({ ...f, domain: e.target.value }))} />
+                <input class="sys-input" style=${{ flex: '1 1 220px' }} placeholder="from address (optional) — e.g. sales@yourcompany.com"
+                  value=${domainForm.from_email} onInput=${e => setDomainForm(f => ({ ...f, from_email: e.target.value }))} />
+                <button class="sys-btn" disabled=${domBusy === 'connect' || !domainForm.domain.trim()} onClick=${connectDomain}>${domBusy === 'connect' ? 'Adding…' : 'Connect domain'}</button>
+              </div>
+              <div class="sys-hint" style=${{ marginTop: '6px' }}>We'll give you DNS records to add at your domain registrar, then you verify — usually a few minutes, up to 48h.</div>
+            </div>`}
       </div>`,
 
     notifications: html`

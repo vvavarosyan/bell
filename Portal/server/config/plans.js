@@ -14,6 +14,8 @@ export const PLANS = [
     interval:    'month',
     // Credits granted on each renewal cycle
     credits:     2000,
+    // Max outbound outreach emails per day
+    emails_per_day: 200,
     // Stripe product price id — pasted in via env var
     stripe_price_id_env: 'STRIPE_PRICE_STARTER',
     // Listed features for display on /subscribe
@@ -34,6 +36,7 @@ export const PLANS = [
     price_qar:   10000,
     interval:    'month',
     credits:     15000,
+    emails_per_day: 1000,
     stripe_price_id_env: 'STRIPE_PRICE_BUSINESS',
     features: [
       'Everything in Starter',
@@ -53,6 +56,7 @@ export const PLANS = [
     price_qar:   30000,
     interval:    'month',
     credits:     60000,
+    emails_per_day: 5000,
     stripe_price_id_env: 'STRIPE_PRICE_ENTERPRISE',
     features: [
       'Everything in Business',

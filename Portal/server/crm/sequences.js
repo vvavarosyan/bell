@@ -10,6 +10,8 @@
 
 import { query } from '../db.js';
 import { sendEmail, getFromAddress, inboundReplyTo } from '../lib/email.js';
+import { resolveSendIdentity, formatFrom } from '../lib/email_domains.js';
+import { checkDailyLimit } from '../lib/sendlimits.js';
 import { logActivity, markContacted, buildMergeVars, applyMerge } from '../lib/crm.js';
 
 const TICK_MS = 60_000;
@@ -99,6 +101,13 @@ async function processEnrollment(enr) {
     return 'errored';
   }
 
+  // Respect the tenant's daily send cap — if reached, defer this step to tomorrow.
+  const lim = await checkDailyLimit(enr.tenant_id);
+  if (!lim.allowed) {
+    await query(`UPDATE crm_sequence_enrollments SET next_run_at = date_trunc('day', now()) + interval '1 day' WHERE id = $1`, [enr.id]);
+    return 'deferred';
+  }
+
   // Personalize {tokens} for this recipient, then send the step.
   const vars = buildMergeVars(rec);
   const subject = applyMerge(step.subject, vars);
@@ -113,7 +122,7 @@ async function processEnrollment(enr) {
   const effReplyTo = inboundReplyTo(emailId) || replyTo;
   let from;
   try {
-    from = await getFromAddress();
+    from = formatFrom(await resolveSendIdentity(enr.tenant_id)) || await getFromAddress();
     const res = await sendEmail({ from, to, replyTo: effReplyTo, subject, text: bodyText });
     await query(`UPDATE crm_emails SET status='sent', provider_message_id=$2, from_email=$3, reply_to=$4, sent_at=now() WHERE id=$1`,
       [emailId, res.id, from, effReplyTo]);

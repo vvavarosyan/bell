@@ -17,12 +17,15 @@ import { Router } from 'express';
 import { query } from '../db.js';
 import { ensureCrmRecord, logActivity, markContacted, buildMergeVars, applyMerge } from '../lib/crm.js';
 import { sendEmail, getFromAddress, inboundReplyTo } from '../lib/email.js';
+import { resolveSendIdentity, formatFrom } from '../lib/email_domains.js';
+import { checkDailyLimit } from '../lib/sendlimits.js';
 
 const router = Router();
 
-// For now, only platform_admin may SEND email (single verified bell.qa domain).
-// Later, tenants add their own domains via DNS and send as themselves.
-const canSendEmail = (req) => req.user?.role === 'platform_admin';
+// Any authenticated tenant may send — every tenant gets a default Bell sending
+// identity (and may connect their own domain). The `feature` mount already
+// requires auth + an active subscription; daily limits cap volume.
+const canSendEmail = (req) => !!req.tenant?.id;
 
 const tenantId = (req) => req.tenant?.id;
 const actorEmail = (req) => req.user?.email || null;
@@ -337,6 +340,8 @@ router.post('/records/:id/email', async (req, res, next) => {
 
     const to = String(req.body?.to || (r0.entity_type === 'company' ? r0.company_email : r0.person_email) || '').trim();
     if (!to) return res.status(400).json({ error: 'no_recipient', reason: 'No email address on file — enter one.' });
+    const limit = await checkDailyLimit(tenantId(req), req.tenant?.plan);
+    if (!limit.allowed) return res.status(429).json({ error: 'daily_limit', reason: `You've hit today's sending limit (${limit.limit}/day). It resets tomorrow — or upgrade your plan for more.` });
     // Personalize {tokens} for this recipient.
     const vars = buildMergeVars(r0);
     const subject  = applyMerge(String(req.body?.subject || '').trim(), vars);
@@ -354,7 +359,7 @@ router.post('/records/:id/email', async (req, res, next) => {
     const effReplyTo = inboundReplyTo(emailId) || replyTo;
 
     try {
-      const from = await getFromAddress();
+      const from = formatFrom(await resolveSendIdentity(tenantId(req))) || await getFromAddress();
       const sent = await sendEmail({ from, to, replyTo: effReplyTo, subject, text: bodyText });
       await query(`UPDATE crm_emails SET status='sent', provider_message_id=$2, from_email=$3, reply_to=$4, sent_at=now() WHERE id=$1`,
         [emailId, sent.id, from, effReplyTo]);
@@ -389,6 +394,43 @@ router.post('/templates', async (req, res, next) => {
        VALUES ($1,$2,$3,$4,$5) RETURNING id, name, subject, body, created_at`,
       [tenantId(req), name, req.body?.subject || null, req.body?.body || null, actorEmail(req)]);
     res.json(r.rows[0]);
+  } catch (err) { next(err); }
+});
+router.put('/templates/:id', async (req, res, next) => {
+  try {
+    const r = await query(
+      `UPDATE crm_email_templates SET name = COALESCE($3, name), subject = $4, body = $5
+        WHERE id=$1 AND tenant_id=$2 RETURNING id, name, subject, body, created_at`,
+      [Number(req.params.id), tenantId(req), (req.body?.name || '').trim() || null, req.body?.subject ?? null, req.body?.body ?? null]);
+    if (!r.rows.length) return res.status(404).json({ error: 'not_found' });
+    res.json(r.rows[0]);
+  } catch (err) { next(err); }
+});
+router.delete('/templates/:id', async (req, res, next) => {
+  try {
+    const r = await query(`DELETE FROM crm_email_templates WHERE id=$1 AND tenant_id=$2 RETURNING id`, [Number(req.params.id), tenantId(req)]);
+    if (!r.rows.length) return res.status(404).json({ error: 'not_found' });
+    res.json({ ok: true });
+  } catch (err) { next(err); }
+});
+
+// Outreach metrics: sent / opened / replied + rates for this tenant.
+router.get('/email-metrics', async (req, res, next) => {
+  try {
+    const r = await query(`
+      SELECT
+        count(*) FILTER (WHERE direction='out' AND status IN ('sent','delivered','opened'))::int      AS sent,
+        count(*) FILTER (WHERE direction='out' AND (status='opened' OR opened_at IS NOT NULL))::int    AS opened,
+        count(*) FILTER (WHERE direction='in')::int                                                    AS replies,
+        count(DISTINCT record_id) FILTER (WHERE direction='in')::int                                   AS replied_records
+      FROM crm_emails WHERE tenant_id=$1`, [tenantId(req)]);
+    const m = r.rows[0] || {};
+    const sent = m.sent || 0;
+    res.json({
+      sent, opened: m.opened || 0, replies: m.replies || 0, replied_records: m.replied_records || 0,
+      open_rate:  sent ? Math.round((m.opened / sent) * 1000) / 10 : 0,
+      reply_rate: sent ? Math.round((m.replied_records / sent) * 1000) / 10 : 0,
+    });
   } catch (err) { next(err); }
 });
 
@@ -638,6 +680,51 @@ router.post('/records/bulk', async (req, res, next) => {
         }
       }
       return res.json({ enrolled, requested: own.rows.length });
+    }
+    if (action === 'send') {
+      if (!canSendEmail(req)) return res.status(403).json({ error: 'cannot_send' });
+      const subjTpl = String(req.body?.subject || '');
+      const bodyTpl = String(req.body?.body || '');
+      if (!subjTpl.trim() && !bodyTpl.trim()) return res.status(400).json({ error: 'empty_email' });
+      const recs = await query(
+        `SELECT r.id, r.entity_type, r.entity_id,
+                c.email AS company_email, p.email AS person_email,
+                c.name AS company_name, c.industry AS company_industry, c.city AS company_city, c.website AS company_website,
+                p.full_name AS person_name, p.headline AS person_headline
+           FROM crm_records r
+           LEFT JOIN companies c ON r.entity_type='company' AND c.id=r.entity_id
+           LEFT JOIN people    p ON r.entity_type='person'  AND p.id=r.entity_id
+          WHERE r.tenant_id=$1 AND r.id = ANY($2::bigint[])`, [tid, ids]);
+      const from = formatFrom(await resolveSendIdentity(tid)) || await getFromAddress();
+      const replyTo = actorEmail(req);
+      const lim0 = await checkDailyLimit(tid, req.tenant?.plan);
+      let remaining = lim0.remaining;
+      let sent = 0, noEmail = 0, capped = 0, failed = 0;
+      for (const r0 of recs.rows) {
+        const to = String((r0.entity_type === 'company' ? r0.company_email : r0.person_email) || '').trim();
+        if (!to) { noEmail++; continue; }
+        if (remaining <= 0) { capped++; continue; }
+        const vars = buildMergeVars(r0);
+        const subject = applyMerge(subjTpl, vars);
+        const bodyText = applyMerge(bodyTpl, vars);
+        const insB = await query(
+          `INSERT INTO crm_emails (tenant_id, record_id, direction, to_email, reply_to, subject, body_text, status, sent_by)
+           VALUES ($1,$2,'out',$3,$4,$5,$6,'queued',$7) RETURNING id`,
+          [tid, r0.id, to, replyTo, subject, bodyText, replyTo]);
+        const emailId = Number(insB.rows[0].id);
+        const effReplyTo = inboundReplyTo(emailId) || replyTo;
+        try {
+          const s = await sendEmail({ from, to, replyTo: effReplyTo, subject, text: bodyText });
+          await query(`UPDATE crm_emails SET status='sent', provider_message_id=$2, from_email=$3, reply_to=$4, sent_at=now() WHERE id=$1`, [emailId, s.id, from, effReplyTo]);
+          await logActivity(null, tid, r0.id, 'email_out', { actorUserId: actorUserId(req), actorEmail: replyTo, summary: 'Email sent: ' + (subject || '(no subject)'), payload: { to, email_id: emailId, bulk: true } });
+          await markContacted(null, tid, r0.id, replyTo);
+          sent++; remaining--;
+        } catch (e) {
+          await query(`UPDATE crm_emails SET status='failed', error=$2 WHERE id=$1`, [emailId, String(e.message).slice(0, 400)]);
+          failed++;
+        }
+      }
+      return res.json({ action: 'send', requested: ids.length, sent, no_email: noEmail, capped, failed });
     }
     return res.status(400).json({ error: 'unknown_action' });
   } catch (err) { next(err); }
