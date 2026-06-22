@@ -629,7 +629,7 @@ function CompanyTab({ company, extra, similar, relationships, contacts, onReload
           ` : null}
           ${g.label === 'Contact' && !needsReveal ? html`
             <div style=${{marginTop:'10px'}}>
-              <${ContactsList} kind="company" refId=${company.id} contacts=${contacts} onChange=${onReload} readOnly=${isUser} />
+              <${ContactsList} kind="company" refId=${company.id} contacts=${contacts} onChange=${onReload} readOnly=${!isLocalEngine} />
             </div>
           ` : null}
         </section>

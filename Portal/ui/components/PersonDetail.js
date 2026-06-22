@@ -239,7 +239,7 @@ function ProfileTab({ person, contacts, onReload, needsReveal = false, onReveal,
           ` : null}
           ${g.label === 'Contact' && !needsReveal ? html`
             <div style=${{marginTop:'10px'}}>
-              <${ContactsList} kind="person" refId=${person.id} contacts=${contacts} onChange=${onReload} />
+              <${ContactsList} kind="person" refId=${person.id} contacts=${contacts} onChange=${onReload} readOnly=${!isLocalEngine} />
             </div>
           ` : null}
         </section>
