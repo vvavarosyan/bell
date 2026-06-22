@@ -533,6 +533,8 @@ function RecordDrawer({ recordId, onClose, onChanged }) {
   const [emBody, setEmBody] = useState('');
   const [templates, setTemplates] = useState([]);
   const [sending, setSending] = useState(false);
+  const [recipients, setRecipients] = useState({ cc: [], reveal: [] });
+  const [ccSel, setCcSel] = useState(new Set());
   const [seqList, setSeqList] = useState([]);
   const [selSeq, setSelSeq] = useState('');
   const [openEmail, setOpenEmail] = useState(null);
@@ -613,7 +615,13 @@ function RecordDrawer({ recordId, onClose, onChanged }) {
   const openCompose = async () => {
     setEmTo(data?.suggested_to || '');
     setComposing(true);
+    setCcSel(new Set());
     try { const r = await api.crmTemplates(); setTemplates(r.rows || []); } catch { /* ignore */ }
+    try { setRecipients(await api.crmRecipients(recordId)); } catch { setRecipients({ cc: [], reveal: [] }); }
+  };
+  const revealFromCompose = async (personId) => {
+    try { await api.revealPerson(personId); setRecipients(await api.crmRecipients(recordId)); toast('Revealed — now available to CC'); }
+    catch (e) { toast(/insufficient/i.test(e.message || '') ? 'Not enough credits to reveal' : 'Reveal failed: ' + (e.message || ''), 'error'); }
   };
   const applyTemplate = (id) => {
     const t = templates.find(x => String(x.id) === String(id));
@@ -623,7 +631,7 @@ function RecordDrawer({ recordId, onClose, onChanged }) {
     if (!emSubject.trim() && !emBody.trim()) { toast('Write a subject or message', 'error'); return; }
     setSending(true);
     try {
-      await api.crmSendEmail(recordId, { to: emTo.trim(), subject: emSubject, body: emBody });
+      await api.crmSendEmail(recordId, { to: emTo.trim(), subject: emSubject, body: emBody, cc: [...ccSel] });
       toast('Email sent');
       setComposing(false); setEmSubject(''); setEmBody('');
       await load(); onChanged?.();
@@ -682,6 +690,19 @@ function RecordDrawer({ recordId, onClose, onChanged }) {
                   </select>` : null}
                   <input type="text" placeholder="To" value=${emTo} onChange=${e => setEmTo(e.target.value)}
                     style=${{ width: '100%', marginBottom: '8px', background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border)', color: 'var(--text)', padding: '7px 9px', borderRadius: '6px', fontSize: '12.5px', boxSizing: 'border-box' }} />
+                  ${recipients.cc.length ? html`<div style=${{ marginBottom: '8px' }}>
+                    <div style=${{ fontSize: '10.5px', color: 'var(--text-dim)', marginBottom: '4px' }}>Also CC (people you've revealed at this company):</div>
+                    ${recipients.cc.map(c => html`<label key=${c.email} style=${{ display: 'inline-flex', alignItems: 'center', gap: '5px', fontSize: '11.5px', color: 'var(--text-muted)', marginRight: '14px', cursor: 'pointer' }}>
+                      <input type="checkbox" checked=${ccSel.has(c.email)} onChange=${() => setCcSel(prev => { const n = new Set(prev); n.has(c.email) ? n.delete(c.email) : n.add(c.email); return n; })} style=${{ accentColor: 'var(--accent)' }} /> ${c.label}
+                    </label>`)}
+                  </div>` : null}
+                  ${recipients.reveal.length ? html`<div style=${{ marginBottom: '8px', padding: '8px 10px', background: 'rgba(91,140,255,0.08)', border: '1px solid rgba(91,140,255,0.3)', borderRadius: '6px', fontSize: '11.5px', color: 'var(--text-muted)' }}>
+                    <div style=${{ marginBottom: '5px' }}>Decision-makers here you haven't revealed — reveal to reach the right person and lift your reply rate:</div>
+                    ${recipients.reveal.map(r => html`<span key=${r.person_id} style=${{ display: 'inline-flex', alignItems: 'center', gap: '6px', marginRight: '10px', marginBottom: '4px' }}>
+                      <span style=${{ color: 'var(--text)' }}>${r.name}</span>${r.title ? html`<span style=${{ color: 'var(--text-dim)' }}>· ${r.title}</span>` : null}
+                      <button onClick=${() => revealFromCompose(r.person_id)} style=${{ background: 'var(--accent)', border: 'none', color: '#fff', borderRadius: '4px', padding: '2px 9px', fontSize: '10.5px', cursor: 'pointer' }}>Reveal</button>
+                    </span>`)}
+                  </div>` : null}
                   <input type="text" placeholder="Subject" value=${emSubject} onChange=${e => setEmSubject(e.target.value)}
                     style=${{ width: '100%', marginBottom: '8px', background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border)', color: 'var(--text)', padding: '7px 9px', borderRadius: '6px', fontSize: '12.5px', boxSizing: 'border-box' }} />
                   <textarea placeholder="Write your message…  Use {name}, {company}… to personalize." value=${emBody} onChange=${e => setEmBody(e.target.value)}

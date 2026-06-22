@@ -19,6 +19,7 @@ import { ensureCrmRecord, logActivity, markContacted, buildMergeVars, applyMerge
 import { sendEmail, getFromAddress, inboundReplyTo } from '../lib/email.js';
 import { resolveSendIdentity, formatFrom } from '../lib/email_domains.js';
 import { checkDailyLimit } from '../lib/sendlimits.js';
+import { getRevealedSet } from '../lib/credits.js';
 
 const router = Router();
 
@@ -342,6 +343,7 @@ router.post('/records/:id/email', async (req, res, next) => {
     if (!to) return res.status(400).json({ error: 'no_recipient', reason: 'No email address on file — enter one.' });
     const limit = await checkDailyLimit(tenantId(req), req.tenant?.plan);
     if (!limit.allowed) return res.status(429).json({ error: 'daily_limit', reason: `You've hit today's sending limit (${limit.limit}/day). It resets tomorrow — or upgrade your plan for more.` });
+    const cc = Array.isArray(req.body?.cc) ? req.body.cc.map((s) => String(s).trim()).filter((s) => s.includes('@')).slice(0, 25) : [];
     // Personalize {tokens} for this recipient.
     const vars = buildMergeVars(r0);
     const subject  = applyMerge(String(req.body?.subject || '').trim(), vars);
@@ -350,9 +352,9 @@ router.post('/records/:id/email', async (req, res, next) => {
     const replyTo = actorEmail(req);
 
     const ins = await query(
-      `INSERT INTO crm_emails (tenant_id, record_id, direction, to_email, reply_to, subject, body_text, status, sent_by)
-       VALUES ($1,$2,'out',$3,$4,$5,$6,'queued',$7) RETURNING id`,
-      [tenantId(req), id, to, replyTo, subject, bodyText, replyTo]);
+      `INSERT INTO crm_emails (tenant_id, record_id, direction, to_email, cc_email, reply_to, subject, body_text, status, sent_by)
+       VALUES ($1,$2,'out',$3,$4,$5,$6,$7,'queued',$8) RETURNING id`,
+      [tenantId(req), id, to, cc.length ? cc.join(', ') : null, replyTo, subject, bodyText, replyTo]);
     const emailId = Number(ins.rows[0].id);
     // If inbound is configured, route replies through Bell (so they thread + stop
     // sequences); otherwise replies go straight to the human sender.
@@ -362,7 +364,7 @@ router.post('/records/:id/email', async (req, res, next) => {
       let from;
       try { from = formatFrom(await resolveSendIdentity(tenantId(req))); } catch (e) { console.error('[crm] identity resolve failed:', e.message); }
       from = from || await getFromAddress();
-      const sent = await sendEmail({ from, to, replyTo: effReplyTo, subject, text: bodyText });
+      const sent = await sendEmail({ from, to, cc: cc.length ? cc : undefined, replyTo: effReplyTo, subject, text: bodyText });
       await query(`UPDATE crm_emails SET status='sent', provider_message_id=$2, from_email=$3, reply_to=$4, sent_at=now() WHERE id=$1`,
         [emailId, sent.id, from, effReplyTo]);
       await logActivity(null, tenantId(req), id, 'email_out', {
@@ -433,6 +435,41 @@ router.get('/email-metrics', async (req, res, next) => {
       open_rate:  sent ? Math.round((m.opened / sent) * 1000) / 10 : 0,
       reply_rate: sent ? Math.round((m.replied_records / sent) * 1000) / 10 : 0,
     });
+  } catch (err) { next(err); }
+});
+
+// Outreach recipient suggestions for a company record:
+//  • cc      = revealed people (with email) + the company's other emails
+//  • reveal  = UNREVEALED decision-makers (reveal them to reach the right person)
+const DECISION_MAKER_RX = /\b(ceo|chief|cfo|coo|cto|cmo|founder|co-?founder|owner|president|managing\s*director|director|head\s*of|head\b|vp|vice\s*president|partner|general\s*manager|\bgm\b|manager|principal)\b/i;
+router.get('/records/:id/recipients', async (req, res, next) => {
+  try {
+    const tid = tenantId(req);
+    const rec = await query(`SELECT entity_type, entity_id FROM crm_records WHERE id=$1 AND tenant_id=$2`, [Number(req.params.id), tid]);
+    if (!rec.rows.length) return res.status(404).json({ error: 'not_found' });
+    if (rec.rows[0].entity_type !== 'company') return res.json({ cc: [], reveal: [] });
+    const companyId = Number(rec.rows[0].entity_id);
+    const ppl = await query(
+      `SELECT p.id, p.full_name, p.email, pc.title
+         FROM person_companies pc JOIN people p ON p.id = pc.person_id
+        WHERE pc.company_id = $1 AND COALESCE(pc.is_current, true) = true
+        ORDER BY pc.org_chart_level NULLS LAST, p.full_name LIMIT 100`, [companyId]);
+    const revealed = await getRevealedSet(tid, 'person', ppl.rows.map((x) => Number(x.id)));
+    const cc = [], reveal = [], seen = new Set();
+    for (const p of ppl.rows) {
+      const email = String(p.email || '').trim();
+      if (revealed.has(Number(p.id))) {
+        if (email && email.includes('@') && !seen.has(email.toLowerCase())) { seen.add(email.toLowerCase()); cc.push({ email, label: p.full_name + (p.title ? ' · ' + p.title : '') }); }
+      } else if (DECISION_MAKER_RX.test(String(p.title || ''))) {
+        reveal.push({ person_id: Number(p.id), name: p.full_name, title: p.title || '' });   // email NOT exposed (unrevealed)
+      }
+    }
+    const cont = await query(`SELECT value FROM company_contacts WHERE company_id=$1 AND type='email' LIMIT 20`, [companyId]).catch(() => ({ rows: [] }));
+    for (const c of cont.rows) {
+      const email = String(c.value || '').trim();
+      if (email && email.includes('@') && !seen.has(email.toLowerCase())) { seen.add(email.toLowerCase()); cc.push({ email, label: 'Company email' }); }
+    }
+    res.json({ cc, reveal });
   } catch (err) { next(err); }
 });
 
