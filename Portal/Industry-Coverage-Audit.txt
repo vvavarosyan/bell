@@ -1,0 +1,108 @@
+======================================================================
+  BELL — INDUSTRY COVERAGE AUDIT  (read-only)
+  2026-06-22T11:29:07.390Z
+======================================================================
+
+ACTIVE companies scanned:          75792
+
+Classified today (findable):       48556  (64.1%)
+UNCLASSIFIED today (missed):       27236  (35.9%)
+
+Breakdown of the unclassified:
+  • re-derive would classify:      8   → just run the backfill
+  • unmapped source label:         5266   → FIXABLE: extend the map
+  • no industry signal at all:     21962   → needs enrichment
+
+After re-derive + map work, residual TRUE gap (no signal): 21962  (29%)
+
+Projected coverage per industry (after re-derive) — tag counts:
+    18496  Construction & Contracting
+    18056  Trading & Distribution
+     6582  Healthcare
+     2281  Hospitality & F&B
+     2138  Information Technology
+     1721  Travel & Tourism
+     1606  Real Estate
+     1599  Facilities & Cleaning
+     1305  Banking & Finance
+     1295  Telecommunications
+     1080  Logistics & Transport
+     1075  Media & Entertainment
+     1071  Textiles & Garments
+     1062  Oil & Gas
+      933  Beauty & Wellness
+      904  Marketing & Advertising
+      894  Automotive
+      820  Consulting
+      586  Manufacturing
+      573  Retail
+      473  Agriculture & Fisheries
+      385  Furniture & Interior
+      368  Education & Training
+      362  Jewellery & Gold
+      345  Engineering
+      285  Security Services
+      220  Manpower & Recruitment
+      135  Pharmaceuticals
+      128  Sports & Recreation
+      120  Chemicals & Plastics
+       96  Aviation & Aerospace
+       83  Insurance
+       42  Energy & Utilities
+        7  Legal Services
+        1  Government & Public Sector
+
+Top 50 UNMAPPED source labels (on still-unclassified companies):
+  (extend server/lib/industry.js LABEL_MAP to cover these real labels)
+    7616  Services
+    1621  Industry
+     854  Car Service
+     752  Commercial Agents
+     606  Car Repair
+     580  Clothes Laundry & Iron
+     450  Barber Shops
+     318  Project & Branches & Management & Supervising
+     244  Kinder Gardens
+     238  Bakeries
+     230  Hosbitality Services
+     160  Internet Services
+     156  Commercial Services
+     150  Equipment Rentals
+      92  Establishing & Supervising Companies
+      80  Carpentry Work
+      72  Arts & Drawing
+      70  Marine Services
+      70  Physiotherapy& Massage
+      68  Air Conditioning Industry
+      62  Petrol Stations
+      56  Rodents & Epidemic Fighting
+      54  Installation Of Glass And Aluminium Panels
+      48  Startups
+      44  Lifts & Elevators Installation Works
+      40  Auditing Bureau
+      37  Startup
+      36  Car Park Rentals
+      32  Concrete Mould Fab.
+      32  Electrical Equipment Repair
+      28  Debts Collection
+      28  Car Rentals
+      26  Marine, Air And Land Survey Works
+      26  Auctions
+      26  Incleation Of Quran
+      24  Accounts Audit Office
+      22  Climate
+      22  Marine Activities & Services
+      22  Patent And Risht Reserve
+      22  Massage And Massage
+      21  AI, Startups
+      20  Energy and Environmental Technologies
+      20  Quantity Surey & Cost Managaement
+      20  Installation , Fix Measure And Control Devices And Equipment
+      20  Asphalt Industry
+      20  Ice Making
+      18  Company
+      18  Glass Industry
+      18  Patent Invention Ownership
+      18  Plumbing Works
+
+======================================================================

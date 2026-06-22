@@ -1,104 +1,44 @@
 ======================================================================
   BELL DATA-QUALITY CLEANUP — APPLY
-  2026-06-20T11:12:31.778Z
+  2026-06-20T11:45:36.870Z
 ======================================================================
 
-Scanned: 189645 companies, 36307 people
+Scanned: 189645 companies, 36288 people
 
 CHANGES (applied):
-  Phones    — deleted 0 invalid/dup, normalized 2
+  Phones    — deleted 0 invalid/dup, normalized 0
   Socials   — deleted 0 dup/personal/third-party, canonicalized 0
-  Emails    — deleted 3 other-domain, re-pointed primary on 119
-  Websites  — fixed 1776 markdown/broken URLs
-  People    — deleted 19 non-person "headings"
-  Titles    — cleared 12 bogus shared exec titles
-
-Sample contact changes:
-  · website: http://transtechnology.net/ → http://transtechnology.net
-  · website: https://innovationtechnology.com/ → https://innovationtechnology.com
-  · website: https://protectioninsurance.com/ → https://protectioninsurance.com
-  · website: https://businessconglomerate.com/ → https://businessconglomerate.com
-  · website: https://mediaproduction.net/ → https://mediaproduction.net
-  · website: http://www.freestonestrategies.com/ → http://www.freestonestrategies.com
-  · website: https://akdenizproje.com/ → https://akdenizproje.com
-  · website: https://binthamergarage.com/ → https://binthamergarage.com
-  · website: https://blacleaf.com/ → https://blacleaf.com
-  · website: https://solasmarineservices.com/ → https://solasmarineservices.com
-  · website: https://www.modrnmarketing.com/ → https://www.modrnmarketing.com
-  · website: http://wizkidz.com.qa/ → http://wizkidz.com.qa
-  · website: https://outlook.live.com/mail/ → https://outlook.live.com/mail
-  · website: http://alsadaf.qa/ → http://alsadaf.qa
-  · website: https://imperialconsulting.com/ → https://imperialconsulting.com
-  · website: https://www.construction.com/ → https://www.construction.com
-  · website: https://alkhuzaei.com/ → https://alkhuzaei.com
-  · website: https://infiniteevents.com/ → https://infiniteevents.com
-  · website: https://aldarproperties.com/ → https://aldarproperties.com
-  · website: https://cognyst.com/ → https://cognyst.com
-  · website: https://arabinsurance.com/ → https://arabinsurance.com
-  · website: https://towerproject.com/ → https://towerproject.com
-  · website: https://digitalsystems.com/ → https://digitalsystems.com
-  · website: https://khourystand.net/ → https://khourystand.net
-  · website: https://arkanbusiness.com/ → https://arkanbusiness.com
-  · website: http://globalelite.com/ → http://globalelite.com
-  · website: http://futureline.com/ → http://futureline.com
-  · website: http://imperialcommercial.com/ → http://imperialcommercial.com
-  · website: https://aegissecuritysystems.com/ → https://aegissecuritysystems.com
-  · website: https://glittersalon.com/ → https://glittersalon.com
-  · website: https://mayorka.com/ → https://mayorka.com
-  · website: https://lavenderlaundry.com/ → https://lavenderlaundry.com
-  · website: https://lavalin.com/ → https://lavalin.com
-  · website: https://foursquaredesigns.com/ → https://foursquaredesigns.com
-  · website: https://mycrown.net/ → https://mycrown.net
-  · website: https://brooklyn.com/ → https://brooklyn.com
-  · website: https://speedyasset.com/ → https://speedyasset.com
-  · website: https://almillennium.com/ → https://almillennium.com
-  · website: https://www.fullcolor.com/ → https://www.fullcolor.com
-  · website: https://galacticsolution.com/ → https://galacticsolution.com
-  · website: https://eastgate.com/ → https://eastgate.com
-  · website: https://qualityplus.com/ → https://qualityplus.com
-  · website: https://intouchrelocations.com/ → https://intouchrelocations.com
-  · website: https://lusailmedia.com/ → https://lusailmedia.com
-  · website: https://parisnails.com/ → https://parisnails.com
-  · website: https://entotox.com/ → https://entotox.com
-  · website: https://exotica.com/ → https://exotica.com
-  · website: https://www.nasseralalienterprises.com/ → https://www.nasseralalienterprises.com
-  · website: https://woodland.com/ → https://woodland.com
-  · website: https://intralink.net/ → https://intralink.net
-  · website: https://busulaiman.com/ → https://busulaiman.com
-  · website: https://unitedseas.net/ → https://unitedseas.net
-  · website: http://alrafaq.com/ → http://alrafaq.com
-  · website: https://alamina.qa/ → https://alamina.qa
-  · website: https://www.lighting.philips.com/ → https://www.lighting.philips.com
-  · website: https://almalik.com/ → https://almalik.com
-  · website: https://globalsystem.net/ → https://globalsystem.net
-  · website: https://alfarasha.com/ → https://alfarasha.com
-  · website: https://alkooheji.com/ → https://alkooheji.com
-  · website: http://rumaihi.com/ → http://rumaihi.com
+  Emails    — deleted 0 other-domain, re-pointed primary on 84
+  Websites  — fixed 0 markdown/broken URLs
+  People    — deleted 96 non-person "headings"
+  Titles    — cleared 0 bogus shared exec titles
 
 Sample people removed:
-  · #2000018749 "Misr Insurance Company - Egypt"
-  · #2000018759 "Qatari private shareholding company"
-  · #2000018761 "Qatari Public Shareholding Company"
-  · #2000018765 "listed Company"
-  · #2000019304 "1-Metito Utilities Limited, 2- Alattyia …"
-  · #2000019325 "Construction Development Company"
-  · #2000019330 "Mohammed Sultan Mohammed Al-Jaber, Osama…"
-  · #2000020049 "Qatar Industrial Manufacturing Company"
-  · #2000020452 "CONTACT PERSON"
-  · #2000020645 "Construction Development Company & Fiore…"
-  · #2000020648 "Construction Development Company"
-  · #2000023059 "Dr. Moopens Healthcare Management Servic…"
-  · #2000023990 "CONTACT PERSON"
-  · #2000035593 "LINKS MANAGEMENT SERVICES LLC"
-  · #2000012152 "Victoria Porter" (template)
-  · #2000012153 "Maria Flynn" (template)
-  · #2000012154 "Gina Kennedy" (template)
-  · #2000014223 "David Fox" (template)
-  · #2000017139 "Keliam U. Uison" (template)
-
-Sample exec-title clears:
-  · company #177827: cleared 8× "Chief Executive Officer"
-  · company #180630: cleared 4× "Managing Director"
+  · #2000004147 "John Doe" · Specialty (Urology)
+  · #2000004148 "John Doe" · Specialty (Urology)
+  · #2000004254 "Apple Diane Tamondong Paghubasan" · Registered General Nur…
+  · #2000004255 "Apple Diane Tamondong Paghubasan" · Registered General Nur…
+  · #2000010156 "Apple Grace Noval Cabaluna" · Registered General Nur…
+  · #2000011141 "Open Automation Software" · Plant Resource Manager…
+  · #2000011252 "Madison Payne" · - CEO @ Google
+  · #2000011253 "Joyce Cervantes" · - CEO @ Google
+  · #2000011254 "Wesley Ervin" · - CEO @ Google
+  · #2000011255 "Katherine Hogan" · - CEO @ Google
+  · #2000011256 "Justin Brooks" · - CEO @ Google
+  · #2000011257 "Olivia Little" · - CEO @ Google
+  · #2000011258 "Kimberly Greene" · - CEO @ Google
+  · #2000011259 "Madison Dunn" · - CEO @ Google
+  · #2000011328 "Full Name" · Website Lead
+  · #2000011332 "Information Technology" · Director (IT Director)
+  · #2000011401 "AI Solutions" · Lead automation, chatb…
+  · #2000011422 "Pest Control Software Qatar" · ODOO PARTNER in Qatar
+  · #2000011429 "ERP, Web Development Solutions" · ERPNext Qatar Channel …
+  · #2000011589 "Dell Technologies" · FY26 Global Alliances …
+  · #2000011590 "Dell Technologies Global Alliances" · Global Partner of the …
+  · #2000011718 "SAP Solutions" · Copyright &copy; 2026 …
+  · #2000011781 "Mexoteq Solutions" · Your technology partne…
+  · #2000012175 "Digital Platform Partners" · Become a Digital Platf…
+  · #2000012187 "Marketing Partners" · Partner Engineering Pr…
 
 Changes applied. Run a sync push to mirror them to production.
 ======================================================================
