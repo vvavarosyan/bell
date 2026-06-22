@@ -202,6 +202,7 @@ export const api = {
   crmUpdateTask:          (id, body) => request('/api/crm/tasks/' + id, { method: 'PATCH', body: JSON.stringify(body) }),
   crmDeleteTask:          (id) => request('/api/crm/tasks/' + id, { method: 'DELETE' }),
   crmSendEmail:           (id, body) => request(`/api/crm/records/${id}/email`, { method: 'POST', body: JSON.stringify(body) }),
+  crmRecipients:          (id) => request(`/api/crm/records/${id}/recipients`),
   crmTemplates:           () => request('/api/crm/templates'),
   crmSaveTemplate:        (body) => request('/api/crm/templates', { method: 'POST', body: JSON.stringify(body) }),
   crmUpdateTemplate:      (id, body) => request('/api/crm/templates/' + id, { method: 'PUT', body: JSON.stringify(body) }),
