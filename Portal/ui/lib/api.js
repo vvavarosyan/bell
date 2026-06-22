@@ -204,6 +204,9 @@ export const api = {
   crmSendEmail:           (id, body) => request(`/api/crm/records/${id}/email`, { method: 'POST', body: JSON.stringify(body) }),
   crmTemplates:           () => request('/api/crm/templates'),
   crmSaveTemplate:        (body) => request('/api/crm/templates', { method: 'POST', body: JSON.stringify(body) }),
+  crmUpdateTemplate:      (id, body) => request('/api/crm/templates/' + id, { method: 'PUT', body: JSON.stringify(body) }),
+  crmDeleteTemplate:      (id) => request('/api/crm/templates/' + id, { method: 'DELETE' }),
+  crmEmailMetrics:        () => request('/api/crm/email-metrics'),
   crmSequences:           () => request('/api/crm/sequences'),
   crmSequence:            (id) => request('/api/crm/sequences/' + id),
   crmCreateSequence:      (body) => request('/api/crm/sequences', { method: 'POST', body: JSON.stringify(body) }),
@@ -262,4 +265,11 @@ export const api = {
   // Account (the signed-in user's own profile / notifications / preferences)
   getAccount:             () => request('/api/account'),
   updateAccount:          (patch) => request('/api/account', { method: 'PATCH', body: JSON.stringify(patch) }),
+
+  // Outreach sending identity (per-tenant): Bell subdomain + custom domains.
+  outreachIdentities:     () => request('/api/outreach/identities'),
+  outreachConnectDomain:  (domain, from_email, from_name) => request('/api/outreach/domains', { method: 'POST', body: JSON.stringify({ domain, from_email, from_name }) }),
+  outreachVerifyDomain:   (id) => request('/api/outreach/domains/' + id + '/verify', { method: 'POST' }),
+  outreachRemoveDomain:   (id) => request('/api/outreach/domains/' + id, { method: 'DELETE' }),
+  outreachUpdateIdentity: (id, patch) => request('/api/outreach/identities/' + id, { method: 'PATCH', body: JSON.stringify(patch) }),
 };

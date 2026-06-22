@@ -48,7 +48,9 @@ import accountRouter           from './routes/account.js';
 import feedRouter              from './routes/feed.js';
 import crmRouter               from './routes/crm.js';
 import crmInboundRouter        from './routes/crm_inbound.js';
+import resendWebhookRouter     from './routes/resend_webhook.js';
 import detailRequestsRouter    from './routes/detail_requests.js';
+import outreachRouter          from './routes/outreach.js';
 import notificationsRouter     from './routes/notifications.js';
 import emailTemplatesRouter     from './routes/email_templates.js';
 import adminUsersRouter         from './routes/admin_users.js';
@@ -155,6 +157,7 @@ app.use('/api/open-data',  ...feature, openDataRouter);
 app.use('/api/feed',       ...feature, feedRouter);
 app.use('/api/crm',        ...feature, crmRouter);
 app.use('/api/detail-requests', ...feature, detailRequestsRouter);
+app.use('/api/outreach',        ...feature, outreachRouter);
 // Stats backs the app shell/header — signed in only, no subscription gate so an
 // unsubscribed user still gets a working frame before being routed to /subscribe.
 app.use('/api/stats',      requireAuth, statsRouter);
@@ -207,6 +210,8 @@ app.use('/api/billing',            billingRouter);
 app.use('/api/sync',               syncRouter);
 // Inbound email webhook — machine-to-machine, self-gated by BDI_CRM_INBOUND_TOKEN.
 app.use('/api/crm-inbound',        crmInboundRouter);
+// Resend email-events webhook (opens/clicks/delivery) — self-gated by ?secret.
+app.use('/api/resend-webhook',     resendWebhookRouter);
 
 // Static UI
 app.use(express.static(UI_DIR, { extensions: ['html'] }));

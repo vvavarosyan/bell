@@ -55,6 +55,9 @@ export function CrmTab() {
   const [seqList, setSeqList] = useState([]);
   const [isAdmin, setIsAdmin] = useState(false);
   const [bulkSeq, setBulkSeq] = useState('');
+  const [bulkCompose, setBulkCompose] = useState(null);   // null = closed; {subject,body} = open
+  const [bulkSending, setBulkSending] = useState(false);
+  const [emailMetrics, setEmailMetrics] = useState(null);
 
   const load = useCallback(async ({ silent = false } = {}) => {
     if (!silent) setLoading(true);
@@ -77,6 +80,7 @@ export function CrmTab() {
   useEffect(() => {
     (async () => { try { const m = await api.authMe(); setIsAdmin(m?.user?.role === 'platform_admin'); } catch { /* ignore */ } })();
     (async () => { try { const r = await api.crmSegments(); setSegments(r.rows || []); } catch { /* ignore */ } })();
+    (async () => { try { setEmailMetrics(await api.crmEmailMetrics()); } catch { /* ignore */ } })();
     (async () => { try { const r = await api.crmSequences(); setSeqList((r.rows || []).filter(s => s.status === 'active' && s.step_count > 0)); } catch { /* ignore */ } })();
   }, []);
 
@@ -94,6 +98,23 @@ export function CrmTab() {
     } catch (err) {
       toast(/admin_only/i.test(err.message) ? 'Running sequences is admin-only for now' : 'Bulk action failed: ' + err.message, 'error');
     }
+  };
+  const bulkSend = async () => {
+    const ids = [...selected];
+    if (!ids.length || !bulkCompose) return;
+    if (!(bulkCompose.subject || '').trim() && !(bulkCompose.body || '').trim()) { toast('Add a subject or message', 'error'); return; }
+    setBulkSending(true);
+    try {
+      const r = await api.crmBulk(ids, 'send', { subject: bulkCompose.subject, body: bulkCompose.body });
+      const parts = [`${r.sent} sent`];
+      if (r.no_email) parts.push(`${r.no_email} had no email`);
+      if (r.capped) parts.push(`${r.capped} over daily limit`);
+      if (r.failed) parts.push(`${r.failed} failed`);
+      toast(parts.join(' · '), r.sent ? 'success' : 'info');
+      setBulkCompose(null); clearSel(); await load({ silent: true });
+    } catch (e) {
+      toast(/daily_limit/i.test(e.message) ? 'Daily sending limit reached — try again tomorrow.' : 'Send failed: ' + (e.message || ''), 'error');
+    } finally { setBulkSending(false); }
   };
   const applySegment = (seg) => {
     const f = seg.filters || {};
@@ -163,12 +184,19 @@ export function CrmTab() {
         </span>`)}
       </div>` : null}
 
+      ${emailMetrics && emailMetrics.sent > 0 ? html`<div style=${{ display: 'flex', gap: '18px', fontSize: '11.5px', color: 'var(--text-muted)', marginBottom: '10px' }}>
+        <span>✉ <strong style=${{ color: 'var(--text)' }}>${emailMetrics.sent}</strong> sent</span>
+        <span>Open rate <strong style=${{ color: 'var(--text)' }}>${emailMetrics.open_rate}%</strong></span>
+        <span>Reply rate <strong style=${{ color: 'var(--text)' }}>${emailMetrics.reply_rate}%</strong></span>
+        ${emailMetrics.replies ? html`<span><strong style=${{ color: 'var(--text)' }}>${emailMetrics.replies}</strong> repl${emailMetrics.replies === 1 ? 'y' : 'ies'}</span>` : null}
+      </div>` : null}
+
       ${selected.size > 0 ? html`<div style=${{ display: 'flex', alignItems: 'center', gap: '10px', padding: '10px 14px', marginBottom: '10px', background: 'rgba(91,140,255,0.1)', border: '1px solid rgba(91,140,255,0.35)', borderRadius: '10px', flexWrap: 'wrap' }}>
         <strong style=${{ fontSize: '12.5px', color: 'var(--text)' }}>${selected.size} selected</strong>
         <span style=${{ fontSize: '11.5px', color: 'var(--text-muted)' }}>Set status:</span>
         ${STATUSES.map(s => html`<button key=${s} onClick=${() => bulk('status', { status: s })}
           style=${{ background: 'transparent', border: '1px solid var(--border)', color: STATUS_META[s].color, borderRadius: '6px', padding: '3px 9px', fontSize: '11px', cursor: 'pointer' }}>${STATUS_META[s].label}</button>`)}
-        ${isAdmin && seqList.length ? html`<span style=${{ width: '1px', height: '18px', background: 'var(--border)' }}></span>
+        ${seqList.length ? html`<span style=${{ width: '1px', height: '18px', background: 'var(--border)' }}></span>
           <select value=${bulkSeq} onChange=${e => setBulkSeq(e.target.value)}
             style=${{ background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: '6px', padding: '4px 8px', fontSize: '11.5px' }}>
             <option value="">Enroll in sequence…</option>
@@ -176,10 +204,25 @@ export function CrmTab() {
           </select>
           <button onClick=${() => bulkSeq && bulk('enroll', { sequence_id: Number(bulkSeq) })} disabled=${!bulkSeq}
             style=${{ background: 'var(--accent)', border: '1px solid var(--accent)', color: '#fff', borderRadius: '6px', padding: '4px 12px', fontSize: '11.5px', fontWeight: 600, cursor: bulkSeq ? 'pointer' : 'not-allowed' }}>Enroll</button>` : null}
+        <button onClick=${() => setBulkCompose({ subject: '', body: '' })} style=${{ background: 'var(--accent)', border: '1px solid var(--accent)', color: '#fff', borderRadius: '6px', padding: '4px 12px', fontSize: '11.5px', fontWeight: 600, cursor: 'pointer' }}>Send email</button>
         <span style=${{ flex: 1 }}></span>
         <button onClick=${() => bulk('archive', { archived: true })} style=${{ background: 'transparent', border: '1px solid var(--border)', color: 'var(--text-muted)', borderRadius: '6px', padding: '4px 10px', fontSize: '11.5px', cursor: 'pointer' }}>Archive</button>
         <button onClick=${clearSel} style=${{ background: 'transparent', border: 'none', color: 'var(--text-dim)', cursor: 'pointer', fontSize: '11.5px' }}>Clear</button>
       </div>` : null}
+
+      ${bulkCompose ? html`
+        <div onClick=${() => !bulkSending && setBulkCompose(null)} style=${{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
+          <div onClick=${e => e.stopPropagation()} style=${{ width: 'min(560px, 92vw)', background: 'var(--bg-elev-2, #1a2034)', border: '1px solid var(--border)', borderRadius: '10px', padding: '18px 20px' }}>
+            <div style=${{ fontSize: '14px', fontWeight: 600, marginBottom: '4px' }}>Send email to ${selected.size} ${selected.size === 1 ? 'record' : 'records'}</div>
+            <div style=${{ fontSize: '11.5px', color: 'var(--text-muted)', marginBottom: '12px' }}>Each email is personalized per recipient. Tokens: <code>{company} {name} {first_name} {industry} {city} {title} {website}</code></div>
+            <input value=${bulkCompose.subject} onInput=${e => setBulkCompose(c => ({ ...c, subject: e.target.value }))} placeholder="Subject" style=${{ width: '100%', boxSizing: 'border-box', background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: '6px', padding: '8px 10px', fontSize: '13px', marginBottom: '8px' }} />
+            <textarea value=${bulkCompose.body} onInput=${e => setBulkCompose(c => ({ ...c, body: e.target.value }))} placeholder="Hi {first_name}, …" style=${{ width: '100%', boxSizing: 'border-box', minHeight: '160px', background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: '6px', padding: '8px 10px', fontSize: '13px', resize: 'vertical' }}></textarea>
+            <div style=${{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '14px' }}>
+              <button onClick=${() => setBulkCompose(null)} disabled=${bulkSending} style=${{ background: 'transparent', border: '1px solid var(--border)', color: 'var(--text-muted)', borderRadius: '6px', padding: '7px 14px', fontSize: '12.5px', cursor: 'pointer' }}>Cancel</button>
+              <button onClick=${bulkSend} disabled=${bulkSending} style=${{ background: 'var(--accent)', border: '1px solid var(--accent)', color: '#fff', borderRadius: '6px', padding: '7px 16px', fontSize: '12.5px', fontWeight: 600, cursor: bulkSending ? 'wait' : 'pointer' }}>${bulkSending ? 'Sending…' : `Send to ${selected.size}`}</button>
+            </div>
+          </div>
+        </div>` : null}
 
       ${rows.length > 0 ? html`<label style=${{ display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: '11px', color: 'var(--text-dim)', marginBottom: '8px', cursor: 'pointer' }}>
         <input type="checkbox" checked=${allSelected} onChange=${toggleAll} /> Select all (${rows.length})
