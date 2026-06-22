@@ -620,8 +620,16 @@ function RecordDrawer({ recordId, onClose, onChanged }) {
     try { setRecipients(await api.crmRecipients(recordId)); } catch { setRecipients({ cc: [], reveal: [] }); }
   };
   const revealFromCompose = async (personId) => {
-    try { await api.revealPerson(personId); setRecipients(await api.crmRecipients(recordId)); toast('Revealed — now available to CC'); }
-    catch (e) { toast(/insufficient/i.test(e.message || '') ? 'Not enough credits to reveal' : 'Reveal failed: ' + (e.message || ''), 'error'); }
+    const before = recipients.cc.length;
+    try {
+      await api.revealPerson(personId);
+      const rec = await api.crmRecipients(recordId);
+      setRecipients(rec);
+      onChanged?.();   // refresh so they show revealed in People too
+      toast(rec.cc.length > before ? 'Revealed — added to the CC list.' : 'Revealed (and now unlocked in People) — but no email is on file for them yet.', rec.cc.length > before ? 'success' : 'info');
+    } catch (e) {
+      toast(/insufficient|402/i.test(e.message || '') ? 'Not enough credits to reveal this person.' : 'Reveal failed: ' + (e.message || ''), 'error');
+    }
   };
   const applyTemplate = (id) => {
     const t = templates.find(x => String(x.id) === String(id));
