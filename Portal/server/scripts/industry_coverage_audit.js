@@ -127,7 +127,7 @@ function report({ C, dist, unmapped, topN }) {
   L.push('');
   L.push('Breakdown of the unclassified:');
   L.push(`  • re-derive would classify:      ${C.wouldFix}   → just run the backfill`);
-  L.push(`  • unmapped source label:         ${C.gapWithLabel}   → FIXABLE: extend the map`);
+  L.push(`  • only generic labels left:      ${C.gapWithLabel}   → too vague to classify (Services/Industry/…)`);
   L.push(`  • no industry signal at all:     ${C.gapNoLabel}   → needs enrichment`);
   L.push('');
   L.push(`After re-derive + map work, residual TRUE gap (no signal): ${C.gapNoLabel}  (${pct(C.gapNoLabel)}%)`);
@@ -138,8 +138,8 @@ function report({ C, dist, unmapped, topN }) {
   const missing = CANONICAL_INDUSTRIES.filter((c) => !dist.has(c));
   if (missing.length) { L.push(''); L.push('  ⚠ canonical industries with ZERO companies: ' + missing.join(', ')); }
   L.push('');
-  L.push(`Top ${topN} UNMAPPED source labels (on still-unclassified companies):`);
-  L.push('  (extend server/lib/industry.js LABEL_MAP to cover these real labels)');
+  L.push(`Top ${topN} GENERIC labels left blank by design (on still-unclassified companies):`);
+  L.push('  (too generic to be a real trade — e.g. "Services", "Industry", "Company")');
   const us = [...unmapped.values()].sort((a, b) => b.n - a.n).slice(0, topN);
   if (!us.length) L.push('  (none — every unclassified company has no source signal)');
   for (const e of us) L.push(`  ${String(e.n).padStart(6)}  ${e.sample}`);
@@ -160,7 +160,8 @@ function selfTest() {
     { label: 'stored company', row: { name: 'X', industry: 'Banking & Finance', industries: ['Banking & Finance'] }, expect: 'stored' },
     { label: 'QCCI category → would-fix', row: { name: 'QNBN', industry: null, industries: null, extra_fields: { qcci_category: 'Communication Services' } }, expect: 'would-fix' },
     { label: 'name marker → would-fix', row: { name: 'Doha Medical Clinic', industry: null, industries: null, extra_fields: {} }, expect: 'would-fix' },
-    { label: 'unmapped label → gap-with-label', row: { name: 'Al Lulu Est', industry: null, industries: null, sector: 'Pearl Diving Services' }, expect: 'gap-with-label' },
+    { label: 'specific trade label → would-fix (own tag)', row: { name: 'Al Lulu Est', industry: null, industries: null, sector: 'Pearl Diving Services' }, expect: 'would-fix' },
+    { label: 'only generic label → gap-with-label', row: { name: 'Gen Est', industry: null, industries: null, sector: 'Services' }, expect: 'gap-with-label' },
     { label: 'no signal → gap-no-label', row: { name: 'ABC Est', industry: null, industries: null, extra_fields: {} }, expect: 'gap-no-label' },
   ];
   let pass = 0, fail = 0;

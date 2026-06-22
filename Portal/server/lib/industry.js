@@ -46,8 +46,8 @@ const LABEL_MAP = [
   ['Banking & Finance', ['bank', 'financ', 'invest', 'capital market', 'wealth', 'asset manage', 'exchange house', 'brokerage']],
   ['Insurance', ['insurance', 'takaful', 'reinsur']],
   ['Real Estate', ['real estate', 'real-estate', 'realestate', 'property', 'realty']],
-  ['Construction & Contracting', ['construct', 'contract', 'building', 'civil works', 'infrastructure', 'concrete', 'asphalt', 'aluminium', 'aluminum', 'plumbing']],
-  ['Engineering', ['engineering', 'electromechanical', 'air conditioning', 'elevator', 'escalator']],
+  ['Construction & Contracting', ['construct', 'contract', 'building', 'civil works', 'infrastructure', 'concrete', 'asphalt', 'aluminium', 'aluminum', 'plumbing', 'air conditioning', 'elevator', 'escalator', 'carpentry']],
+  ['Engineering', ['engineering', 'electromechanical']],
   ['Pharmaceuticals', ['pharmaceutical']],
   ['Healthcare', ['health', 'medical', 'hospital', 'clinic', 'pharma', 'dental', 'nursing', 'diagnostic', 'wellness clinic', 'physiotherap']],
   ['Logistics & Transport', ['logistic', 'transport', 'shipping', 'freight', 'cargo', 'warehous', 'supply chain', 'courier', 'maritime', 'port ']],
@@ -103,19 +103,44 @@ function arrText(v) {
   return String(v);
 }
 
+// Generic source labels that carry no real industry meaning — never promoted to
+// a specific-trade tag (a company with only these stays unclassified).
+const GENERIC_CATEGORY = new Set([
+  'services', 'service', 'commercial services', 'industry', 'industries', 'company',
+  'companies', 'general', 'others', 'other', 'miscellaneous', 'misc', 'business',
+  'n/a', 'na', 'none', 'unknown', 'establishment', 'various', 'activities',
+  'project & branches & management & supervising', 'establishing & supervising companies',
+]);
+
+function titleCaseLabel(s) {
+  return s.replace(/\w\S*/g, (t) => t[0].toUpperCase() + t.slice(1).toLowerCase());
+}
+
+/** Normalise a raw source category into a clean specific-trade tag, or null when
+ *  it's too generic / short to be a meaningful industry. */
+export function cleanCategoryLabel(raw) {
+  const s = String(raw || '').replace(/\s+/g, ' ').trim().replace(/[.;:,]+$/, '').trim();
+  if (s.length < 3) return null;
+  if (GENERIC_CATEGORY.has(s.toLowerCase())) return null;
+  return titleCaseLabel(s).replace(/\bHosbitality\b/g, 'Hospitality');
+}
+
 /**
  * Derive a company's industry tags + primary from its signals.
+ * Produces BOTH levels (Val 2026-06-22): the broad canonical industries AND the
+ * company's specific source-directory trade(s) (e.g. "Car Repair", "Carpentry"),
+ * so users can filter by either. `primary` stays a broad canonical when known.
  * @param {object} c   { name, legal_name, sector, description, industry, extra }
- *   `extra` is the company's extra_fields jsonb.
  * @returns {{ primary: string|null, tags: string[] }}
  */
 export function deriveIndustries(c = {}) {
   const extra = c.extra || c.extra_fields || {};
-  const tags = [];
-  const seen = new Set();
-  const add = (canon) => { if (canon && !seen.has(canon)) { seen.add(canon); tags.push(canon); } };
+  const broad = []; const seenB = new Set();
+  const addBroad = (x) => { if (x && !seenB.has(x)) { seenB.add(x); broad.push(x); } };
+  const specific = []; const seenS = new Set();
+  const addSpecific = (x) => { if (x && !seenS.has(x)) { seenS.add(x); specific.push(x); } };
 
-  // 1) Source-directory categories (most reliable) — order = priority.
+  // 1) Source-directory categories → broad canonical(s) AND the specific trade.
   const sourceLabels = [
     extra.qcci_sub_category, extra.qcci_category,
     c.sector,
@@ -124,16 +149,23 @@ export function deriveIndustries(c = {}) {
     extra.qse_sector, extra.qse_sector_name,
     extra.moci_activity, extra.moci_main_activity,
   ];
-  for (const label of sourceLabels) for (const canon of mapLabelToCanonical(label)) add(canon);
-
-  // 2) LinkedIn industry label.
-  for (const label of [extra.linkedin_industry_v2_taxonomy, extra.linkedin_industry]) {
-    for (const canon of mapLabelToCanonical(label)) add(canon);
+  for (const label of sourceLabels) {
+    for (const canon of mapLabelToCanonical(label)) addBroad(canon);
+    for (const part of String(label || '').split(/[,;|/]+/)) {
+      const spec = cleanCategoryLabel(part);
+      if (spec) addSpecific(spec);
+    }
   }
 
-  // 3) Strict name/description inference — only adds a definitive single match.
-  const inferred = inferIndustry(`${c.name || ''}  ${c.legal_name || ''}  ${c.description || extra.website_description || ''}`);
-  if (inferred) add(inferred);
+  // 2) LinkedIn industry label → broad canonical only.
+  for (const label of [extra.linkedin_industry_v2_taxonomy, extra.linkedin_industry]) {
+    for (const canon of mapLabelToCanonical(label)) addBroad(canon);
+  }
 
-  return { primary: tags[0] || null, tags };
+  // 3) Strict name/description inference → broad only (definitive single match).
+  const inferred = inferIndustry(`${c.name || ''}  ${c.legal_name || ''}  ${c.description || extra.website_description || ''}`);
+  if (inferred) addBroad(inferred);
+
+  const tags = [...broad, ...specific];
+  return { primary: broad[0] || specific[0] || null, tags };
 }
