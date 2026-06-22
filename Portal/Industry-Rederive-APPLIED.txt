@@ -1,83 +1,77 @@
 ==================================================================
   BELL INDUSTRY RE-DERIVATION — APPLIED
-  2026-06-22T13:09:05.938Z
+  2026-06-22T14:10:58.893Z
 ==================================================================
 
 Companies scanned:        189648
-Would change:             39852  (21%)
-  …of which multi-industry: 24555
+Would change:             3567  (2%)
+  …of which multi-industry: 3185
 Skipped (admin-locked):   0
 
 New PRIMARY-industry distribution (changed rows):
-    16760  Construction & Contracting
-     7052  Trading & Distribution
-     6955  Healthcare
-     1477  Hospitality & F&B
-     1196  Telecommunications
-      834  Oil & Gas
-      816  Textiles & Garments
-      731  Logistics & Transport
-      467  Travel & Tourism
-      441  Agriculture & Fisheries
-      432  Information Technology
-      396  Facilities & Cleaning
-      272  Manufacturing
-      263  Beauty & Wellness
-      252  Furniture & Interior
-      247  Retail
-      200  Jewellery & Gold
-      189  Security Services
-      189  Automotive
-      110  Pharmaceuticals
-      101  Banking & Finance
-       99  Marketing & Advertising
-       93  Chemicals & Plastics
-       59  Sports & Recreation
-       47  Education & Training
-       34  Energy & Utilities
-       26  Media & Entertainment
-       21  Engineering
-       18  Consulting
-       16  Real Estate
-       15  Marine
-       12  Insurance
-       11  Installation
-       10  Startup
-        6  Pipes
-        4  Aviation & Aerospace
+     2124  Information Technology
+      864  Banking & Finance
+      190  Construction & Contracting
+       77  Telecommunications
+       49  Marketing & Advertising
+       46  Consulting
+       32  Engineering
+       24  The Acquisition (By Way Of Leasing
+       23  Legal Services
+       21  Real Estate
+       21  Oil & Gas
+       13  Insurance
+       12  Healthcare
+       12  Trading & Distribution
+       11  Strategic
+        9  Logistics & Transport
+        8  Media & Entertainment
+        7  Manufacturing
+        5  Selection
+        3  Security Services
+        3  Sports & Recreation
+        2  Title Transfer
+        2  Travel & Tourism
+        2  Education & Training
         1  Government & Public Sector
+        1  Startups
+        1  Aviation & Aerospace
+        1  Energy & Utilities
+        1  Facilities & Cleaning
+        1  Textiles & Garments
+        1  Service Marks
 
 Sample changes (old primary → new tags · company):
-  · Data                   → Startup + Startups   ·   Aqilius AI
-  · Energy & Utilities     → Energy & Utilities   ·   Baker Hughes
-  · Information Technology → Information Technology   ·   Blue Future
-  · Enterprise Saas        → Startup + Startups   ·   Boardro
-  · Telecommunications     → Telecommunications + Information Technology   ·   Bravent
-  · Telecommunications     → Telecommunications + Information Technology   ·   Cisco QSTP-LLC
-  · Oil & Gas              → Oil & Gas   ·   ConocoPhillips Water Technology Ltd QSTP
-  · Telecommunications     → Telecommunications + Information Technology   ·   Contactless
-  · Fintech                → Startup + Startups   ·   Cyfirm
-  · Telecommunications     → Telecommunications + Information Technology   ·   Cypher Learning QSTP-LLC
-  · Information Technology → Information Technology + Security Services + Startup   ·   Cytomate
-  · Telecommunications     → Telecommunications + Information Technology   ·   Dakkaken Group
-  · Ai Drug Discovery      → Startup + Startups   ·   Denovo Sciences
-  · Enterprise Saas        → Startup + Startups   ·   ENABLE Tech
-  · Telecommunications     → Telecommunications + Information Technology   ·   Engineering Solutions QSTP-LLC
-  · Energy & Utilities     → Energy & Utilities   ·   ExxonMobil Research Qatar QSTP-B
-  · Telecommunications     → Telecommunications + Information Technology   ·   Fuego Digital Media QSTP-LLC
-  · Telecommunications     → Telecommunications + Information Technology   ·   Gamyra Tech QSTP-LLC
-  · Telecommunications     → Telecommunications + Information Technology   ·   GBI QSTP-LLC
-  · Energy & Utilities     → Energy & Utilities   ·   Iberdrola QSTP-LLC
-  · Telecommunications     → Telecommunications + Information Technology   ·   iHorizons QSTP-LLC
-  · Healthcare             → Healthcare + Startup + Startups   ·   Invicure
-  · Telecommunications     → Telecommunications + Information Technology   ·   Kamkalima
-  · Telecommunications     → Telecommunications + Information Technology   ·   Khayal Production
-  · Telecommunications     → Telecommunications + Information Technology   ·   Maktapp QSTP-LLC
-  · Healthcare             → Healthcare   ·   Meddy QSTP-LLC
-  · Telecommunications     → Telecommunications + Information Technology   ·   MEEZA QSTP-LLC
-  · Telecommunications     → Telecommunications + Information Technology   ·   Microsoft QSTP-LLC
-  · Healthcare             → Healthcare + Startup + Startups   ·   MindBridgeXR
-  · Deeptech               → Startup + Startups   ·   NovomAI
+  · Healthcare             → Healthcare + Information Technology + Startup + Startups   ·   MindBridgeXR
+  · Information Technology → Information Technology + Marketing & Advertising + Media & Entertainment + Consulting   ·   emoceans LLC
+  · Information Technology → Information Technology + Banking & Finance + Consulting + Security Services   ·   KD LLC
+  · Consulting             → Consulting   ·   La Fleche LLC
+  · Banking & Finance      → Banking & Finance + Real Estate + Construction & Contracting + Logistics & Transport + Trading & Distribution + Security Services + Government & Public Sector   ·   Taprano LLC
+  · Information Technology → Information Technology + Manufacturing + Media & Entertainment   ·   Aurelon Entertainment LLC
+  · Banking & Finance      → Banking & Finance + Real Estate + Construction & Contracting + Logistics & Transport + Trading & Distribution + Security Services + Government & Public Sector   ·   Panasia ME LLC
+  · Information Technology → Information Technology + Consulting   ·   OZONE TECHNOLOGIES LLC
+  · Information Technology → Information Technology   ·   Bufflix LLC
+  · Government & Public Se → Government & Public Sector   ·   Kalima Lab LLC
+  · Information Technology → Information Technology + Marketing & Advertising + Media & Entertainment + Consulting + Facilities & Cleaning   ·   Nyke Media Management and Advidory LLC
+  · Information Technology → Information Technology + Consulting   ·   Qunzia LLC
+  · Information Technology → Information Technology + Consulting   ·   Innovbon Technologies LLC
+  · Information Technology → Information Technology + Engineering + Manufacturing + Consulting   ·   Zartwell Engineering Group LLC
+  · Banking & Finance      → Banking & Finance + Logistics & Transport + Security Services   ·   Valtor LLC
+  · Information Technology → Information Technology + Banking & Finance + Consulting   ·   Cloudilic LLC
+  · Consulting             → Consulting   ·   Mora Advisory Partners LLC
+  · Banking & Finance      → Banking & Finance + Consulting   ·   Elite Advisory Group LLC
+  · Information Technology → Information Technology + Banking & Finance + Consulting   ·   Kunta Consulting LLC
+  · Information Technology → Information Technology   ·   ResQ LLC
+  · Banking & Finance      → Banking & Finance + Logistics & Transport + Security Services   ·   Dilmon Holdings LLC
+  · Information Technology → Information Technology + Marketing & Advertising + Media & Entertainment + Consulting   ·   IsoPixel Games LLC
+  · Information Technology → Information Technology + Consulting   ·   Dari Living LLC
+  · Marketing & Advertisin → Marketing & Advertising + Consulting   ·   JTEKKZ LLC
+  · Information Technology → Information Technology + Consulting   ·   Aquilon IT LLC
+  · Banking & Finance      → Banking & Finance + Logistics & Transport + Security Services   ·   Inception elite holding QFC LLC
+  · Information Technology → Information Technology   ·   M2P Innovation LLC
+  · Information Technology → Information Technology   ·   KUKiDU International LLC
+  · Information Technology → Information Technology + Healthcare + Consulting   ·   ONIXTONE LLC
+  · The Acquisition (By Wa → The Acquisition (By Way Of Leasing   ·   Badr Tech Solutions SPC LLC
 
 Applied. Run a sync push to mirror the new industries to production.
 ==================================================================

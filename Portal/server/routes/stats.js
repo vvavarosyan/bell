@@ -30,6 +30,8 @@ router.get('/', async (req, res, next) => {
     // pg returns counts as strings; coerce to numbers for the UI.
     const row = r.rows[0];
     for (const k of Object.keys(row)) row[k] = Number(row[k]);
+    // Internal enrichment cost (credits/USD we spend) is platform-admin only.
+    if (req.user?.role !== 'platform_admin') { delete row.credits_total; delete row.usd_total; }
     res.json(row);
   } catch (err) { next(err); }
 });

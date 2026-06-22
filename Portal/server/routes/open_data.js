@@ -7,6 +7,7 @@ import { query } from '../db.js';
 import { previewRecords } from '../sources/qatar_open_data/client.js';
 import { manualSync, getSchedulerState } from '../sources/qatar_open_data/scheduler.js';
 import { pickAndComputeChart } from '../sources/qatar_open_data/chart_picker.js';
+import { requireRole } from '../lib/auth.js';
 
 const router = Router();
 
@@ -262,7 +263,7 @@ router.get('/runs', async (req, res, next) => {
 // POST /sync/catalog          — refresh metadata only
 // POST /sync/records          — sync all changed datasets
 // POST /sync/records/:datasetId — sync one dataset (force)
-router.post('/sync/catalog', async (req, res, next) => {
+router.post('/sync/catalog', requireRole('platform_admin'), async (req, res, next) => {
   try {
     const result = await manualSync('catalog', { triggeredBy: req.body?.triggered_by });
     res.json(result);
@@ -271,7 +272,7 @@ router.post('/sync/catalog', async (req, res, next) => {
     next(err);
   }
 });
-router.post('/sync/records', async (req, res, next) => {
+router.post('/sync/records', requireRole('platform_admin'), async (req, res, next) => {
   try {
     const result = await manualSync('records', { triggeredBy: req.body?.triggered_by });
     res.json(result);
@@ -280,7 +281,7 @@ router.post('/sync/records', async (req, res, next) => {
     next(err);
   }
 });
-router.post('/sync/records/:datasetId', async (req, res, next) => {
+router.post('/sync/records/:datasetId', requireRole('platform_admin'), async (req, res, next) => {
   try {
     const result = await manualSync('one', {
       datasetIds: [String(req.params.datasetId)],
