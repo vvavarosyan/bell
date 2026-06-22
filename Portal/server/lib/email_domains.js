@@ -13,7 +13,10 @@ import { getKey } from '../keychain.js';
 import { query, withTransaction } from '../db.js';
 
 const RESEND_DOMAINS_URL = 'https://api.resend.com/domains';
-const OUTREACH_DOMAIN = (process.env.BDI_OUTREACH_DOMAIN || 'mail.bell.qa').trim();
+// The verified Bell sending domain. Defaults to bell.qa (already verified in
+// Resend). When the dedicated outreach subdomain mail.bell.qa is verified (paid
+// Resend plan), set BDI_OUTREACH_DOMAIN=mail.bell.qa — identities self-heal.
+const OUTREACH_DOMAIN = (process.env.BDI_OUTREACH_DOMAIN || 'bell.qa').trim();
 
 function slugLocalPart(slug) {
   return String(slug || 'team').toLowerCase().replace(/[^a-z0-9.-]/g, '').slice(0, 40) || 'team';
@@ -36,10 +39,17 @@ async function resend(method, path = '', body) {
 /** Ensure the tenant has its default Bell-subdomain sending identity. Idempotent. */
 export async function ensureBellIdentity(tenant) {
   const tenantId = Number(tenant.id);
-  const existing = await query(
-    `SELECT id FROM tenant_email_domains WHERE tenant_id = $1 AND kind = 'bell' LIMIT 1`, [tenantId]);
-  if (existing.rows.length) return;
   const fromEmail = `${slugLocalPart(tenant.slug)}@${OUTREACH_DOMAIN}`;
+  const existing = await query(
+    `SELECT id, domain FROM tenant_email_domains WHERE tenant_id = $1 AND kind = 'bell' LIMIT 1`, [tenantId]);
+  if (existing.rows.length) {
+    // Self-heal: if the parent outreach domain changed (env), update the Bell identity.
+    if (existing.rows[0].domain !== OUTREACH_DOMAIN) {
+      await query(`UPDATE tenant_email_domains SET domain = $2, from_email = $3 WHERE id = $1`,
+        [existing.rows[0].id, OUTREACH_DOMAIN, fromEmail]);
+    }
+    return;
+  }
   await withTransaction(async (client) => {
     const hasDefault = await client.query(
       `SELECT 1 FROM tenant_email_domains WHERE tenant_id = $1 AND is_default LIMIT 1`, [tenantId]);
