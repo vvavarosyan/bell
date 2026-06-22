@@ -26,6 +26,18 @@ export function AccountTab() {
     try { setData(await api.getAccount()); } catch { setData({ profile: {}, notifications: {}, preferences: {} }); }
   })(); }, []);
 
+  // Sending-identity hooks MUST be declared above the early return (Rules of Hooks).
+  const [identities, setIdentities] = useState(null);
+  const [domainForm, setDomainForm] = useState({ domain: '', from_email: '' });
+  const [domBusy, setDomBusy] = useState('');
+  useEffect(() => {
+    if (section !== 'domain' || identities !== null) return;
+    (async () => {
+      try { const r = await api.outreachIdentities(); setIdentities(r.identities || []); }
+      catch (e) { toast('Load failed: ' + (e.message || ''), 'error'); setIdentities([]); }
+    })();
+  }, [section, identities]);
+
   if (!data) return html`<div class="sys-page"><div class="sys-body"><div class="empty">Loading…</div></div></div>`;
 
   const p = data.profile || {};
@@ -41,15 +53,11 @@ export function AccountTab() {
   };
 
   // ---- Sending domain (per-tenant outreach identity) --------------------
-  const [identities, setIdentities] = useState(null);
-  const [domainForm, setDomainForm] = useState({ domain: '', from_email: '' });
-  const [domBusy, setDomBusy] = useState('');
-
+  // (state + load effect are declared above, with the other hooks)
   const loadIdentities = async () => {
     try { const r = await api.outreachIdentities(); setIdentities(r.identities || []); }
     catch (e) { toast('Load failed: ' + (e.message || ''), 'error'); setIdentities([]); }
   };
-  useEffect(() => { if (section === 'domain' && identities === null) loadIdentities(); }, [section]);
 
   const connectDomain = async () => {
     const d = (domainForm.domain || '').trim();
