@@ -50,16 +50,27 @@ router.get('/subscription', requireAuth, async (req, res, next) => {
     `, [req.tenant.id]);
     if (!r.rows.length) return res.status(404).json({ error: 'tenant_not_found' });
     const t = r.rows[0];
-    // Self-heal: if we think they're past_due but Stripe says the subscription is
-    // live (e.g. a one-off charge wrongly flipped it before this fix), correct it.
-    if (t.subscription_status === 'past_due' && t.stripe_subscription_id) {
+    // Refresh from Stripe ONLY when our period-end looks stale or the sub is
+    // past_due — keeps the next-renewal date accurate without a Stripe call on
+    // every load. Also self-heals a stale past_due.
+    const expStale = !t.plan_expires_at || new Date(t.plan_expires_at).getTime() < Date.now();
+    if (t.stripe_subscription_id && (t.subscription_status === 'past_due' || expStale)) {
       try {
         const live = await stripe().subscriptions.retrieve(t.stripe_subscription_id);
-        if (['active', 'trialing'].includes(live.status)) {
-          await query(`UPDATE tenants SET subscription_status = $2, past_due_at = NULL WHERE id = $1`, [req.tenant.id, live.status]);
-          t.subscription_status = live.status; t.past_due_at = null;
-        }
-      } catch { /* keep DB value if Stripe is unreachable */ }
+        const liveEnd = live.current_period_end ? new Date(live.current_period_end * 1000) : null;
+        const liveCancel = !!live.cancel_at_period_end;
+        const healed = (t.subscription_status === 'past_due' && ['active', 'trialing'].includes(live.status)) ? live.status : t.subscription_status;
+        await query(
+          `UPDATE tenants SET plan_expires_at = COALESCE($2, plan_expires_at), cancel_at_period_end = $3,
+                 subscription_status = $4, past_due_at = CASE WHEN $4 IN ('active','trialing') THEN NULL ELSE past_due_at END
+             WHERE id = $1`,
+          [req.tenant.id, liveEnd, liveCancel, healed]
+        );
+        if (liveEnd) t.plan_expires_at = liveEnd;
+        t.cancel_at_period_end = liveCancel;
+        if (['active', 'trialing'].includes(healed)) t.past_due_at = null;
+        t.subscription_status = healed;
+      } catch { /* keep DB values if Stripe is unreachable */ }
     }
     const GRACE_MS = 24 * 60 * 60 * 1000;
     const pastDue = t.subscription_status === 'past_due' && !!t.past_due_at;
@@ -233,6 +244,36 @@ router.post('/change-plan', requireAuth, async (req, res, next) => {
   } catch (err) {
     if (err.message?.includes('STRIPE_SECRET_KEY')) return res.status(500).json({ error: 'stripe_not_configured', message: err.message });
     next(err);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// POST /api/billing/change-plan/preview — what an upgrade would cost right now
+// (the prorated charge). Best-effort: returns { amount_due, currency } or null.
+// ---------------------------------------------------------------------------
+router.post('/change-plan/preview', requireAuth, async (req, res, next) => {
+  try {
+    const plan = planById(req.body?.plan_id);
+    if (!plan || !plan.self_serve) return res.status(400).json({ error: 'invalid_plan' });
+    const newPrice = stripePriceId(plan);
+    if (!newPrice) return res.json({ amount_due: null, preview_unavailable: true });
+    const r = await query(`SELECT plan, stripe_customer_id, stripe_subscription_id FROM tenants WHERE id = $1`, [req.tenant.id]);
+    const cur = r.rows[0];
+    if (!cur?.stripe_subscription_id) return res.json({ amount_due: null });
+    const curPlan = planById(cur.plan);
+    const isUpgrade = (plan.price_qar || 0) > (curPlan?.price_qar || 0);
+    if (!isUpgrade) return res.json({ change: 'downgrade', amount_due: 0 });
+    const sub = await stripe().subscriptions.retrieve(cur.stripe_subscription_id);
+    const itemId = sub.items?.data?.[0]?.id;
+    const upcoming = await stripe().invoices.retrieveUpcoming({
+      customer: cur.stripe_customer_id,
+      subscription: cur.stripe_subscription_id,
+      subscription_items: [{ id: itemId, price: newPrice }],
+      subscription_proration_behavior: 'always_invoice',
+    });
+    res.json({ change: 'upgrade', amount_due: upcoming.amount_due, currency: (upcoming.currency || 'qar').toUpperCase() });
+  } catch (err) {
+    res.json({ amount_due: null, preview_unavailable: true });   // degrade gracefully
   }
 });
 
@@ -687,11 +728,14 @@ async function handleInvoicePaid(inv) {
      WHERE id = $1
   `, [t.id]);
   console.log(`[billing] tenant ${t.id} invoice paid plan=${plan.id} — credits via monthly grant`);
+  const firstInvoice = inv.billing_reason === 'subscription_create';
   notifyTenant(t.id, {
     category: 'account', type: 'payment_succeeded',
-    title: 'Subscription renewed',
-    body: 'Your payment went through and your credits for the new period are ready.',
-    link: '/billing', icon: 'megaphone',
+    title: firstInvoice ? 'Welcome to Bell — your subscription is active' : 'Subscription renewed',
+    body: firstInvoice
+      ? `Your ${plan.name} plan is active and your ${(plan.credits || 0).toLocaleString()} monthly credits are ready. Manage everything from the Billing page.`
+      : 'Your payment went through and your credits for the new period are ready.',
+    link: '/billing', icon: 'megaphone', email: true,
   }).catch(() => {});
 }
 
@@ -726,8 +770,8 @@ async function handlePaymentIntentSucceeded(pi) {
     notifyTenant(tenantId, {
       category: 'account', type: 'credits_purchased',
       title: `${credits.toLocaleString()} credits added`,
-      body: 'Your credit top-up went through — the credits are in your balance.',
-      link: '/billing', icon: 'megaphone',
+      body: `Your credit top-up of ${credits.toLocaleString()} credits went through — they're in your balance now.`,
+      link: '/billing', icon: 'megaphone', email: true,
     }).catch(() => {});
   }
 }

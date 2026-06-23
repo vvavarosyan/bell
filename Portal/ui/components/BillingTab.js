@@ -204,7 +204,13 @@ export function BillingTab() {
   };
 
   const changePlan = async (planId, kind) => {
-    if (kind === 'down' && !window.confirm('Schedule a downgrade? You keep your current plan and credits until the end of this billing cycle, then renew on the lower plan.')) return;
+    if (kind === 'up') {
+      let msg = 'Upgrade now? You will be charged the prorated difference immediately, then the new rate at renewal.';
+      try { const pv = await api.billingChangePlanPreview(planId); if (pv && pv.amount_due != null) msg = `Upgrade now? You'll be charged about ${money(pv.amount_due, pv.currency)} today (prorated), then the new rate at each renewal.`; } catch { /* preview optional */ }
+      if (!window.confirm(msg)) return;
+    } else if (kind === 'down') {
+      if (!window.confirm('Schedule a downgrade? You keep your current plan and credits until the end of this billing cycle, then renew on the lower plan.')) return;
+    }
     setChanging(planId);
     try {
       const r = await api.billingChangePlan(planId);
@@ -309,8 +315,7 @@ export function BillingTab() {
         <div class="sys-section">
           <h2>Plan</h2>
           <div class="sys-kv"><span class="k">Current plan</span><span class="v">${sub?.plan_label || sub?.plan || 'No plan'}</span>${pill(sub?.subscription_status)}</div>
-          ${sub?.plan_renewed_at ? html`<div class="sys-kv"><span class="k">Renews</span><span>${fmtDate(sub.plan_renewed_at)}</span></div>` : null}
-          ${sub?.plan_expires_at ? html`<div class="sys-kv"><span class="k">Period ends</span><span>${fmtDate(sub.plan_expires_at)}</span></div>` : null}
+          ${sub?.plan_expires_at ? html`<div class="sys-kv"><span class="k">${sub.cancel_at_period_end ? 'Access until' : 'Renews on'}</span><span>${fmtDate(sub.plan_expires_at)}</span></div>` : null}
 
           ${sub?.pending_plan ? html`<div style=${{ marginTop: '12px', padding: '10px 14px', borderRadius: '8px', border: '1px solid var(--amber)', background: 'rgba(245,158,11,0.08)', fontSize: '12.5px', color: 'var(--text)' }}>
             Scheduled: your plan changes to <b>${sub.pending_plan_label}</b>${sub.plan_expires_at ? ' on ' + fmtDate(sub.plan_expires_at) : ' at the next renewal'}. You keep <b>${sub.plan_label}</b> and its credits until then.

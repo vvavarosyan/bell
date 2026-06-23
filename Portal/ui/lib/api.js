@@ -271,6 +271,7 @@ export const api = {
   billingCancel:           () => request('/api/billing/cancel', { method: 'POST', body: '{}' }),
   billingResume:           () => request('/api/billing/resume', { method: 'POST', body: '{}' }),
   billingChangePlan:      (plan_id) => request('/api/billing/change-plan', { method: 'POST', body: JSON.stringify({ plan_id }) }),
+  billingChangePlanPreview: (plan_id) => request('/api/billing/change-plan/preview', { method: 'POST', body: JSON.stringify({ plan_id }) }),
 
   // Account (the signed-in user's own profile / notifications / preferences)
   getAccount:             () => request('/api/account'),
