@@ -45,7 +45,7 @@ router.get('/subscription', requireAuth, async (req, res, next) => {
   try {
     const r = await query(`
       SELECT plan, subscription_status, plan_renewed_at, plan_expires_at, past_due_at, pending_plan,
-             credit_balance, stripe_customer_id, stripe_subscription_id
+             cancel_at_period_end, credit_balance, stripe_customer_id, stripe_subscription_id
         FROM tenants WHERE id = $1
     `, [req.tenant.id]);
     if (!r.rows.length) return res.status(404).json({ error: 'tenant_not_found' });
@@ -75,6 +75,7 @@ router.get('/subscription', requireAuth, async (req, res, next) => {
       past_due_at:         t.past_due_at,
       pending_plan:        t.pending_plan || null,
       pending_plan_label:  t.pending_plan ? (planById(t.pending_plan)?.name || t.pending_plan) : null,
+      cancel_at_period_end: !!t.cancel_at_period_end,
       grace_hours_left:    graceMsLeft != null ? Math.ceil(graceMsLeft / 3600000) : null,
       frozen:              pastDue ? graceMsLeft <= 0 : ['canceled', 'unpaid'].includes(t.subscription_status),
       has_stripe_customer: !!t.stripe_customer_id,
@@ -231,6 +232,97 @@ router.post('/change-plan', requireAuth, async (req, res, next) => {
     return res.json({ ok: true, change: 'downgrade', plan: cur.plan, pending_plan: plan.id, effective: eff });
   } catch (err) {
     if (err.message?.includes('STRIPE_SECRET_KEY')) return res.status(500).json({ error: 'stripe_not_configured', message: err.message });
+    next(err);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// GET /api/billing/payment-method — the customer's default card (brand/last4).
+// ---------------------------------------------------------------------------
+router.get('/payment-method', requireAuth, async (req, res, next) => {
+  try {
+    const r = await query(`SELECT stripe_customer_id FROM tenants WHERE id = $1`, [req.tenant.id]);
+    const cid = r.rows[0]?.stripe_customer_id;
+    if (!cid) return res.json({ card: null });
+    const cust = await stripe().customers.retrieve(cid);
+    let pmId = cust.invoice_settings?.default_payment_method;
+    if (!pmId) {
+      const pms = await stripe().paymentMethods.list({ customer: cid, type: 'card', limit: 1 });
+      pmId = pms.data?.[0]?.id;
+    }
+    if (!pmId) return res.json({ card: null });
+    const pm = typeof pmId === 'string' ? await stripe().paymentMethods.retrieve(pmId) : pmId;
+    const c = pm.card || {};
+    res.json({ card: { brand: c.brand || 'card', last4: c.last4 || '••••', exp_month: c.exp_month, exp_year: c.exp_year } });
+  } catch (err) { if (err.message?.includes('STRIPE_SECRET_KEY')) return res.json({ card: null }); next(err); }
+});
+
+// ---------------------------------------------------------------------------
+// POST /api/billing/payment-method/setup — SetupIntent for adding/replacing a
+// card in-app (Stripe Payment Element). Returns { client_secret }.
+// ---------------------------------------------------------------------------
+router.post('/payment-method/setup', requireAuth, async (req, res, next) => {
+  try {
+    const cid = await getOrCreateStripeCustomer(req.tenant, req.user);
+    const si = await stripe().setupIntents.create({
+      customer: cid, payment_method_types: ['card'], usage: 'off_session',
+    });
+    res.json({ client_secret: si.client_secret });
+  } catch (err) {
+    if (err.message?.includes('STRIPE_SECRET_KEY')) return res.status(500).json({ error: 'stripe_not_configured' });
+    next(err);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// POST /api/billing/payment-method/default — set the just-saved card as the
+// default for the customer + their subscription. Body: { payment_method_id }.
+// ---------------------------------------------------------------------------
+router.post('/payment-method/default', requireAuth, async (req, res, next) => {
+  try {
+    const pmId = String(req.body?.payment_method_id || '');
+    if (!pmId) return res.status(400).json({ error: 'missing_payment_method' });
+    const r = await query(`SELECT stripe_customer_id, stripe_subscription_id FROM tenants WHERE id = $1`, [req.tenant.id]);
+    const cid = r.rows[0]?.stripe_customer_id;
+    const subId = r.rows[0]?.stripe_subscription_id;
+    if (!cid) return res.status(400).json({ error: 'no_customer' });
+    await stripe().customers.update(cid, { invoice_settings: { default_payment_method: pmId } });
+    if (subId) await stripe().subscriptions.update(subId, { default_payment_method: pmId }).catch(() => {});
+    res.json({ ok: true });
+  } catch (err) {
+    if (err.message?.includes('STRIPE_SECRET_KEY')) return res.status(500).json({ error: 'stripe_not_configured' });
+    next(err);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// POST /api/billing/cancel — cancel the subscription at the end of the current
+// period (no immediate loss of access). POST /resume undoes it.
+// ---------------------------------------------------------------------------
+router.post('/cancel', requireAuth, async (req, res, next) => {
+  try {
+    const r = await query(`SELECT stripe_subscription_id FROM tenants WHERE id = $1`, [req.tenant.id]);
+    const subId = r.rows[0]?.stripe_subscription_id;
+    if (!subId) return res.status(400).json({ error: 'no_subscription' });
+    const sub = await stripe().subscriptions.update(subId, { cancel_at_period_end: true });
+    await query(`UPDATE tenants SET cancel_at_period_end = true, updated_at = now() WHERE id = $1`, [req.tenant.id]);
+    res.json({ ok: true, cancels_at: sub.current_period_end ? new Date(sub.current_period_end * 1000).toISOString() : null });
+  } catch (err) {
+    if (err.message?.includes('STRIPE_SECRET_KEY')) return res.status(500).json({ error: 'stripe_not_configured' });
+    next(err);
+  }
+});
+
+router.post('/resume', requireAuth, async (req, res, next) => {
+  try {
+    const r = await query(`SELECT stripe_subscription_id FROM tenants WHERE id = $1`, [req.tenant.id]);
+    const subId = r.rows[0]?.stripe_subscription_id;
+    if (!subId) return res.status(400).json({ error: 'no_subscription' });
+    await stripe().subscriptions.update(subId, { cancel_at_period_end: false });
+    await query(`UPDATE tenants SET cancel_at_period_end = false, updated_at = now() WHERE id = $1`, [req.tenant.id]);
+    res.json({ ok: true });
+  } catch (err) {
+    if (err.message?.includes('STRIPE_SECRET_KEY')) return res.status(500).json({ error: 'stripe_not_configured' });
     next(err);
   }
 });
@@ -544,6 +636,7 @@ async function handleSubscriptionChange(sub) {
       scheduledDowngrade,
     ]);
   });
+  await query(`UPDATE tenants SET cancel_at_period_end = $2 WHERE id = $1`, [tenantId, !!sub.cancel_at_period_end]);
 
   console.log(`[billing] tenant ${tenantId} → plan=${plan?.id || '?'} status=${status} period_end=${currentPeriodEnd?.toISOString()}`);
 }
