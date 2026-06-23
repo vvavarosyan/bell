@@ -211,6 +211,36 @@ export async function revealBulk(tenantId, entityType, ids, actor) {
  * Admin add/deduct. delta may be negative; balance is clamped at 0.
  * Returns the new balance.
  */
+/**
+ * Grant paid top-up credits to a tenant, exactly once per Stripe invoice.
+ * Idempotent via credit_purchases (invoice id is the PK), so webhook retries
+ * can't double-grant. Also records a credit_ledger entry for the usage history.
+ */
+export async function grantPurchasedCredits(tenantId, credits, invoiceId, amount, actor = 'purchase') {
+  const n = Math.floor(Number(credits) || 0);
+  if (!tenantId || !invoiceId || n <= 0) return { granted: 0 };
+  return withTransaction(async (client) => {
+    // Claim this invoice; if already recorded, another delivery beat us to it.
+    const claim = await client.query(
+      `INSERT INTO credit_purchases (stripe_invoice_id, tenant_id, credits, amount)
+       VALUES ($1,$2,$3,$4) ON CONFLICT (stripe_invoice_id) DO NOTHING`,
+      [String(invoiceId), tenantId, n, amount != null ? Math.round(Number(amount)) : null]
+    );
+    if (claim.rowCount === 0) return { granted: 0, duplicate: true };
+    const balRow = await client.query(`SELECT credit_balance FROM tenants WHERE id = $1 FOR UPDATE`, [tenantId]);
+    if (!balRow.rows.length) return { granted: 0 };
+    const balance = Number(balRow.rows[0].credit_balance) || 0;
+    const newBal = balance + n;
+    await client.query(`UPDATE tenants SET credit_balance = $2, updated_at = now() WHERE id = $1`, [tenantId, newBal]);
+    await client.query(
+      `INSERT INTO credit_ledger (tenant_id, delta, reason, balance_after, ref_type, actor)
+       VALUES ($1, $2, 'credit_purchase', $3, 'stripe_invoice', $4)`,
+      [tenantId, n, newBal, actor]
+    );
+    return { granted: n, balance: newBal };
+  });
+}
+
 export async function adminAdjust(tenantId, delta, actor, note) {
   return withTransaction(async (client) => {
     const balRow = await client.query(

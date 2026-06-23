@@ -490,17 +490,22 @@ export async function requireActiveSubscription(req, res, next) {
 
   // Look up live subscription status from DB
   const r = await query(`
-    SELECT subscription_status, plan_expires_at FROM tenants WHERE id = $1
+    SELECT subscription_status, plan_expires_at, past_due_at FROM tenants WHERE id = $1
   `, [req.tenant.id]);
   const t = r.rows[0];
-  const isActive = t && ['active', 'trialing'].includes(t.subscription_status);
+  const status = t?.subscription_status;
+  if (['active', 'trialing'].includes(status)) return next();
 
-  if (!isActive) {
-    return res.status(402).json({
-      error: 'subscription_required',
-      reason: t?.subscription_status || 'no_subscription',
-      hint: 'Subscribe at /subscribe to access this resource.',
-    });
+  // Grace window: after a failed payment (past_due) access stays open for 24h
+  // so the user can fix their card before the account freezes.
+  if (status === 'past_due' && t.past_due_at) {
+    const GRACE_MS = 24 * 60 * 60 * 1000;
+    if (Date.now() - new Date(t.past_due_at).getTime() < GRACE_MS) return next();
   }
-  next();
+
+  return res.status(402).json({
+    error: 'subscription_required',
+    reason: status || 'no_subscription',
+    hint: 'Subscribe at /subscribe to access this resource.',
+  });
 }

@@ -262,6 +262,9 @@ export const api = {
   billingPortal:          () => request('/api/billing/portal', { method: 'POST', body: '{}' }),
   billingInvoices:        () => request('/api/billing/invoices'),
   billingUsage:           (limit = 50) => request('/api/billing/usage?limit=' + limit),
+  billingCreditPricing:   () => request('/api/billing/credit-pricing'),
+  billingBuyCredits:      (credits) => request('/api/billing/buy-credits', { method: 'POST', body: JSON.stringify({ credits }) }),
+  billingChangePlan:      (plan_id) => request('/api/billing/change-plan', { method: 'POST', body: JSON.stringify({ plan_id }) }),
 
   // Account (the signed-in user's own profile / notifications / preferences)
   getAccount:             () => request('/api/account'),
