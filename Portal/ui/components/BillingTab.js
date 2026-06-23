@@ -175,10 +175,12 @@ export function BillingTab() {
   const [checkout, setCheckout] = useState(null);
   const [cardSetup, setCardSetup] = useState(null);
   const [cancelBusy, setCancelBusy] = useState(false);
+  const [autoR, setAutoR] = useState(null);
+  const [autoSaving, setAutoSaving] = useState(false);
 
   useEffect(() => { (async () => {
     try {
-      const [s, u, inv, pl, pr, mode, meR, pm] = await Promise.all([
+      const [s, u, inv, pl, pr, mode, meR, pm, ar] = await Promise.all([
         api.billingSubscription().catch(() => null),
         api.billingUsage().catch(() => null),
         api.billingInvoices().catch(() => ({ invoices: [] })),
@@ -187,10 +189,11 @@ export function BillingTab() {
         fetch('/api/auth/mode').then(r => r.json()).catch(() => ({})),
         api.authMe().catch(() => null),
         api.billingPaymentMethod().catch(() => ({ card: null })),
+        api.billingAutorecharge().catch(() => null),
       ]);
       setSub(s); setUsage(u); setInvoices(inv?.invoices || []);
       setPlans(pl?.plans || []); setPricing(pr); setPk(mode?.stripe_publishable_key || null);
-      setMe(meR); setCard(pm?.card || null);
+      setMe(meR); setCard(pm?.card || null); setAutoR(ar);
     } finally { setLoading(false); }
   })(); }, []);
 
@@ -255,6 +258,17 @@ export function BillingTab() {
     try { await api.billingBuyCreditsConfirm(c.payment_intent_id); } catch { /* webhook will grant */ }
     toast(`Added ${c.credits.toLocaleString()} credits to your balance.`);
     await reloadUsage();
+  };
+
+  const setAutoField = (k, v) => setAutoR(a => ({ ...(a || {}), [k]: v }));
+  const saveAutoR = async () => {
+    setAutoSaving(true);
+    try {
+      const r = await api.billingSetAutorecharge({ enabled: !!autoR.enabled, threshold: Math.floor(Number(autoR.threshold) || 0), amount: Math.floor(Number(autoR.amount) || (pricing?.min || 500)) });
+      setAutoR(a => ({ ...a, ...r }));
+      toast(r.enabled ? 'Auto-recharge is on.' : 'Auto-recharge is off.');
+    } catch (e) { toast(e.body?.error === 'no_card' ? 'Add a card first to enable auto-recharge.' : (e.body?.detail || e.message || 'Save failed'), 'error'); }
+    finally { setAutoSaving(false); }
   };
 
   const startCardUpdate = async () => {
@@ -390,6 +404,22 @@ export function BillingTab() {
               </div>
             `}
           </div>
+
+          ${autoR ? html`<div style=${{ marginTop: '18px', maxWidth: '560px', border: '1px solid var(--border)', borderRadius: '12px', padding: '16px' }}>
+            <label style=${{ display: 'inline-flex', alignItems: 'center', gap: '8px', fontWeight: 600, fontSize: '14px', color: 'var(--text)', cursor: 'pointer' }}>
+              <input type="checkbox" checked=${!!autoR.enabled} onChange=${e => setAutoField('enabled', e.target.checked)} style=${{ width: '16px', height: '16px', accentColor: 'var(--accent)' }} />
+              Auto-recharge
+            </label>
+            <div class="sys-hint" style=${{ marginTop: '4px' }}>When your balance drops below the threshold, Bell automatically buys more credits on your saved card — so you never run out mid-task.</div>
+            <div style=${{ display: 'flex', gap: '16px', alignItems: 'flex-end', marginTop: '10px', flexWrap: 'wrap' }}>
+              <div><div style=${{ fontSize: '11px', color: 'var(--text-dim)', marginBottom: '4px' }}>When balance falls below</div>
+                <input class="sys-input" type="number" min="0" step="100" value=${autoR.threshold} onInput=${e => setAutoField('threshold', e.target.value)} style=${{ width: '130px' }} /></div>
+              <div><div style=${{ fontSize: '11px', color: 'var(--text-dim)', marginBottom: '4px' }}>Top up by (credits)</div>
+                <input class="sys-input" type="number" min=${pricing?.min || 500} max=${pricing?.max || 100000} step="100" value=${autoR.amount} onInput=${e => setAutoField('amount', e.target.value)} style=${{ width: '130px' }} /></div>
+              <button class="sys-btn" disabled=${autoSaving} onClick=${saveAutoR}>${autoSaving ? 'Saving…' : 'Save'}</button>
+            </div>
+            ${(() => { const aq = quote(autoR.amount); return html`<div class="sys-hint" style=${{ marginTop: '8px', marginBottom: 0 }}>Each recharge buys ${Number(autoR.amount || 0).toLocaleString()} credits${aq && !aq.error ? ' (' + qar(aq.total) + ')' : ''} — at most once every 10 minutes. ${!card ? 'Add a card above to enable.' : ''}</div>`; })()}
+          </div>` : null}
 
           <div style=${{ marginTop: '18px', maxWidth: '640px' }}>
             <div class="sys-hint" style=${{ marginBottom: '4px' }}>Recent activity</div>
