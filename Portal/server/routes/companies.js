@@ -236,6 +236,7 @@ router.get('/', async (req, res, next) => {
     if (req.query.score_min)   { params.push(Number(req.query.score_min));   where.push(`companies.bell_score >= $${params.length}`); }
     // data-completeness toggles
     if (req.query.has_website  === '1') where.push(`companies.website IS NOT NULL AND btrim(companies.website::text) <> ''`);
+    else if (req.query.has_website === '0') where.push(`(companies.website IS NULL OR btrim(companies.website::text) = '')`);
     if (req.query.has_linkedin === '1') where.push(`companies.linkedin_url IS NOT NULL`);
     if (req.query.has_email    === '1') where.push(`(companies.email IS NOT NULL OR EXISTS (SELECT 1 FROM company_contacts cc WHERE cc.company_id = companies.id AND cc.type = 'email'))`);
     if (req.query.has_phone    === '1') where.push(`(companies.phone IS NOT NULL OR EXISTS (SELECT 1 FROM company_contacts cc WHERE cc.company_id = companies.id AND cc.type = 'phone'))`);
