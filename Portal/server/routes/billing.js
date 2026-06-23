@@ -369,6 +369,46 @@ router.post('/resume', requireAuth, async (req, res, next) => {
 });
 
 // ---------------------------------------------------------------------------
+// GET/PUT /api/billing/autorecharge — opt-in auto top-up settings.
+// ---------------------------------------------------------------------------
+router.get('/autorecharge', requireAuth, async (req, res, next) => {
+  try {
+    const r = await query(`SELECT autorecharge_enabled, autorecharge_threshold, autorecharge_amount FROM tenants WHERE id = $1`, [req.tenant.id]);
+    const t = r.rows[0] || {};
+    res.json({ enabled: !!t.autorecharge_enabled, threshold: Number(t.autorecharge_threshold) || 500, amount: Number(t.autorecharge_amount) || 2000, min: CREDIT_TOPUP.min, max: CREDIT_TOPUP.max });
+  } catch (err) { next(err); }
+});
+
+router.put('/autorecharge', requireAuth, async (req, res, next) => {
+  try {
+    const b = req.body || {};
+    const enabled = !!b.enabled;
+    const threshold = Math.max(0, Math.min(100000, Math.floor(Number(b.threshold) || 0)));
+    const amount = Math.max(CREDIT_TOPUP.min, Math.min(CREDIT_TOPUP.max, Math.floor(Number(b.amount) || CREDIT_TOPUP.min)));
+    if (enabled) {
+      // Must have a card on file to auto-charge.
+      const r0 = await query(`SELECT stripe_customer_id FROM tenants WHERE id = $1`, [req.tenant.id]);
+      const cid = r0.rows[0]?.stripe_customer_id;
+      let hasCard = false;
+      try {
+        if (cid) {
+          const c = await stripe().customers.retrieve(cid);
+          hasCard = !!c.invoice_settings?.default_payment_method;
+          if (!hasCard) { const pms = await stripe().paymentMethods.list({ customer: cid, type: 'card', limit: 1 }); hasCard = !!pms.data?.length; }
+        }
+      } catch { /* ignore */ }
+      if (!hasCard) return res.status(400).json({ error: 'no_card', detail: 'Add a card before enabling auto-recharge.' });
+    }
+    await query(`UPDATE tenants SET autorecharge_enabled = $2, autorecharge_threshold = $3, autorecharge_amount = $4, updated_at = now() WHERE id = $1`,
+      [req.tenant.id, enabled, threshold, amount]);
+    res.json({ ok: true, enabled, threshold, amount });
+  } catch (err) {
+    if (err.message?.includes('STRIPE_SECRET_KEY')) return res.status(500).json({ error: 'stripe_not_configured' });
+    next(err);
+  }
+});
+
+// ---------------------------------------------------------------------------
 // POST /api/billing/portal — Stripe Customer Portal (manage subscription)
 // Returns: { url }
 // ---------------------------------------------------------------------------
@@ -538,6 +578,16 @@ router.post('/buy-credits/confirm', requireAuth, async (req, res, next) => {
     if (pi.status !== 'succeeded') return res.json({ ok: false, status: pi.status });
     const credits = Number(pi.metadata.bdi_credits) || 0;
     const r = await grantPurchasedCredits(req.tenant.id, credits, pi.id, pi.amount, req.user?.email || 'purchase');
+    if (r.granted > 0) {
+      // Email here (not just in the webhook) so it sends even when the
+      // payment_intent.succeeded webhook event isn't enabled in Stripe.
+      notifyTenant(req.tenant.id, {
+        category: 'account', type: 'credits_purchased',
+        title: `${credits.toLocaleString()} credits added`,
+        body: `Your credit top-up of ${credits.toLocaleString()} credits went through — they're in your balance now.`,
+        link: '/billing', icon: 'megaphone', email: true,
+      }).catch(() => {});
+    }
     res.json({ ok: true, granted: r.granted, balance: r.balance, credits });
   } catch (err) {
     if (err.message?.includes('STRIPE_SECRET_KEY')) return res.status(500).json({ error: 'stripe_not_configured', message: err.message });
@@ -774,6 +824,64 @@ async function handlePaymentIntentSucceeded(pi) {
       link: '/billing', icon: 'megaphone', email: true,
     }).catch(() => {});
   }
+}
+
+// ---------------------------------------------------------------------------
+// Opt-in auto-recharge. If a tenant's balance fell below their threshold, charge
+// the saved card off-session for `amount` credits and grant them. Called
+// fire-and-forget from the reveal path — must NEVER throw into a reveal. A
+// 10-minute cooldown (autorecharge_last_at) prevents loops + concurrent charges.
+// ---------------------------------------------------------------------------
+export async function maybeAutoRecharge(tenantId) {
+  try {
+    const r = await query(
+      `SELECT autorecharge_enabled, autorecharge_threshold, autorecharge_amount, autorecharge_last_at,
+              credit_balance, stripe_customer_id
+         FROM tenants WHERE id = $1`, [tenantId]);
+    const t = r.rows[0];
+    if (!t || !t.autorecharge_enabled) return;
+    if (Number(t.credit_balance) >= Number(t.autorecharge_threshold)) return;
+    if (!t.stripe_customer_id) return;
+    if (t.autorecharge_last_at && (Date.now() - new Date(t.autorecharge_last_at).getTime()) < 10 * 60 * 1000) return;
+    const priced = priceCredits(t.autorecharge_amount);
+    if (priced.error) return;
+    const cust = await stripe().customers.retrieve(t.stripe_customer_id);
+    const pm = cust.invoice_settings?.default_payment_method;
+    if (!pm) return;
+    // Stamp the attempt FIRST so a burst of reveals can't fire multiple charges.
+    await query(`UPDATE tenants SET autorecharge_last_at = now() WHERE id = $1`, [tenantId]);
+
+    let pi;
+    try {
+      pi = await stripe().paymentIntents.create({
+        amount: priced.amount, currency: 'qar', customer: t.stripe_customer_id,
+        payment_method: pm, off_session: true, confirm: true,
+        description: `Auto-recharge — ${priced.credits.toLocaleString()} Bell credits`,
+        metadata: { bdi_kind: 'credit_topup', bdi_tenant_id: String(tenantId), bdi_credits: String(priced.credits), bdi_auto: '1' },
+      });
+    } catch (e) {
+      // Declined / needs authentication → turn auto-recharge off + tell them.
+      await query(`UPDATE tenants SET autorecharge_enabled = false WHERE id = $1`, [tenantId]);
+      notifyTenant(tenantId, {
+        category: 'account', type: 'autorecharge_failed',
+        title: 'Auto-recharge couldn’t complete',
+        body: 'We couldn’t automatically top up your credits — your card may need attention. Auto-recharge is now off; update your card or buy credits manually to turn it back on.',
+        link: '/billing', icon: 'megaphone', email: true,
+      }).catch(() => {});
+      return;
+    }
+    if (pi.status === 'succeeded') {
+      const g = await grantPurchasedCredits(tenantId, priced.credits, pi.id, pi.amount, 'auto-recharge');
+      if (g.granted > 0) {
+        notifyTenant(tenantId, {
+          category: 'account', type: 'credits_purchased',
+          title: `Auto-recharged ${priced.credits.toLocaleString()} credits`,
+          body: `Your balance was low, so we topped up ${priced.credits.toLocaleString()} credits (QAR ${priced.qar.toLocaleString()}) on your saved card.`,
+          link: '/billing', icon: 'megaphone', email: true,
+        }).catch(() => {});
+      }
+    }
+  } catch { /* never let auto-recharge break a reveal */ }
 }
 
 // ---------------------------------------------------------------------------

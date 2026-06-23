@@ -270,6 +270,8 @@ export const api = {
   billingPmDefault:        (payment_method_id) => request('/api/billing/payment-method/default', { method: 'POST', body: JSON.stringify({ payment_method_id }) }),
   billingCancel:           () => request('/api/billing/cancel', { method: 'POST', body: '{}' }),
   billingResume:           () => request('/api/billing/resume', { method: 'POST', body: '{}' }),
+  billingAutorecharge:     () => request('/api/billing/autorecharge'),
+  billingSetAutorecharge:  (body) => request('/api/billing/autorecharge', { method: 'PUT', body: JSON.stringify(body) }),
   billingChangePlan:      (plan_id) => request('/api/billing/change-plan', { method: 'POST', body: JSON.stringify({ plan_id }) }),
   billingChangePlanPreview: (plan_id) => request('/api/billing/change-plan/preview', { method: 'POST', body: JSON.stringify({ plan_id }) }),
 

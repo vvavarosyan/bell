@@ -153,6 +153,7 @@ export async function revealOne(tenantId, entityType, entityId, actor) {
     return { revealed: true, charged: 1, already: false, balance: newBal, insufficient: false };
   });
   lowCreditCheck(tenantId, result.balance, result.charged);
+  if (result.charged > 0) import('../routes/billing.js').then((m) => m.maybeAutoRecharge?.(tenantId)).catch(() => {});
   return result;
 }
 
@@ -206,6 +207,7 @@ export async function revealBulk(tenantId, entityType, ids, actor) {
     };
   });
   lowCreditCheck(tenantId, result.balance, result.charged);
+  if (result.charged > 0) import('../routes/billing.js').then((m) => m.maybeAutoRecharge?.(tenantId)).catch(() => {});
   return result;
 }
 
