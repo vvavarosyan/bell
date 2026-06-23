@@ -105,7 +105,8 @@ export function CompaniesTab({ archivedMode: initialArchived = false, mode = 'lo
       if (f.foundedMin) params.founded_min = f.foundedMin;
       if (f.foundedMax) params.founded_max = f.foundedMax;
       if (f.scoreMin)   params.score_min   = f.scoreMin;
-      if (f.hasWebsite)  params.has_website  = '1';
+      if (f.website === 'has')  params.has_website = '1';
+      else if (f.website === 'none') params.has_website = '0';
       if (f.hasEmail)    params.has_email    = '1';
       if (f.hasPhone)    params.has_phone    = '1';
       if (f.hasLinkedin) params.has_linkedin = '1';

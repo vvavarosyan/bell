@@ -620,13 +620,15 @@ function RecordDrawer({ recordId, onClose, onChanged }) {
     try { setRecipients(await api.crmRecipients(recordId)); } catch { setRecipients({ cc: [], reveal: [] }); }
   };
   const revealFromCompose = async (personId) => {
-    const before = recipients.cc.length;
     try {
       await api.revealPerson(personId);
       const rec = await api.crmRecipients(recordId);
       setRecipients(rec);
       onChanged?.();   // refresh so they show revealed in People too
-      toast(rec.cc.length > before ? 'Revealed — added to the CC list.' : 'Revealed (and now unlocked in People) — but no email is on file for them yet.', rec.cc.length > before ? 'success' : 'info');
+      const added = rec.cc.find(c => c.person_id === personId && c.email);
+      toast(added ? `Revealed — ${added.name} added to the CC list.`
+                  : 'Revealed and unlocked in People — but Bell has no email on file for them yet.',
+            added ? 'success' : 'info');
     } catch (e) {
       toast(/insufficient|402/i.test(e.message || '') ? 'Not enough credits to reveal this person.' : 'Reveal failed: ' + (e.message || ''), 'error');
     }
@@ -699,10 +701,19 @@ function RecordDrawer({ recordId, onClose, onChanged }) {
                   <input type="text" placeholder="To" value=${emTo} onChange=${e => setEmTo(e.target.value)}
                     style=${{ width: '100%', marginBottom: '8px', background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border)', color: 'var(--text)', padding: '7px 9px', borderRadius: '6px', fontSize: '12.5px', boxSizing: 'border-box' }} />
                   ${recipients.cc.length ? html`<div style=${{ marginBottom: '8px' }}>
-                    <div style=${{ fontSize: '10.5px', color: 'var(--text-dim)', marginBottom: '4px' }}>Also CC (people you've revealed at this company):</div>
-                    ${recipients.cc.map(c => html`<label key=${c.email} style=${{ display: 'inline-flex', alignItems: 'center', gap: '5px', fontSize: '11.5px', color: 'var(--text-muted)', marginRight: '14px', cursor: 'pointer' }}>
-                      <input type="checkbox" checked=${ccSel.has(c.email)} onChange=${() => setCcSel(prev => { const n = new Set(prev); n.has(c.email) ? n.delete(c.email) : n.add(c.email); return n; })} style=${{ accentColor: 'var(--accent)' }} /> ${c.label}
-                    </label>`)}
+                    <div style=${{ fontSize: '10.5px', color: 'var(--text-dim)', marginBottom: '5px' }}>Add to CC:</div>
+                    ${recipients.cc.map((c, i) => c.no_email ? html`
+                      <div key=${'cc' + i} style=${{ fontSize: '11.5px', color: 'var(--text-dim)', marginBottom: '3px', paddingLeft: '2px' }}>
+                        ${c.label} — <span style=${{ fontStyle: 'italic' }}>revealed, no email on file yet</span>
+                      </div>
+                    ` : html`
+                      <label key=${'cc' + i} style=${{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '11.5px', color: 'var(--text-muted)', marginBottom: '3px', cursor: 'pointer' }}>
+                        <input type="checkbox" checked=${ccSel.has(c.email)} onChange=${() => setCcSel(prev => { const n = new Set(prev); n.has(c.email) ? n.delete(c.email) : n.add(c.email); return n; })} style=${{ accentColor: 'var(--accent)' }} />
+                        <span style=${{ color: 'var(--text)' }}>${c.label}</span>
+                        <span style=${{ color: 'var(--text-dim)' }}>${c.email}</span>
+                        ${c.type === 'company' ? html`<span style=${{ fontSize: '9px', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-dim)', border: '1px solid var(--border)', borderRadius: '3px', padding: '0 4px' }}>company</span>` : null}
+                      </label>
+                    `)}
                   </div>` : null}
                   ${recipients.reveal.length ? html`<div style=${{ marginBottom: '8px', padding: '8px 10px', background: 'rgba(91,140,255,0.08)', border: '1px solid rgba(91,140,255,0.3)', borderRadius: '6px', fontSize: '11.5px', color: 'var(--text-muted)' }}>
                     <div style=${{ marginBottom: '5px' }}>Decision-makers here you haven't revealed — reveal to reach the right person and lift your reply rate:</div>

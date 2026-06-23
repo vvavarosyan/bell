@@ -18,6 +18,15 @@ const SECTIONS = [
 const FUNCTION_TEAMS = ['', 'sales', 'bd', 'marketing', 'research', 'gtm'];
 const cbStyle = { width: '16px', height: '16px', accentColor: 'var(--accent)', cursor: 'pointer' };
 
+// ICP picker suggestions (users can also type their own).
+const ICP_GROUP = { fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 700, color: 'var(--text-dim)', margin: '20px 0 8px' };
+const ICP_INDUSTRIES = ['Construction', 'Real Estate', 'Oil & Gas', 'Energy', 'Healthcare', 'Education', 'Hospitality', 'Retail', 'Finance & Banking', 'Insurance', 'Logistics & Transport', 'Manufacturing', 'Technology', 'Telecommunications', 'Professional Services', 'Government', 'Food & Beverage', 'Automotive', 'Media', 'Engineering'];
+const ICP_SIZES = ['1–10', '11–50', '51–200', '201–500', '501–1000', '1000+'];
+const ICP_TITLES = ['CEO', 'Managing Director', 'General Manager', 'Founder / Owner', 'COO', 'CFO', 'CTO', 'CMO', 'Head of Procurement', 'Procurement Manager', 'Operations Manager', 'Sales Director', 'Marketing Manager', 'IT Manager', 'HR Manager', 'Finance Manager', 'Business Development Manager', 'Purchasing Manager', 'Project Manager'];
+const ICP_TECH = ['WordPress', 'Shopify', 'Wix', 'Squarespace', 'WooCommerce', 'Magento', 'Salesforce', 'HubSpot', 'Zoho', 'SAP', 'Oracle', 'Microsoft 365', 'Google Workspace'];
+const ICP_SIGNALS = ['Hiring / expanding team', 'Opening a new branch', 'Recently funded', 'New product launch', 'Leadership change', 'Office relocation', 'Active tender / RFP', 'Digital transformation', 'Website redesign', 'Entering a new market', 'Newly licensed', 'Won a government contract'];
+const ICP_WEBSITE = [['any', 'Any'], ['has', 'Has a website'], ['none', 'No website']];
+
 export function AccountTab() {
   const [data, setData] = useState(null);
   const [section, setSection] = useState('profile');
@@ -42,6 +51,7 @@ export function AccountTab() {
   // ICP / company-profile hooks — above the early return (Rules of Hooks).
   const [icp, setIcp] = useState(null);
   const [icpSaving, setIcpSaving] = useState(false);
+  const [chipDraft, setChipDraft] = useState({});
   useEffect(() => {
     if (section !== 'icp' || icp !== null) return;
     (async () => {
@@ -49,13 +59,19 @@ export function AccountTab() {
         const r = await api.getIcp();
         const pr = r.profile || {};
         setIcp({
-          company_about: pr.company_about || '', products_services: pr.products_services || '',
-          pricing: pr.pricing || '', current_customers: pr.current_customers || '',
-          target_industries: (pr.target_industries || []).join(', '), target_sizes: (pr.target_sizes || []).join(', '),
-          target_geographies: pr.target_geographies || '', target_titles: pr.target_titles || '',
-          target_keywords: pr.target_keywords || '', icp_notes: pr.icp_notes || '',
+          company_name: pr.company_name || '', company_about: pr.company_about || '',
+          products_services: pr.products_services || '',
+          pricing_items: Array.isArray(pr.pricing_items) ? pr.pricing_items : [],
+          current_customers: pr.current_customers || '',
+          target_industries: pr.target_industries || [], target_sizes: pr.target_sizes || [],
+          target_titles: pr.target_titles || [], target_tech_stack: pr.target_tech_stack || [],
+          target_has_website: pr.target_has_website || 'any',
+          target_keywords: pr.target_keywords || [], icp_notes: pr.icp_notes || '',
         });
-      } catch (e) { toast('Load failed: ' + (e.message || ''), 'error'); setIcp({}); }
+      } catch (e) {
+        toast('Load failed: ' + (e.message || ''), 'error');
+        setIcp({ pricing_items: [], target_industries: [], target_sizes: [], target_titles: [], target_tech_stack: [], target_keywords: [], target_has_website: 'any' });
+      }
     })();
   }, [section, icp]);
 
@@ -74,16 +90,47 @@ export function AccountTab() {
   };
 
   const setIcpField = (k, v) => setIcp(c => ({ ...(c || {}), [k]: v }));
+  const icpArr = (k) => (icp && Array.isArray(icp[k])) ? icp[k] : [];
+  const addChip = (k, val) => {
+    const v = String(val || '').trim(); if (!v) return;
+    setIcp(c => { const cur = Array.isArray(c?.[k]) ? c[k] : []; return cur.some(x => x.toLowerCase() === v.toLowerCase()) ? c : { ...c, [k]: [...cur, v] }; });
+  };
+  const removeChip = (k, val) => setIcp(c => ({ ...c, [k]: (Array.isArray(c?.[k]) ? c[k] : []).filter(x => x !== val) }));
+  const commitDraft = (k) => { addChip(k, chipDraft[k]); setChipDraft(d => ({ ...d, [k]: '' })); };
+  const addPrice = () => setIcp(c => ({ ...c, pricing_items: [...(Array.isArray(c?.pricing_items) ? c.pricing_items : []), { title: '', price: '' }] }));
+  const setPrice = (i, k, v) => setIcp(c => ({ ...c, pricing_items: (c.pricing_items || []).map((it, j) => j === i ? { ...it, [k]: v } : it) }));
+  const removePrice = (i) => setIcp(c => ({ ...c, pricing_items: (c.pricing_items || []).filter((_, j) => j !== i) }));
+
+  const CHIP = { display: 'inline-flex', alignItems: 'center', gap: '5px', fontSize: '11.5px', background: 'rgba(255,255,255,0.05)', border: '1px solid var(--border)', borderRadius: '999px', padding: '3px 6px 3px 11px', color: 'var(--text)' };
+  const CHIP_X = { background: 'transparent', border: 'none', color: 'var(--text-dim)', cursor: 'pointer', fontSize: '14px', lineHeight: 1, padding: 0 };
+  const CHIP_SUGGEST = { fontSize: '11px', background: 'transparent', border: '1px dashed var(--border)', borderRadius: '999px', padding: '3px 10px', color: 'var(--text-muted)', cursor: 'pointer' };
+  const chipField = (k, opts, placeholder) => html`
+    <div>
+      ${icpArr(k).length ? html`<div style=${{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginBottom: '7px' }}>
+        ${icpArr(k).map(v => html`<span key=${v} style=${CHIP}>${v}<button type="button" onClick=${() => removeChip(k, v)} title="Remove" style=${CHIP_X}>×</button></span>`)}
+      </div>` : null}
+      ${(opts || []).filter(o => !icpArr(k).some(x => x.toLowerCase() === o.toLowerCase())).length ? html`
+        <div style=${{ display: 'flex', flexWrap: 'wrap', gap: '5px', marginBottom: '7px' }}>
+          ${(opts || []).filter(o => !icpArr(k).some(x => x.toLowerCase() === o.toLowerCase())).map(o => html`<button key=${o} type="button" onClick=${() => addChip(k, o)} style=${CHIP_SUGGEST}>+ ${o}</button>`)}
+        </div>` : null}
+      <input class="sys-input" placeholder=${placeholder || 'Type your own and press Enter…'} value=${chipDraft[k] || ''}
+        onInput=${e => setChipDraft(d => ({ ...d, [k]: e.target.value }))}
+        onKeyDown=${e => { if (e.key === 'Enter') { e.preventDefault(); commitDraft(k); } }} />
+    </div>`;
+
   const submitIcp = async () => {
     if (!icp) return;
     setIcpSaving(true);
     try {
-      const body = {
-        ...icp,
-        target_industries: String(icp.target_industries || '').split(',').map(s => s.trim()).filter(Boolean),
-        target_sizes: String(icp.target_sizes || '').split(',').map(s => s.trim()).filter(Boolean),
-      };
-      await api.saveIcp(body);
+      await api.saveIcp({
+        company_name: icp.company_name, company_about: icp.company_about, products_services: icp.products_services,
+        pricing_items: (icp.pricing_items || []).filter(it => (it.title || '').trim() || (it.price || '').trim()),
+        current_customers: icp.current_customers,
+        target_industries: icpArr('target_industries'), target_sizes: icpArr('target_sizes'),
+        target_titles: icpArr('target_titles'), target_tech_stack: icpArr('target_tech_stack'),
+        target_has_website: icp.target_has_website || 'any', target_keywords: icpArr('target_keywords'),
+        icp_notes: icp.icp_notes,
+      });
       toast('Company profile saved');
     } catch (e) { toast('Save failed: ' + (e.message || ''), 'error'); }
     finally { setIcpSaving(false); }
@@ -208,22 +255,39 @@ export function AccountTab() {
         <h2>Company & ICP</h2>
         <div class="sys-hint">Describe your business and exactly who you sell to. Bell uses this to personalize your Signals and to guide Bella. (Bella will be able to fill this in for you later.)</div>
         ${icp === null ? html`<div class="empty">Loading…</div>` : html`
+          <div style=${ICP_GROUP}>About your company</div>
           <div class="sys-grid">
+            <div class="sys-field full"><label>Company name</label><input class="sys-input" value=${icp.company_name || ''} onInput=${e => setIcpField('company_name', e.target.value)} /></div>
             <div class="sys-field full"><label>What your company does</label><textarea class="sys-textarea" value=${icp.company_about || ''} onInput=${e => setIcpField('company_about', e.target.value)}></textarea></div>
             <div class="sys-field full"><label>Products & services</label><textarea class="sys-textarea" value=${icp.products_services || ''} onInput=${e => setIcpField('products_services', e.target.value)}></textarea></div>
-            <div class="sys-field"><label>Pricing</label><input class="sys-input" value=${icp.pricing || ''} onInput=${e => setIcpField('pricing', e.target.value)} /></div>
             <div class="sys-field full"><label>Current customers</label><textarea class="sys-textarea" value=${icp.current_customers || ''} onInput=${e => setIcpField('current_customers', e.target.value)}></textarea></div>
           </div>
-          <div style=${{ fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 700, color: 'var(--text-dim)', margin: '18px 0 8px' }}>Ideal customer profile (who to target)</div>
+          <div class="sys-field full" style=${{ marginTop: '12px' }}>
+            <label>Pricing — one row per product / service</label>
+            ${(icp.pricing_items || []).map((it, i) => html`
+              <div key=${'pr' + i} style=${{ display: 'flex', gap: '8px', marginBottom: '6px' }}>
+                <input class="sys-input" style=${{ flex: 2 }} placeholder="Service / product" value=${it.title || ''} onInput=${e => setPrice(i, 'title', e.target.value)} />
+                <input class="sys-input" style=${{ flex: 1 }} placeholder="Price (e.g. QAR 5,000 / mo)" value=${it.price || ''} onInput=${e => setPrice(i, 'price', e.target.value)} />
+                <button type="button" title="Remove" onClick=${() => removePrice(i)} style=${{ flexShrink: 0, background: 'transparent', border: '1px solid var(--border)', color: 'var(--text-muted)', borderRadius: '6px', padding: '0 11px', cursor: 'pointer' }}>×</button>
+              </div>`)}
+            <button type="button" onClick=${addPrice} style=${{ marginTop: '2px', background: 'transparent', border: '1px dashed var(--border)', color: 'var(--text-muted)', borderRadius: '6px', padding: '6px 12px', fontSize: '12px', cursor: 'pointer' }}>+ Add pricing</button>
+          </div>
+
+          <div style=${ICP_GROUP}>Ideal customer — who to target</div>
           <div class="sys-grid">
-            <div class="sys-field"><label>Target industries</label><input class="sys-input" placeholder="Construction, Healthcare, …" value=${icp.target_industries || ''} onInput=${e => setIcpField('target_industries', e.target.value)} /></div>
-            <div class="sys-field"><label>Target company sizes</label><input class="sys-input" placeholder="11-50, 51-200, …" value=${icp.target_sizes || ''} onInput=${e => setIcpField('target_sizes', e.target.value)} /></div>
-            <div class="sys-field"><label>Target geographies</label><input class="sys-input" placeholder="Doha, Qatar, GCC" value=${icp.target_geographies || ''} onInput=${e => setIcpField('target_geographies', e.target.value)} /></div>
-            <div class="sys-field"><label>Decision-maker titles</label><input class="sys-input" placeholder="CEO, Head of Procurement, …" value=${icp.target_titles || ''} onInput=${e => setIcpField('target_titles', e.target.value)} /></div>
-            <div class="sys-field full"><label>Keywords / buying signals</label><input class="sys-input" placeholder="new branch, hiring, expansion, …" value=${icp.target_keywords || ''} onInput=${e => setIcpField('target_keywords', e.target.value)} /></div>
+            <div class="sys-field full"><label>Target industries</label>${chipField('target_industries', ICP_INDUSTRIES, 'Add an industry…')}</div>
+            <div class="sys-field full"><label>Target company sizes (employees)</label>${chipField('target_sizes', ICP_SIZES, 'Add a size band…')}</div>
+            <div class="sys-field full"><label>Decision-maker titles to reach</label>${chipField('target_titles', ICP_TITLES, 'Add a job title…')}</div>
+            <div class="sys-field full"><label>Tech stack they use</label>${chipField('target_tech_stack', ICP_TECH, 'e.g. WordPress, Shopify…')}</div>
+            <div class="sys-field"><label>Website</label>
+              <select class="sys-input" value=${icp.target_has_website || 'any'} onChange=${e => setIcpField('target_has_website', e.target.value)}>
+                ${ICP_WEBSITE.map(([v, l]) => html`<option key=${v} value=${v}>${l}</option>`)}
+              </select>
+            </div>
+            <div class="sys-field full"><label>Buying signals to watch for</label>${chipField('target_keywords', ICP_SIGNALS, 'Add a buying signal…')}</div>
             <div class="sys-field full"><label>Notes</label><textarea class="sys-textarea" value=${icp.icp_notes || ''} onInput=${e => setIcpField('icp_notes', e.target.value)}></textarea></div>
           </div>
-          <div class="sys-hint" style=${{ marginTop: '6px' }}>Tip: separate multiple industries or sizes with commas.</div>
+          <div class="sys-hint" style=${{ marginTop: '8px' }}>Pick from the suggestions or type your own and press Enter. The website filter also lives in Companies → Filters.</div>
           <div class="sys-actions"><button class="sys-btn" disabled=${icpSaving} onClick=${submitIcp}>${icpSaving ? 'Saving…' : 'Save company profile'}</button></div>
         `}
       </div>`,

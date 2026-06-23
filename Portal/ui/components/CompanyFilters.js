@@ -10,18 +10,20 @@ import { html } from '../lib/html.js';
 const STATUS_OPTS = ['active', 'inactive', 'suspended', 'withdrawn', 'in_liquidation', 'frozen', 'deregistered', 'not_licensed', 'unknown'];
 const SOURCE_OPTS = ['QFC', 'QFZ', 'MOCI', 'QSTP', 'QSE', 'QCCI', 'MoPH', 'Tasmu'];
 const EMP_OPTS    = ['1-10', '11-50', '51-200', '201-1000', '1001-5000', '5000+'];
-const COMPLETE    = [['hasWebsite', 'Website'], ['hasEmail', 'Email'], ['hasPhone', 'Phone'], ['hasLinkedin', 'LinkedIn'], ['hasPeople', 'People']];
+const COMPLETE    = [['hasEmail', 'Email'], ['hasPhone', 'Phone'], ['hasLinkedin', 'LinkedIn'], ['hasPeople', 'People']];
+const WEBSITE_OPTS = [['has', 'Has website'], ['none', 'No website']];
 
 export const EMPTY_FILTERS = {
   industries: [], statuses: [], sources: [], empBuckets: [],
-  city: '', foundedMin: '', foundedMax: '', scoreMin: '',
-  hasWebsite: false, hasEmail: false, hasPhone: false, hasLinkedin: false, hasPeople: false,
+  city: '', foundedMin: '', foundedMax: '', scoreMin: '', website: '',
+  hasEmail: false, hasPhone: false, hasLinkedin: false, hasPeople: false,
 };
 
 export function countActiveFilters(f) {
   if (!f) return 0;
   return f.industries.length + f.statuses.length + f.sources.length + f.empBuckets.length
     + (String(f.city).trim() ? 1 : 0) + (f.foundedMin ? 1 : 0) + (f.foundedMax ? 1 : 0) + (f.scoreMin ? 1 : 0)
+    + (f.website ? 1 : 0)
     + COMPLETE.reduce((n, [k]) => n + (f[k] ? 1 : 0), 0);
 }
 
@@ -82,6 +84,7 @@ export function CompanyFilters({ value, industries = [], onApply, onClose }) {
           ${sec('Status', html`<div class="bdi-chiprow">${STATUS_OPTS.map((s) => chip(d.statuses.includes(s), s, () => toggle('statuses', s)))}</div>`)}
           ${sec('Source', html`<div class="bdi-chiprow">${SOURCE_OPTS.map((s) => chip(d.sources.includes(s), s, () => toggle('sources', s)))}</div>`)}
           ${sec('Employee size', html`<div class="bdi-chiprow">${EMP_OPTS.map((s) => chip(d.empBuckets.includes(s), s, () => toggle('empBuckets', s)))}</div>`)}
+          ${sec('Website', html`<div class="bdi-chiprow">${WEBSITE_OPTS.map(([k, label]) => chip(d.website === k, label, () => set('website', d.website === k ? '' : k)))}</div>`)}
           ${sec('Has data', html`<div class="bdi-chiprow">${COMPLETE.map(([k, label]) => chip(d[k], label, () => set(k, !d[k])))}</div>`)}
           ${sec('Location', html`<input class="bdi-filter-input" type="text" placeholder="City…" value=${d.city} onChange=${(e) => set('city', e.target.value)} style=${{ width: '160px' }} />`)}
           ${sec('Founded year', html`<div style=${{ display: 'flex', alignItems: 'center', gap: '6px' }}>${num('foundedMin', 'from')}<span class="muted">–</span>${num('foundedMax', 'to')}</div>`)}

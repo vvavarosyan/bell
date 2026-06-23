@@ -458,8 +458,17 @@ router.get('/records/:id/recipients', async (req, res, next) => {
     const cc = [], reveal = [], seen = new Set();
     for (const p of ppl.rows) {
       const email = String(p.email || '').trim();
+      const validEmail = email.includes('@');
+      const label = p.full_name + (p.title ? ' · ' + p.title : '');
       if (revealed.has(Number(p.id))) {
-        if (email && email.includes('@') && !seen.has(email.toLowerCase())) { seen.add(email.toLowerCase()); cc.push({ email, label: p.full_name + (p.title ? ' · ' + p.title : '') }); }
+        if (validEmail && !seen.has(email.toLowerCase())) {
+          seen.add(email.toLowerCase());
+          cc.push({ type: 'person', person_id: Number(p.id), email, name: p.full_name, title: p.title || '', label });
+        } else if (!validEmail) {
+          // Revealed, but Bell has no email on file yet — surface it so the user
+          // can see the reveal worked (otherwise it looks like nothing happened).
+          cc.push({ type: 'person', person_id: Number(p.id), email: '', name: p.full_name, title: p.title || '', label, no_email: true });
+        }
       } else if (DECISION_MAKER_RX.test(String(p.title || ''))) {
         reveal.push({ person_id: Number(p.id), name: p.full_name, title: p.title || '' });   // email NOT exposed (unrevealed)
       }
@@ -467,7 +476,7 @@ router.get('/records/:id/recipients', async (req, res, next) => {
     const cont = await query(`SELECT value FROM company_contacts WHERE company_id=$1 AND type='email' LIMIT 20`, [companyId]).catch(() => ({ rows: [] }));
     for (const c of cont.rows) {
       const email = String(c.value || '').trim();
-      if (email && email.includes('@') && !seen.has(email.toLowerCase())) { seen.add(email.toLowerCase()); cc.push({ email, label: 'Company email' }); }
+      if (email.includes('@') && !seen.has(email.toLowerCase())) { seen.add(email.toLowerCase()); cc.push({ type: 'company', email, label: 'Company' }); }
     }
     res.json({ cc, reveal });
   } catch (err) { next(err); }
