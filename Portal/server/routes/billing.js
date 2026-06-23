@@ -5,8 +5,9 @@ import { Router } from 'express';
 import Stripe from 'stripe';
 import { query, withTransaction } from '../db.js';
 import { requireAuth } from '../lib/auth.js';
-import { PLANS, planById, stripePriceId, planByStripePrice } from '../config/plans.js';
+import { PLANS, planById, stripePriceId, planByStripePrice, priceCredits, CREDIT_TOPUP } from '../config/plans.js';
 import { notifyTenant } from '../lib/notifications.js';
+import { grantPurchasedCredits } from '../lib/credits.js';
 
 const router = Router();
 
@@ -43,12 +44,15 @@ router.get('/plans', (req, res) => {
 router.get('/subscription', requireAuth, async (req, res, next) => {
   try {
     const r = await query(`
-      SELECT plan, subscription_status, plan_renewed_at, plan_expires_at,
+      SELECT plan, subscription_status, plan_renewed_at, plan_expires_at, past_due_at,
              credit_balance, stripe_customer_id, stripe_subscription_id
         FROM tenants WHERE id = $1
     `, [req.tenant.id]);
     if (!r.rows.length) return res.status(404).json({ error: 'tenant_not_found' });
     const t = r.rows[0];
+    const GRACE_MS = 24 * 60 * 60 * 1000;
+    const pastDue = t.subscription_status === 'past_due' && !!t.past_due_at;
+    const graceMsLeft = pastDue ? Math.max(0, GRACE_MS - (Date.now() - new Date(t.past_due_at).getTime())) : null;
     res.json({
       plan:                t.plan,
       plan_label:          planById(t.plan)?.name || t.plan,
@@ -57,6 +61,9 @@ router.get('/subscription', requireAuth, async (req, res, next) => {
       credit_balance:      Number(t.credit_balance) || 0,
       plan_renewed_at:     t.plan_renewed_at,
       plan_expires_at:     t.plan_expires_at,
+      past_due_at:         t.past_due_at,
+      grace_hours_left:    graceMsLeft != null ? Math.ceil(graceMsLeft / 3600000) : null,
+      frozen:              pastDue ? graceMsLeft <= 0 : ['canceled', 'unpaid'].includes(t.subscription_status),
       has_stripe_customer: !!t.stripe_customer_id,
     });
   } catch (err) { next(err); }
@@ -135,6 +142,43 @@ router.post('/checkout', requireAuth, async (req, res, next) => {
     if (err.message?.includes('STRIPE_SECRET_KEY')) {
       return res.status(500).json({ error: 'stripe_not_configured', message: err.message });
     }
+    next(err);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// POST /api/billing/change-plan — upgrade/downgrade the active subscription to
+// another self-serve tier in-app, with proration. Body: { plan_id }.
+// Upgrades bill the prorated difference immediately; downgrades credit it
+// forward. The customer.subscription.updated webhook also syncs tenant.plan.
+// ---------------------------------------------------------------------------
+router.post('/change-plan', requireAuth, async (req, res, next) => {
+  try {
+    const plan = planById(req.body?.plan_id);
+    if (!plan || !plan.self_serve) return res.status(400).json({ error: 'invalid_plan' });
+    const newPrice = stripePriceId(plan);
+    if (!newPrice) return res.status(500).json({ error: 'plan_not_configured', detail: `${plan.stripe_price_id_env} not set.` });
+
+    const r = await query(`SELECT stripe_subscription_id FROM tenants WHERE id = $1`, [req.tenant.id]);
+    const subId = r.rows[0]?.stripe_subscription_id;
+    if (!subId) return res.status(400).json({ error: 'no_subscription', detail: 'Start a subscription before changing plans.' });
+
+    const sub = await stripe().subscriptions.retrieve(subId);
+    const item = sub.items?.data?.[0];
+    if (!item?.id) return res.status(500).json({ error: 'subscription_item_missing' });
+    if (item.price?.id === newPrice) return res.json({ ok: true, unchanged: true, plan: plan.id });
+
+    await stripe().subscriptions.update(subId, {
+      items: [{ id: item.id, price: newPrice }],
+      proration_behavior: 'create_prorations',
+      payment_behavior:   'allow_incomplete',
+      metadata: { ...(sub.metadata || {}), bdi_tenant_id: String(req.tenant.id), bdi_plan_id: plan.id },
+    });
+    // Reflect immediately; the webhook will also confirm.
+    await query(`UPDATE tenants SET plan = $2, updated_at = now() WHERE id = $1`, [req.tenant.id, plan.id]);
+    res.json({ ok: true, plan: plan.id, plan_label: plan.name });
+  } catch (err) {
+    if (err.message?.includes('STRIPE_SECRET_KEY')) return res.status(500).json({ error: 'stripe_not_configured', message: err.message });
     next(err);
   }
 });
@@ -226,6 +270,76 @@ router.get('/usage', requireAuth, async (req, res, next) => {
       entries:         entriesR.rows,
     });
   } catch (err) { next(err); }
+});
+
+// ---------------------------------------------------------------------------
+// GET /api/billing/credit-pricing — top-up pricing config (for the UI preview)
+// ---------------------------------------------------------------------------
+router.get('/credit-pricing', (req, res) => {
+  res.json({ ...CREDIT_TOPUP });
+});
+
+// ---------------------------------------------------------------------------
+// POST /api/billing/buy-credits — one-time extra-credit purchase.
+// Body: { credits }. Bills the tenant's saved card via a Stripe Invoice (so a
+// real downloadable receipt lands in the invoices list); the webhook grants the
+// credits on invoice.payment_succeeded. If no card is on file, returns a
+// hosted_invoice_url for the user to pay.
+// ---------------------------------------------------------------------------
+router.post('/buy-credits', requireAuth, async (req, res, next) => {
+  try {
+    const priced = priceCredits(req.body?.credits);
+    if (priced.error) {
+      return res.status(400).json({ error: 'invalid_quantity', reason: priced.error, min: CREDIT_TOPUP.min, max: CREDIT_TOPUP.max });
+    }
+    const customerId = await getOrCreateStripeCustomer(req.tenant, req.user);
+
+    // Draft invoice first, then attach exactly one line item to it.
+    const invoice = await stripe().invoices.create({
+      customer: customerId,
+      collection_method: 'charge_automatically',
+      auto_advance: false,
+      metadata: {
+        bdi_tenant_id: String(req.tenant.id),
+        bdi_kind:      'credit_topup',
+        bdi_credits:   String(priced.credits),
+      },
+    });
+    await stripe().invoiceItems.create({
+      customer: customerId,
+      invoice:  invoice.id,
+      amount:   priced.amount,           // halalas
+      currency: 'qar',
+      description: `${priced.credits.toLocaleString()} Bell credits`,
+    });
+    const finalized = await stripe().invoices.finalizeInvoice(invoice.id);
+
+    // Try to charge the saved card immediately.
+    try {
+      const paid = await stripe().invoices.pay(finalized.id);
+      if (paid.status === 'paid') {
+        // Grant now for an instant balance update; the webhook is the idempotent safety net.
+        await grantPurchasedCredits(req.tenant.id, priced.credits, paid.id, paid.amount_paid, req.user?.email || 'purchase');
+      }
+      return res.json({
+        ok: true, paid: paid.status === 'paid',
+        credits: priced.credits, qar: priced.qar,
+        invoice_id: paid.id, invoice_pdf: paid.invoice_pdf || null,
+      });
+    } catch (payErr) {
+      // No usable payment method — let them pay on the hosted invoice page.
+      return res.json({
+        ok: true, paid: false, requires_payment: true,
+        credits: priced.credits, qar: priced.qar,
+        hosted_invoice_url: finalized.hosted_invoice_url || null,
+      });
+    }
+  } catch (err) {
+    if (err.message?.includes('STRIPE_SECRET_KEY')) {
+      return res.status(500).json({ error: 'stripe_not_configured', message: err.message });
+    }
+    next(err);
+  }
 });
 
 // ---------------------------------------------------------------------------
@@ -332,7 +446,8 @@ async function handleSubscriptionChange(sub) {
              stripe_subscription_id = $3,
              subscription_status    = $4,
              plan_renewed_at        = COALESCE($5, plan_renewed_at),
-             plan_expires_at        = $6
+             plan_expires_at        = $6,
+             past_due_at            = CASE WHEN $4 IN ('active','trialing') THEN NULL ELSE past_due_at END
        WHERE id = $1
     `, [
       tenantId,
@@ -359,6 +474,23 @@ async function handleSubscriptionDeleted(sub) {
 }
 
 async function handleInvoicePaid(inv) {
+  // Extra-credit top-up purchase → grant the bought credits (idempotent).
+  if (inv.metadata?.bdi_kind === 'credit_topup') {
+    const tenantId = Number(inv.metadata.bdi_tenant_id) || null;
+    const credits  = Number(inv.metadata.bdi_credits) || 0;
+    if (tenantId && credits > 0) {
+      const r = await grantPurchasedCredits(tenantId, credits, inv.id, inv.amount_paid, 'purchase');
+      if (r.granted > 0) {
+        notifyTenant(tenantId, {
+          category: 'account', type: 'credits_purchased',
+          title: `${credits.toLocaleString()} credits added`,
+          body: 'Your credit top-up payment went through — the credits are in your balance.',
+          link: '/billing', icon: 'megaphone',
+        }).catch(() => {});
+      }
+    }
+    return;
+  }
   // Renewal succeeded — top up credits for the tenant's current plan.
   const customerId = inv.customer;
   const r = await query(
@@ -377,7 +509,8 @@ async function handleInvoicePaid(inv) {
   await query(`
     UPDATE tenants
        SET subscription_status = 'active',
-           plan_renewed_at     = now()
+           plan_renewed_at     = now(),
+           past_due_at         = NULL
      WHERE id = $1
   `, [t.id]);
   console.log(`[billing] tenant ${t.id} invoice paid plan=${plan.id} — credits via monthly grant`);
@@ -391,7 +524,8 @@ async function handleInvoicePaid(inv) {
 
 async function handleInvoiceFailed(inv) {
   const r = await query(`
-    UPDATE tenants SET subscription_status = 'past_due'
+    UPDATE tenants SET subscription_status = 'past_due',
+                       past_due_at = COALESCE(past_due_at, now())
      WHERE stripe_customer_id = $1
    RETURNING id
   `, [inv.customer]);
