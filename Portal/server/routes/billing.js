@@ -7,7 +7,7 @@ import { query, withTransaction } from '../db.js';
 import { requireAuth } from '../lib/auth.js';
 import { PLANS, planById, stripePriceId, planByStripePrice, priceCredits, CREDIT_TOPUP } from '../config/plans.js';
 import { notifyTenant } from '../lib/notifications.js';
-import { grantPurchasedCredits } from '../lib/credits.js';
+import { grantPurchasedCredits, adminAdjust } from '../lib/credits.js';
 
 const router = Router();
 
@@ -44,7 +44,7 @@ router.get('/plans', (req, res) => {
 router.get('/subscription', requireAuth, async (req, res, next) => {
   try {
     const r = await query(`
-      SELECT plan, subscription_status, plan_renewed_at, plan_expires_at, past_due_at,
+      SELECT plan, subscription_status, plan_renewed_at, plan_expires_at, past_due_at, pending_plan,
              credit_balance, stripe_customer_id, stripe_subscription_id
         FROM tenants WHERE id = $1
     `, [req.tenant.id]);
@@ -73,6 +73,8 @@ router.get('/subscription', requireAuth, async (req, res, next) => {
       plan_renewed_at:     t.plan_renewed_at,
       plan_expires_at:     t.plan_expires_at,
       past_due_at:         t.past_due_at,
+      pending_plan:        t.pending_plan || null,
+      pending_plan_label:  t.pending_plan ? (planById(t.pending_plan)?.name || t.pending_plan) : null,
       grace_hours_left:    graceMsLeft != null ? Math.ceil(graceMsLeft / 3600000) : null,
       frozen:              pastDue ? graceMsLeft <= 0 : ['canceled', 'unpaid'].includes(t.subscription_status),
       has_stripe_customer: !!t.stripe_customer_id,
@@ -158,10 +160,15 @@ router.post('/checkout', requireAuth, async (req, res, next) => {
 });
 
 // ---------------------------------------------------------------------------
-// POST /api/billing/change-plan — upgrade/downgrade the active subscription to
-// another self-serve tier in-app, with proration. Body: { plan_id }.
-// Upgrades bill the prorated difference immediately; downgrades credit it
-// forward. The customer.subscription.updated webhook also syncs tenant.plan.
+// POST /api/billing/change-plan — upgrade or downgrade the active subscription.
+// Body: { plan_id }.
+//   • Upgrade   → immediate. Stripe bills the prorated price difference now; we
+//                 apply the new plan and grant the PRORATED extra credits for the
+//                 remaining cycle (never a free full allotment).
+//   • Downgrade → scheduled. No charge/change now; the lower price + allotment
+//                 take effect at the next renewal (pending_plan). The user keeps
+//                 their current plan + credits until then.
+//   • Re-selecting the current plan cancels a scheduled downgrade.
 // ---------------------------------------------------------------------------
 router.post('/change-plan', requireAuth, async (req, res, next) => {
   try {
@@ -170,24 +177,58 @@ router.post('/change-plan', requireAuth, async (req, res, next) => {
     const newPrice = stripePriceId(plan);
     if (!newPrice) return res.status(500).json({ error: 'plan_not_configured', detail: `${plan.stripe_price_id_env} not set.` });
 
-    const r = await query(`SELECT stripe_subscription_id FROM tenants WHERE id = $1`, [req.tenant.id]);
-    const subId = r.rows[0]?.stripe_subscription_id;
+    const r = await query(`SELECT plan, stripe_subscription_id FROM tenants WHERE id = $1`, [req.tenant.id]);
+    const cur = r.rows[0];
+    const subId = cur?.stripe_subscription_id;
     if (!subId) return res.status(400).json({ error: 'no_subscription', detail: 'Start a subscription before changing plans.' });
+    const curPlan = planById(cur.plan);
 
     const sub = await stripe().subscriptions.retrieve(subId);
     const item = sub.items?.data?.[0];
     if (!item?.id) return res.status(500).json({ error: 'subscription_item_missing' });
-    if (item.price?.id === newPrice) return res.json({ ok: true, unchanged: true, plan: plan.id });
 
+    // Re-selecting the current plan → cancel any scheduled downgrade.
+    if (curPlan?.id === plan.id) {
+      if (item.price?.id !== newPrice) {
+        await stripe().subscriptions.update(subId, { items: [{ id: item.id, price: newPrice }], proration_behavior: 'none' });
+      }
+      await query(`UPDATE tenants SET pending_plan = NULL, updated_at = now() WHERE id = $1`, [req.tenant.id]);
+      return res.json({ ok: true, unchanged: true, plan: plan.id, canceled_downgrade: true });
+    }
+
+    const isUpgrade = (plan.price_qar || 0) > (curPlan?.price_qar || 0);
+
+    if (isUpgrade) {
+      // error_if_incomplete → if the prorated charge can't be collected, Stripe
+      // throws and we never grant credits or switch the plan (no free upgrades).
+      await stripe().subscriptions.update(subId, {
+        items: [{ id: item.id, price: newPrice }],
+        proration_behavior: 'always_invoice',     // charge the prorated difference now
+        payment_behavior:   'error_if_incomplete',
+        metadata: { ...(sub.metadata || {}), bdi_tenant_id: String(req.tenant.id), bdi_plan_id: plan.id },
+      });
+      // Prorated extra credits for the remaining cycle (matches what they paid).
+      const ps = sub.current_period_start ? sub.current_period_start * 1000 : null;
+      const pe = sub.current_period_end ? sub.current_period_end * 1000 : null;
+      let frac = 1;
+      if (ps && pe && pe > ps) frac = Math.max(0, Math.min(1, (pe - Date.now()) / (pe - ps)));
+      const diff = Math.max(0, (plan.credits || 0) - (curPlan?.credits || 0));
+      const proratedCredits = Math.round(diff * frac);
+      await query(`UPDATE tenants SET plan = $2, pending_plan = NULL, updated_at = now() WHERE id = $1`, [req.tenant.id, plan.id]);
+      if (proratedCredits > 0) await adminAdjust(req.tenant.id, proratedCredits, 'system', `upgrade to ${plan.name} (prorated)`);
+      return res.json({ ok: true, change: 'upgrade', plan: plan.id, plan_label: plan.name, credits_added: proratedCredits });
+    }
+
+    // Downgrade — apply at period end. No proration/charge now; the next renewal
+    // uses the lower price. Keep current plan + credits until then.
     await stripe().subscriptions.update(subId, {
       items: [{ id: item.id, price: newPrice }],
-      proration_behavior: 'create_prorations',
-      payment_behavior:   'allow_incomplete',
-      metadata: { ...(sub.metadata || {}), bdi_tenant_id: String(req.tenant.id), bdi_plan_id: plan.id },
+      proration_behavior: 'none',
+      metadata: { ...(sub.metadata || {}), bdi_tenant_id: String(req.tenant.id), bdi_pending_plan: plan.id },
     });
-    // Reflect immediately; the webhook will also confirm.
-    await query(`UPDATE tenants SET plan = $2, updated_at = now() WHERE id = $1`, [req.tenant.id, plan.id]);
-    res.json({ ok: true, plan: plan.id, plan_label: plan.name });
+    await query(`UPDATE tenants SET pending_plan = $2, updated_at = now() WHERE id = $1`, [req.tenant.id, plan.id]);
+    const eff = sub.current_period_end ? new Date(sub.current_period_end * 1000).toISOString() : null;
+    return res.json({ ok: true, change: 'downgrade', plan: cur.plan, pending_plan: plan.id, effective: eff });
   } catch (err) {
     if (err.message?.includes('STRIPE_SECRET_KEY')) return res.status(500).json({ error: 'stripe_not_configured', message: err.message });
     next(err);
@@ -239,6 +280,26 @@ router.get('/invoices', requireAuth, async (req, res, next) => {
       hosted_invoice_url: inv.hosted_invoice_url,
       invoice_pdf:        inv.invoice_pdf,
     }));
+    // Credit top-ups are PaymentIntents (not invoices) — surface their receipts too.
+    try {
+      const piList = await stripe().paymentIntents.list({ customer: customerId, limit: 24, expand: ['data.latest_charge'] });
+      for (const p of (piList.data || [])) {
+        if (p.metadata?.bdi_kind !== 'credit_topup' || p.status !== 'succeeded') continue;
+        invoices.push({
+          id:                 p.id,
+          number:             `${Number(p.metadata.bdi_credits || 0).toLocaleString()} credits`,
+          created:            p.created ? new Date(p.created * 1000).toISOString() : null,
+          total:              p.amount,
+          amount_paid:        p.amount,
+          currency:           (p.currency || 'qar').toUpperCase(),
+          status:             'paid',
+          hosted_invoice_url: p.latest_charge?.receipt_url || null,
+          invoice_pdf:        null,
+          kind:               'credit',
+        });
+      }
+    } catch { /* receipts are best-effort */ }
+    invoices.sort((a, b) => new Date(b.created || 0) - new Date(a.created || 0));
     res.json({ invoices });
   } catch (err) {
     if (err.message?.includes('STRIPE_SECRET_KEY')) return res.json({ invoices: [], stripe_unconfigured: true });
@@ -451,6 +512,17 @@ async function handleSubscriptionChange(sub) {
     return;
   }
 
+  // Honor scheduled downgrades: if the incoming price matches the tenant's
+  // pending_plan, that's the downgrade we deferred to period end — keep the
+  // current (higher) plan until renewal. Otherwise apply the incoming plan and
+  // clear any pending change.
+  const stateR = await query(`SELECT plan, pending_plan FROM tenants WHERE id = $1`, [tenantId]);
+  const curPlanId = stateR.rows[0]?.plan || null;
+  const pendingPlanId = stateR.rows[0]?.pending_plan || null;
+  const incomingId = plan?.id || null;
+  const scheduledDowngrade = !!(incomingId && pendingPlanId && incomingId === pendingPlanId);
+  const applyPlanId = scheduledDowngrade ? curPlanId : incomingId;
+
   await withTransaction(async (client) => {
     await client.query(`
       UPDATE tenants
@@ -459,15 +531,17 @@ async function handleSubscriptionChange(sub) {
              subscription_status    = $4,
              plan_renewed_at        = COALESCE($5, plan_renewed_at),
              plan_expires_at        = $6,
-             past_due_at            = CASE WHEN $4 IN ('active','trialing') THEN NULL ELSE past_due_at END
+             past_due_at            = CASE WHEN $4 IN ('active','trialing') THEN NULL ELSE past_due_at END,
+             pending_plan           = CASE WHEN $7 THEN pending_plan ELSE NULL END
        WHERE id = $1
     `, [
       tenantId,
-      plan?.id || null,
+      applyPlanId,
       subscriptionId,
       status,
       currentPeriodStart,
       currentPeriodEnd,
+      scheduledDowngrade,
     ]);
   });
 
@@ -490,14 +564,21 @@ async function handleInvoicePaid(inv) {
   // standalone PaymentIntents (handled separately) and must never touch
   // subscription state.
   if (!inv.subscription) return;
-  // Renewal succeeded — top up credits for the tenant's current plan.
+  // Only a true cycle renewal (or the first invoice) drives renewal logic — not
+  // proration/upgrade invoices (billing_reason 'subscription_update').
+  if (inv.billing_reason && !['subscription_cycle', 'subscription_create'].includes(inv.billing_reason)) return;
   const customerId = inv.customer;
   const r = await query(
-    `SELECT id, plan FROM tenants WHERE stripe_customer_id = $1`,
+    `SELECT id, plan, pending_plan FROM tenants WHERE stripe_customer_id = $1`,
     [customerId]
   );
   const t = r.rows[0];
   if (!t) return;
+  // Apply a scheduled downgrade at the renewal boundary, then grant for the new plan.
+  if (inv.billing_reason === 'subscription_cycle' && t.pending_plan) {
+    await query(`UPDATE tenants SET plan = $2, pending_plan = NULL WHERE id = $1`, [t.id, t.pending_plan]);
+    t.plan = t.pending_plan;
+  }
   const plan = planById(t.plan);
   if (!plan) return;
 

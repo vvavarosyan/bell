@@ -132,12 +132,15 @@ export function BillingTab() {
     window.dispatchEvent(new Event('bdi:credits-changed'));
   };
 
-  const changePlan = async (planId, isDown) => {
-    if (isDown && !window.confirm('Downgrade your plan? Your monthly credit allotment and limits will be lower from this change onward.')) return;
+  const changePlan = async (planId, kind) => {
+    if (kind === 'down' && !window.confirm('Schedule a downgrade? You keep your current plan and credits until the end of this billing cycle, then renew on the lower plan.')) return;
     setChanging(planId);
     try {
-      await api.billingChangePlan(planId);
-      toast('Plan updated.');
+      const r = await api.billingChangePlan(planId);
+      if (r.change === 'upgrade') toast(r.credits_added > 0 ? `Upgraded — ${r.credits_added.toLocaleString()} credits added (prorated).` : 'Plan upgraded.');
+      else if (r.change === 'downgrade') toast(`Downgrade scheduled${r.effective ? ' for ' + new Date(r.effective).toLocaleDateString() : ' at next renewal'}.`);
+      else if (r.canceled_downgrade) toast('Scheduled downgrade canceled — staying on your current plan.');
+      else toast('Plan updated.');
       const [s, u] = await Promise.all([api.billingSubscription().catch(() => sub), api.billingUsage().catch(() => usage)]);
       setSub(s); setUsage(u); window.dispatchEvent(new Event('bdi:credits-changed'));
     } catch (e) { toast(e.body?.detail || e.body?.error || e.message || 'Plan change failed', 'error'); }
@@ -208,25 +211,36 @@ export function BillingTab() {
           ${sub?.plan_renewed_at ? html`<div class="sys-kv"><span class="k">Renews</span><span>${fmtDate(sub.plan_renewed_at)}</span></div>` : null}
           ${sub?.plan_expires_at ? html`<div class="sys-kv"><span class="k">Period ends</span><span>${fmtDate(sub.plan_expires_at)}</span></div>` : null}
 
+          ${sub?.pending_plan ? html`<div style=${{ marginTop: '12px', padding: '10px 14px', borderRadius: '8px', border: '1px solid var(--amber)', background: 'rgba(245,158,11,0.08)', fontSize: '12.5px', color: 'var(--text)' }}>
+            Scheduled: your plan changes to <b>${sub.pending_plan_label}</b>${sub.plan_expires_at ? ' on ' + fmtDate(sub.plan_expires_at) : ' at the next renewal'}. You keep <b>${sub.plan_label}</b> and its credits until then.
+          </div>` : null}
           <div style=${{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '12px', marginTop: '14px' }}>
             ${plans.map(p => {
               const current = p.id === sub?.plan;
+              const pending = p.id === sub?.pending_plan;
               const isDown = hasActiveSub && p.price_qar < currentPlanPrice;
               const isUp = hasActiveSub && p.price_qar > currentPlanPrice;
               return html`<div key=${p.id} style=${{
-                border: '1px solid ' + (current ? 'var(--accent)' : 'var(--border)'), borderRadius: '12px', padding: '16px',
+                border: '1px solid ' + (current ? 'var(--accent)' : pending ? 'var(--amber)' : 'var(--border)'), borderRadius: '12px', padding: '16px',
                 background: current ? 'rgba(91,140,255,0.06)' : 'var(--bg-elev, rgba(255,255,255,0.02))', display: 'flex', flexDirection: 'column', gap: '8px',
               }}>
-                <div style=${{ fontWeight: 700, fontSize: '15px', color: 'var(--text)' }}>${p.name}</div>
+                <div style=${{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <span style=${{ fontWeight: 700, fontSize: '15px', color: 'var(--text)' }}>${p.name}</span>
+                  ${pending ? html`<span style=${{ fontSize: '9px', textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--amber)', border: '1px solid var(--amber)', borderRadius: '4px', padding: '1px 5px' }}>Scheduled</span>` : null}
+                </div>
                 <div style=${{ fontSize: '20px', fontWeight: 700, color: 'var(--text)' }}>${qar(p.price_qar)}<span style=${{ fontSize: '12px', color: 'var(--text-muted)', fontWeight: 400 }}> / ${p.interval || 'month'}</span></div>
                 <div style=${{ fontSize: '12px', color: 'var(--text-muted)' }}>${(p.credits || 0).toLocaleString()} credits / month</div>
                 <div style=${{ flex: 1 }}></div>
                 ${current
-                  ? html`<button class="sys-btn sys-btn-secondary" disabled>Current plan</button>`
-                  : !hasActiveSub
-                    ? html`<button class="sys-btn" onClick=${() => (window.location.href = '/subscribe')}>Choose ${p.name}</button>`
-                    : html`<button class="sys-btn ${isUp ? '' : 'sys-btn-secondary'}" disabled=${changing === p.id}
-                        onClick=${() => changePlan(p.id, isDown)}>${changing === p.id ? 'Updating…' : (isUp ? 'Upgrade' : 'Downgrade')}</button>`}
+                  ? (sub?.pending_plan
+                      ? html`<button class="sys-btn" disabled=${changing === p.id} onClick=${() => changePlan(p.id)}>${changing === p.id ? 'Updating…' : 'Keep this plan'}</button>`
+                      : html`<button class="sys-btn sys-btn-secondary" disabled>Current plan</button>`)
+                  : pending
+                    ? html`<button class="sys-btn sys-btn-secondary" disabled>Scheduled for renewal</button>`
+                    : !hasActiveSub
+                      ? html`<button class="sys-btn" onClick=${() => (window.location.href = '/subscribe')}>Choose ${p.name}</button>`
+                      : html`<button class="sys-btn ${isUp ? '' : 'sys-btn-secondary'}" disabled=${changing === p.id || !!sub?.pending_plan}
+                          onClick=${() => changePlan(p.id, isDown ? 'down' : 'up')}>${changing === p.id ? 'Updating…' : (isUp ? 'Upgrade' : 'Downgrade')}</button>`}
               </div>`;
             })}
           </div>
@@ -294,7 +308,7 @@ export function BillingTab() {
                       <td>${pill(inv.status)}</td>
                       <td style=${{ textAlign: 'right' }}>
                         ${inv.invoice_pdf ? html`<a class="linkbtn" href=${inv.invoice_pdf} target="_blank" rel="noopener">PDF</a>` : ''}
-                        ${inv.hosted_invoice_url ? html` <a class="linkbtn" href=${inv.hosted_invoice_url} target="_blank" rel="noopener">View</a>` : ''}
+                        ${inv.hosted_invoice_url ? html` <a class="linkbtn" href=${inv.hosted_invoice_url} target="_blank" rel="noopener">${inv.kind === 'credit' ? 'Receipt' : 'View'}</a>` : ''}
                       </td>
                     </tr>`)}
                 </tbody>

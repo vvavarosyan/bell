@@ -38,10 +38,12 @@ export async function ensureMonthlyGrant(tenantId) {
     const allot = plan?.credits || 0;
     const now = Date.now();
     const start = t.credits_period_start ? new Date(t.credits_period_start).getTime() : null;
+    // Grant ONLY when a new ~30-day period has rolled (a renewal). A mid-cycle
+    // plan change must NOT grant a fresh allotment — that handed out free credits
+    // on upgrade. Upgrades top up prorated credits explicitly in change-plan.
     const newPeriod = start === null || (now - start) >= PERIOD_MS;
-    const planChanged = t.credits_period_plan && t.credits_period_plan !== t.plan;
 
-    if (allot > 0 && (newPeriod || planChanged)) {
+    if (allot > 0 && newPeriod) {
       const newBal = Number(t.credit_balance) + allot;
       await client.query(
         `UPDATE tenants
