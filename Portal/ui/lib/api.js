@@ -265,6 +265,11 @@ export const api = {
   billingCreditPricing:   () => request('/api/billing/credit-pricing'),
   billingBuyCredits:      (credits) => request('/api/billing/buy-credits', { method: 'POST', body: JSON.stringify({ credits }) }),
   billingBuyCreditsConfirm: (payment_intent_id) => request('/api/billing/buy-credits/confirm', { method: 'POST', body: JSON.stringify({ payment_intent_id }) }),
+  billingPaymentMethod:    () => request('/api/billing/payment-method'),
+  billingPmSetup:          () => request('/api/billing/payment-method/setup', { method: 'POST', body: '{}' }),
+  billingPmDefault:        (payment_method_id) => request('/api/billing/payment-method/default', { method: 'POST', body: JSON.stringify({ payment_method_id }) }),
+  billingCancel:           () => request('/api/billing/cancel', { method: 'POST', body: '{}' }),
+  billingResume:           () => request('/api/billing/resume', { method: 'POST', body: '{}' }),
   billingChangePlan:      (plan_id) => request('/api/billing/change-plan', { method: 'POST', body: JSON.stringify({ plan_id }) }),
 
   // Account (the signed-in user's own profile / notifications / preferences)
