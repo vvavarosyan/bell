@@ -10,6 +10,7 @@ const SECTIONS = [
   { id: 'profile',       label: 'Profile' },
   { id: 'email',         label: 'Email' },
   { id: 'domain',        label: 'Sending domain' },
+  { id: 'icp',           label: 'Company & ICP' },
   { id: 'notifications', label: 'Notifications' },
   { id: 'preferences',   label: 'Preferences' },
   { id: 'security',      label: 'Account & Security' },
@@ -38,6 +39,26 @@ export function AccountTab() {
     })();
   }, [section, identities]);
 
+  // ICP / company-profile hooks — above the early return (Rules of Hooks).
+  const [icp, setIcp] = useState(null);
+  const [icpSaving, setIcpSaving] = useState(false);
+  useEffect(() => {
+    if (section !== 'icp' || icp !== null) return;
+    (async () => {
+      try {
+        const r = await api.getIcp();
+        const pr = r.profile || {};
+        setIcp({
+          company_about: pr.company_about || '', products_services: pr.products_services || '',
+          pricing: pr.pricing || '', current_customers: pr.current_customers || '',
+          target_industries: (pr.target_industries || []).join(', '), target_sizes: (pr.target_sizes || []).join(', '),
+          target_geographies: pr.target_geographies || '', target_titles: pr.target_titles || '',
+          target_keywords: pr.target_keywords || '', icp_notes: pr.icp_notes || '',
+        });
+      } catch (e) { toast('Load failed: ' + (e.message || ''), 'error'); setIcp({}); }
+    })();
+  }, [section, icp]);
+
   if (!data) return html`<div class="sys-page"><div class="sys-body"><div class="empty">Loading…</div></div></div>`;
 
   const p = data.profile || {};
@@ -50,6 +71,22 @@ export function AccountTab() {
     try { await api.updateAccount(patch); toast(msg || 'Saved'); }
     catch (e) { toast('Save failed: ' + (e.message || ''), 'error'); }
     finally { setSaving(false); }
+  };
+
+  const setIcpField = (k, v) => setIcp(c => ({ ...(c || {}), [k]: v }));
+  const submitIcp = async () => {
+    if (!icp) return;
+    setIcpSaving(true);
+    try {
+      const body = {
+        ...icp,
+        target_industries: String(icp.target_industries || '').split(',').map(s => s.trim()).filter(Boolean),
+        target_sizes: String(icp.target_sizes || '').split(',').map(s => s.trim()).filter(Boolean),
+      };
+      await api.saveIcp(body);
+      toast('Company profile saved');
+    } catch (e) { toast('Save failed: ' + (e.message || ''), 'error'); }
+    finally { setIcpSaving(false); }
   };
 
   // ---- Sending domain (per-tenant outreach identity) --------------------
@@ -164,6 +201,31 @@ export function AccountTab() {
           </div>
         </div>
         <div class="sys-actions"><button class="sys-btn" disabled=${saving} onClick=${() => save({ profile: data.profile }, 'Profile saved')}>${saving ? 'Saving…' : 'Save profile'}</button></div>
+      </div>`,
+
+    icp: html`
+      <div class="sys-section">
+        <h2>Company & ICP</h2>
+        <div class="sys-hint">Describe your business and exactly who you sell to. Bell uses this to personalize your Signals and to guide Bella. (Bella will be able to fill this in for you later.)</div>
+        ${icp === null ? html`<div class="empty">Loading…</div>` : html`
+          <div class="sys-grid">
+            <div class="sys-field full"><label>What your company does</label><textarea class="sys-textarea" value=${icp.company_about || ''} onInput=${e => setIcpField('company_about', e.target.value)}></textarea></div>
+            <div class="sys-field full"><label>Products & services</label><textarea class="sys-textarea" value=${icp.products_services || ''} onInput=${e => setIcpField('products_services', e.target.value)}></textarea></div>
+            <div class="sys-field"><label>Pricing</label><input class="sys-input" value=${icp.pricing || ''} onInput=${e => setIcpField('pricing', e.target.value)} /></div>
+            <div class="sys-field full"><label>Current customers</label><textarea class="sys-textarea" value=${icp.current_customers || ''} onInput=${e => setIcpField('current_customers', e.target.value)}></textarea></div>
+          </div>
+          <div style=${{ fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 700, color: 'var(--text-dim)', margin: '18px 0 8px' }}>Ideal customer profile (who to target)</div>
+          <div class="sys-grid">
+            <div class="sys-field"><label>Target industries</label><input class="sys-input" placeholder="Construction, Healthcare, …" value=${icp.target_industries || ''} onInput=${e => setIcpField('target_industries', e.target.value)} /></div>
+            <div class="sys-field"><label>Target company sizes</label><input class="sys-input" placeholder="11-50, 51-200, …" value=${icp.target_sizes || ''} onInput=${e => setIcpField('target_sizes', e.target.value)} /></div>
+            <div class="sys-field"><label>Target geographies</label><input class="sys-input" placeholder="Doha, Qatar, GCC" value=${icp.target_geographies || ''} onInput=${e => setIcpField('target_geographies', e.target.value)} /></div>
+            <div class="sys-field"><label>Decision-maker titles</label><input class="sys-input" placeholder="CEO, Head of Procurement, …" value=${icp.target_titles || ''} onInput=${e => setIcpField('target_titles', e.target.value)} /></div>
+            <div class="sys-field full"><label>Keywords / buying signals</label><input class="sys-input" placeholder="new branch, hiring, expansion, …" value=${icp.target_keywords || ''} onInput=${e => setIcpField('target_keywords', e.target.value)} /></div>
+            <div class="sys-field full"><label>Notes</label><textarea class="sys-textarea" value=${icp.icp_notes || ''} onInput=${e => setIcpField('icp_notes', e.target.value)}></textarea></div>
+          </div>
+          <div class="sys-hint" style=${{ marginTop: '6px' }}>Tip: separate multiple industries or sizes with commas.</div>
+          <div class="sys-actions"><button class="sys-btn" disabled=${icpSaving} onClick=${submitIcp}>${icpSaving ? 'Saving…' : 'Save company profile'}</button></div>
+        `}
       </div>`,
 
     email: html`

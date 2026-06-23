@@ -212,7 +212,7 @@ export function MarketFeedTab() {
       <!-- Trending sidebar -->
       <aside class="feed-aside">
         ${stats ? html`
-          <div class="feed-aside-title">Bell Data Intelligence</div>
+          <div class="feed-aside-title">Data Statistics</div>
           <div class="feed-bdi-stats" title="The scale and freshness of Bell Data Intelligence">
             <div class="feed-bdi-stat"><b>${(stats.bdi_companies || 0).toLocaleString()}</b><span>Companies</span></div>
             <div class="feed-bdi-stat"><b>${(stats.bdi_people || 0).toLocaleString()}</b><span>People</span></div>

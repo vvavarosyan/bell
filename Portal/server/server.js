@@ -51,6 +51,7 @@ import crmInboundRouter        from './routes/crm_inbound.js';
 import resendWebhookRouter     from './routes/resend_webhook.js';
 import detailRequestsRouter    from './routes/detail_requests.js';
 import outreachRouter          from './routes/outreach.js';
+import icpRouter               from './routes/icp.js';
 import notificationsRouter     from './routes/notifications.js';
 import emailTemplatesRouter     from './routes/email_templates.js';
 import adminUsersRouter         from './routes/admin_users.js';
@@ -158,6 +159,7 @@ app.use('/api/feed',       ...feature, feedRouter);
 app.use('/api/crm',        ...feature, crmRouter);
 app.use('/api/detail-requests', ...feature, detailRequestsRouter);
 app.use('/api/outreach',        ...feature, outreachRouter);
+app.use('/api/icp',             ...feature, icpRouter);
 // Stats backs the app shell/header — signed in only, no subscription gate so an
 // unsubscribed user still gets a working frame before being routed to /subscribe.
 app.use('/api/stats',      requireAuth, statsRouter);
@@ -213,11 +215,20 @@ app.use('/api/crm-inbound',        crmInboundRouter);
 // Resend email-events webhook (opens/clicks/delivery) — self-gated by ?secret.
 app.use('/api/resend-webhook',     resendWebhookRouter);
 
-// Static UI
-app.use(express.static(UI_DIR, { extensions: ['html'] }));
+// Static UI. JS modules + HTML carry no content-hash in their URL, so tell the
+// browser to ALWAYS revalidate them (cheap 304 when unchanged) — this prevents
+// stale/mismatched modules serving a blank page after a deploy. CSS already
+// cache-busts via ?v=, images/fonts may cache normally.
+app.use(express.static(UI_DIR, {
+  extensions: ['html'],
+  setHeaders: (res, filePath) => {
+    if (/\.(js|mjs|html)$/i.test(filePath)) res.setHeader('Cache-Control', 'no-cache');
+  },
+}));
 
 // SPA fallback — anything not under /api/ returns index.html
 app.get(/^\/(?!api\/).*/, (req, res) => {
+  res.set('Cache-Control', 'no-cache');
   res.sendFile(path.join(UI_DIR, 'index.html'));
 });
 
