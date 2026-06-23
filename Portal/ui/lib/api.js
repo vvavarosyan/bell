@@ -273,4 +273,8 @@ export const api = {
   outreachVerifyDomain:   (id) => request('/api/outreach/domains/' + id + '/verify', { method: 'POST' }),
   outreachRemoveDomain:   (id) => request('/api/outreach/domains/' + id, { method: 'DELETE' }),
   outreachUpdateIdentity: (id, patch) => request('/api/outreach/identities/' + id, { method: 'PATCH', body: JSON.stringify(patch) }),
+
+  // Company profile + ICP (per-tenant) — drives Signals + Bella.
+  getIcp:                 () => request('/api/icp'),
+  saveIcp:                (body) => request('/api/icp', { method: 'PUT', body: JSON.stringify(body) }),
 };

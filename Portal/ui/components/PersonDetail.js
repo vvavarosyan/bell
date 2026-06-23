@@ -195,7 +195,7 @@ export function PersonDetail({ personId, onMutated, onDeleted, isUser = false, i
       </div>
 
       <div class="detail-body">
-        ${tab === 'profile'    ? html`<${ProfileTab}    person=${p} contacts=${data.contacts || []} onReload=${reload} needsReveal=${needsReveal} onReveal=${revealContacts} isUser=${isUser} />` : null}
+        ${tab === 'profile'    ? html`<${ProfileTab}    person=${p} contacts=${data.contacts || []} onReload=${reload} needsReveal=${needsReveal} onReveal=${revealContacts} isUser=${isUser} isLocalEngine=${isLocalEngine} />` : null}
         ${tab === 'companies'  ? html`<${CompaniesView} companies=${companies} />` : null}
         ${tab === 'experience' ? html`<${ExperienceView} person=${p} />` : null}
       </div>
@@ -203,7 +203,7 @@ export function PersonDetail({ personId, onMutated, onDeleted, isUser = false, i
   `;
 }
 
-function ProfileTab({ person, contacts, onReload, needsReveal = false, onReveal, isUser = false }) {
+function ProfileTab({ person, contacts, onReload, needsReveal = false, onReveal, isUser = false, isLocalEngine = false }) {
   const saveField = async (field, value) => {
     try {
       await api.updatePerson(person.id, { [field]: value });
