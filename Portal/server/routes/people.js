@@ -9,7 +9,7 @@ import {
   listPersonContacts, loadPersonContactsByIds,
   upsertContact, setPrimaryContact, deleteContact,
 } from '../lib/contacts.js';
-import { revealOne, revealBulk, getRevealedSet, bypassesCredits } from '../lib/credits.js';
+import { revealOne, revealBulk, getRevealedSet, bypassesCredits, markRevealed } from '../lib/credits.js';
 import { denyUnlessLocalEngine } from '../lib/auth.js';
 import { addRevealedToCrm } from '../lib/crm.js';
 
@@ -319,6 +319,7 @@ router.post('/:id/reveal', async (req, res, next) => {
           WHERE id = $1 AND is_revealed = false`,
         [id, actor]
       );
+      await markRevealed(req.tenant?.id, 'person', id, actor);
       await addRevealedToCrm(req.tenant?.id, 'person', [id], actor);
       return res.json({ revealed: true, charged: 0, unlimited: true, person: await personContact(id) });
     }
@@ -346,6 +347,7 @@ router.post('/reveal-bulk', async (req, res, next) => {
           WHERE id = ANY($1::bigint[]) AND is_revealed = false`,
         [ids.map(Number), actor]
       );
+      await markRevealed(req.tenant?.id, 'person', ids, actor);
       await addRevealedToCrm(req.tenant?.id, 'person', ids, actor);
       return res.json({ unlimited: true, revealed: ids.length, requested: ids.length });
     }

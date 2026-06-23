@@ -102,6 +102,22 @@ async function lowCreditCheck(tenantId, after, charged) {
   }
 }
 
+/** Record reveal(s) WITHOUT charging — the admin / internal-tenant bypass path.
+ *  Keeps per-tenant reveal state (tenant_reveals) consistent with the global
+ *  is_revealed flag, so CRM recipients, People and Companies all agree on what's
+ *  revealed. Accepts a single id or an array. */
+export async function markRevealed(tenantId, entityType, entityIds, actor) {
+  const ids = (Array.isArray(entityIds) ? entityIds : [entityIds]).map(Number).filter(Number.isFinite);
+  if (!tenantId || !ids.length) return;
+  for (const id of ids) {
+    await query(
+      `INSERT INTO tenant_reveals (tenant_id, entity_type, entity_id, revealed_by) VALUES ($1,$2,$3,$4)
+       ON CONFLICT (tenant_id, entity_type, entity_id) DO NOTHING`,
+      [tenantId, entityType, id, actor]
+    );
+  }
+}
+
 export async function revealOne(tenantId, entityType, entityId, actor) {
   await ensureMonthlyGrant(tenantId);
   const result = await withTransaction(async (client) => {
