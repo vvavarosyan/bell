@@ -264,6 +264,7 @@ export const api = {
   billingUsage:           (limit = 50) => request('/api/billing/usage?limit=' + limit),
   billingCreditPricing:   () => request('/api/billing/credit-pricing'),
   billingBuyCredits:      (credits) => request('/api/billing/buy-credits', { method: 'POST', body: JSON.stringify({ credits }) }),
+  billingBuyCreditsConfirm: (payment_intent_id) => request('/api/billing/buy-credits/confirm', { method: 'POST', body: JSON.stringify({ payment_intent_id }) }),
   billingChangePlan:      (plan_id) => request('/api/billing/change-plan', { method: 'POST', body: JSON.stringify({ plan_id }) }),
 
   // Account (the signed-in user's own profile / notifications / preferences)
