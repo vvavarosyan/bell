@@ -1,9 +1,9 @@
-// System → Billing. Plan up/downgrade, buy extra credits, credits & usage,
-// invoices/receipts, and a payment-status banner with a 24h freeze warning.
-// Subscription/usage from our DB, invoices from Stripe, card management via the
-// Stripe Customer Portal.
+// System → Billing. Plan up/downgrade, buy extra credits (in-app Stripe
+// Payment Element — the user never leaves Bell), credits & usage, invoices,
+// and a payment-status banner with a 24h freeze warning. Subscription/usage
+// from our DB, invoices from Stripe, card management via the Customer Portal.
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { html } from '../lib/html.js';
 import { api } from '../lib/api.js';
 import { toast } from '../lib/toast.js';
@@ -22,29 +22,98 @@ const qar = (n) => `QAR ${(Number(n) || 0).toLocaleString(undefined, { minimumFr
 const fmtDate = (s) => s ? new Date(s).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }) : '—';
 const pill = (st) => html`<span class="sys-pill" style=${{ color: STATUS_COLOR[st] || 'var(--text-muted)', borderColor: STATUS_COLOR[st] || 'var(--border)' }}>${(st || 'none').replace('_', ' ')}</span>`;
 
+// Load Stripe.js once and return a Stripe instance for the publishable key.
+let _stripePromise = null;
+function loadStripe(pk) {
+  if (_stripePromise) return _stripePromise;
+  _stripePromise = new Promise((resolve, reject) => {
+    if (window.Stripe) return resolve(window.Stripe(pk));
+    const s = document.createElement('script');
+    s.src = 'https://js.stripe.com/v3/'; s.async = true;
+    s.onload = () => resolve(window.Stripe(pk));
+    s.onerror = () => reject(new Error('stripe_js_failed'));
+    document.head.appendChild(s);
+  });
+  return _stripePromise;
+}
+const STRIPE_APPEARANCE = {
+  theme: 'night', labels: 'above',
+  variables: { colorPrimary: '#5b8cff', colorBackground: 'rgba(255,255,255,0.03)', colorText: '#e6e9ef', colorTextSecondary: '#8a93a6', borderRadius: '8px', fontFamily: 'ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif' },
+};
+
+// In-app card payment for a credit top-up (Stripe Payment Element).
+function CreditCheckout({ pk, clientSecret, label, onSuccess, onCancel }) {
+  const elRef = useRef(null);
+  const ref = useRef({ stripe: null, elements: null, pe: null });
+  const [ready, setReady] = useState(false);
+  const [paying, setPaying] = useState(false);
+  const [err, setErr] = useState('');
+
+  useEffect(() => {
+    let dead = false;
+    (async () => {
+      try {
+        const stripe = await loadStripe(pk);
+        if (dead) return;
+        const elements = stripe.elements({ clientSecret, appearance: STRIPE_APPEARANCE, loader: 'auto' });
+        const pe = elements.create('payment', { layout: { type: 'tabs', defaultCollapsed: false } });
+        ref.current = { stripe, elements, pe };
+        if (elRef.current) { pe.mount(elRef.current); setReady(true); }
+      } catch { setErr('Could not load the secure payment field. Please try again.'); }
+    })();
+    return () => { dead = true; try { ref.current.pe?.unmount(); ref.current.pe?.destroy(); } catch { /* ignore */ } };
+  }, [clientSecret, pk]);
+
+  const pay = async () => {
+    const { stripe, elements } = ref.current;
+    if (!stripe || !elements) return;
+    setPaying(true); setErr('');
+    const { error, paymentIntent } = await stripe.confirmPayment({ elements, redirect: 'if_required' });
+    if (error) { setErr(error.message || 'Payment failed. Please check your card and try again.'); setPaying(false); return; }
+    if (paymentIntent && paymentIntent.status === 'succeeded') { onSuccess(); return; }
+    setErr('Payment did not complete. Please try again.'); setPaying(false);
+  };
+
+  return html`
+    <div style=${{ marginTop: '12px', border: '1px solid var(--accent)', borderRadius: '10px', padding: '14px', background: 'rgba(91,140,255,0.04)' }}>
+      <div style=${{ fontWeight: 600, fontSize: '13px', marginBottom: '10px', color: 'var(--text)' }}>${label}</div>
+      <div ref=${elRef}></div>
+      ${!ready && !err ? html`<div class="sys-hint" style=${{ marginTop: 0 }}>Loading secure payment field…</div>` : null}
+      ${err ? html`<div style=${{ color: 'var(--red)', fontSize: '12.5px', marginTop: '8px' }}>${err}</div>` : null}
+      <div style=${{ display: 'flex', gap: '8px', marginTop: '12px' }}>
+        <button class="sys-btn" disabled=${!ready || paying} onClick=${pay}>${paying ? 'Processing…' : 'Pay now'}</button>
+        <button class="sys-btn sys-btn-secondary" disabled=${paying} onClick=${onCancel}>Cancel</button>
+      </div>
+      <div class="sys-hint" style=${{ marginTop: '8px', marginBottom: 0 }}>🔒 Encrypted by Stripe — Bell never sees your card details.</div>
+    </div>`;
+}
+
 export function BillingTab() {
   const [sub, setSub] = useState(null);
   const [usage, setUsage] = useState(null);
   const [invoices, setInvoices] = useState([]);
   const [plans, setPlans] = useState([]);
   const [pricing, setPricing] = useState(null);
+  const [pk, setPk] = useState(null);
   const [loading, setLoading] = useState(true);
   const [portalBusy, setPortalBusy] = useState(false);
   const [changing, setChanging] = useState(null);
   const [buyQty, setBuyQty] = useState('');
   const [buying, setBuying] = useState(false);
+  const [checkout, setCheckout] = useState(null);
 
   useEffect(() => { (async () => {
     try {
-      const [s, u, inv, pl, pr] = await Promise.all([
+      const [s, u, inv, pl, pr, mode] = await Promise.all([
         api.billingSubscription().catch(() => null),
         api.billingUsage().catch(() => null),
         api.billingInvoices().catch(() => ({ invoices: [] })),
         api.billingPlans().catch(() => ({ plans: [] })),
         api.billingCreditPricing().catch(() => null),
+        fetch('/api/auth/mode').then(r => r.json()).catch(() => ({})),
       ]);
       setSub(s); setUsage(u); setInvoices(inv?.invoices || []);
-      setPlans(pl?.plans || []); setPricing(pr);
+      setPlans(pl?.plans || []); setPricing(pr); setPk(mode?.stripe_publishable_key || null);
     } finally { setLoading(false); }
   })(); }, []);
 
@@ -86,21 +155,28 @@ export function BillingTab() {
     return { credits: n, rate, total: Math.round(n * rate * 100) / 100 };
   };
 
-  const buyCredits = async () => {
+  const startCheckout = async () => {
     const q = quote(buyQty);
     if (!q) { toast(`Enter how many credits to buy (min ${pricing?.min?.toLocaleString() || 500}).`, 'error'); return; }
     if (q.error) { toast(q.error, 'error'); return; }
+    if (!pk) { toast('Card payments are not configured on this server yet.', 'error'); return; }
     setBuying(true);
     try {
       const r = await api.billingBuyCredits(q.credits);
-      if (r.requires_payment && r.hosted_invoice_url) { window.location.href = r.hosted_invoice_url; return; }
-      toast(`Added ${q.credits.toLocaleString()} credits to your balance.`);
-      setBuyQty('');
-      await reloadUsage();
+      if (!r.client_secret) { toast('Could not start the payment. Please try again.', 'error'); return; }
+      setCheckout({ client_secret: r.client_secret, payment_intent_id: r.payment_intent_id, credits: q.credits, total: q.total });
     } catch (e) {
-      const msg = e.body?.detail || (e.body?.error === 'stripe_not_configured' ? 'Payments are not set up on this server yet.' : '') || e.message || 'Purchase failed';
+      const msg = e.body?.error === 'stripe_not_configured' ? 'Payments are not set up on this server yet.' : (e.body?.detail || e.message || 'Could not start payment');
       toast(msg, 'error');
     } finally { setBuying(false); }
+  };
+
+  const onPaid = async () => {
+    const c = checkout;
+    setCheckout(null); setBuyQty('');
+    try { await api.billingBuyCreditsConfirm(c.payment_intent_id); } catch { /* webhook will still grant */ }
+    toast(`Added ${c.credits.toLocaleString()} credits to your balance.`);
+    await reloadUsage();
   };
 
   const pct = usage && usage.allotment ? Math.min(100, Math.round((usage.used_this_cycle / usage.allotment) * 100)) : 0;
@@ -121,7 +197,7 @@ export function BillingTab() {
             <span style=${{ fontSize: '13px', color: 'var(--text)', flex: 1, minWidth: '240px' }}>
               ${sub.frozen
                 ? html`<b style=${{ color: 'var(--red)' }}>Your account is frozen.</b> A subscription payment is overdue. Update your billing to restore full access.`
-                : html`<b style=${{ color: 'var(--amber)' }}>Payment failed.</b> Update your billing within <b>${sub.grace_hours_left ?? 24}h</b> or your account will be frozen.`}
+                : html`<b style=${{ color: 'var(--amber)' }}>Subscription payment failed.</b> Update your billing within <b>${sub.grace_hours_left ?? 24}h</b> or your account will be frozen.`}
             </span>
             <button class="sys-btn" disabled=${portalBusy} onClick=${openPortal}>${portalBusy ? 'Opening…' : 'Update billing'}</button>
           </div>` : null}
@@ -168,20 +244,26 @@ export function BillingTab() {
           <div class="sys-kv"><span class="k">Renews / resets</span><span>${fmtDate(usage?.cycle_reset)}</span></div>
           ${usage?.allotment ? html`<div class="sys-bar"><span style=${{ width: pct + '%' }}></span></div>` : null}
 
-          <div style=${{ marginTop: '18px', maxWidth: '520px', border: '1px solid var(--border)', borderRadius: '12px', padding: '16px' }}>
+          <div style=${{ marginTop: '18px', maxWidth: '560px', border: '1px solid var(--border)', borderRadius: '12px', padding: '16px' }}>
             <div style=${{ fontWeight: 600, fontSize: '14px', color: 'var(--text)', marginBottom: '4px' }}>Buy extra credits</div>
-            <div class="sys-hint" style=${{ marginTop: 0 }}>Top up any time. Bigger top-ups get a better rate; purchased credits roll over (they don't reset monthly).</div>
-            <div style=${{ display: 'flex', gap: '8px', alignItems: 'center', marginTop: '10px', flexWrap: 'wrap' }}>
-              <input class="sys-input" type="number" min=${pricing?.min || 500} max=${pricing?.max || 100000} step="100"
-                placeholder=${`Credits (min ${(pricing?.min || 500).toLocaleString()})`} value=${buyQty}
-                onInput=${e => setBuyQty(e.target.value)} style=${{ width: '180px' }} />
-              <button class="sys-btn" disabled=${buying || !q || !!q?.error} onClick=${buyCredits}>${buying ? 'Processing…' : 'Buy credits'}</button>
-            </div>
-            <div style=${{ marginTop: '8px', fontSize: '13px', minHeight: '18px', color: q?.error ? 'var(--red)' : 'var(--text-muted)' }}>
-              ${q?.error ? q.error
-                : q ? html`${q.credits.toLocaleString()} credits × ${qar(q.rate)}/credit = <b style=${{ color: 'var(--text)' }}>${qar(q.total)}</b>`
-                : (pricing ? html`Rates: up to ${pricing.tiers[0].upTo + 1 >= 15000 ? '15,000' : (pricing.tiers[0].upTo + 1).toLocaleString()} @ ${qar(pricing.tiers[0].rate)} · then ${qar(pricing.tiers[1].rate)} · then ${qar(pricing.tiers[2].rate)}/credit` : '')}
-            </div>
+            <div class="sys-hint" style=${{ marginTop: 0 }}>Top up any time — paid right here, no leaving Bell. Bigger top-ups get a better rate; purchased credits roll over (they don't reset monthly).</div>
+            ${checkout ? html`
+              <${CreditCheckout} pk=${pk} clientSecret=${checkout.client_secret}
+                label=${`${checkout.credits.toLocaleString()} credits — ${qar(checkout.total)}`}
+                onSuccess=${onPaid} onCancel=${() => setCheckout(null)} />
+            ` : html`
+              <div style=${{ display: 'flex', gap: '8px', alignItems: 'center', marginTop: '10px', flexWrap: 'wrap' }}>
+                <input class="sys-input" type="number" min=${pricing?.min || 500} max=${pricing?.max || 100000} step="100"
+                  placeholder=${`Credits (min ${(pricing?.min || 500).toLocaleString()})`} value=${buyQty}
+                  onInput=${e => setBuyQty(e.target.value)} style=${{ width: '180px' }} />
+                <button class="sys-btn" disabled=${buying || !q || !!q?.error} onClick=${startCheckout}>${buying ? 'Starting…' : 'Buy credits'}</button>
+              </div>
+              <div style=${{ marginTop: '8px', fontSize: '13px', minHeight: '18px', color: q?.error ? 'var(--red)' : 'var(--text-muted)' }}>
+                ${q?.error ? q.error
+                  : q ? html`${q.credits.toLocaleString()} credits × ${qar(q.rate)}/credit = <b style=${{ color: 'var(--text)' }}>${qar(q.total)}</b>`
+                  : (pricing ? html`Rate: up to 15,000 @ QAR 1.00 · 15k–60k @ QAR 0.75 · 60k+ @ QAR 0.50 per credit` : '')}
+              </div>
+            `}
           </div>
 
           <div style=${{ marginTop: '18px', maxWidth: '640px' }}>
@@ -217,7 +299,7 @@ export function BillingTab() {
                     </tr>`)}
                 </tbody>
               </table>`}
-          <div class="sys-hint" style=${{ marginTop: '14px', marginBottom: 0 }}>Full archive, payment method and tax details: <a class="linkbtn" onClick=${openPortal}>Manage billing</a>.</div>
+          <div class="sys-hint" style=${{ marginTop: '14px', marginBottom: 0 }}>Subscription invoices are downloadable here. Credit top-ups get an emailed Stripe receipt and show under Recent activity. Full archive & tax details: <a class="linkbtn" onClick=${openPortal}>Manage billing</a>.</div>
         </div>
 
       </div>

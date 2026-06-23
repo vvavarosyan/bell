@@ -50,6 +50,17 @@ router.get('/subscription', requireAuth, async (req, res, next) => {
     `, [req.tenant.id]);
     if (!r.rows.length) return res.status(404).json({ error: 'tenant_not_found' });
     const t = r.rows[0];
+    // Self-heal: if we think they're past_due but Stripe says the subscription is
+    // live (e.g. a one-off charge wrongly flipped it before this fix), correct it.
+    if (t.subscription_status === 'past_due' && t.stripe_subscription_id) {
+      try {
+        const live = await stripe().subscriptions.retrieve(t.stripe_subscription_id);
+        if (['active', 'trialing'].includes(live.status)) {
+          await query(`UPDATE tenants SET subscription_status = $2, past_due_at = NULL WHERE id = $1`, [req.tenant.id, live.status]);
+          t.subscription_status = live.status; t.past_due_at = null;
+        }
+      } catch { /* keep DB value if Stripe is unreachable */ }
+    }
     const GRACE_MS = 24 * 60 * 60 * 1000;
     const pastDue = t.subscription_status === 'past_due' && !!t.past_due_at;
     const graceMsLeft = pastDue ? Math.max(0, GRACE_MS - (Date.now() - new Date(t.past_due_at).getTime())) : null;
@@ -280,11 +291,13 @@ router.get('/credit-pricing', (req, res) => {
 });
 
 // ---------------------------------------------------------------------------
-// POST /api/billing/buy-credits — one-time extra-credit purchase.
-// Body: { credits }. Bills the tenant's saved card via a Stripe Invoice (so a
-// real downloadable receipt lands in the invoices list); the webhook grants the
-// credits on invoice.payment_succeeded. If no card is on file, returns a
-// hosted_invoice_url for the user to pay.
+// POST /api/billing/buy-credits — start a one-time extra-credit purchase.
+// Body: { credits }. Creates a STANDALONE Stripe PaymentIntent (NOT an invoice,
+// so it is fully isolated from the subscription lifecycle) and returns its
+// client_secret for the in-app Payment Element. allow_redirects:'never' keeps
+// the whole flow on-platform (card only — the user never leaves Bell). Credits
+// are granted via /buy-credits/confirm (instant) + the payment_intent.succeeded
+// webhook (idempotent safety net).
 // ---------------------------------------------------------------------------
 router.post('/buy-credits', requireAuth, async (req, res, next) => {
   try {
@@ -293,51 +306,47 @@ router.post('/buy-credits', requireAuth, async (req, res, next) => {
       return res.status(400).json({ error: 'invalid_quantity', reason: priced.error, min: CREDIT_TOPUP.min, max: CREDIT_TOPUP.max });
     }
     const customerId = await getOrCreateStripeCustomer(req.tenant, req.user);
-
-    // Draft invoice first, then attach exactly one line item to it.
-    const invoice = await stripe().invoices.create({
-      customer: customerId,
-      collection_method: 'charge_automatically',
-      auto_advance: false,
+    const pi = await stripe().paymentIntents.create({
+      amount:        priced.amount,        // halalas
+      currency:      'qar',
+      customer:      customerId,
+      description:   `${priced.credits.toLocaleString()} Bell credits`,
+      receipt_email: req.user?.email || undefined,
       metadata: {
-        bdi_tenant_id: String(req.tenant.id),
         bdi_kind:      'credit_topup',
+        bdi_tenant_id: String(req.tenant.id),
         bdi_credits:   String(priced.credits),
       },
+      automatic_payment_methods: { enabled: true, allow_redirects: 'never' },
     });
-    await stripe().invoiceItems.create({
-      customer: customerId,
-      invoice:  invoice.id,
-      amount:   priced.amount,           // halalas
-      currency: 'qar',
-      description: `${priced.credits.toLocaleString()} Bell credits`,
-    });
-    const finalized = await stripe().invoices.finalizeInvoice(invoice.id);
-
-    // Try to charge the saved card immediately.
-    try {
-      const paid = await stripe().invoices.pay(finalized.id);
-      if (paid.status === 'paid') {
-        // Grant now for an instant balance update; the webhook is the idempotent safety net.
-        await grantPurchasedCredits(req.tenant.id, priced.credits, paid.id, paid.amount_paid, req.user?.email || 'purchase');
-      }
-      return res.json({
-        ok: true, paid: paid.status === 'paid',
-        credits: priced.credits, qar: priced.qar,
-        invoice_id: paid.id, invoice_pdf: paid.invoice_pdf || null,
-      });
-    } catch (payErr) {
-      // No usable payment method — let them pay on the hosted invoice page.
-      return res.json({
-        ok: true, paid: false, requires_payment: true,
-        credits: priced.credits, qar: priced.qar,
-        hosted_invoice_url: finalized.hosted_invoice_url || null,
-      });
-    }
+    res.json({ ok: true, client_secret: pi.client_secret, payment_intent_id: pi.id, credits: priced.credits, qar: priced.qar });
   } catch (err) {
     if (err.message?.includes('STRIPE_SECRET_KEY')) {
       return res.status(500).json({ error: 'stripe_not_configured', message: err.message });
     }
+    next(err);
+  }
+});
+
+// ---------------------------------------------------------------------------
+// POST /api/billing/buy-credits/confirm — after the card is confirmed in-app,
+// verify the PaymentIntent succeeded and grant the credits immediately
+// (idempotent; the webhook also grants as a safety net). Body: { payment_intent_id }.
+// ---------------------------------------------------------------------------
+router.post('/buy-credits/confirm', requireAuth, async (req, res, next) => {
+  try {
+    const pid = String(req.body?.payment_intent_id || '');
+    if (!pid) return res.status(400).json({ error: 'missing_payment_intent' });
+    const pi = await stripe().paymentIntents.retrieve(pid);
+    if (pi.metadata?.bdi_kind !== 'credit_topup' || Number(pi.metadata?.bdi_tenant_id) !== req.tenant.id) {
+      return res.status(400).json({ error: 'mismatch' });
+    }
+    if (pi.status !== 'succeeded') return res.json({ ok: false, status: pi.status });
+    const credits = Number(pi.metadata.bdi_credits) || 0;
+    const r = await grantPurchasedCredits(req.tenant.id, credits, pi.id, pi.amount, req.user?.email || 'purchase');
+    res.json({ ok: true, granted: r.granted, balance: r.balance, credits });
+  } catch (err) {
+    if (err.message?.includes('STRIPE_SECRET_KEY')) return res.status(500).json({ error: 'stripe_not_configured', message: err.message });
     next(err);
   }
 });
@@ -389,6 +398,9 @@ router.post('/stripe-webhook', async (req, res) => {
         break;
       case 'invoice.payment_failed':
         await handleInvoiceFailed(event.data.object);
+        break;
+      case 'payment_intent.succeeded':
+        await handlePaymentIntentSucceeded(event.data.object);
         break;
       default:
         // Other events ignored
@@ -474,23 +486,10 @@ async function handleSubscriptionDeleted(sub) {
 }
 
 async function handleInvoicePaid(inv) {
-  // Extra-credit top-up purchase → grant the bought credits (idempotent).
-  if (inv.metadata?.bdi_kind === 'credit_topup') {
-    const tenantId = Number(inv.metadata.bdi_tenant_id) || null;
-    const credits  = Number(inv.metadata.bdi_credits) || 0;
-    if (tenantId && credits > 0) {
-      const r = await grantPurchasedCredits(tenantId, credits, inv.id, inv.amount_paid, 'purchase');
-      if (r.granted > 0) {
-        notifyTenant(tenantId, {
-          category: 'account', type: 'credits_purchased',
-          title: `${credits.toLocaleString()} credits added`,
-          body: 'Your credit top-up payment went through — the credits are in your balance.',
-          link: '/billing', icon: 'megaphone',
-        }).catch(() => {});
-      }
-    }
-    return;
-  }
+  // Only SUBSCRIPTION invoices affect plan/credits here. Credit top-ups are
+  // standalone PaymentIntents (handled separately) and must never touch
+  // subscription state.
+  if (!inv.subscription) return;
   // Renewal succeeded — top up credits for the tenant's current plan.
   const customerId = inv.customer;
   const r = await query(
@@ -523,6 +522,9 @@ async function handleInvoicePaid(inv) {
 }
 
 async function handleInvoiceFailed(inv) {
+  // Only a SUBSCRIPTION payment failure may mark a tenant past_due. One-off
+  // charges must never freeze a subscription (this was the credit-top-up bug).
+  if (!inv.subscription) return;
   const r = await query(`
     UPDATE tenants SET subscription_status = 'past_due',
                        past_due_at = COALESCE(past_due_at, now())
@@ -537,6 +539,23 @@ async function handleInvoiceFailed(inv) {
     body: "We couldn't process your subscription payment. Please update your billing details to keep your access active.",
     link: '/billing', icon: 'megaphone', email: true,
   }).catch(() => {});
+}
+
+// Credit top-up PaymentIntent succeeded → grant the bought credits (idempotent).
+async function handlePaymentIntentSucceeded(pi) {
+  if (pi.metadata?.bdi_kind !== 'credit_topup') return;   // ignore all other PIs
+  const tenantId = Number(pi.metadata.bdi_tenant_id) || null;
+  const credits  = Number(pi.metadata.bdi_credits) || 0;
+  if (!tenantId || credits <= 0) return;
+  const r = await grantPurchasedCredits(tenantId, credits, pi.id, pi.amount, 'purchase');
+  if (r.granted > 0) {
+    notifyTenant(tenantId, {
+      category: 'account', type: 'credits_purchased',
+      title: `${credits.toLocaleString()} credits added`,
+      body: 'Your credit top-up went through — the credits are in your balance.',
+      link: '/billing', icon: 'megaphone',
+    }).catch(() => {});
+  }
 }
 
 // ---------------------------------------------------------------------------
