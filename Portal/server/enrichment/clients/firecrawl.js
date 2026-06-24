@@ -133,6 +133,21 @@ export async function scrape(url, opts = {}) {
 }
 
 /**
+ * Structured (LLM) extraction from a single page via Firecrawl /v1/scrape with
+ * formats:['json']. Returns the extracted object conforming to `schema`, or null.
+ * Used by the local Company Facts engine (Stage 11) to pull capital / financials
+ * / shareholders from a company's own website. ~5 credits per call.
+ */
+export async function scrapeExtract(url, { prompt, schema, waitFor = 0, timeout = 45000 } = {}) {
+  const body = { url, formats: ['json'], onlyMainContent: true, waitFor, timeout, jsonOptions: {} };
+  if (prompt) body.jsonOptions.prompt = prompt;
+  if (schema) body.jsonOptions.schema = schema;
+  const data = await call('/v1/scrape', body);
+  const d = data?.data || data;
+  return d?.json || null;
+}
+
+/**
  * Generic web search via Firecrawl's /v1/search endpoint.
  * Returns array of { url, title, description } items.
  */
