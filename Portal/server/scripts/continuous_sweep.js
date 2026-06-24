@@ -89,8 +89,15 @@ async function beat(state, s = {}) {
     log(`✓ Round ${totals.round_no}: +${r.found || 0} found, +${r.harvested || 0} harvested, +${r.mapped || 0} mapped · left find:${r.find_left} harvest:${r.harvest_left} map:${r.map_left}`);
 
     if (stopping) break;
-    if (idle) { log(`▸ Backlog clear — idling ${Math.round(IDLE_SLEEP / 60000)}m before re-checking for new companies.`); await sleep(IDLE_SLEEP); }
-    else { await sleep(ROUND_SLEEP); }
+    if (idle) {
+      // Caught up: wait before re-checking for new companies, but keep beating
+      // every minute so the dashboard shows the engine as alive-and-idle (not stopped).
+      log(`▸ Backlog clear — idling ~${Math.round(IDLE_SLEEP / 60000)}m (still beating) before re-checking.`);
+      const until = Date.now() + IDLE_SLEEP;
+      while (!stopping && Date.now() < until) { await sleep(60000); await beat('idle', { ...totals, ...frontier }); }
+    } else {
+      await sleep(ROUND_SLEEP);
+    }
   }
 
   await beat('stopped', totals);
