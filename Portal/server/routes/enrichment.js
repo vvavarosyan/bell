@@ -38,6 +38,20 @@ router.get('/runs', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+// GET /api/enrichment/engine-status — heartbeat of the always-on Continuous Engine.
+// alive = a beat within the last 3 minutes. Degrades to not-installed if the
+// heartbeat table doesn't exist yet (pre-migration) or the engine never ran.
+router.get('/engine-status', async (req, res) => {
+  try {
+    const r = await query(`SELECT * FROM engine_heartbeat WHERE id = 1`);
+    const h = r.rows[0] || null;
+    const alive = !!(h && h.updated_at && (Date.now() - new Date(h.updated_at).getTime()) < 3 * 60 * 1000);
+    res.json({ installed: !!h, alive, heartbeat: h });
+  } catch {
+    res.json({ installed: false, alive: false, heartbeat: null });
+  }
+});
+
 /**
  * POST /api/enrichment/run
  * Body: { mode: 'stage'|'full', stage?, company_ids: [...] }
