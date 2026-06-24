@@ -40,21 +40,21 @@ async function beat(state, s = {}) {
   try {
     await query(
       `INSERT INTO engine_heartbeat
-         (id, started_at, updated_at, state, round_no, found_total, harvested_total, mapped_total, find_left, harvest_left, map_left, pid)
-       VALUES (1, $1, now(), $2, $3, $4, $5, $6, $7, $8, $9, $10)
+         (id, started_at, updated_at, state, round_no, found_total, harvested_total, mapped_total, email_total, find_left, harvest_left, map_left, email_left, pid)
+       VALUES (1, $1, now(), $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
        ON CONFLICT (id) DO UPDATE SET
          started_at = EXCLUDED.started_at, updated_at = now(), state = EXCLUDED.state, round_no = EXCLUDED.round_no,
-         found_total = EXCLUDED.found_total, harvested_total = EXCLUDED.harvested_total, mapped_total = EXCLUDED.mapped_total,
-         find_left = EXCLUDED.find_left, harvest_left = EXCLUDED.harvest_left, map_left = EXCLUDED.map_left, pid = EXCLUDED.pid`,
-      [STARTED_AT, state, s.round_no || 0, s.found_total || 0, s.harvested_total || 0, s.mapped_total || 0,
-       s.find_left ?? null, s.harvest_left ?? null, s.map_left ?? null, process.pid]
+         found_total = EXCLUDED.found_total, harvested_total = EXCLUDED.harvested_total, mapped_total = EXCLUDED.mapped_total, email_total = EXCLUDED.email_total,
+         find_left = EXCLUDED.find_left, harvest_left = EXCLUDED.harvest_left, map_left = EXCLUDED.map_left, email_left = EXCLUDED.email_left, pid = EXCLUDED.pid`,
+      [STARTED_AT, state, s.round_no || 0, s.found_total || 0, s.harvested_total || 0, s.mapped_total || 0, s.email_total || 0,
+       s.find_left ?? null, s.harvest_left ?? null, s.map_left ?? null, s.email_left ?? null, process.pid]
     );
   } catch { /* heartbeat is best-effort — never let it stop the engine */ }
 }
 
 (async () => {
   log('▸▸▸ Continuous Enrichment Engine started — always-on, resumable.');
-  let totals = { round_no: 0, found_total: 0, harvested_total: 0, mapped_total: 0 };
+  let totals = { round_no: 0, found_total: 0, harvested_total: 0, mapped_total: 0, email_total: 0 };
   await beat('starting', totals);
 
   while (!stopping) {
@@ -82,11 +82,12 @@ async function beat(state, s = {}) {
     totals.found_total += r.found || 0;
     totals.harvested_total += r.harvested || 0;
     totals.mapped_total += r.mapped || 0;
-    const frontier = { find_left: r.find_left, harvest_left: r.harvest_left, map_left: r.map_left };
-    const idle = (r.find_attempted || 0) === 0 && (r.harvest_attempted || 0) === 0 && (r.map_attempted || 0) === 0;
+    totals.email_total += r.emails || 0;
+    const frontier = { find_left: r.find_left, harvest_left: r.harvest_left, map_left: r.map_left, email_left: r.email_left };
+    const idle = (r.find_attempted || 0) === 0 && (r.harvest_attempted || 0) === 0 && (r.map_attempted || 0) === 0 && (r.email_attempted || 0) === 0;
 
     await beat(idle ? 'idle' : 'sweeping', { ...totals, ...frontier });
-    log(`✓ Round ${totals.round_no}: +${r.found || 0} found, +${r.harvested || 0} harvested, +${r.mapped || 0} mapped · left find:${r.find_left} harvest:${r.harvest_left} map:${r.map_left}`);
+    log(`✓ Round ${totals.round_no}: +${r.found || 0} found, +${r.harvested || 0} harvested, +${r.mapped || 0} mapped, +${r.emails || 0} emailed · left find:${r.find_left} harvest:${r.harvest_left} map:${r.map_left} email:${r.email_left}`);
 
     if (stopping) break;
     if (idle) {
@@ -102,7 +103,7 @@ async function beat(state, s = {}) {
           const c = await query(`SELECT EXISTS(
             SELECT 1 FROM companies WHERE COALESCE(archived,false)=false AND is_active IS NOT false AND (
               ((website IS NULL OR btrim(website)='') AND stage8_at IS NULL)
-              OR (website IS NOT NULL AND btrim(website)<>'' AND (stage7_at IS NULL OR stage9_at IS NULL))
+              OR (website IS NOT NULL AND btrim(website)<>'' AND (stage7_at IS NULL OR stage9_at IS NULL OR stage10_at IS NULL))
             ) LIMIT 1) AS work`);
           if (c.rows[0] && c.rows[0].work) break;
         } catch { /* ignore */ }
