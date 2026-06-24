@@ -20,12 +20,21 @@ import { query } from '../../db.js';
 import { recomputeBellScoreForCompany } from '../../assembly/bell_score.js';
 import { fetchPage, hostOf, pool } from './http.js';
 import { searchWeb, rendererAvailable, closeRenderer, beginSearchSession, searchState } from './render.js';
+import { search as firecrawlSearch } from '../clients/firecrawl.js';
 
 export const STAGE_LABEL = 'Local Engine 1 — Website Finder';
 export const TOOL_NAME   = 'local_website_finder';
 
 const CONCURRENCY = Number(process.env.BELL_FINDER_CONCURRENCY || 8);
 const TLDS = ['com', 'com.qa', 'qa', 'net'];
+
+// Firecrawl-powered search for the companies domain-guessing misses — reliable,
+// no IP blocking (the headless Bing/DuckDuckGo path self-disables once blocked).
+// ON by default; set BELL_FINDER_FIRECRAWL=0 to fall back to headless-only.
+// Each Firecrawl search ≈ 2 credits; throttle via the engine's day/night pacing.
+const FIRECRAWL_FINDER = process.env.BELL_FINDER_FIRECRAWL !== '0';
+const FC = { searches: 0, credits: 0, results: 0, errors: 0, disabled: false };
+export function finderSearchState() { return { ...FC }; }
 
 // Words stripped from a company name before slugifying to a domain.
 const LEGAL_STOP = new Set([
@@ -239,6 +248,52 @@ export function verifyMatch(page, company, { fromGuess }) {
   return domHasJoin || domHasTwo;
 }
 
+/** Root URL (scheme + host only), no path/query/hash. */
+function rootOf(u) { try { const x = new URL(u); x.pathname = '/'; x.search = ''; x.hash = ''; return x.toString().replace(/\/$/, ''); } catch { return u; } }
+
+/** Last 8 digits of a phone (Qatar local-number length) for page corroboration. */
+function phoneTail(s) { const d = String(s || '').replace(/\D/g, ''); return d.length >= 8 ? d.slice(-8) : ''; }
+
+/**
+ * Strong, name-independent proof that a fetched page belongs to `company`:
+ *   • the page shows the company's KNOWN phone (we hold these for many companies
+ *     from QFC / MOCI / Google Maps), OR
+ *   • the site host equals the company's KNOWN email domain.
+ * Either is near-certain → safe to AUTO-SAVE even for generic-named companies.
+ * Returns 'phone' | 'email-domain' | null.
+ */
+function corroborates(page, company) {
+  if (!page || !page.ok) return null;
+  const host = (hostOf(page.finalUrl) || '').toLowerCase();
+  if (!host || REDIRECT_TRAP_HOSTS.test(host)) return null;
+  const tail = phoneTail(company.phone);
+  if (tail) {
+    const digits = ((page.title || '') + ' ' + (page.text || '')).replace(/\D/g, '');
+    if (digits.includes(tail)) return 'phone';
+  }
+  const em = String(company.email || '').toLowerCase();
+  const dom = em.includes('@') ? em.split('@')[1].trim() : '';
+  if (dom && (host === dom || host.endsWith('.' + dom) || dom.endsWith('.' + host))) return 'email-domain';
+  return null;
+}
+
+/** Firecrawl web search → candidate URLs. Reliable replacement for the blocked
+ *  headless search. Counts credits; auto-disables on auth/quota/missing-key. */
+async function firecrawlSearchUrls(company) {
+  if (!FIRECRAWL_FINDER || FC.disabled) return [];
+  try {
+    const items = await firecrawlSearch(`${company.name} Qatar official website`, { limit: 6 });
+    FC.searches++; FC.credits += 2;
+    const urls = (items || []).map((it) => it && it.url).filter(Boolean);
+    FC.results += urls.length;
+    return urls;
+  } catch (e) {
+    FC.errors++;
+    if (e?.status === 401 || e?.status === 402 || e?.status === 429 || /key_missing|missing/i.test(String(e?.message))) FC.disabled = true;
+    return [];
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Per-company find
 // ---------------------------------------------------------------------------
@@ -280,23 +335,30 @@ export async function enrichCompany(company) {
     }
   }
 
-  // 2) Search fallback (headless browser). Search results are fuzzier than
-  // guesses (name collisions), so the best plausible one is PROPOSED to the
-  // human review queue — not auto-saved. The reviewer approves/rejects.
-  if (await rendererAvailable()) {
-    const results = await searchWeb(`${company.name} Qatar official website`, { limit: 6 });
-    for (const url of results) {
-      if (rejected.has((hostOf(url) || '').toLowerCase())) continue;
-      const page = await fetchPage(url, { respectRobots: false, timeoutMs: 9000, retries: 1 });
-      const reason = candidateReason(page, company);
-      if (reason) {
-        let root = page.finalUrl;
-        try { const u = new URL(page.finalUrl); u.pathname = '/'; u.search = ''; u.hash = ''; root = u.toString().replace(/\/$/, ''); } catch {}
-        await proposeCandidate(company.id, root, 'search:' + reason);
-        await markStage(company.id, 'candidate', { stage8_candidate: root });
-        return { status: 'candidate', candidate: root };
-      }
+  // 2) Search — Firecrawl first (reliable, no IP blocking), headless as a $0
+  // fallback. A STRONGLY verified or CORROBORATED result (known phone / email
+  // domain on the page) is AUTO-SAVED; weaker-but-plausible hits still go to the
+  // human review queue.
+  let results = await firecrawlSearchUrls(company);
+  if (!results.length && await rendererAvailable()) {
+    results = await searchWeb(`${company.name} Qatar official website`, { limit: 6 });
+  }
+  let firstCandidate = null;
+  for (const url of results) {
+    const uhost = (hostOf(url) || '').toLowerCase();
+    if (!uhost || rejected.has(uhost)) continue;
+    const page = await fetchPage(url, { respectRobots: false, timeoutMs: 9000, retries: 1 });
+    if (!page || !page.ok) continue;
+    const corr = corroborates(page, company);
+    if (corr || verifyMatch(page, company, { fromGuess: false })) {
+      return await saveWebsite(company, rootOf(page.finalUrl), corr ? 'search-' + corr : 'search');
     }
+    if (!firstCandidate) { const reason = candidateReason(page, company); if (reason) firstCandidate = { root: rootOf(page.finalUrl), reason }; }
+  }
+  if (firstCandidate) {
+    await proposeCandidate(company.id, firstCandidate.root, 'search:' + firstCandidate.reason);
+    await markStage(company.id, 'candidate', { stage8_candidate: firstCandidate.root });
+    return { status: 'candidate', candidate: firstCandidate.root };
   }
 
   await markStage(company.id, 'no_data', { stage8_checked_at: new Date().toISOString() });
@@ -360,7 +422,9 @@ export async function enrichCompanies(companies, jobLog = null) {
   const total = companies.length;
   const hasBrowser = await rendererAvailable();
   beginSearchSession();   // reset the search rate-limit guard for this run
-  jobLog?.(`  Concurrency: ${CONCURRENCY} · Search tier: ${hasBrowser ? 'headless search enabled' : 'domain-guessing only (install headless browser for search)'}`);
+  FC.searches = 0; FC.credits = 0; FC.results = 0; FC.errors = 0; FC.disabled = false;
+  const searchTier = FIRECRAWL_FINDER ? 'Firecrawl search (reliable)' : (hasBrowser ? 'headless search' : 'domain-guessing only');
+  jobLog?.(`  Concurrency: ${CONCURRENCY} · Search: ${searchTier}`);
   try {
     await pool(companies, CONCURRENCY, async (c) => {
       try {
@@ -382,7 +446,9 @@ export async function enrichCompanies(companies, jobLog = null) {
     await closeRenderer();
   }
   const ss = searchState();
-  if (hasBrowser) jobLog?.(`  Search diagnostic: ${ss.count} searches ran, returned ${ss.results} candidate result(s)${ss.disabled ? ` · DISABLED (${ss.reason})` : ''}.`);
+  const fc = finderSearchState();
+  if (FIRECRAWL_FINDER) jobLog?.(`  Firecrawl search: ${fc.searches} quer(ies) (~${fc.credits} credits), ${fc.results} result(s)${fc.disabled ? ' · DISABLED (auth/quota/key)' : ''}, ${fc.errors} error(s).`);
+  if (hasBrowser) jobLog?.(`  Headless search diagnostic: ${ss.count} ran, ${ss.results} result(s)${ss.disabled ? ` · DISABLED (${ss.reason})` : ''}.`);
   jobLog?.(`  ▸ Found ${done} website(s) (auto) · ${candidates} candidate(s) for review · ${noData} not found.`);
   return { done, candidates, no_data: noData, failed, usd: 0 };
 }
