@@ -24,6 +24,7 @@ const ENGINES = [
   { key: 'harvest_left', name: 'Engine 2 · Website Harvester', left: 'Sites still to harvest',             desc: 'Crawls each site for emails, phones, socials, address, logo, team people and partner companies.' },
   { key: 'map_left',     name: 'Engine 3 · Network Mapper',    left: 'Companies still to map',             desc: 'Maps partners, clients, affiliates and competitors into the business graph.' },
 ];
+const CARD = { border: '1px solid var(--border)', borderRadius: '12px', padding: '16px', background: 'var(--bg-elev, rgba(255,255,255,0.02))' };
 
 export function EngineTab() {
   const [s, setS] = useState(null);
@@ -35,13 +36,15 @@ export function EngineTab() {
   const load = async () => {
     try {
       const st = await api.enrichmentEngineStatus();
-      setS(st);
+      setS(st || {});
       setPace((p) => p.touched ? p : { night_chunk: st?.control?.night_chunk ?? '', day_chunk: st?.control?.day_chunk ?? '', touched: false });
-    } catch { /* non-fatal */ }
+    } catch {
+      setS((cur) => cur || {});   // never get stuck on the loading screen
+    }
   };
   useEffect(() => {
     load();
-    (async () => { try { const r = await api.enrichmentRuns(12); setRuns(r.rows || []); } catch { /* ignore */ } })();
+    (async () => { try { const r = await api.enrichmentRuns(12); setRuns(r?.rows || []); } catch { /* ignore */ } })();
     const t = setInterval(load, 10000);
     return () => clearInterval(t);
   }, []);
@@ -49,81 +52,88 @@ export function EngineTab() {
   const toggle = async () => {
     if (!s) return;
     setBusy(true);
-    try { const r = await api.engineControl({ paused: !s.paused }); toast(r.control?.paused ? 'Engine paused — it will idle until you resume.' : 'Engine resumed.'); await load(); }
-    catch (e) { toast(e.message || 'Failed', 'error'); }
+    try { const r = await api.engineControl({ paused: !s.paused }); toast(r?.control?.paused ? 'Engine paused — it will idle until you resume.' : 'Engine resumed.'); await load(); }
+    catch (e) { toast((e && e.message) || 'Failed', 'error'); }
     finally { setBusy(false); }
   };
   const savePace = async () => {
     setSavingPace(true);
     try { await api.engineControl({ night_chunk: pace.night_chunk, day_chunk: pace.day_chunk }); toast('Pacing saved.'); setPace((p) => ({ ...p, touched: false })); await load(); }
-    catch (e) { toast(e.message || 'Failed', 'error'); }
+    catch (e) { toast((e && e.message) || 'Failed', 'error'); }
     finally { setSavingPace(false); }
   };
+  const setPaceField = (k, v) => setPace((p) => ({ ...p, [k]: v, touched: true }));
 
-  if (!s) return html`<div class="page-fill"><div class="page-scroll"><div class="empty">Loading engine status…</div></div></div>`;
+  if (!s) return html`<div class="dr-shell"><div class="empty">Loading engine status…</div></div>`;
 
   const meta = STATE_META[s.state] || STATE_META.off;
   const hb = s.heartbeat || {};
   const fr = s.frontier || {};
   const total = Number(fr.total || 0);
-  const card = { border: '1px solid var(--border)', borderRadius: '12px', padding: '16px', background: 'var(--bg-elev, rgba(255,255,255,0.02))' };
   const pct = (left) => total ? Math.max(0, Math.min(100, Math.round(((total - Number(left || 0)) / total) * 100))) : 0;
-  const setPaceField = (k, v) => setPace((p) => ({ ...p, [k]: v, touched: true }));
 
   return html`
-    <div class="page-fill"><div class="page-scroll" style=${{ maxWidth: '980px' }}>
-      <h1 style=${{ fontSize: '20px', fontWeight: 700, margin: '0 0 4px' }}>Local Engines</h1>
-      <div class="muted" style=${{ marginBottom: '18px' }}>Bell's own enrichment engines — local, $0, running continuously to gather websites, contacts, people and partners across the database.</div>
-
-      ${!s.installed ? html`<div style=${{ ...card, border: '1px solid var(--amber)', background: 'rgba(245,158,11,0.08)', marginBottom: '16px' }}>
-        <b>The always-on engine isn't running.</b> On your Mac, double-click <code>Install Always-On Engine.command</code> to start it 24/7. (For JavaScript-heavy sites, also run <code>Install Harvester Browser.command</code> once.)
-      </div>` : null}
-
-      <div style=${{ ...card, marginBottom: '16px' }}>
-        <div style=${{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
-          <span style=${{ width: '12px', height: '12px', borderRadius: '50%', background: meta.color, animation: s.alive && !s.paused ? 'feedpulse 1.8s infinite' : 'none' }}></span>
-          <span style=${{ fontSize: '16px', fontWeight: 700 }}>${meta.label}</span>
-          <span style=${{ flex: 1 }}></span>
-          ${s.installed ? html`<button class="sys-btn ${s.paused ? '' : 'sys-btn-secondary'}" disabled=${busy} onClick=${toggle}>${busy ? '…' : (s.paused ? '▶ Resume engine' : '⏸ Pause engine')}</button>` : null}
-        </div>
-        <div style=${{ display: 'flex', gap: '28px', flexWrap: 'wrap', marginTop: '14px', fontSize: '13px' }}>
-          <div><div class="muted" style=${{ fontSize: '11px' }}>Last activity</div>${ago(s.beat_age_ms)}</div>
-          <div><div class="muted" style=${{ fontSize: '11px' }}>Uptime</div>${uptime(hb.started_at)}</div>
-          <div><div class="muted" style=${{ fontSize: '11px' }}>Rounds this run</div>${n(hb.round_no)}</div>
-          <div><div class="muted" style=${{ fontSize: '11px' }}>Found · Harvested · Mapped (this run)</div><b>${n(hb.found_total)}</b> · <b>${n(hb.harvested_total)}</b> · <b>${n(hb.mapped_total)}</b></div>
-        </div>
+    <div class="dr-shell">
+      <div class="grid-toolbar">
+        <strong>Local Engines</strong>
+        <span class="muted small">Bell's own enrichment engines · local · $0 · always-on</span>
+        <span class="spacer"></span>
+        ${s.installed ? html`<button onClick=${toggle} disabled=${busy}>${busy ? '…' : (s.paused ? '▶ Resume' : '⏸ Pause')}</button>` : null}
+        <button onClick=${load}>Refresh</button>
       </div>
 
-      <div style=${{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '12px', marginBottom: '16px' }}>
-        ${ENGINES.map((e) => html`<div key=${e.key} style=${card}>
-          <div style=${{ fontWeight: 700, fontSize: '14px' }}>${e.name}</div>
-          <div class="muted" style=${{ fontSize: '12px', margin: '4px 0 10px', lineHeight: 1.5 }}>${e.desc}</div>
-          <div style=${{ display: 'flex', justifyContent: 'space-between', fontSize: '12.5px', marginBottom: '4px' }}>
-            <span class="muted">${e.left}</span><b>${n(fr[e.key])} left</b>
+      <div style=${{ padding: '16px', overflow: 'auto', maxWidth: '1000px' }}>
+
+        ${!s.installed ? html`<div style=${{ ...CARD, border: '1px solid var(--amber)', background: 'rgba(245,158,11,0.08)', marginBottom: '16px' }}>
+          <b>The always-on engine isn't running.</b> On your Mac, double-click <code>Install Always-On Engine.command</code> to start it 24/7. For JavaScript-heavy sites, also run <code>Install Harvester Browser.command</code> once.
+        </div>` : null}
+
+        <div style=${{ ...CARD, marginBottom: '16px' }}>
+          <div style=${{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+            <span style=${{ width: '12px', height: '12px', borderRadius: '50%', background: meta.color, animation: (s.alive && !s.paused) ? 'feedpulse 1.8s infinite' : 'none' }}></span>
+            <span style=${{ fontSize: '16px', fontWeight: 700 }}>${meta.label}</span>
           </div>
-          <div class="sys-bar"><span style=${{ width: pct(fr[e.key]) + '%' }}></span></div>
-          <div class="muted" style=${{ fontSize: '11px', marginTop: '4px' }}>${pct(fr[e.key])}% of ${n(total)} companies processed</div>
-        </div>`)}
-      </div>
-
-      <div style=${{ ...card, marginBottom: '16px' }}>
-        <div style=${{ fontWeight: 700, fontSize: '14px', marginBottom: '4px' }}>Pacing</div>
-        <div class="muted" style=${{ fontSize: '12px', marginBottom: '10px' }}>Companies processed per round. Heavier at night (10pm–7am), lighter daytime so it never bogs your Mac. Blank = defaults (120 night / 30 day).</div>
-        <div style=${{ display: 'flex', gap: '16px', alignItems: 'flex-end', flexWrap: 'wrap' }}>
-          <div><div style=${{ fontSize: '11px', color: 'var(--text-dim)', marginBottom: '4px' }}>Night chunk</div><input class="sys-input" type="number" min="1" max="2000" value=${pace.night_chunk} onInput=${(e) => setPaceField('night_chunk', e.target.value)} style=${{ width: '120px' }} /></div>
-          <div><div style=${{ fontSize: '11px', color: 'var(--text-dim)', marginBottom: '4px' }}>Day chunk</div><input class="sys-input" type="number" min="1" max="2000" value=${pace.day_chunk} onInput=${(e) => setPaceField('day_chunk', e.target.value)} style=${{ width: '120px' }} /></div>
-          <button class="sys-btn sys-btn-secondary" disabled=${savingPace} onClick=${savePace}>${savingPace ? 'Saving…' : 'Save pacing'}</button>
+          <div style=${{ display: 'flex', gap: '28px', flexWrap: 'wrap', marginTop: '14px', fontSize: '13px' }}>
+            <div><div class="muted" style=${{ fontSize: '11px' }}>Last activity</div>${ago(s.beat_age_ms)}</div>
+            <div><div class="muted" style=${{ fontSize: '11px' }}>Uptime</div>${uptime(hb.started_at)}</div>
+            <div><div class="muted" style=${{ fontSize: '11px' }}>Rounds this run</div>${n(hb.round_no)}</div>
+            <div><div class="muted" style=${{ fontSize: '11px' }}>Found · Harvested · Mapped (this run)</div><b>${n(hb.found_total)}</b> · <b>${n(hb.harvested_total)}</b> · <b>${n(hb.mapped_total)}</b></div>
+          </div>
         </div>
+
+        <div style=${{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '12px', marginBottom: '16px' }}>
+          ${ENGINES.map((e) => html`
+            <div key=${e.key} style=${CARD}>
+              <div style=${{ fontWeight: 700, fontSize: '14px' }}>${e.name}</div>
+              <div class="muted" style=${{ fontSize: '12px', margin: '4px 0 10px', lineHeight: 1.5 }}>${e.desc}</div>
+              <div style=${{ display: 'flex', justifyContent: 'space-between', fontSize: '12.5px', marginBottom: '4px' }}>
+                <span class="muted">${e.left}</span><b>${n(fr[e.key])} left</b>
+              </div>
+              <div class="sys-bar"><span style=${{ width: pct(fr[e.key]) + '%' }}></span></div>
+              <div class="muted" style=${{ fontSize: '11px', marginTop: '4px' }}>${pct(fr[e.key])}% of ${n(total)} companies processed</div>
+            </div>`)}
+        </div>
+
+        <div style=${{ ...CARD, marginBottom: '16px' }}>
+          <div style=${{ fontWeight: 700, fontSize: '14px', marginBottom: '4px' }}>Pacing</div>
+          <div class="muted" style=${{ fontSize: '12px', marginBottom: '10px' }}>Companies processed per round. Heavier at night (10pm–7am), lighter daytime so it never bogs your Mac. Blank = defaults (120 night / 30 day).</div>
+          <div style=${{ display: 'flex', gap: '16px', alignItems: 'flex-end', flexWrap: 'wrap' }}>
+            <div><div style=${{ fontSize: '11px', color: 'var(--text-dim)', marginBottom: '4px' }}>Night chunk</div><input class="sys-input" type="number" min="1" max="2000" value=${pace.night_chunk} onInput=${(e) => setPaceField('night_chunk', e.target.value)} style=${{ width: '120px' }} /></div>
+            <div><div style=${{ fontSize: '11px', color: 'var(--text-dim)', marginBottom: '4px' }}>Day chunk</div><input class="sys-input" type="number" min="1" max="2000" value=${pace.day_chunk} onInput=${(e) => setPaceField('day_chunk', e.target.value)} style=${{ width: '120px' }} /></div>
+            <button class="sys-btn sys-btn-secondary" disabled=${savingPace} onClick=${savePace}>${savingPace ? 'Saving…' : 'Save pacing'}</button>
+          </div>
+        </div>
+
+        ${runs && runs.length ? html`<div style=${CARD}>
+          <div style=${{ fontWeight: 700, fontSize: '14px', marginBottom: '10px' }}>Recent engine runs</div>
+          ${runs.map((r, i) => html`
+            <div key=${i} style=${{ display: 'grid', gridTemplateColumns: '120px 1fr auto', gap: '10px', alignItems: 'center', padding: '6px 0', borderTop: i ? '1px solid var(--border)' : 'none', fontSize: '12.5px' }}>
+              <span class="muted">${r.stage != null ? 'Stage ' + r.stage : (r.tool || '—')}</span>
+              <span style=${{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>${r.output_summary || r.status || ''}</span>
+              <span class="muted">${r.completed_at ? new Date(r.completed_at).toLocaleString() : (r.status || '')}</span>
+            </div>`)}
+        </div>` : null}
+
       </div>
-
-      ${runs.length ? html`<div style=${card}>
-        <div style=${{ fontWeight: 700, fontSize: '14px', marginBottom: '10px' }}>Recent engine runs</div>
-        ${runs.map((r, i) => html`<div key=${i} style=${{ display: 'grid', gridTemplateColumns: '110px 1fr auto', gap: '10px', alignItems: 'center', padding: '6px 0', borderTop: i ? '1px solid var(--border)' : 'none', fontSize: '12.5px' }}>
-          <span class="muted">${r.stage != null ? 'Stage ' + r.stage : (r.tool || '—')}</span>
-          <span style=${{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>${r.output_summary || r.status || ''}</span>
-          <span class="muted">${r.completed_at ? new Date(r.completed_at).toLocaleString() : (r.status || '')}</span>
-        </div>`)}
-      </div>` : null}
-
-    </div></div>`;
+    </div>`;
 }
