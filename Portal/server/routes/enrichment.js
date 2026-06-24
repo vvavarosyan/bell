@@ -38,18 +38,54 @@ router.get('/runs', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
-// GET /api/enrichment/engine-status — heartbeat of the always-on Continuous Engine.
-// alive = a beat within the last 3 minutes. Degrades to not-installed if the
-// heartbeat table doesn't exist yet (pre-migration) or the engine never ran.
+// GET /api/enrichment/engine-status — full status of the always-on Continuous
+// Engine: heartbeat, pause/pacing control, and the LIVE frontier (computed fresh
+// so the dashboard is accurate even when the engine is paused or idle).
 router.get('/engine-status', async (req, res) => {
   try {
-    const r = await query(`SELECT * FROM engine_heartbeat WHERE id = 1`);
-    const h = r.rows[0] || null;
-    const alive = !!(h && h.updated_at && (Date.now() - new Date(h.updated_at).getTime()) < 3 * 60 * 1000);
-    res.json({ installed: !!h, alive, heartbeat: h });
+    const [hb, ctl, fr] = await Promise.all([
+      query(`SELECT * FROM engine_heartbeat WHERE id = 1`),
+      query(`SELECT paused, night_chunk, day_chunk FROM engine_control WHERE id = 1`).catch(() => ({ rows: [] })),
+      query(`SELECT
+          (SELECT count(*) FROM companies WHERE COALESCE(archived,false)=false AND is_active IS NOT false AND (website IS NULL OR btrim(website)='') AND stage8_at IS NULL)::int AS find_left,
+          (SELECT count(*) FROM companies WHERE COALESCE(archived,false)=false AND is_active IS NOT false AND website IS NOT NULL AND btrim(website)<>'' AND stage7_at IS NULL)::int AS harvest_left,
+          (SELECT count(*) FROM companies WHERE COALESCE(archived,false)=false AND is_active IS NOT false AND website IS NOT NULL AND btrim(website)<>'' AND stage9_at IS NULL)::int AS map_left,
+          (SELECT count(*) FROM companies WHERE COALESCE(archived,false)=false AND is_active IS NOT false)::int AS total,
+          (SELECT count(*) FROM companies WHERE COALESCE(archived,false)=false AND is_active IS NOT false AND website IS NOT NULL AND btrim(website)<>'')::int AS with_website
+        `).catch(() => ({ rows: [{}] })),
+    ]);
+    const h = hb.rows[0] || null;
+    const c = ctl.rows[0] || {};
+    const beatAgeMs = h?.updated_at ? Date.now() - new Date(h.updated_at).getTime() : null;
+    const alive = beatAgeMs != null && beatAgeMs < 3 * 60 * 1000;
+    const state = c.paused ? 'paused' : (alive ? (h?.state || 'sweeping') : (h ? 'stopped' : 'off'));
+    res.json({
+      installed: !!h, alive, paused: !!c.paused, state,
+      heartbeat: h, beat_age_ms: beatAgeMs,
+      control: { paused: !!c.paused, night_chunk: c.night_chunk ?? null, day_chunk: c.day_chunk ?? null },
+      frontier: fr.rows[0] || {},
+    });
   } catch {
-    res.json({ installed: false, alive: false, heartbeat: null });
+    res.json({ installed: false, alive: false, paused: false, state: 'off', heartbeat: null, frontier: {}, control: {} });
   }
+});
+
+// POST /api/enrichment/engine/control — pause/resume + pacing. Body: { paused?, night_chunk?, day_chunk? }.
+router.post('/engine/control', async (req, res, next) => {
+  try {
+    const b = req.body || {};
+    const sets = [], vals = [];
+    if (typeof b.paused === 'boolean') { vals.push(b.paused); sets.push(`paused = $${vals.length}`); }
+    if (b.night_chunk != null && b.night_chunk !== '') { vals.push(Math.max(1, Math.min(2000, Math.floor(Number(b.night_chunk)) || 1))); sets.push(`night_chunk = $${vals.length}`); }
+    if (b.day_chunk != null && b.day_chunk !== '') { vals.push(Math.max(1, Math.min(2000, Math.floor(Number(b.day_chunk)) || 1))); sets.push(`day_chunk = $${vals.length}`); }
+    await query(`INSERT INTO engine_control (id) VALUES (1) ON CONFLICT (id) DO NOTHING`);
+    if (sets.length) {
+      vals.push(req.user?.email || 'admin');
+      await query(`UPDATE engine_control SET ${sets.join(', ')}, updated_at = now(), updated_by = $${vals.length} WHERE id = 1`, vals);
+    }
+    const r = await query(`SELECT paused, night_chunk, day_chunk FROM engine_control WHERE id = 1`);
+    res.json({ ok: true, control: r.rows[0] });
+  } catch (err) { next(err); }
 });
 
 /**
