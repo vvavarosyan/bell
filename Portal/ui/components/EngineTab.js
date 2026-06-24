@@ -38,6 +38,7 @@ export function EngineTab() {
   const [busy, setBusy] = useState(false);
   const [pace, setPace] = useState({ night_chunk: '', day_chunk: '', touched: false });
   const [savingPace, setSavingPace] = useState(false);
+  const [rescanning, setRescanning] = useState(false);
 
   const load = async () => {
     try {
@@ -67,6 +68,13 @@ export function EngineTab() {
     finally { setSavingPace(false); }
   };
   const setPaceField = (k, v) => setPace((p) => ({ ...p, [k]: v, touched: true }));
+  const rescan = async (scope, label) => {
+    if (!window.confirm(`Re-scan ${label}? This re-queues all matching companies for the engines to process again. Safe + idempotent (never deletes data); it runs in the background and can take a long while for the whole database.`)) return;
+    setRescanning(true);
+    try { const r = await api.engineRescan(scope); toast(`Re-queued ${Number((r && r.reset) || 0).toLocaleString()} companies. The always-on engine will work through them (or run a sweep from Companies → Harvest stale to start immediately).`); await load(); }
+    catch (e) { toast((e && e.message) || 'Re-scan failed', 'error'); }
+    finally { setRescanning(false); }
+  };
 
   if (!s) return html`<div style=${{ padding: '24px' }}><div class="muted">Loading engine status…</div></div>`;
 
@@ -78,7 +86,7 @@ export function EngineTab() {
     const pct = (left) => total ? Math.max(0, Math.min(100, Math.round(((total - Number(left || 0)) / total) * 100))) : 0;
 
     return html`
-      <div style=${{ padding: '24px', maxWidth: '1000px' }}>
+      <div class="page-fill"><div class="page-scroll"><div style=${{ maxWidth: '1000px' }}>
         <div style=${{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
           <h2 style=${{ margin: 0 }}>Local Engines</h2>
           <span style=${{ flex: 1 }}></span>
@@ -131,6 +139,15 @@ export function EngineTab() {
           <b>All ${nf(total)} companies have been processed by Engines 1–3.</b> The engine is caught up and idles until new companies arrive. To gather <i>more</i> per company (decision-maker emails, financials), that's the next engines we build — not this sweep.
         </div>` : null}
 
+        <div style=${CARD}>
+          <div style=${{ fontWeight: 700, fontSize: '14px', marginBottom: '4px' }}>Re-scan the database</div>
+          <div class="muted" style=${{ fontSize: '12px', marginBottom: '10px' }}>Re-queue companies so the engines process them again — to re-check coverage or after improving extraction. Safe + idempotent; never deletes data. Large jobs run in the background and take a while.</div>
+          <div style=${{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+            <button class="sys-btn" disabled=${rescanning} onClick=${() => rescan('all', `all three engines on every active company (${nf(total)})`)}>${rescanning ? 'Working…' : `Re-scan everything (${nf(total)})`}</button>
+            <button class="sys-btn sys-btn-secondary" disabled=${rescanning} onClick=${() => rescan('harvest', `re-harvesting every known site (${nf(fr.with_website)})`)}>Re-harvest sites (${nf(fr.with_website)})</button>
+          </div>
+        </div>
+
         ${runs && runs.length ? html`<div style=${CARD}>
           <div style=${{ fontWeight: 700, fontSize: '14px', marginBottom: '10px' }}>Recent engine runs</div>
           ${runs.map((r, i) => html`
@@ -140,7 +157,7 @@ export function EngineTab() {
               <span class="muted">${r.completed_at ? new Date(r.completed_at).toLocaleString() : txt(r.status)}</span>
             </div>`)}
         </div>` : null}
-      </div>`;
+      </div></div></div>`;
   } catch (e) {
     return html`<div style=${{ padding: '24px' }}>
       <b style=${{ color: 'var(--red)' }}>The Local Engines view hit an error while rendering.</b>
