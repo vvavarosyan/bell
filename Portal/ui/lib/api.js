@@ -131,6 +131,7 @@ export const api = {
   enrichmentRuns:         (limit = 25) => request('/api/enrichment/runs?limit=' + limit),
   enrichmentEngineStatus: () => request('/api/enrichment/engine-status'),
   engineControl:          (body) => request('/api/enrichment/engine/control', { method: 'POST', body: JSON.stringify(body) }),
+  engineRescan:           (scope) => request('/api/enrichment/engine/rescan', { method: 'POST', body: JSON.stringify({ scope }) }),
   runEnrichment:          (body) => request('/api/enrichment/run', { method: 'POST', body: JSON.stringify(body) }),
   runHarvestSweep:        (limit = 100) => request('/api/enrichment/sweep', { method: 'POST', body: JSON.stringify({ limit }) }),
   finderAudit:            () => request('/api/enrichment/finder-audit'),

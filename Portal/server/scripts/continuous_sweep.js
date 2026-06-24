@@ -94,7 +94,19 @@ async function beat(state, s = {}) {
       // every minute so the dashboard shows the engine as alive-and-idle (not stopped).
       log(`▸ Backlog clear — idling ~${Math.round(IDLE_SLEEP / 60000)}m (still beating) before re-checking.`);
       const until = Date.now() + IDLE_SLEEP;
-      while (!stopping && Date.now() < until) { await sleep(60000); await beat('idle', { ...totals, ...frontier }); }
+      while (!stopping && Date.now() < until) {
+        await sleep(60000);
+        await beat('idle', { ...totals, ...frontier });
+        // If a re-scan or new uploads added work, resume sweeping immediately.
+        try {
+          const c = await query(`SELECT EXISTS(
+            SELECT 1 FROM companies WHERE COALESCE(archived,false)=false AND is_active IS NOT false AND (
+              ((website IS NULL OR btrim(website)='') AND stage8_at IS NULL)
+              OR (website IS NOT NULL AND btrim(website)<>'' AND (stage7_at IS NULL OR stage9_at IS NULL))
+            ) LIMIT 1) AS work`);
+          if (c.rows[0] && c.rows[0].work) break;
+        } catch { /* ignore */ }
+      }
     } else {
       await sleep(ROUND_SLEEP);
     }
