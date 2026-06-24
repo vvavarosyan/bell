@@ -140,7 +140,13 @@ export async function search(query, { limit = 5, country = null } = {}) {
   const body = { query, limit };
   if (country) body.country = country;
   const data = await call('/v1/search', body);
-  return Array.isArray(data?.data) ? data.data : [];
+  // Normalize across Firecrawl response shapes: { data: [...] } (v1),
+  // { data: { web: [...] } } or { web: [...] } (newer search API).
+  const d = data?.data;
+  if (Array.isArray(d)) return d;
+  if (d && Array.isArray(d.web)) return d.web;
+  if (Array.isArray(data?.web)) return data.web;
+  return [];
 }
 
 // TWO stop-word lists. They serve different purposes — keep them separate.

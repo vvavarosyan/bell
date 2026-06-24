@@ -22,6 +22,7 @@ import { createRequire } from 'module';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { htmlToText, extractLinks, extractMeta, extractMailtoTel } from './http.js';
+import { crawl4aiAvailable, crawl4aiRender } from './crawl4ai.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
@@ -67,7 +68,8 @@ function loadPlaywright() {
 
 /** True if a headless browser can be used (Playwright is installed). */
 export async function rendererAvailable() {
-  return !!loadPlaywright() && !_launchFailed;
+  if (await crawl4aiAvailable()) return true;       // free local Crawl4AI server, or…
+  return !!loadPlaywright() && !_launchFailed;       // …local Playwright
 }
 
 async function getBrowser() {
@@ -86,10 +88,19 @@ async function getBrowser() {
 }
 
 /**
- * Render one page with a headless browser. Returns the fetchPage shape:
+ * Render one page. Prefers Crawl4AI (free local server — cracks JS-heavy /
+ * anti-bot sites) and falls back to local Playwright. Returns the fetchPage shape:
  *   { ok, status, finalUrl, html, text, links, meta, mailto, tel, rendered, error }
  */
-export async function renderPage(url, { timeoutMs = 22_000, settleMs = 1500 } = {}) {
+export async function renderPage(url, opts = {}) {
+  if (await crawl4aiAvailable()) {
+    const r = await crawl4aiRender(url, { timeoutMs: opts.timeoutMs || 45_000 });
+    if (r && r.ok) return r;
+  }
+  return renderPagePlaywright(url, opts);
+}
+
+async function renderPagePlaywright(url, { timeoutMs = 22_000, settleMs = 1500 } = {}) {
   const blank = { ok: false, status: 0, finalUrl: url, html: '', text: '', links: [], meta: {}, mailto: [], tel: [], rendered: true };
   let context, page;
   await acquirePage();
