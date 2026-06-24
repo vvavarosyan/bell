@@ -26,6 +26,7 @@ import { recomputeBellScoreForCompany } from '../../assembly/bell_score.js';
 import { inferSeniority } from '../seniority.js';
 import { fetchPage, toRootUrl, sameHost, hostOf, pool } from './http.js';
 import { renderPage, rendererAvailable, closeRenderer } from './render.js';
+import { recordReject } from './rejects.js';
 import {
   findEmails, findPhones, findSocials, preferOwnEmails,
   guessAddress, extractTeam, extractPartners, pickLogo,
@@ -181,7 +182,8 @@ export async function enrichCompany(company) {
   //    - phones: deduped by digits (collapses format variants), capped;
   //    - socials: capped per platform inside findSocials.
   const siteDomain = (hostOf(home.finalUrl) || '').replace(/^www\./, '');
-  const emails  = preferOwnEmails([...new Set([...allMailto, ...findEmails(allText)])], siteDomain, 12);
+  const rawEmails = [...new Set([...allMailto, ...findEmails(allText)])];
+  const emails  = preferOwnEmails(rawEmails, siteDomain, 12);
   const phones  = findPhones(allText, allTel).slice(0, 10);
   const socials = findSocials(allText, allLinks, { companyName: company.name, siteDomain });
   const address = guessAddress(allText);
@@ -211,9 +213,14 @@ export async function enrichCompany(company) {
   // 5) Persist contacts (provenance = the page each was found on, best-effort).
   const homeProv = pages[0].url;
   let wE = 0, wP = 0, wS = 0;
+  const keptEmailSet = new Set(emails.map((x) => String(x).toLowerCase()));
   for (const e of emails) {
     const r = await upsertContact('company', company.id, { type: 'email', value: e, source: SOURCE, source_url: homeProv });
-    if (r) wE++;
+    if (r) wE++; else await recordReject(company.id, 'harvester', 'email', e, 'invalid or junk address');
+  }
+  // Emails seen on the page but NOT kept (other companies' domains / over cap).
+  for (const e of rawEmails.slice(0, 40)) {
+    if (!keptEmailSet.has(String(e).toLowerCase())) await recordReject(company.id, 'harvester', 'email', e, 'off-domain — not this company');
   }
   for (const p of phones) {
     const r = await upsertContact('company', company.id, { type: 'phone', value: p.value, value_display: p.display, source: SOURCE, source_url: homeProv });

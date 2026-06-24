@@ -21,6 +21,7 @@ import { query } from '../../db.js';
 import { fetchPage } from './http.js';
 import { rendererAvailable, renderPage } from './render.js';
 import { scrapeExtract } from '../clients/firecrawl.js';
+import { recordReject } from './rejects.js';
 
 const ENABLED = process.env.BELL_FACTS_FIRECRAWL !== '0';
 const FC = { extracts: 0, credits: 0, financials: 0, shareholders: 0, errors: 0, disabled: false };
@@ -73,16 +74,23 @@ async function getPage(url) {
   return p && p.ok ? p : null;
 }
 
-function validFinancials(facts) {
+function validFinancials(facts, rejects) {
   const out = [];
   for (const f of (Array.isArray(facts.financials) ? facts.financials : [])) {
     const metric = clean(f.metric); if (!metric) continue;
     const valNum = parseNum(f.value); const valText = clean(f.value);
-    if (valNum == null && !(valText && /\d/.test(valText))) continue;     // require a number
+    if (valNum == null && !(valText && /\d/.test(valText))) {            // require a number
+      if (rejects) rejects.push({ kind: 'fact', value: `${metric}${valText ? ': ' + valText : ''}`, reason: 'no numeric value' });
+      continue;
+    }
     out.push({ metric, value_text: valText, value_num: valNum, currency: clean(f.currency), period: clean(f.period) });
   }
   for (const c of (Array.isArray(facts.capital) ? facts.capital : [])) {
-    const amount = clean(c.amount); if (!amount || !/\d/.test(amount)) continue;
+    const amount = clean(c.amount);
+    if (!amount || !/\d/.test(amount)) {
+      if (rejects && (clean(c.type) || amount)) rejects.push({ kind: 'fact', value: `capital${amount ? ': ' + amount : ''}`, reason: 'no numeric value' });
+      continue;
+    }
     const type = (clean(c.type) || 'capital').toLowerCase();
     const metric = /paid/.test(type) ? 'paid_up_capital' : /author/.test(type) ? 'authorized_capital' : 'capital';
     out.push({ metric, value_text: amount, value_num: parseNum(amount), currency: clean(c.currency), period: null });
@@ -155,9 +163,11 @@ export async function enrichCompany(company) {
   }
   if (!facts) { await markStage11(company.id, 'no_data', { stage11_skip: 'no-extract' }); return { status: 'no_data', facts: 0 }; }
 
-  const financials = validFinancials(facts);
+  const rejects = [];
+  const financials = validFinancials(facts, rejects);
   const shareholders = validShareholders(facts);
   const { fin, sh } = await writeFacts(company.id, financials, shareholders, 'website:firecrawl');
+  for (const rj of rejects.slice(0, 25)) { try { await recordReject(company.id, 'facts', rj.kind, rj.value, rj.reason); } catch { /* ignore */ } }
   FC.financials += fin; FC.shareholders += sh;
   const total = fin + sh;
   await markStage11(company.id, total > 0 ? 'done' : 'no_data', { stage11_financials: fin, stage11_shareholders: sh });
