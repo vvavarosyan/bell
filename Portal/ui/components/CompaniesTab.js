@@ -128,6 +128,17 @@ export function CompaniesTab({ archivedMode: initialArchived = false, mode = 'lo
   }, [isLocalEngine]);
   useEffect(() => { refreshReviewCount(); }, [refreshReviewCount, rows]);
 
+  // Live status of the always-on Continuous Enrichment Engine (local engine only).
+  const [engineStatus, setEngineStatus] = useState(null);
+  useEffect(() => {
+    if (!isLocalEngine) return undefined;
+    let dead = false;
+    const tick = async () => { try { const s = await api.enrichmentEngineStatus(); if (!dead) setEngineStatus(s); } catch { /* non-fatal */ } };
+    tick();
+    const t = setInterval(tick, 20000);
+    return () => { dead = true; clearInterval(t); };
+  }, [isLocalEngine]);
+
   useEffect(() => { load(); }, [load]);
 
   // Industry filter options (distinct industries, most-common first).
@@ -308,6 +319,14 @@ export function CompaniesTab({ archivedMode: initialArchived = false, mode = 'lo
           <button class="accent" onClick=${runSweep}>Harvest stale ▶</button>
           <button onClick=${runAudit} disabled=${auditing} title="Re-validate every website the Finder saved and show which are wrong or empty, before purging.">${auditing ? 'Auditing…' : 'Audit finds'}</button>
         </div>
+      ` : null}
+      ${isLocalEngine && engineStatus ? html`
+        <span title=${engineStatus.alive ? ('Always-on engine running. Last beat ' + (engineStatus.heartbeat?.updated_at ? new Date(engineStatus.heartbeat.updated_at).toLocaleTimeString() : '—') + '. Found ' + (engineStatus.heartbeat?.found_total || 0) + ', harvested ' + (engineStatus.heartbeat?.harvested_total || 0) + ', mapped ' + (engineStatus.heartbeat?.mapped_total || 0) + ' this run.') : (engineStatus.installed ? 'Engine installed but no recent heartbeat — check it is running.' : 'Always-on engine not running. Double-click "Install Always-On Engine.command".')}
+          style=${{ display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: '11.5px', color: 'var(--text-muted)', border: '1px solid var(--border)', borderRadius: '999px', padding: '3px 10px' }}>
+          <span style=${{ width: '8px', height: '8px', borderRadius: '50%', background: engineStatus.alive ? '#22c55e' : (engineStatus.installed ? '#f59e0b' : '#64748b'), animation: engineStatus.alive ? 'feedpulse 1.8s infinite' : 'none' }}></span>
+          ${engineStatus.alive ? 'Engine live' : engineStatus.installed ? 'Engine idle' : 'Engine off'}
+          ${engineStatus.alive && engineStatus.heartbeat ? html`<span style=${{ color: 'var(--text-dim)' }}>· ${Number(engineStatus.heartbeat.find_left ?? 0).toLocaleString()} to find · ${Number(engineStatus.heartbeat.harvest_left ?? 0).toLocaleString()} to harvest</span>` : null}
+        </span>
       ` : null}
       <button onClick=${load}>Refresh</button>
       <div class="seg-toggle" style=${{ display: 'inline-flex', gap: '4px' }}>
