@@ -50,6 +50,7 @@ router.get('/engine-status', async (req, res) => {
           (SELECT count(*) FROM companies WHERE COALESCE(archived,false)=false AND is_active IS NOT false AND (website IS NULL OR btrim(website)='') AND stage8_at IS NULL)::int AS find_left,
           (SELECT count(*) FROM companies WHERE COALESCE(archived,false)=false AND is_active IS NOT false AND website IS NOT NULL AND btrim(website)<>'' AND stage7_at IS NULL)::int AS harvest_left,
           (SELECT count(*) FROM companies WHERE COALESCE(archived,false)=false AND is_active IS NOT false AND website IS NOT NULL AND btrim(website)<>'' AND stage9_at IS NULL)::int AS map_left,
+          (SELECT count(*) FROM companies WHERE COALESCE(archived,false)=false AND is_active IS NOT false AND website IS NOT NULL AND btrim(website)<>'' AND stage7_at IS NOT NULL AND stage10_at IS NULL)::int AS email_left,
           (SELECT count(*) FROM companies WHERE COALESCE(archived,false)=false AND is_active IS NOT false)::int AS total,
           (SELECT count(*) FROM companies WHERE COALESCE(archived,false)=false AND is_active IS NOT false AND website IS NOT NULL AND btrim(website)<>'')::int AS with_website
         `).catch(() => ({ rows: [{}] })),
@@ -100,7 +101,8 @@ router.post('/engine/rescan', async (req, res, next) => {
     if (scope === 'find')         { sql = `UPDATE companies SET stage8_at=NULL WHERE ${active}`; label = 'website finding'; }
     else if (scope === 'harvest') { sql = `UPDATE companies SET stage7_at=NULL WHERE ${active} AND ${hasSite}`; label = 'harvesting'; }
     else if (scope === 'map')     { sql = `UPDATE companies SET stage9_at=NULL WHERE ${active} AND ${hasSite}`; label = 'network mapping'; }
-    else                          { sql = `UPDATE companies SET stage7_at=NULL, stage8_at=NULL, stage9_at=NULL WHERE ${active}`; label = 'all engines'; }
+    else if (scope === 'email')   { sql = `UPDATE companies SET stage10_at=NULL WHERE ${active} AND ${hasSite}`; label = 'email finding'; }
+    else                          { sql = `UPDATE companies SET stage7_at=NULL, stage8_at=NULL, stage9_at=NULL, stage10_at=NULL WHERE ${active}`; label = 'all engines'; }
     const r = await query(sql);
     res.json({ ok: true, scope, reset: r.rowCount || 0, label });
   } catch (err) { next(err); }

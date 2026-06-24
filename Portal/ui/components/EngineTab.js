@@ -29,6 +29,7 @@ const ENGINES = [
   { key: 'find_left',    name: 'Engine 1 · Website Finder',   left: 'Companies still needing a website', desc: 'Finds an official website for companies that have none — domain guessing first, then verified search.' },
   { key: 'harvest_left', name: 'Engine 2 · Website Harvester', left: 'Sites still to harvest',             desc: 'Crawls each site for emails, phones, socials, address, logo, team people and partner companies.' },
   { key: 'map_left',     name: 'Engine 3 · Network Mapper',    left: 'Companies still to map',             desc: 'Maps partners, clients, affiliates and competitors into the business graph.' },
+  { key: 'email_left',   name: 'Engine 4 · Email Finder',      left: 'Harvested sites still to email-find', desc: 'Finds decision-maker emails — matches published addresses to people, learns each company\'s email format, and verifies every address before saving.' },
 ];
 const CARD = { border: '1px solid var(--border)', borderRadius: '12px', padding: '16px', background: 'var(--bg-elev, rgba(255,255,255,0.02))', marginBottom: '16px' };
 
@@ -108,7 +109,7 @@ export function EngineTab() {
             <div><div class="muted" style=${{ fontSize: '11px' }}>Last activity</div>${agoFn(s.beat_age_ms)}</div>
             <div><div class="muted" style=${{ fontSize: '11px' }}>Uptime</div>${uptimeFn(hb.started_at)}</div>
             <div><div class="muted" style=${{ fontSize: '11px' }}>Rounds this run</div>${nf(hb.round_no)}</div>
-            <div><div class="muted" style=${{ fontSize: '11px' }}>Found · Harvested · Mapped</div><b>${nf(hb.found_total)}</b> · <b>${nf(hb.harvested_total)}</b> · <b>${nf(hb.mapped_total)}</b></div>
+            <div><div class="muted" style=${{ fontSize: '11px' }}>Found · Harvested · Mapped · Emailed</div><b>${nf(hb.found_total)}</b> · <b>${nf(hb.harvested_total)}</b> · <b>${nf(hb.mapped_total)}</b> · <b>${nf(hb.email_total)}</b></div>
           </div>
         </div>
 
@@ -135,8 +136,8 @@ export function EngineTab() {
           </div>
         </div>
 
-        ${total > 0 && fr.find_left === 0 && fr.harvest_left === 0 && fr.map_left === 0 ? html`<div style=${{ ...CARD, border: '1px solid rgba(34,197,94,0.4)', background: 'rgba(34,197,94,0.06)' }}>
-          <b>All ${nf(total)} companies have been processed by Engines 1–3.</b> The engine is caught up and idles until new companies arrive. To gather <i>more</i> per company (decision-maker emails, financials), that's the next engines we build — not this sweep.
+        ${total > 0 && fr.find_left === 0 && fr.harvest_left === 0 && fr.map_left === 0 && fr.email_left === 0 ? html`<div style=${{ ...CARD, border: '1px solid rgba(34,197,94,0.4)', background: 'rgba(34,197,94,0.06)' }}>
+          <b>All ${nf(total)} companies have been processed by Engines 1–4.</b> The engines are caught up and idle until new companies arrive or you re-scan.
         </div>` : null}
 
         <div style=${CARD}>
@@ -145,6 +146,7 @@ export function EngineTab() {
           <div style=${{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
             <button class="sys-btn" disabled=${rescanning} onClick=${() => rescan('all', `all three engines on every active company (${nf(total)})`)}>${rescanning ? 'Working…' : `Re-scan everything (${nf(total)})`}</button>
             <button class="sys-btn sys-btn-secondary" disabled=${rescanning} onClick=${() => rescan('harvest', `re-harvesting every known site (${nf(fr.with_website)})`)}>Re-harvest sites (${nf(fr.with_website)})</button>
+            <button class="sys-btn sys-btn-secondary" disabled=${rescanning} onClick=${() => rescan('email', `re-finding emails on every harvested site (${nf(fr.with_website)})`)}>Re-find emails (${nf(fr.with_website)})</button>
           </div>
         </div>
 
