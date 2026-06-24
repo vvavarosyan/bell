@@ -58,8 +58,18 @@ async function beat(state, s = {}) {
   await beat('starting', totals);
 
   while (!stopping) {
+    // Respect the Portal's pause/resume + pacing controls (best-effort).
+    let control = {};
+    try { const c = await query(`SELECT paused, night_chunk, day_chunk FROM engine_control WHERE id = 1`); control = c.rows[0] || {}; } catch { /* table may not exist yet */ }
+    if (control.paused) {
+      await beat('paused', totals);
+      await sleep(15000);
+      continue;
+    }
     totals.round_no++;
-    const chunk = isNight() ? NIGHT_CHUNK : DAY_CHUNK;
+    const nightC = Number(control.night_chunk) || NIGHT_CHUNK;
+    const dayC   = Number(control.day_chunk)   || DAY_CHUNK;
+    const chunk = isNight() ? nightC : dayC;
     let r;
     try {
       r = await runHarvestSweep({ limit: chunk, triggeredBy: 'continuous', jobLog: null });

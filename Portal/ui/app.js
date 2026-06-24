@@ -35,6 +35,7 @@ import { AccountTab }    from './components/AccountTab.js';
 import { DetailRequestsTab } from './components/DetailRequestsTab.js';
 import { WebsiteCandidatesTab } from './components/WebsiteCandidatesTab.js';
 import { HarvestHistoryTab } from './components/HarvestHistoryTab.js';
+import { EngineTab } from './components/EngineTab.js';
 import { ManualLookupTab } from './components/ManualLookupTab.js';
 import { NotificationBell } from './components/NotificationBell.js';
 import { AnnouncementsTab } from './components/AnnouncementsTab.js';
@@ -62,6 +63,7 @@ const VIEWS = {
   'detail-requests': { Component: DetailRequestsTab },
   'website-candidates': { Component: WebsiteCandidatesTab },
   'manual-lookup': { Component: ManualLookupTab },
+  'engine': { Component: EngineTab },
   'harvest-history': { Component: HarvestHistoryTab },
   'announcements': { Component: AnnouncementsTab },
   'email-templates': { Component: EmailTemplatesTab },
@@ -90,6 +92,7 @@ const LABELS = {
   'detail-requests': 'Detail Requests',
   'website-candidates': 'Website Review',
   'manual-lookup': 'Manual Lookup',
+  'engine': 'Local Engines',
   'harvest-history': 'Harvest History',
   'announcements': 'Announcements',
   'email-templates': 'Email Templates',
