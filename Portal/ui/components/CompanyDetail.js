@@ -471,6 +471,7 @@ export function CompanyDetail({ companyId, onMutated, onDeleted, canHardDelete =
         <button class=${tab==='company'?'active':''} onClick=${()=>setTab('company')}>Company</button>
         <button class=${tab==='people'?'active':''}  onClick=${()=>setTab('people')}>People (${data.people.length})</button>
         <button class=${tab==='intel'?'active':''}   onClick=${()=>setTab('intel')}>Intel${intelCount ? ` (${intelCount})` : ''}</button>
+        ${isLocalEngine ? html`<button class=${tab==='sources'?'active':''} onClick=${()=>setTab('sources')}>Sources</button>` : null}
         <button class=${tab==='legal'?'active':''}   onClick=${()=>setTab('legal')}>Legal (${legalTabCount})</button>
       </div>
 
@@ -478,6 +479,7 @@ export function CompanyDetail({ companyId, onMutated, onDeleted, canHardDelete =
         ${tab === 'company' ? html`<${CompanyTab} company=${c} extra=${extra} similar=${similar} relationships=${rels} contacts=${data.contacts || []} onReload=${reload} needsReveal=${needsReveal} onReveal=${revealContacts} isUser=${isUser} isLocalEngine=${isLocalEngine} />` : null}
         ${tab === 'people'  ? html`<${PeopleView}  people=${data.people} isUser=${isUser} onReveal=${revealPerson} />` : null}
         ${tab === 'intel'   ? html`<${IntelTab} financials=${data.financials || []} shareholders=${data.shareholders || []} partnerships=${data.partnerships || []} />` : null}
+        ${isLocalEngine && tab === 'sources' ? html`<${SourcesActivityTab} company=${c} extra=${extra} contacts=${data.contacts || []} people=${data.people || []} financials=${data.financials || []} shareholders=${data.shareholders || []} />` : null}
         ${tab === 'legal'   ? html`<${LegalTab}    sources=${sources} extra=${extra} isUser=${isUser} />` : null}
       </div>
     </aside>
@@ -925,6 +927,93 @@ function IntelTab({ financials, shareholders, partnerships }) {
         </div>`)}
       </div>
     ` : null}
+  </div>`;
+}
+
+// Sources & Activity — local-admin view of WHAT each engine did for this company
+// and WHERE every saved value came from. Everything is coerced to strings (never
+// render a jsonb object as a child — that blanks the view).
+function SourcesActivityTab({ company, extra, contacts, people, financials, shareholders }) {
+  const e = extra || {};
+  const num = (x) => Number(x || 0);
+  const host = (u) => { try { return new URL(u).hostname.replace(/^www\./, ''); } catch { return u ? String(u).slice(0, 40) : ''; } };
+  const when = (t) => { try { return t ? new Date(t).toLocaleString() : ''; } catch { return ''; } };
+  const fmtFound = (f) => {
+    if (!f || typeof f !== 'object') return '';
+    const p = [];
+    if (f.emails) p.push(`${f.emails} email${f.emails > 1 ? 's' : ''}`);
+    if (f.phones) p.push(`${f.phones} phone${f.phones > 1 ? 's' : ''}`);
+    if (f.socials) p.push(`${f.socials} social${f.socials > 1 ? 's' : ''}`);
+    if (f.people) p.push(`${f.people} ${f.people > 1 ? 'people' : 'person'}`);
+    if (f.partners) p.push(`${f.partners} partner${f.partners > 1 ? 's' : ''}`);
+    return p.join(' · ');
+  };
+  const SC = { done: '#22c55e', skipped: '#64748b', no_data: '#64748b', failed: '#e5534b', running: '#f59e0b', pending: '#475569', candidate: '#f59e0b' };
+
+  const engines = [
+    { name: 'Engine 1 · Website Finder', st: company.stage8_status, at: company.stage8_at,
+      detail: e.stage8_found ? `Found ${e.stage8_found}${e.stage8_method ? ` (via ${e.stage8_method})` : ''}`
+        : e.stage8_candidate ? `Candidate ${e.stage8_candidate} — pending review, not saved`
+        : e.stage8_skip_reason ? `Skipped — ${String(e.stage8_skip_reason).replace(/_/g, ' ')}`
+        : 'No website found yet' },
+    { name: 'Engine 2 · Website Harvester', st: company.stage7_status, at: company.stage7_at,
+      detail: e.stage7_found ? `Harvested ${fmtFound(e.stage7_found) || 'nothing'}${Array.isArray(e.stage7_pages) ? ` · ${e.stage7_pages.length} page(s)` : ''}${e.stage7_rendered ? ' · JS-rendered' : ''}`
+        : e.stage7_skip_reason ? `Skipped — ${String(e.stage7_skip_reason).replace(/_/g, ' ')}` : 'Not harvested yet' },
+    { name: 'Engine 3 · Network Mapper', st: company.stage9_status, at: company.stage9_at,
+      detail: (e.stage9_found && (e.stage9_found.count || fmtFound(e.stage9_found))) ? `Mapped ${fmtFound(e.stage9_found) || (num(e.stage9_found.count) + ' relationship(s)')}`
+        : e.stage9_skip_reason ? `Skipped — ${String(e.stage9_skip_reason).replace(/_/g, ' ')}` : 'Not mapped yet' },
+    { name: 'Engine 4 · Email Finder', st: company.stage10_status, at: company.stage10_at,
+      detail: num(e.stage10_emails) > 0 ? `${num(e.stage10_emails)} email(s) — ${num(e.stage10_observed)} matched, ${num(e.stage10_pattern)} pattern-verified${e.stage10_format ? ` · format “${e.stage10_format}”` : ''}`
+        : e.stage10_skip ? `Skipped — ${String(e.stage10_skip).replace(/-/g, ' ')}` : 'No emails added' },
+    { name: 'Engine 5 · Company Facts', st: company.stage11_status, at: company.stage11_at,
+      detail: (num(e.stage11_financials) + num(e.stage11_shareholders)) > 0 ? `${num(e.stage11_financials)} financial(s) + ${num(e.stage11_shareholders)} shareholder(s)`
+        : e.stage11_skip === 'no-facts-keywords' ? 'Skipped — site doesn’t mention financials'
+        : e.stage11_skip ? `Skipped — ${String(e.stage11_skip).replace(/-/g, ' ')}` : 'No facts found' },
+  ];
+
+  const head = (label, n) => html`<div style=${{ fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 700, color: 'var(--text-dim)', margin: '18px 0 8px' }}>${label}${n ? ` · ${n}` : ''}</div>`;
+  const cell = { padding: '7px 10px', fontSize: '12.5px', borderBottom: '1px solid rgba(255,255,255,0.05)' };
+  const tag = (s, x) => html`<span style=${{ fontSize: '9.5px', color: 'var(--text-dim)', whiteSpace: 'nowrap' }}>${s || '—'}${x ? ` · ${x}` : ''}</span>`;
+  const kind = (t) => html`<span class="muted small" style=${{ textTransform: 'uppercase', fontSize: '9px', marginRight: '6px' }}>${t}</span>`;
+
+  return html`<div class="overview" style=${{ padding: '4px 14px 16px' }}>
+    ${head('Engine activity')}
+    <div>
+      ${engines.map((g, i) => html`<div key=${i} style=${{ ...cell, display: 'flex', gap: '10px', alignItems: 'flex-start' }}>
+        <span style=${{ width: '8px', height: '8px', borderRadius: '50%', background: (SC[g.st] || '#475569'), marginTop: '5px', flexShrink: 0 }}></span>
+        <div style=${{ flex: 1 }}>
+          <div style=${{ display: 'flex', justifyContent: 'space-between', gap: '8px' }}>
+            <strong style=${{ fontSize: '12px' }}>${g.name}</strong>
+            <span class="muted small">${g.at ? when(g.at) : (g.st || 'pending')}</span>
+          </div>
+          <div class="muted small" style=${{ marginTop: '2px', lineHeight: 1.5 }}>${g.detail}</div>
+        </div>
+      </div>`)}
+    </div>
+
+    ${head('Every saved detail & where it came from')}
+    <div>
+      ${company.website ? html`<div style=${{ ...cell, display: 'flex', justifyContent: 'space-between', gap: '10px' }}>
+        <span>${kind('site')}${company.website}</span>${tag(e.website_found && e.website_found.method ? 'website-finder (' + e.website_found.method + ')' : 'website')}
+      </div>` : null}
+      ${(contacts || []).map((c) => html`<div key=${'c' + c.id} style=${{ ...cell, display: 'flex', justifyContent: 'space-between', gap: '10px' }}>
+        <span>${kind(c.type)}${c.value_display || c.value}</span>${tag(c.source, c.source_url ? host(c.source_url) : (c.is_verified ? 'verified' : ''))}
+      </div>`)}
+      ${(financials || []).map((f) => html`<div key=${'f' + f.id} style=${{ ...cell, display: 'flex', justifyContent: 'space-between', gap: '10px' }}>
+        <span>${kind('fact')}${String(f.metric).replace(/_/g, ' ')}: ${f.value_text || (f.value_num != null ? Number(f.value_num).toLocaleString() : '—')}${f.currency ? ' ' + f.currency : ''}</span>${tag(f.source, f.confidence)}
+      </div>`)}
+      ${(shareholders || []).map((s) => html`<div key=${'s' + s.id} style=${{ ...cell, display: 'flex', justifyContent: 'space-between', gap: '10px' }}>
+        <span>${kind('owner')}${s.holder_name}${s.stake_text ? ` · ${s.stake_text}` : ''}</span>${tag(s.source, s.confidence)}
+      </div>`)}
+      ${(people && people.length) ? html`<div style=${{ ...cell, display: 'flex', justifyContent: 'space-between', gap: '10px' }}>
+        <span>${kind('people')}${people.length} ${people.length > 1 ? 'people' : 'person'} linked</span>${tag('harvester / linkedin')}
+      </div>` : null}
+      ${(!company.website && !(contacts || []).length && !(financials || []).length && !(shareholders || []).length) ? html`<div class="muted small" style=${{ padding: '10px' }}>Nothing saved yet — the engines haven’t produced data for this company.</div>` : null}
+    </div>
+
+    <div class="muted small" style=${{ marginTop: '14px', lineHeight: 1.5, opacity: 0.85 }}>
+      Every value shows its source. “Skipped / candidate” means an engine looked but didn’t save (e.g. a search result sent to review, or a site that doesn’t publish financials) — so nothing unverified enters Bell.
+    </div>
   </div>`;
 }
 
