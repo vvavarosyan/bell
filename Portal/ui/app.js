@@ -7,7 +7,7 @@
 //      • no session → redirect to /sign-in
 //      • session → fetch /api/auth/me, mount Portal with that user's role
 
-import { createElement, useState, useEffect, useCallback } from 'react';
+import { createElement, useState, useEffect, useCallback, Component } from 'react';
 import { createRoot } from 'react-dom';
 import { html } from './lib/html.js';
 import { api } from './lib/api.js';
@@ -40,6 +40,22 @@ import { ManualLookupTab } from './components/ManualLookupTab.js';
 import { NotificationBell } from './components/NotificationBell.js';
 import { AnnouncementsTab } from './components/AnnouncementsTab.js';
 import { EmailTemplatesTab } from './components/EmailTemplatesTab.js';
+
+// Error boundary so a crash in ONE view shows a readable message instead of
+// blanking the whole app. Reset per-view via a `key` on the active tab.
+class ViewErrorBoundary extends Component {
+  constructor(props) { super(props); this.state = { error: null }; }
+  componentDidCatch(error) { try { console.error('[view crashed]', error); } catch {} this.setState({ error }); }
+  render() {
+    const e = this.state.error;
+    if (e) return html`<div style=${{ padding: '24px' }}>
+      <b style=${{ color: 'var(--red, #e5534b)' }}>This view hit an error and couldn't render.</b>
+      <pre style=${{ marginTop: '10px', fontSize: '12px', whiteSpace: 'pre-wrap', wordBreak: 'break-word', color: 'var(--text-muted)' }}>${String((e && e.stack) || (e && e.message) || e)}</pre>
+      <div class="muted" style=${{ marginTop: '10px' }}>The rest of the app is fine — pick another section. If it persists, copy this message to support.</div>
+    </div>`;
+    return this.props.children;
+  }
+}
 
 // Maps a sidebar nav id to a renderable view. Items not listed here fall back
 // to a ComingSoon placeholder with the item's label.
@@ -211,7 +227,7 @@ function App({ initialUser, initialTenant, mode }) {
         </div>
 
         ${Active
-          ? html`<${Active} mode=${mode?.mode || 'local-admin'} />`
+          ? html`<${ViewErrorBoundary} key=${tab}><${Active} mode=${mode?.mode || 'local-admin'} /></${ViewErrorBoundary}>`
           : html`<${ComingSoon} label=${LABELS[tab] || tab} />`}
       </main>
     </div>

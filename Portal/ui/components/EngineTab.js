@@ -21,6 +21,9 @@ const STATE_META = {
 function agoFn(ms) { if (ms == null) return '—'; const s = Math.round(ms / 1000); if (s < 60) return s + 's ago'; if (s < 3600) return Math.round(s / 60) + 'm ago'; return Math.round(s / 3600) + 'h ago'; }
 function uptimeFn(iso) { if (!iso) return '—'; let s = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000); const d = Math.floor(s / 86400); s -= d * 86400; const h = Math.floor(s / 3600); s -= h * 3600; const m = Math.floor(s / 60); return (d ? d + 'd ' : '') + (h ? h + 'h ' : '') + m + 'm'; }
 function nf(x) { return Number(x || 0).toLocaleString(); }
+// Coerce any value to a safe string — a JSON/object field rendered as a child
+// throws "Objects are not valid as a React child" and blanks the view.
+function txt(x) { if (x == null) return ''; return typeof x === 'object' ? JSON.stringify(x) : String(x); }
 
 const ENGINES = [
   { key: 'find_left',    name: 'Engine 1 · Website Finder',   left: 'Companies still needing a website', desc: 'Finds an official website for companies that have none — domain guessing first, then verified search.' },
@@ -132,9 +135,9 @@ export function EngineTab() {
           <div style=${{ fontWeight: 700, fontSize: '14px', marginBottom: '10px' }}>Recent engine runs</div>
           ${runs.map((r, i) => html`
             <div key=${i} style=${{ display: 'grid', gridTemplateColumns: '120px 1fr auto', gap: '10px', alignItems: 'center', padding: '6px 0', borderTop: i ? '1px solid var(--border)' : 'none', fontSize: '12.5px' }}>
-              <span class="muted">${r.stage != null ? 'Stage ' + r.stage : (r.tool || '—')}</span>
-              <span style=${{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>${r.output_summary || r.status || ''}</span>
-              <span class="muted">${r.completed_at ? new Date(r.completed_at).toLocaleString() : (r.status || '')}</span>
+              <span class="muted">${r.stage != null ? 'Stage ' + r.stage : (txt(r.tool) || '—')}</span>
+              <span style=${{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>${txt(r.output_summary) || txt(r.status)}</span>
+              <span class="muted">${r.completed_at ? new Date(r.completed_at).toLocaleString() : txt(r.status)}</span>
             </div>`)}
         </div>` : null}
       </div>`;
