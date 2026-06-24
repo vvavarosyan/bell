@@ -21,6 +21,7 @@ import { query } from '../../db.js';
 import { upsertContact, isJunkEmail } from '../../lib/contacts.js';
 import { verifyEmail, emailDomain } from './emailverify.js';
 import { decodeFormat, emailFromFormat, inferStructuralFormat, splitName } from './email_patterns.js';
+import { recordReject } from './rejects.js';
 
 const PER_COMPANY_CAP = Number(process.env.BELL_EMAIL_PER_COMPANY || 25);
 
@@ -127,6 +128,8 @@ export async function enrichCompany(company) {
           extra_fields: { pattern: learned.format, verify: v.method || 'smtp' },
         });
         if (r) { patternWritten++; assigned.add(p.id); }
+      } else {
+        await recordReject(company.id, 'email', 'email', gen, `verification: ${v.result}${v.detail ? ` (${v.detail})` : ''}`);
       }
     }
   }

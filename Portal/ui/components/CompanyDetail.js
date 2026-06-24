@@ -479,7 +479,7 @@ export function CompanyDetail({ companyId, onMutated, onDeleted, canHardDelete =
         ${tab === 'company' ? html`<${CompanyTab} company=${c} extra=${extra} similar=${similar} relationships=${rels} contacts=${data.contacts || []} onReload=${reload} needsReveal=${needsReveal} onReveal=${revealContacts} isUser=${isUser} isLocalEngine=${isLocalEngine} />` : null}
         ${tab === 'people'  ? html`<${PeopleView}  people=${data.people} isUser=${isUser} onReveal=${revealPerson} />` : null}
         ${tab === 'intel'   ? html`<${IntelTab} financials=${data.financials || []} shareholders=${data.shareholders || []} partnerships=${data.partnerships || []} />` : null}
-        ${isLocalEngine && tab === 'sources' ? html`<${SourcesActivityTab} company=${c} extra=${extra} contacts=${data.contacts || []} people=${data.people || []} financials=${data.financials || []} shareholders=${data.shareholders || []} />` : null}
+        ${isLocalEngine && tab === 'sources' ? html`<${SourcesActivityTab} company=${c} extra=${extra} contacts=${data.contacts || []} people=${data.people || []} financials=${data.financials || []} shareholders=${data.shareholders || []} rejects=${data.rejects || []} />` : null}
         ${tab === 'legal'   ? html`<${LegalTab}    sources=${sources} extra=${extra} isUser=${isUser} />` : null}
       </div>
     </aside>
@@ -933,7 +933,7 @@ function IntelTab({ financials, shareholders, partnerships }) {
 // Sources & Activity — local-admin view of WHAT each engine did for this company
 // and WHERE every saved value came from. Everything is coerced to strings (never
 // render a jsonb object as a child — that blanks the view).
-function SourcesActivityTab({ company, extra, contacts, people, financials, shareholders }) {
+function SourcesActivityTab({ company, extra, contacts, people, financials, shareholders, rejects }) {
   const e = extra || {};
   const num = (x) => Number(x || 0);
   const host = (u) => { try { return new URL(u).hostname.replace(/^www\./, ''); } catch { return u ? String(u).slice(0, 40) : ''; } };
@@ -1011,8 +1011,18 @@ function SourcesActivityTab({ company, extra, contacts, people, financials, shar
       ${(!company.website && !(contacts || []).length && !(financials || []).length && !(shareholders || []).length) ? html`<div class="muted small" style=${{ padding: '10px' }}>Nothing saved yet — the engines haven’t produced data for this company.</div>` : null}
     </div>
 
+    ${(rejects && rejects.length) ? html`
+      ${head('Found but not saved', rejects.length)}
+      <div>
+        ${rejects.map((r) => html`<div key=${'r' + r.id} style=${{ ...cell, display: 'flex', justifyContent: 'space-between', gap: '10px' }}>
+          <span>${kind(r.kind)}<span style=${{ color: 'var(--text-muted)' }}>${r.value}</span></span>
+          <span style=${{ fontSize: '9.5px', color: '#e0a050', whiteSpace: 'nowrap' }}>${r.engine} · ${r.reason}</span>
+        </div>`)}
+      </div>
+    ` : null}
+
     <div class="muted small" style=${{ marginTop: '14px', lineHeight: 1.5, opacity: 0.85 }}>
-      Every value shows its source. “Skipped / candidate” means an engine looked but didn’t save (e.g. a search result sent to review, or a site that doesn’t publish financials) — so nothing unverified enters Bell.
+      Every value shows its source. “Skipped / candidate / not saved” means an engine looked but didn’t keep it (e.g. an email on another company’s domain, an address that failed mailbox verification, or a site that doesn’t publish financials) — so nothing unverified enters Bell.
     </div>
   </div>`;
 }

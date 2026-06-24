@@ -7,6 +7,7 @@ import {
   upsertContact, setPrimaryContact, deleteContact,
   loadPersonContactsByIds,
 } from '../lib/contacts.js';
+import { listRejects } from '../enrichment/local/rejects.js';
 import { maskPeople } from './people.js';
 import { wipeStaleEnrichmentAfterUrlReplace } from '../enrichment/stages/stage1.js';
 import { recomputeBellScoreForCompany } from '../assembly/bell_score.js';
@@ -385,7 +386,7 @@ router.get('/:id', async (req, res, next) => {
       // matchers above (e.g. a future sibling route added without checking).
       return res.status(400).json({ error: 'invalid_id', got: req.params.id });
     }
-    const [company, sources, people, contacts, financials, shareholders, partnerships] = await Promise.all([
+    const [company, sources, people, contacts, financials, shareholders, partnerships, rejects] = await Promise.all([
       query('SELECT * FROM companies WHERE id = $1', [id]),
       query(`
         SELECT id, source, source_record_id, source_url, raw_payload,
@@ -411,6 +412,7 @@ router.get('/:id', async (req, res, next) => {
                FROM company_shareholders WHERE company_id = $1 ORDER BY stake_pct DESC NULLS LAST, holder_name`, [id]),
       query(`SELECT id, partner_name, partner_company_id, relationship, description, since, confidence, source
                FROM company_partnerships WHERE company_id = $1 ORDER BY partner_name`, [id]),
+      listRejects(id),
     ]);
     if (!company.rows.length) return res.status(404).json({ error: 'not_found' });
     const row = company.rows[0];
@@ -436,6 +438,7 @@ router.get('/:id', async (req, res, next) => {
       financials:   financials.rows,
       shareholders: shareholders.rows,
       partnerships: partnerships.rows,
+      rejects:      rejects,
     });
   } catch (err) { next(err); }
 });
