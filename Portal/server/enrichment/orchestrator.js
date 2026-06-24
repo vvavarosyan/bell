@@ -19,6 +19,7 @@ import * as stage7 from './local/harvester.js';
 import * as stage8 from './local/finder.js';
 import * as stage9 from './local/relationships.js';
 import * as stage10 from './local/email_finder.js';
+import * as stage11 from './local/company_facts.js';
 
 const STAGES = {
   1: { module: stage1, label: 'Stage 1 — LinkedIn Discovery',         tool: 'firecrawl_spark_pro' },
@@ -31,6 +32,7 @@ const STAGES = {
   8: { module: stage8, label: 'Local Engine 1 — Website Finder',      tool: 'local_website_finder' },
   9: { module: stage9, label: 'Local Engine 3 — Network Mapper',      tool: 'local_relationship_mapper' },
   10: { module: stage10, label: 'Local Engine 4 — Email Finder',       tool: 'local_email_finder' },
+  11: { module: stage11, label: 'Local Engine 5 — Company Facts',      tool: 'local_company_facts' },
 };
 
 // (No more placeholders — every stage is implemented.)
@@ -42,7 +44,7 @@ function stageInfo(stage) {
 
 /** All stages with implemented flag and label — for the UI. */
 export function stageList() {
-  return [1, 2, 3, 4, 5, 6, 7, 8, 9, 10].map(n => ({
+  return [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11].map(n => ({
     stage: n,
     label:  (STAGES[n] || PLACEHOLDERS[n]).label,
     implemented: !!STAGES[n],
@@ -97,6 +99,7 @@ export async function runStageForCompanies({ stage, companyIds, triggeredBy = nu
   let done = 0, noData = 0, failed = 0;
   let usdTotal = 0;
   let emailsWritten = 0;
+  let factsWritten = 0;
   const errors = [];
 
   // Bulk path: if the stage module exposes enrichCompanies(), use it.
@@ -108,6 +111,7 @@ export async function runStageForCompanies({ stage, companyIds, triggeredBy = nu
       failed   = r.failed;
       usdTotal = r.usd;
       emailsWritten = Number(r.emails || 0);
+      factsWritten = Number(r.facts || 0);
       await query(`UPDATE enrichment_runs SET progress_done = $2 WHERE id = $1`, [runId, companies.length]);
     } catch (err) {
       failed = companies.length;
@@ -174,6 +178,7 @@ export async function runStageForCompanies({ stage, companyIds, triggeredBy = nu
     done, no_data: noData, failed,
     usd: usdTotal,
     emails: emailsWritten,
+    facts: factsWritten,
   };
 }
 
@@ -407,22 +412,44 @@ export async function runHarvestSweep({ limit = 100, triggeredBy = null, jobLog 
     jobLog?.(`  Phase 4 — no companies ready for email finding. Skipping.`);
   }
 
+  // Phase 5 — pull capital / financials / shareholders from the company's own
+  // website (gated: only sites that actually mention them get a Firecrawl
+  // extract). Runs after harvest so the website + pages are already known.
+  const factsRows = await query(
+    `SELECT id FROM companies
+      WHERE COALESCE(archived, false) = false AND is_active IS NOT false
+        AND website IS NOT NULL AND btrim(website) <> ''
+        AND stage7_at IS NOT NULL
+        AND stage11_at IS NULL
+      ORDER BY bell_score ASC, id ASC
+      LIMIT $1`, [cap]);
+  const factsIds = factsRows.rows.map(r => r.id);
+  let companyFacts = { done: 0, no_data: 0, failed: 0, facts: 0 };
+  if (factsIds.length) {
+    jobLog?.(`  Phase 5 — Engine 5 (Company Facts) on ${factsIds.length} company(ies)…`);
+    companyFacts = await safeRun(() => runStageForCompanies({ stage: 11, companyIds: factsIds, triggeredBy, jobLog: (m) => jobLog?.('  [E5] ' + m) })).then(unwrap);
+  } else {
+    jobLog?.(`  Phase 5 — no companies ready for facts. Skipping.`);
+  }
+
   // How much frontier remains, so the admin knows whether to run again.
   const remain = await query(
     `SELECT
        (SELECT count(*) FROM companies WHERE COALESCE(archived,false)=false AND is_active IS NOT false AND (website IS NULL OR btrim(website)='') AND stage8_at IS NULL) AS find_left,
        (SELECT count(*) FROM companies WHERE COALESCE(archived,false)=false AND is_active IS NOT false AND website IS NOT NULL AND btrim(website)<>'' AND stage7_at IS NULL) AS harvest_left,
        (SELECT count(*) FROM companies WHERE COALESCE(archived,false)=false AND is_active IS NOT false AND website IS NOT NULL AND btrim(website)<>'' AND stage9_at IS NULL) AS map_left,
-       (SELECT count(*) FROM companies WHERE COALESCE(archived,false)=false AND is_active IS NOT false AND website IS NOT NULL AND btrim(website)<>'' AND stage7_at IS NOT NULL AND stage10_at IS NULL) AS email_left`);
-  const { find_left, harvest_left, map_left, email_left } = remain.rows[0] || {};
-  jobLog?.(`▸▸▸ Sweep complete. Found ${find?.done || 0} site(s); harvested ${harvest?.done || 0}; mapped ${mapped?.done || 0}; emailed ${email?.emails || 0}. Remaining — to find: ${find_left}, to harvest: ${harvest_left}, to map: ${map_left}, to email: ${email_left}.`);
+       (SELECT count(*) FROM companies WHERE COALESCE(archived,false)=false AND is_active IS NOT false AND website IS NOT NULL AND btrim(website)<>'' AND stage7_at IS NOT NULL AND stage10_at IS NULL) AS email_left,
+       (SELECT count(*) FROM companies WHERE COALESCE(archived,false)=false AND is_active IS NOT false AND website IS NOT NULL AND btrim(website)<>'' AND stage7_at IS NOT NULL AND stage11_at IS NULL) AS facts_left`);
+  const { find_left, harvest_left, map_left, email_left, facts_left } = remain.rows[0] || {};
+  jobLog?.(`▸▸▸ Sweep complete. Found ${find?.done || 0} site(s); harvested ${harvest?.done || 0}; mapped ${mapped?.done || 0}; emailed ${email?.emails || 0}; facts ${companyFacts?.facts || 0}. Remaining — find: ${find_left}, harvest: ${harvest_left}, map: ${map_left}, email: ${email_left}, facts: ${facts_left}.`);
 
   return {
     found: find?.done || 0, find_attempted: findIds.length,
     harvested: harvest?.done || 0, harvest_attempted: harvestIds.length,
     mapped: mapped?.done || 0, map_attempted: mapIds.length,
     emails: email?.emails || 0, email_attempted: emailIds.length,
-    find_left: Number(find_left || 0), harvest_left: Number(harvest_left || 0), map_left: Number(map_left || 0), email_left: Number(email_left || 0),
+    facts: companyFacts?.facts || 0, facts_attempted: factsIds.length,
+    find_left: Number(find_left || 0), harvest_left: Number(harvest_left || 0), map_left: Number(map_left || 0), email_left: Number(email_left || 0), facts_left: Number(facts_left || 0),
   };
 }
 
@@ -456,12 +483,16 @@ export async function runLocalEnginesForCompanies({ companyIds, triggeredBy = nu
   jobLog?.(`  Engine 4 — Email Finder…`);
   const email = await safeRun(() => runStageForCompanies({ stage: 10, companyIds: ids, triggeredBy, jobLog: (m) => jobLog?.('  [E4] ' + m) })).then(unwrap);
 
-  jobLog?.(`▸▸▸ Done. Found ${find?.done || 0} site(s); harvested ${harvest?.done || 0}; mapped ${mapped?.done || 0}; emailed ${email?.emails || 0}.`);
+  jobLog?.(`  Engine 5 — Company Facts…`);
+  const companyFacts = await safeRun(() => runStageForCompanies({ stage: 11, companyIds: ids, triggeredBy, jobLog: (m) => jobLog?.('  [E5] ' + m) })).then(unwrap);
+
+  jobLog?.(`▸▸▸ Done. Found ${find?.done || 0} site(s); harvested ${harvest?.done || 0}; mapped ${mapped?.done || 0}; emailed ${email?.emails || 0}; facts ${companyFacts?.facts || 0}.`);
   return {
     selected: ids.length,
     found: find?.done || 0, find_attempted: find?.total || 0,
     harvested: harvest?.done || 0, harvest_attempted: harvest?.total || 0,
     mapped: mapped?.done || 0, map_attempted: mapped?.total || 0,
     emailed: email?.emails || 0,
+    facts: companyFacts?.facts || 0,
   };
 }

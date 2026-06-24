@@ -13,6 +13,7 @@ import {
 import { auditFinderFinds, cleanupFinderFinds } from '../enrichment/local/cleanup.js';
 import { listCandidates, countPending, decideCandidate } from '../enrichment/local/candidates.js';
 import { createLookup, runLookup, listLookups, approveLookup, enrichMatchLookup, rejectLookup } from '../enrichment/local/manual_lookup.js';
+import { crawl4aiAvailable } from '../enrichment/local/crawl4ai.js';
 
 const router = Router();
 
@@ -51,6 +52,7 @@ router.get('/engine-status', async (req, res) => {
           (SELECT count(*) FROM companies WHERE COALESCE(archived,false)=false AND is_active IS NOT false AND website IS NOT NULL AND btrim(website)<>'' AND stage7_at IS NULL)::int AS harvest_left,
           (SELECT count(*) FROM companies WHERE COALESCE(archived,false)=false AND is_active IS NOT false AND website IS NOT NULL AND btrim(website)<>'' AND stage9_at IS NULL)::int AS map_left,
           (SELECT count(*) FROM companies WHERE COALESCE(archived,false)=false AND is_active IS NOT false AND website IS NOT NULL AND btrim(website)<>'' AND stage7_at IS NOT NULL AND stage10_at IS NULL)::int AS email_left,
+          (SELECT count(*) FROM companies WHERE COALESCE(archived,false)=false AND is_active IS NOT false AND website IS NOT NULL AND btrim(website)<>'' AND stage7_at IS NOT NULL AND stage11_at IS NULL)::int AS facts_left,
           (SELECT count(*) FROM companies WHERE COALESCE(archived,false)=false AND is_active IS NOT false)::int AS total,
           (SELECT count(*) FROM companies WHERE COALESCE(archived,false)=false AND is_active IS NOT false AND website IS NOT NULL AND btrim(website)<>'')::int AS with_website
         `).catch(() => ({ rows: [{}] })),
@@ -60,14 +62,16 @@ router.get('/engine-status', async (req, res) => {
     const beatAgeMs = h?.updated_at ? Date.now() - new Date(h.updated_at).getTime() : null;
     const alive = beatAgeMs != null && beatAgeMs < 3 * 60 * 1000;
     const state = c.paused ? 'paused' : (alive ? (h?.state || 'sweeping') : (h ? 'stopped' : 'off'));
+    let c4up = false; try { c4up = await crawl4aiAvailable(); } catch { /* optional engine */ }
     res.json({
       installed: !!h, alive, paused: !!c.paused, state,
       heartbeat: h, beat_age_ms: beatAgeMs,
       control: { paused: !!c.paused, night_chunk: c.night_chunk ?? null, day_chunk: c.day_chunk ?? null },
       frontier: fr.rows[0] || {},
+      crawl4ai: { up: c4up },
     });
   } catch {
-    res.json({ installed: false, alive: false, paused: false, state: 'off', heartbeat: null, frontier: {}, control: {} });
+    res.json({ installed: false, alive: false, paused: false, state: 'off', heartbeat: null, frontier: {}, control: {}, crawl4ai: { up: false } });
   }
 });
 
@@ -102,7 +106,8 @@ router.post('/engine/rescan', async (req, res, next) => {
     else if (scope === 'harvest') { sql = `UPDATE companies SET stage7_at=NULL WHERE ${active} AND ${hasSite}`; label = 'harvesting'; }
     else if (scope === 'map')     { sql = `UPDATE companies SET stage9_at=NULL WHERE ${active} AND ${hasSite}`; label = 'network mapping'; }
     else if (scope === 'email')   { sql = `UPDATE companies SET stage10_at=NULL WHERE ${active} AND ${hasSite}`; label = 'email finding'; }
-    else                          { sql = `UPDATE companies SET stage7_at=NULL, stage8_at=NULL, stage9_at=NULL, stage10_at=NULL WHERE ${active}`; label = 'all engines'; }
+    else if (scope === 'facts')   { sql = `UPDATE companies SET stage11_at=NULL WHERE ${active} AND ${hasSite}`; label = 'company facts'; }
+    else                          { sql = `UPDATE companies SET stage7_at=NULL, stage8_at=NULL, stage9_at=NULL, stage10_at=NULL, stage11_at=NULL WHERE ${active}`; label = 'all engines'; }
     const r = await query(sql);
     res.json({ ok: true, scope, reset: r.rowCount || 0, label });
   } catch (err) { next(err); }
