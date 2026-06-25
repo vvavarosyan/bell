@@ -113,6 +113,46 @@ router.post('/engine/rescan', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+// GET /api/enrichment/results — engine output + data-quality summary, for tuning.
+// The decisive number is person_emails.pattern_verified: if it's 0 while emails
+// exist, the network is blocking SMTP and Engine 4 is only matching published
+// addresses (→ add a verification API).
+router.get('/results', async (req, res) => {
+  const active = `COALESCE(archived,false)=false AND is_active IS NOT false`;
+  const site = `website IS NOT NULL AND btrim(website)<>''`;
+  try {
+    const [web, harv, pem, cem, fin, sh, rejN, rejBy] = await Promise.all([
+      query(`SELECT
+        count(*) FILTER (WHERE ${active})::int AS active_total,
+        count(*) FILTER (WHERE ${active} AND ${site})::int AS with_website,
+        count(*) FILTER (WHERE ${active} AND stage8_at IS NOT NULL AND extra_fields->'website_found'->>'method'='guess')::int AS found_guess,
+        count(*) FILTER (WHERE ${active} AND stage8_at IS NOT NULL AND extra_fields->'website_found'->>'method' LIKE 'search%')::int AS found_search
+        FROM companies`),
+      query(`SELECT count(*) FILTER (WHERE ${active} AND stage7_at IS NOT NULL)::int AS harvested FROM companies`),
+      query(`SELECT
+        count(*) FILTER (WHERE source='stage10-observed')::int AS observed,
+        count(*) FILTER (WHERE source='stage10-pattern')::int AS pattern_verified,
+        count(*)::int AS total
+        FROM person_contacts WHERE type='email'`),
+      query(`SELECT count(DISTINCT company_id)::int AS companies, count(*)::int AS total FROM company_contacts WHERE type='email'`),
+      query(`SELECT count(*)::int AS cnt, count(DISTINCT company_id)::int AS companies FROM company_financials WHERE source LIKE 'website%'`).catch(() => ({ rows: [{}] })),
+      query(`SELECT count(*)::int AS cnt FROM company_shareholders WHERE source LIKE 'website%'`).catch(() => ({ rows: [{}] })),
+      query(`SELECT count(*)::int AS total FROM enrichment_rejects`).catch(() => ({ rows: [{ total: 0 }] })),
+      query(`SELECT reason, count(*)::int AS n FROM enrichment_rejects GROUP BY reason ORDER BY n DESC LIMIT 8`).catch(() => ({ rows: [] })),
+    ]);
+    res.json({
+      websites: web.rows[0] || {},
+      harvest: harv.rows[0] || {},
+      person_emails: pem.rows[0] || {},
+      company_emails: cem.rows[0] || {},
+      facts: { financials: fin.rows[0]?.cnt || 0, companies: fin.rows[0]?.companies || 0, shareholders: sh.rows[0]?.cnt || 0 },
+      rejects: { total: rejN.rows[0]?.total || 0, by_reason: rejBy.rows || [] },
+    });
+  } catch (err) {
+    res.json({ error: String((err && err.message) || 'results_failed') });
+  }
+});
+
 /**
  * POST /api/enrichment/run
  * Body: { mode: 'stage'|'full', stage?, company_ids: [...] }

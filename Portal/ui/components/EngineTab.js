@@ -41,6 +41,7 @@ export function EngineTab() {
   const [pace, setPace] = useState({ night_chunk: '', day_chunk: '', touched: false });
   const [savingPace, setSavingPace] = useState(false);
   const [rescanning, setRescanning] = useState(false);
+  const [results, setResults] = useState(null);
 
   const load = async () => {
     try {
@@ -52,6 +53,7 @@ export function EngineTab() {
   useEffect(() => {
     load();
     (async () => { try { const r = await api.enrichmentRuns(12); setRuns((r && r.rows) || []); } catch { /* ignore */ } })();
+    (async () => { try { const r = await api.enrichmentResults(); setResults(r || null); } catch { /* ignore */ } })();
     const t = setInterval(load, 10000);
     return () => clearInterval(t);
   }, []);
@@ -127,6 +129,19 @@ export function EngineTab() {
               <div class="muted" style=${{ fontSize: '11px', marginTop: '4px' }}>${pct(fr[e.key])}% of ${nf(total)} companies processed</div>
             </div>`)}
         </div>
+
+        ${results && !results.error ? html`<div style=${CARD}>
+          <div style=${{ fontWeight: 700, fontSize: '14px', marginBottom: '10px' }}>Results & data quality</div>
+          <div style=${{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '14px', fontSize: '12.5px' }}>
+            <div><div class="muted" style=${{ fontSize: '11px' }}>Websites on file</div><b>${nf((results.websites || {}).with_website)}</b> <span class="muted">of ${nf((results.websites || {}).active_total)}</span><div class="muted" style=${{ fontSize: '10.5px', marginTop: '2px' }}>finder added: ${nf((results.websites || {}).found_guess)} guess · ${nf((results.websites || {}).found_search)} search</div></div>
+            <div><div class="muted" style=${{ fontSize: '11px' }}>Companies harvested</div><b>${nf((results.harvest || {}).harvested)}</b><div class="muted" style=${{ fontSize: '10.5px', marginTop: '2px' }}>${nf((results.company_emails || {}).companies)} have an email</div></div>
+            <div><div class="muted" style=${{ fontSize: '11px' }}>Decision-maker emails</div><b>${nf((results.person_emails || {}).total)}</b><div class="muted" style=${{ fontSize: '10.5px', marginTop: '2px' }}>${nf((results.person_emails || {}).observed)} matched · ${nf((results.person_emails || {}).pattern_verified)} verified</div></div>
+            <div><div class="muted" style=${{ fontSize: '11px' }}>Company facts</div><b>${nf((results.facts || {}).financials)}</b> financials<div class="muted" style=${{ fontSize: '10.5px', marginTop: '2px' }}>${nf((results.facts || {}).shareholders)} owners · ${nf((results.facts || {}).companies)} companies</div></div>
+            <div><div class="muted" style=${{ fontSize: '11px' }}>Rejected (not saved)</div><b>${nf((results.rejects || {}).total)}</b><div class="muted" style=${{ fontSize: '10.5px', marginTop: '2px' }}>${(((results.rejects || {}).by_reason) || []).slice(0, 2).map((r) => `${r.n} ${r.reason}`).join(' · ') || '—'}</div></div>
+          </div>
+          ${((results.person_emails || {}).total > 0 && (results.person_emails || {}).pattern_verified === 0) ? html`<div style=${{ fontSize: '11px', marginTop: '12px', color: 'var(--amber, #f59e0b)', lineHeight: 1.5 }}>Note: 0 pattern-verified emails — your network is likely blocking SMTP, so Engine 4 is only matching published addresses. Adding a verification API would unlock the rest.</div>` : null}
+          <div class="muted" style=${{ fontSize: '11px', marginTop: '8px', opacity: 0.8 }}>Firecrawl credit spend isn't tracked here — check your Firecrawl dashboard.</div>
+        </div>` : null}
 
         <div style=${CARD}>
           <div style=${{ fontWeight: 700, fontSize: '14px', marginBottom: '4px' }}>Pacing</div>
