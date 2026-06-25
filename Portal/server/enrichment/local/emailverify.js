@@ -9,6 +9,7 @@
 
 import net from 'node:net';
 import { promises as dns } from 'node:dns';
+import { getKey } from '../../keychain.js';
 
 const MX_CACHE = new Map();        // domain -> { mx, at }
 const CATCHALL_CACHE = new Map();  // domain -> boolean
@@ -25,6 +26,46 @@ const FAIL_LIMIT   = Number(process.env.BELL_EMAIL_SMTP_FAIL_LIMIT || 5);
 // stop attempting SMTP for the rest of the process (verifyEmail returns 'unknown').
 let consecutiveFails = 0;
 let smtpDisabled = false;
+
+// Reoon email-verification API — the PRIMARY verifier when a key is configured
+// (keychain `bdi-reoon` locally, or BDI_KEY_REOON / BELL_REOON_KEY in prod). Reoon
+// runs the SMTP check from its own reputable IPs, so it works even though outbound
+// :25 is blocked on this Mac. Falls back to the local MX/SMTP path when no key.
+let _reoonKey;            // undefined = unchecked; null = none; string = key
+let _reoonCheckedAt = 0;
+let _reoonAuthFailed = false;
+async function getReoonKey() {
+  if (_reoonKey !== undefined && Date.now() - _reoonCheckedAt < 300_000) return _reoonKey;
+  _reoonCheckedAt = Date.now();
+  try { _reoonKey = process.env.BELL_REOON_KEY || (await getKey('reoon')) || null; }
+  catch { _reoonKey = null; }
+  return _reoonKey;
+}
+
+/** Verify via Reoon. Returns { result, mx, method:'reoon', detail } or null (no
+ *  key / transient error / quota) so the caller falls back to local SMTP. */
+async function reoonVerify(email) {
+  if (_reoonAuthFailed) return null;
+  const key = await getReoonKey();
+  if (!key) return null;
+  try {
+    const url = `https://emailverifier.reoon.com/api/v1/verify?email=${encodeURIComponent(email)}&key=${encodeURIComponent(key)}&mode=power`;
+    const ctl = new AbortController();
+    const to = setTimeout(() => ctl.abort(), 20_000);
+    const res = await fetch(url, { signal: ctl.signal }).finally(() => clearTimeout(to));
+    if (res.status === 401 || res.status === 403) { _reoonAuthFailed = true; return null; }
+    if (!res.ok) return null;                       // 402/429 quota etc. → fall back
+    const d = await res.json().catch(() => null);
+    if (!d) return null;
+    const status = String(d.status || '').toLowerCase();
+    let result;
+    if (d.is_safe_to_send === true || status === 'safe') result = 'valid';
+    else if (status === 'catch_all' || d.is_catch_all === true) result = 'catch_all';
+    else if (d.is_deliverable === false || ['invalid', 'disabled', 'disposable', 'spamtrap', 'inbox_full'].includes(status)) result = 'invalid';
+    else result = 'unknown';
+    return { result, mx: d.mx_accepts_mail !== false, method: 'reoon', detail: status || undefined };
+  } catch { return null; }
+}
 
 export function emailDomain(email) {
   const m = /@([^@\s]+)$/.exec(String(email || '').trim().toLowerCase());
@@ -128,6 +169,11 @@ function smtpProbe(mxHost, domain, rcpt, probeCatchAll) {
 export async function verifyEmail(email, opts = {}) {
   const addr = String(email || '').trim().toLowerCase();
   if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(addr)) return { result: 'invalid', mx: false, method: 'format' };
+
+  // Reoon API first (clean IP — works despite the local SMTP block).
+  const viaReoon = await reoonVerify(addr);
+  if (viaReoon) return viaReoon;
+
   const domain = emailDomain(addr);
 
   const mx = await lookupMx(domain);
