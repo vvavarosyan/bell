@@ -21,6 +21,7 @@ import { recomputeBellScoreForCompany } from '../../assembly/bell_score.js';
 import { fetchPage, hostOf, pool } from './http.js';
 import { searchWeb, rendererAvailable, closeRenderer, beginSearchSession, searchState } from './render.js';
 import { search as firecrawlSearch } from '../clients/firecrawl.js';
+import * as apify from '../clients/apify.js';
 
 export const STAGE_LABEL = 'Local Engine 1 — Website Finder';
 export const TOOL_NAME   = 'local_website_finder';
@@ -28,13 +29,20 @@ export const TOOL_NAME   = 'local_website_finder';
 const CONCURRENCY = Number(process.env.BELL_FINDER_CONCURRENCY || 8);
 const TLDS = ['com', 'com.qa', 'qa', 'net'];
 
-// Firecrawl-powered search for the companies domain-guessing misses — reliable,
-// no IP blocking (the headless Bing/DuckDuckGo path self-disables once blocked).
-// ON by default; set BELL_FINDER_FIRECRAWL=0 to fall back to headless-only.
-// Each Firecrawl search ≈ 2 credits; throttle via the engine's day/night pacing.
-const FIRECRAWL_FINDER = process.env.BELL_FINDER_FIRECRAWL !== '0';
+// Website search for the companies domain-guessing misses.
+// PRIMARY = Apify Google Maps (compass/crawler-google-places): a Maps listing
+// usually carries the official website, at far higher yield + lower cost than a
+// generic web search. On by default; set BELL_FINDER_APIFY=0 to disable.
+// Firecrawl search is now an OPT-IN fallback (set BELL_FINDER_FIRECRAWL=1) — its
+// ROI was poor (~5% of paid searches saved a site). Headless search is the $0
+// last resort. Every candidate is still verified/corroborated before saving.
+const APIFY_FINDER     = process.env.BELL_FINDER_APIFY !== '0';
+const FIRECRAWL_FINDER = process.env.BELL_FINDER_FIRECRAWL === '1';
+const MAPS_ACTOR = 'compass/crawler-google-places';
 const FC = { searches: 0, credits: 0, results: 0, errors: 0, disabled: false };
+const AP = { runs: 0, results: 0, errors: 0, disabled: false };
 export function finderSearchState() { return { ...FC }; }
+export function finderApifyState() { return { ...AP }; }
 
 // Words stripped from a company name before slugifying to a domain.
 const LEGAL_STOP = new Set([
@@ -294,6 +302,33 @@ async function firecrawlSearchUrls(company) {
   }
 }
 
+/** Apify Google Maps → the official website(s) for a company. Maps lists the site
+ *  directly, so this is the primary (cheaper, higher-yield) finder. Auto-disables
+ *  if the Apify token is missing/unauthorized. */
+async function apifyMapsUrls(company) {
+  if (!APIFY_FINDER || AP.disabled) return [];
+  try {
+    const items = await apify.runSync(MAPS_ACTOR, {
+      searchStringsArray: [company.name],
+      locationQuery: 'Qatar',
+      maxCrawledPlacesPerSearch: 2,
+      language: 'en',
+      skipClosedPlaces: false,
+      scrapeContacts: false,
+      maxImages: 0,
+      maxReviews: 0,
+    }, { timeoutMs: 120_000 });
+    AP.runs++;
+    const urls = (items || []).map((p) => p && (p.website || p.websiteUrl)).filter(Boolean);
+    AP.results += urls.length;
+    return [...new Set(urls)];
+  } catch (e) {
+    AP.errors++;
+    if (e?.status === 401 || e?.status === 402 || /token|unauthor|key_missing|missing/i.test(String(e?.message))) AP.disabled = true;
+    return [];
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Per-company find
 // ---------------------------------------------------------------------------
@@ -335,11 +370,11 @@ export async function enrichCompany(company) {
     }
   }
 
-  // 2) Search — Firecrawl first (reliable, no IP blocking), headless as a $0
-  // fallback. A STRONGLY verified or CORROBORATED result (known phone / email
-  // domain on the page) is AUTO-SAVED; weaker-but-plausible hits still go to the
-  // human review queue.
-  let results = await firecrawlSearchUrls(company);
+  // 2) Find the official site. Apify Google Maps first (cheap + high-yield — Maps
+  // lists the website), then optional Firecrawl search, then free headless search.
+  // Every candidate is still verified/corroborated below before it can be saved.
+  let results = await apifyMapsUrls(company);
+  if (!results.length && FIRECRAWL_FINDER) results = await firecrawlSearchUrls(company);
   if (!results.length && await rendererAvailable()) {
     results = await searchWeb(`${company.name} Qatar official website`, { limit: 6 });
   }
@@ -423,7 +458,8 @@ export async function enrichCompanies(companies, jobLog = null) {
   const hasBrowser = await rendererAvailable();
   beginSearchSession();   // reset the search rate-limit guard for this run
   FC.searches = 0; FC.credits = 0; FC.results = 0; FC.errors = 0; FC.disabled = false;
-  const searchTier = FIRECRAWL_FINDER ? 'Firecrawl search (reliable)' : (hasBrowser ? 'headless search' : 'domain-guessing only');
+  AP.runs = 0; AP.results = 0; AP.errors = 0; AP.disabled = false;
+  const searchTier = APIFY_FINDER ? 'Apify Google Maps' : (FIRECRAWL_FINDER ? 'Firecrawl search' : (hasBrowser ? 'headless search' : 'domain-guessing only'));
   jobLog?.(`  Concurrency: ${CONCURRENCY} · Search: ${searchTier}`);
   try {
     await pool(companies, CONCURRENCY, async (c) => {
@@ -447,6 +483,8 @@ export async function enrichCompanies(companies, jobLog = null) {
   }
   const ss = searchState();
   const fc = finderSearchState();
+  const ap = finderApifyState();
+  if (APIFY_FINDER) jobLog?.(`  Apify Maps: ${ap.runs} lookup(s), ${ap.results} website(s)${ap.disabled ? ' · DISABLED (token)' : ''}, ${ap.errors} error(s).`);
   if (FIRECRAWL_FINDER) jobLog?.(`  Firecrawl search: ${fc.searches} quer(ies) (~${fc.credits} credits), ${fc.results} result(s)${fc.disabled ? ' · DISABLED (auth/quota/key)' : ''}, ${fc.errors} error(s).`);
   if (hasBrowser) jobLog?.(`  Headless search diagnostic: ${ss.count} ran, ${ss.results} result(s)${ss.disabled ? ` · DISABLED (${ss.reason})` : ''}.`);
   jobLog?.(`  ▸ Found ${done} website(s) (auto) · ${candidates} candidate(s) for review · ${noData} not found.`);

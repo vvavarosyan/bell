@@ -115,7 +115,7 @@ export async function deleteKey(name) {
 export async function listKeyNames() {
   // We check known names rather than enumerating, on both platforms.
   // This list grows as new enrichment tools are added.
-  const known = ['firecrawl', 'apify', 'linkedin'];
+  const known = ['firecrawl', 'apify', 'linkedin', 'reoon'];
   const results = [];
   for (const name of known) {
     if (await hasKey(name)) results.push(name);
