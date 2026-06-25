@@ -57,11 +57,22 @@ async function beat(state, s = {}) {
   let totals = { round_no: 0, found_total: 0, harvested_total: 0, mapped_total: 0, email_total: 0, facts_total: 0 };
   await beat('starting', totals);
 
+  // Keep the heartbeat fresh even during a LONG round. One round now runs all 5
+  // engines with network calls and can exceed the dashboard's 3-min "alive"
+  // window; without this it would read "Stopped" mid-round even though it's
+  // working. A timer re-stamps the last known state every 45s, independent of the
+  // round loop.
+  let hbState = 'starting';
+  let hbStats = { ...totals };
+  const hbTimer = setInterval(() => { beat(hbState, hbStats); }, 45000);
+  if (hbTimer.unref) hbTimer.unref();
+
   while (!stopping) {
     // Respect the Portal's pause/resume + pacing controls (best-effort).
     let control = {};
     try { const c = await query(`SELECT paused, night_chunk, day_chunk FROM engine_control WHERE id = 1`); control = c.rows[0] || {}; } catch { /* table may not exist yet */ }
     if (control.paused) {
+      hbState = 'paused'; hbStats = { ...totals };
       await beat('paused', totals);
       await sleep(15000);
       continue;
@@ -70,11 +81,13 @@ async function beat(state, s = {}) {
     const nightC = Number(control.night_chunk) || NIGHT_CHUNK;
     const dayC   = Number(control.day_chunk)   || DAY_CHUNK;
     const chunk = isNight() ? nightC : dayC;
+    hbState = 'sweeping'; hbStats = { ...totals };
     let r;
     try {
       r = await runHarvestSweep({ limit: chunk, triggeredBy: 'continuous', jobLog: null });
     } catch (err) {
       log(`✗ Round ${totals.round_no} failed: ${err.message}`);
+      hbState = 'error';
       await beat('error', totals);
       await sleep(30000);
       continue;
@@ -87,7 +100,8 @@ async function beat(state, s = {}) {
     const frontier = { find_left: r.find_left, harvest_left: r.harvest_left, map_left: r.map_left, email_left: r.email_left, facts_left: r.facts_left };
     const idle = (r.find_attempted || 0) === 0 && (r.harvest_attempted || 0) === 0 && (r.map_attempted || 0) === 0 && (r.email_attempted || 0) === 0 && (r.facts_attempted || 0) === 0;
 
-    await beat(idle ? 'idle' : 'sweeping', { ...totals, ...frontier });
+    hbState = idle ? 'idle' : 'sweeping'; hbStats = { ...totals, ...frontier };
+    await beat(hbState, hbStats);
     log(`✓ Round ${totals.round_no}: +${r.found || 0} found, +${r.harvested || 0} harvested, +${r.mapped || 0} mapped, +${r.emails || 0} emailed, +${r.facts || 0} facts · left find:${r.find_left} harvest:${r.harvest_left} map:${r.map_left} email:${r.email_left} facts:${r.facts_left}`);
 
     if (stopping) break;
@@ -95,6 +109,7 @@ async function beat(state, s = {}) {
       // Caught up: wait before re-checking for new companies, but keep beating
       // every minute so the dashboard shows the engine as alive-and-idle (not stopped).
       log(`▸ Backlog clear — idling ~${Math.round(IDLE_SLEEP / 60000)}m (still beating) before re-checking.`);
+      hbState = 'idle'; hbStats = { ...totals, ...frontier };
       const until = Date.now() + IDLE_SLEEP;
       while (!stopping && Date.now() < until) {
         await sleep(60000);
@@ -114,6 +129,7 @@ async function beat(state, s = {}) {
     }
   }
 
+  clearInterval(hbTimer);
   await beat('stopped', totals);
   log('▸▸▸ Continuous Engine stopping (signal received). Frontier is saved — it resumes on next start.');
   try { await pool.end(); } catch { /* ignore */ }
