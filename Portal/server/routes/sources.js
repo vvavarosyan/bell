@@ -17,7 +17,7 @@ const DIR_ROOT   = path.join(WORKSPACE, 'Data', 'Companies', '1. Data Gathering'
 
 const router = Router();
 
-const SOURCES = ['QFZ', 'QFC', 'MOCI', 'QSTP', 'QSE', 'QCCI', 'MoPH', 'Tasmu'];
+const SOURCES = ['QFZ', 'QFC', 'MOCI', 'QSTP', 'QSE', 'QCCI', 'MoPH', 'Tasmu', 'CRA', 'MadeInQatar', 'QFCRA'];
 
 const SCRAPE_COMMAND = {
   QFZ:  { dir: 'QFZ',  script: 'Run Scan Now.command' },
@@ -28,6 +28,9 @@ const SCRAPE_COMMAND = {
   QCCI: { dir: '../Other Sources/Qatar Chamber', script: 'Run Scan Now.command' },
   MoPH: { dir: '../Other Sources/MoPH', script: 'Run Scan Now.command' },
   Tasmu: { dir: '../Other Sources/Tasmu', script: 'Run Scan Now.command' },
+  CRA:  { dir: '../Other Sources/CRA ICT', script: 'Run Scan Now.command' },
+  MadeInQatar: { dir: '../Other Sources/Made in Qatar', script: 'Run Scan Now.command' },
+  QFCRA: { dir: '../Other Sources/QFCRA', script: 'Run Scan Now.command' },
 };
 
 // GET /api/sources  — per-source snapshot

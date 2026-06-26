@@ -129,6 +129,26 @@ router.get('/', async (req, res, next) => {
       where.push(`NOT EXISTS (SELECT 1 FROM person_companies pc WHERE pc.person_id = people.id)`);
     }
 
+    // Email-status filter (data-quality / admin): verified | pattern | matched | has | none
+    const emailStatus = (req.query.email_status || '').trim();
+    if (emailStatus === 'verified') {
+      where.push(`EXISTS (SELECT 1 FROM person_contacts pc WHERE pc.person_id = people.id AND pc.type='email' AND pc.is_verified = true)`);
+    } else if (emailStatus === 'pattern') {
+      where.push(`EXISTS (SELECT 1 FROM person_contacts pc WHERE pc.person_id = people.id AND pc.type='email' AND pc.source = 'stage10-pattern')`);
+    } else if (emailStatus === 'matched') {
+      where.push(`EXISTS (SELECT 1 FROM person_contacts pc WHERE pc.person_id = people.id AND pc.type='email' AND pc.source = 'stage10-observed')`);
+    } else if (emailStatus === 'has') {
+      where.push(`(email IS NOT NULL OR EXISTS (SELECT 1 FROM person_contacts pc WHERE pc.person_id = people.id AND pc.type='email'))`);
+    } else if (emailStatus === 'none') {
+      where.push(`email IS NULL AND NOT EXISTS (SELECT 1 FROM person_contacts pc WHERE pc.person_id = people.id AND pc.type='email')`);
+    }
+
+    // Date-added (created_at) range — 'YYYY-MM-DD'.
+    const addedAfter  = (req.query.added_after  || '').trim();
+    const addedBefore = (req.query.added_before || '').trim();
+    if (addedAfter)  { params.push(addedAfter);  where.push(`created_at >= $${params.length}::date`); }
+    if (addedBefore) { params.push(addedBefore); where.push(`created_at <  ($${params.length}::date + interval '1 day')`); }
+
     const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
     params.push(limit, offset);
 

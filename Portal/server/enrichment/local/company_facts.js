@@ -7,14 +7,18 @@
 // Credit-smart + doctrine-first ("no garbage"):
 //   • $0 GATE — fetch the site locally (Crawl4AI renders JS ones) and only
 //     proceed if the text actually mentions capital / shareholders / financials.
-//     Most companies don't → we never spend a credit on them.
-//   • EXTRACT — for the rest, one Firecrawl structured (LLM) scrape returns clean
-//     { capital, financials, shareholders } (validated live: Milaha → capital
-//     QAR 4B + FY24/FY23 figures, ~5 credits).
+//     Most companies don't → we never look further.
+//   • EXTRACT (local-first, FREE) — parse the SAME rendered page with local
+//     heuristics for capital / financials / shareholders. No second fetch, no
+//     credits. This is the default ("extract once" off the Crawl4AI render).
+//   • EXTRACT (Firecrawl, opt-in) — only if the local pass finds nothing AND
+//     BELL_FACTS_FIRECRAWL=1, fall back to one structured (LLM) scrape (~5
+//     credits). Off by default so the engine costs $0 unless you ask for it.
 //   • VALIDATE — only well-formed facts are stored (a metric + a real number; a
 //     named shareholder; capital with a value). Vague/empty → discarded.
 //
-// Disable with BELL_FACTS_FIRECRAWL=0. Mirrors the other engines' shape:
+// Flags: BELL_FACTS_LOCAL=0 disables local extraction; BELL_FACTS_FIRECRAWL=1
+// enables the paid fallback. Mirrors the other engines' shape:
 //   enrichCompany(company) + enrichCompanies(companies, jobLog).
 
 import { query } from '../../db.js';
@@ -23,8 +27,9 @@ import { rendererAvailable, renderPage } from './render.js';
 import { scrapeExtract } from '../clients/firecrawl.js';
 import { recordReject } from './rejects.js';
 
-const ENABLED = process.env.BELL_FACTS_FIRECRAWL !== '0';
-const FC = { extracts: 0, credits: 0, financials: 0, shareholders: 0, errors: 0, disabled: false };
+const LOCAL_FIRST        = process.env.BELL_FACTS_LOCAL !== '0';   // free local parse (default ON)
+const FIRECRAWL_FALLBACK = process.env.BELL_FACTS_FIRECRAWL === '1'; // paid LLM extract (default OFF)
+const FC = { local: 0, extracts: 0, credits: 0, financials: 0, shareholders: 0, errors: 0, disabled: false };
 export function factsState() { return { ...FC }; }
 
 // Only spend a credit if the page actually talks about money/ownership.
@@ -58,6 +63,65 @@ function parseNum(v) {
   if (!m) return null;
   const n = parseFloat(m[0]) * mult;
   return Number.isFinite(n) ? n : null;
+}
+
+// ---- LOCAL (free) facts extraction from the already-rendered page ----------
+// Returns the SAME { capital, financials, shareholders } shape Firecrawl returns,
+// so the existing validators + write path handle both identically. Conservative
+// by design (each item needs a currency/number or a clear "Name NN%") to honour
+// the "no garbage" doctrine; the validators discard anything still vague.
+const CUR = '(QAR|QR|USD|US\\$|\\$|EUR|€|AED|SAR|KWD|BHD|OMR)';
+function normCurrency(c) {
+  if (!c) return null;
+  const s = String(c).toUpperCase();
+  if (s === 'QR') return 'QAR';
+  if (s === 'US$' || s === '$') return 'USD';
+  if (s === '€') return 'EUR';
+  return s;
+}
+export function extractFactsLocal(page) {
+  const text = (((page && page.title) || '') + '\n' + ((page && page.text) || '')).replace(/ /g, ' ');
+  const capital = [], financials = [], shareholders = [];
+  let m;
+
+  // Capital: "<type> capital [of] <cur> <num>"  (type optional)
+  const capRx = new RegExp(
+    '(authoriz(?:ed)?|paid[\\s-]*up|share|registered|issued)?\\s*capital(?:\\s+of)?[^.\\n]{0,40}?' +
+    CUR + '\\s*([0-9][0-9.,]*\\s*(?:billion|bn|million|mn|thousand|k)?)', 'gi');
+  while ((m = capRx.exec(text)) !== null) {
+    const amount = (m[3] || '').trim().replace(/[.,]+$/, '');
+    if (!/\d/.test(amount)) continue;
+    capital.push({ type: (m[1] || 'capital').trim(), currency: normCurrency(m[2]), amount: `${m[2]} ${amount}`.trim() });
+    if (capital.length >= 10) break;
+  }
+
+  // Financials: "<metric> ... [cur] <num>"  (+ a nearby year if present)
+  const METRIC = '(net\\s+profit|net\\s+income|net\\s+loss|revenue|total\\s+revenue|turnover|' +
+    'total\\s+assets|operating\\s+income|gross\\s+profit|ebitda|total\\s+equity|profit\\s+for\\s+the\\s+year)';
+  const finRx = new RegExp(METRIC + '[^.\\n]{0,40}?' + CUR + '?\\s*([0-9][0-9.,]*\\s*(?:billion|bn|million|mn|thousand|k)?)', 'gi');
+  while ((m = finRx.exec(text)) !== null) {
+    const num = (m[3] || '').trim().replace(/[.,]+$/, '');
+    if (!/\d/.test(num)) continue;
+    const around = text.slice(Math.max(0, m.index - 10), m.index + m[0].length + 40);
+    const ym = around.match(/\b(20\d\d|FY\s?\d{2,4})\b/);
+    financials.push({ metric: m[1].replace(/\s+/g, ' ').trim(), currency: normCurrency(m[2]), value: num, period: ym ? ym[1] : null });
+    if (financials.length >= 30) break;
+  }
+
+  // Shareholders: only inside an ownership context; "<Name> ... NN%".
+  if (/shareholders?|ownership\s+structure|shareholding|owned\s+by/i.test(text)) {
+    const shRx = /([A-Z][A-Za-z&.\-'’ ]{2,38}?)\s*(?:[-–—:(]|\bholds?\b|\bowns?\b|\bwith\b)?\s*\(?([0-9]{1,3}(?:\.[0-9]+)?)\s*%/g;
+    const STOP = /^(the|and|capital|revenue|profit|total|share|approximately|about|over|up|growth|increase|more|than|nearly|around|almost|net|gross|annual)$/i;
+    while ((m = shRx.exec(text)) !== null) {
+      const name = m[1].replace(/\s+/g, ' ').trim();
+      const pct = parseFloat(m[2]);
+      if (!name || name.length < 3 || pct > 100 || STOP.test(name)) continue;
+      shareholders.push({ name, stake: m[2] + '%', type: null });
+      if (shareholders.length >= 20) break;
+    }
+  }
+
+  return { capital, financials, shareholders };
 }
 
 async function markStage11(id, status, extras = {}) {
@@ -145,32 +209,46 @@ export async function enrichCompany(company) {
     return { status: 'no_data', facts: 0 };
   }
 
-  if (!ENABLED || FC.disabled) {
+  if (!LOCAL_FIRST && !FIRECRAWL_FALLBACK) {
     await markStage11(company.id, 'no_data', { stage11_skip: 'extract-disabled' });
     return { status: 'no_data', facts: 0 };
   }
 
-  // Structured extraction (Firecrawl LLM) on the company's OWN page.
-  let facts;
-  try {
-    facts = await scrapeExtract(page.finalUrl || url, { prompt: PROMPT, schema: SCHEMA });
-    FC.extracts++; FC.credits += 5;
-  } catch (e) {
-    FC.errors++;
-    if (e?.status === 401 || e?.status === 402 || e?.status === 429) FC.disabled = true;
-    await markStage11(company.id, 'failed', { stage11_error: String((e && e.message) || 'extract').slice(0, 140) });
-    return { status: 'failed', facts: 0 };
+  // EXTRACT (local-first, FREE) — parse the page we already rendered.
+  let financials = [], shareholders = [], source = 'website:local';
+  if (LOCAL_FIRST) {
+    FC.local++;
+    const local = extractFactsLocal(page);
+    financials = validFinancials(local, null);
+    shareholders = validShareholders(local);
   }
-  if (!facts) { await markStage11(company.id, 'no_data', { stage11_skip: 'no-extract' }); return { status: 'no_data', facts: 0 }; }
 
-  const rejects = [];
-  const financials = validFinancials(facts, rejects);
-  const shareholders = validShareholders(facts);
-  const { fin, sh } = await writeFacts(company.id, financials, shareholders, 'website:firecrawl');
-  for (const rj of rejects.slice(0, 25)) { try { await recordReject(company.id, 'facts', rj.kind, rj.value, rj.reason); } catch { /* ignore */ } }
+  // EXTRACT (Firecrawl LLM, OPT-IN) — only if local found nothing.
+  if (!financials.length && !shareholders.length && FIRECRAWL_FALLBACK && !FC.disabled) {
+    let facts;
+    try {
+      facts = await scrapeExtract(page.finalUrl || url, { prompt: PROMPT, schema: SCHEMA });
+      FC.extracts++; FC.credits += 5;
+    } catch (e) {
+      FC.errors++;
+      if (e?.status === 401 || e?.status === 402 || e?.status === 429) FC.disabled = true;
+      await markStage11(company.id, 'failed', { stage11_error: String((e && e.message) || 'extract').slice(0, 140) });
+      return { status: 'failed', facts: 0 };
+    }
+    if (facts) {
+      const rejects = [];
+      financials = validFinancials(facts, rejects);
+      shareholders = validShareholders(facts);
+      source = 'website:firecrawl';
+      for (const rj of rejects.slice(0, 25)) { try { await recordReject(company.id, 'facts', rj.kind, rj.value, rj.reason); } catch { /* ignore */ } }
+    }
+  }
+
+  const { fin, sh } = await writeFacts(company.id, financials, shareholders, source);
   FC.financials += fin; FC.shareholders += sh;
   const total = fin + sh;
-  await markStage11(company.id, total > 0 ? 'done' : 'no_data', { stage11_financials: fin, stage11_shareholders: sh });
+  await markStage11(company.id, total > 0 ? 'done' : 'no_data',
+    { stage11_financials: fin, stage11_shareholders: sh, stage11_source: source });
   return { status: total > 0 ? 'done' : 'no_data', facts: total };
 }
 

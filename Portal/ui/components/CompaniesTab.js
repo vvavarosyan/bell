@@ -15,7 +15,7 @@ import { BellScore } from './BellScore.js';
 import { CompanyFilters, EMPTY_FILTERS, countActiveFilters } from './CompanyFilters.js';
 
 const STATUS_OPTIONS = ['', 'active', 'inactive', 'suspended', 'withdrawn', 'in_liquidation', 'frozen', 'deregistered', 'not_licensed', 'unknown'];
-const SOURCE_OPTIONS = ['', 'QFC', 'QFZ', 'MOCI', 'QSTP', 'QSE', 'QCCI', 'MoPH', 'Tasmu'];
+const SOURCE_OPTIONS = ['', 'QFC', 'QFZ', 'MOCI', 'QSTP', 'QSE', 'QCCI', 'MoPH', 'Tasmu', 'CRA', 'MadeInQatar', 'QFCRA'];
 
 // Friendly names + descriptions for each enrichment stage. The tooltip text
 // shows on hover (via the native `title` attribute) so admin can see what

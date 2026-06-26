@@ -163,11 +163,19 @@ export async function upsertContact(kind, refId, contact) {
     || (contact.type === 'phone' ? contact.value : normalized);
   const source  = contact.source || 'manual';
 
+  // Email health (WS4 accuracy loop): a verified email carries email_status +
+  // a freshness timestamp. Non-email contacts leave these null.
+  const isEmail = contact.type === 'email';
+  const emailStatus = isEmail
+    ? (contact.email_status || (contact.is_verified === true ? 'verified' : null))
+    : null;
+  const lastVerifiedAt = (contact.is_verified === true || (isEmail && emailStatus)) ? new Date() : null;
+
   const r = await query(`
     INSERT INTO ${table}
       (${refCol}, type, value, value_display, source, source_url, source_label,
-       is_primary, is_verified, verified_at, extra_fields)
-    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb)
+       is_primary, is_verified, verified_at, email_status, last_verified_at, extra_fields)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13::jsonb)
     ON CONFLICT (${refCol}, type, value) DO UPDATE SET
       value_display = COALESCE(${table}.value_display, EXCLUDED.value_display),
       source        = CASE WHEN ${table}.source = 'backfill'
@@ -176,6 +184,8 @@ export async function upsertContact(kind, refId, contact) {
       source_label  = COALESCE(${table}.source_label, EXCLUDED.source_label),
       is_verified   = ${table}.is_verified OR EXCLUDED.is_verified,
       verified_at   = COALESCE(${table}.verified_at,  EXCLUDED.verified_at),
+      email_status     = COALESCE(EXCLUDED.email_status, ${table}.email_status),
+      last_verified_at = GREATEST(${table}.last_verified_at, EXCLUDED.last_verified_at),
       extra_fields  = ${table}.extra_fields || EXCLUDED.extra_fields,
       updated_at    = now()
     RETURNING id, ${refCol} AS ref_id, type, value, value_display,
@@ -186,6 +196,7 @@ export async function upsertContact(kind, refId, contact) {
     contact.is_primary === true,
     contact.is_verified === true,
     contact.is_verified === true ? new Date() : null,
+    emailStatus, lastVerifiedAt,
     JSON.stringify(contact.extra_fields || {}),
   ]);
 

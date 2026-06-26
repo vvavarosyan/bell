@@ -425,6 +425,142 @@ export function mapTASMU(raw) {
   };
 }
 
+// ------- CRA ICT (Communications Regulatory Authority — ICT companies) -----
+// Licensed ICT companies from the CRA directory: CR number + website/email/phone
+// + ICT category. The CR number → primary_registration_no so Assembly merges
+// these with the MOCI/QCCI row for the same company.
+export function mapCRA(raw) {
+  const orgName = nz(raw.name);
+  if (!orgName) return null;
+  const { name, name_normalized } = namePair(orgName);
+  const cr = nz(raw.cr_number);
+  const key = cr || nz(raw.permit_number) || name_normalized;
+  if (!key) return null;
+  const recordId = 'cra:' + key;
+  const { status_normalized, is_active } = normalizeUnspecifiedStatus();
+  return {
+    source_record_id: recordId,
+    source_url: 'https://www.cra.gov.qa/en/Services/ICT-Business/ICT-Business-List/ICT-Business-Directory',
+    companyFields: {
+      name,
+      name_normalized,
+      is_active,
+      archived: !is_active,
+      status_normalized,
+      primary_registration_no: cr || null,   // CR # → cross-links with MOCI/QCCI
+      sector: nz(raw.category),
+      website: nz(raw.website),
+      email: nz(raw.email),
+      phone: nz(raw.phone),
+      country: 'Qatar',
+    },
+    extraFields: {
+      cra_cr_number: cr,
+      cra_permit_number: nz(raw.permit_number),
+      cra_category: nz(raw.category),
+      cra_subcategory: nz(raw.subcategory),
+      cra_main_category: Array.isArray(raw.main_category) ? raw.main_category.join(', ') : nz(raw.main_category),
+    },
+    rawPayload: raw,
+  };
+}
+
+// ------- Made in Qatar (exhibitor directory) ------------------------------
+// Qatari manufacturers/exhibitors from madeinqatar.com.qa. Each record carries
+// the company owner (a decision-maker → folded in as a person by the companion
+// ingestMadeInQatarOwners pass) plus phone/mobile/email/website/logo. No CR
+// number on the listing, so we key on the GravityView entry id.
+export function mapMadeInQatar(raw) {
+  const orgName = nz(raw.name);
+  if (!orgName) return null;
+  const { name, name_normalized } = namePair(orgName);
+
+  const entryId = nz(raw.entry_id);
+  const key = entryId || name_normalized;
+  if (!key) return null;
+  const recordId = 'madeinqatar:' + key;
+
+  const { status_normalized, is_active } = normalizeUnspecifiedStatus();
+
+  // Listing gives a landline (phone) and/or a mobile; prefer the landline as the
+  // primary phone, keep both in extra_fields. The runner mirrors phone+email
+  // into company_contacts; the mobile is also surfaced there below.
+  const phone  = nz(raw.phone);
+  const mobile = nz(raw.mobile);
+
+  return {
+    source_record_id: recordId,
+    source_url: nz(raw.source_url) || 'https://www.madeinqatar.com.qa/exhibitor-directory-2023/',
+    companyFields: {
+      name,
+      name_normalized,
+      is_active,
+      archived: !is_active,
+      status_normalized,
+      sector: nz(raw.category),
+      website: nz(raw.website),
+      email: nz(raw.email),
+      phone: phone || mobile,
+      country: 'Qatar',
+    },
+    extraFields: {
+      madeinqatar_entry_id:   entryId,
+      madeinqatar_owner:      nz(raw.owner),     // decision-maker → person
+      madeinqatar_mobile:     mobile,
+      madeinqatar_category:   nz(raw.category),
+      madeinqatar_logo_url:   nz(raw.logo_url),
+      madeinqatar_description: nz(raw.description),
+    },
+    rawPayload: raw,
+  };
+}
+
+// ------- QFCRA (QFC Regulatory Authority public register) -----------------
+// Authorised firms + DNFBP firms regulated by the QFCRA. The QFC number is the
+// firm's official QFC registration → primary_registration_no so Assembly merges
+// these with the QFC public-register row for the same firm. Approved individuals
+// are folded in as people by the companion ingestQfcraPeople pass.
+export function mapQFCRA(raw) {
+  const orgName = nz(raw.name);
+  if (!orgName) return null;
+  const { name, name_normalized } = namePair(orgName);
+
+  const qfc = nz(raw.qfc_number);
+  const key = qfc || name_normalized;
+  if (!key) return null;
+  const recordId = 'qfcra:' + key;
+
+  // These are the ACTIVE/authorised registers, so treat all as operating;
+  // keep the verbatim status (e.g. "Authorised - Closed to New Business").
+  const { status_normalized, is_active } = normalizeUnspecifiedStatus();
+  const firmType = nz(raw.firm_type) || 'Authorised Firm';
+
+  return {
+    source_record_id: recordId,
+    source_url: nz(raw.source_url) || 'https://www.qfcra.com/public_registers/search-authorised-firms/',
+    companyFields: {
+      name,
+      name_normalized,
+      legal_form: firmType + ' (QFC)',
+      is_active,
+      archived: !is_active,
+      status_normalized,
+      status_raw: nz(raw.status) || 'Authorised',
+      primary_registration_no: qfc || null,   // QFC # → cross-links with the QFC register
+      country: 'Qatar',
+    },
+    extraFields: {
+      qfcra_qfc_number:           qfc,
+      qfcra_firm_type:            firmType,
+      qfcra_status:               nz(raw.status),
+      qfcra_date_authorised:      nz(raw.date_authorised),
+      qfcra_date_current_status:  nz(raw.date_of_current_status),
+      qfcra_previous_names:       Array.isArray(raw.previous_names) ? raw.previous_names.join(', ') : nz(raw.previous_names),
+    },
+    rawPayload: raw,
+  };
+}
+
 export const MAPPERS = {
   QFZ:  mapQFZ,
   QFC:  mapQFC,
@@ -434,4 +570,7 @@ export const MAPPERS = {
   QCCI: mapQATARCID,
   MoPH: mapMOPH,
   Tasmu: mapTASMU,
+  CRA:  mapCRA,
+  MadeInQatar: mapMadeInQatar,
+  QFCRA: mapQFCRA,
 };

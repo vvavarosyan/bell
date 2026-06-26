@@ -12,8 +12,14 @@ browser per page (which made an icon flicker in the macOS dock and was slower).
 
 Endpoints:
   GET  /health  -> {"ok": true|false, "warm": bool, "error": ...}
-  POST /crawl   -> body {"url": "...", "wait_for": ms?}
+  POST /crawl   -> body {"url": "...", "wait_for": ms?,
+                         "js_code": str|[str]?, "wait_selector": "css:..."|"js:..."?,
+                         "settle_ms": int?}
                    -> {"ok", "status", "url", "html", "markdown"}
+
+  js_code / wait_selector / settle_ms are OPTIONAL and only used for JS-heavy
+  pages (e.g. expanding a wpDataTables grid to show all rows before scraping).
+  Omitting them yields the original plain-render behaviour, unchanged.
 
 Defensive by design: any failure returns {"ok": false, ...} so the Node client
 falls back to the local Playwright renderer. Nothing here can break harvesting.
@@ -70,11 +76,27 @@ except Exception as e:  # pragma: no cover
     READY = False
 
 
-async def _do_crawl(url, wait_for):
+async def _do_crawl(url, wait_for, js_code=None, wait_selector=None, settle_ms=None):
     cfg = None
     try:
         from crawl4ai import CrawlerRunConfig, CacheMode
-        cfg = CrawlerRunConfig(cache_mode=CacheMode.BYPASS, page_timeout=int(wait_for or 30000))
+        kwargs = dict(cache_mode=CacheMode.BYPASS, page_timeout=int(wait_for or 30000))
+        # Optional JS execution (e.g. expand a DataTables grid to "All" rows).
+        if js_code:
+            kwargs["js_code"] = js_code if isinstance(js_code, list) else [js_code]
+        # Optional wait condition. crawl4ai expects a "css:<selector>" or
+        # "js:<expr>" string; accept a bare selector and prefix it for callers.
+        if wait_selector:
+            ws = str(wait_selector)
+            kwargs["wait_for"] = ws if ws.startswith(("css:", "js:")) else ("css:" + ws)
+        # Optional settle delay (ms) before the HTML is captured, to let the JS
+        # finish re-rendering. crawl4ai takes seconds.
+        if settle_ms:
+            try:
+                kwargs["delay_before_return_html"] = float(settle_ms) / 1000.0
+            except Exception:
+                pass
+        cfg = CrawlerRunConfig(**kwargs)
     except Exception:
         cfg = None
     r = await (_crawler.arun(url=url, config=cfg) if cfg is not None else _crawler.arun(url=url))
@@ -93,9 +115,13 @@ async def _do_crawl(url, wait_for):
     }
 
 
-def crawl_sync(url, wait_for):
-    fut = asyncio.run_coroutine_threadsafe(_do_crawl(url, wait_for), _loop)
-    return fut.result(timeout=90)
+def crawl_sync(url, wait_for, js_code=None, wait_selector=None, settle_ms=None):
+    fut = asyncio.run_coroutine_threadsafe(
+        _do_crawl(url, wait_for, js_code=js_code, wait_selector=wait_selector, settle_ms=settle_ms),
+        _loop)
+    # Allow extra wall-clock when JS expansion is requested (DataTables "All" can
+    # take a while to render thousands of rows).
+    return fut.result(timeout=180 if (js_code or wait_selector) else 90)
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -130,7 +156,14 @@ class Handler(BaseHTTPRequestHandler):
                 return self._send(400, {"ok": False, "error": "no url"})
             if not READY or _crawler is None:
                 return self._send(200, {"ok": False, "error": "crawl4ai not ready: %s" % IMPORT_ERROR})
-            self._send(200, crawl_sync(url, (body or {}).get("wait_for")))
+            b = body or {}
+            self._send(200, crawl_sync(
+                url,
+                b.get("wait_for"),
+                js_code=b.get("js_code"),
+                wait_selector=b.get("wait_selector"),
+                settle_ms=b.get("settle_ms"),
+            ))
         except Exception as e:
             self._send(200, {"ok": False, "error": str(e)[:300]})
 
