@@ -51,6 +51,12 @@ export function PeopleTab({ mode = 'local-admin' } = {}) {
 
   useEffect(() => { load(); }, [load]);
 
+  // On page change, jump the list back to the top (don't keep the prior scroll).
+  useEffect(() => {
+    const el = document.querySelector('.grid-wrap');
+    if (el) el.scrollTop = 0;
+  }, [offset]);
+
   // Auto-open first row when nothing's selected
   useEffect(() => {
     if (!openedId && rows.length > 0) setOpenedId(rows[0].id);
@@ -176,6 +182,8 @@ export function PeopleTab({ mode = 'local-admin' } = {}) {
         <option value="">All sources</option>
         <option value="MoPH">MoPH</option>
         <option value="LinkedIn">LinkedIn</option>
+        <option value="MadeInQatar">Made in Qatar</option>
+        <option value="QFCRA">QFCRA</option>
         <option value="manual">Manual</option>
       </select>
       <select
@@ -187,8 +195,9 @@ export function PeopleTab({ mode = 'local-admin' } = {}) {
         <option value="with">Has employment link</option>
         <option value="without">No employment link</option>
       </select>
+      ${!isUser ? html`
       <select
-        title="Filter by email status"
+        title="Filter by email status (admin)"
         value=${emailStatus}
         onChange=${e => { setEmailStatus(e.target.value); setOffset(0); }}
       >
@@ -199,12 +208,13 @@ export function PeopleTab({ mode = 'local-admin' } = {}) {
         <option value="has">Has any email</option>
         <option value="none">No email</option>
       </select>
-      <input type="date" title="Added on/after" value=${addedAfter}
+      <input type="date" title="Added on/after (admin)" value=${addedAfter}
         onChange=${e => { setAddedAfter(e.target.value); setOffset(0); }}
         style=${{ flex: '0 0 auto' }} />
-      <input type="date" title="Added on/before" value=${addedBefore}
+      <input type="date" title="Added on/before (admin)" value=${addedBefore}
         onChange=${e => { setAddedBefore(e.target.value); setOffset(0); }}
         style=${{ flex: '0 0 auto' }} />
+      ` : null}
       ${loading ? html`<span class="count">loading…</span>` : html`<${Pagination} total=${total} limit=${limit} offset=${offset} onChange=${setOffset} />`}
       <span class="spacer"></span>
       <button onClick=${load}>Refresh</button>

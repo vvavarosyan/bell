@@ -141,6 +141,12 @@ export function CompaniesTab({ archivedMode: initialArchived = false, mode = 'lo
 
   useEffect(() => { load(); }, [load]);
 
+  // On page change, jump the list back to the top (don't keep the prior scroll).
+  useEffect(() => {
+    const el = document.querySelector('.grid-wrap');
+    if (el) el.scrollTop = 0;
+  }, [offset]);
+
   // Industry filter options (distinct industries, most-common first).
   useEffect(() => { api.companyIndustries().then(r => setIndustries(r.rows || [])).catch(() => {}); }, []);
 
