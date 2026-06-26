@@ -13,6 +13,8 @@ import { MAPPERS } from './mappers.js';
 import { recomputeCompanyStatus } from './recompute_status.js';
 import { normalizeEmail, normalizePhone, isJunkEmail } from '../lib/contacts.js';
 import { ingestMophPractitioners } from './people_moph.js';
+import { ingestMadeInQatarOwners } from './people_madeinqatar.js';
+import { ingestQfcraPeople } from './people_qfcra.js';
 import { deriveIndustries } from '../lib/industry.js';
 
 const __filename = fileURLToPath(import.meta.url);
@@ -29,6 +31,9 @@ const LATEST_FILE = {
   QCCI: '../Other Sources/Qatar Chamber/scans/qatarcid_companies_latest.json',
   MoPH: '../Other Sources/MoPH/scans/moph_facilities_latest.json',
   Tasmu: '../Other Sources/Tasmu/scans/tasmu_companies_latest.json',
+  CRA:  '../Other Sources/CRA ICT/scans/cra_companies_latest.json',
+  MadeInQatar: '../Other Sources/Made in Qatar/scans/made_in_qatar_companies_latest.json',
+  QFCRA: '../Other Sources/QFCRA/scans/qfcra_latest.json',
 };
 
 const BATCH_SIZE = 200;
@@ -88,6 +93,22 @@ export async function ingestSource(source, jobProgress) {
     practitioners = await ingestMophPractitioners(jobProgress);
   }
 
+  // Made in Qatar carries the company owner inline: after the exhibitor
+  // companies are in, fold each owner in as a person linked to their company.
+  let owners = null;
+  if (source === 'MadeInQatar') {
+    jobProgress?.('Ingesting Made in Qatar owners as people …');
+    owners = await ingestMadeInQatarOwners(jobProgress);
+  }
+
+  // QFCRA carries approved individuals alongside the firms: after the firm
+  // companies are in, fold each individual in as a person linked to their firm(s).
+  let individuals = null;
+  if (source === 'QFCRA') {
+    jobProgress?.('Ingesting QFCRA approved individuals as people …');
+    individuals = await ingestQfcraPeople(jobProgress);
+  }
+
   // Remember when this source was last ingested (UI/debug).
   await query(
     `INSERT INTO settings (key, value) VALUES ($1, $2::jsonb)
@@ -106,6 +127,8 @@ export async function ingestSource(source, jobProgress) {
     archived:    recon.archived,
     flagged_for_review: recon.flagged,
     ...(practitioners ? { practitioners } : {}),
+    ...(owners ? { owners } : {}),
+    ...(individuals ? { individuals } : {}),
   };
 }
 

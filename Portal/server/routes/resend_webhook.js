@@ -9,6 +9,7 @@
 
 import { Router } from 'express';
 import { query } from '../db.js';
+import { handleBounce } from '../lib/suppression.js';
 
 const router = Router();
 const SECRET = process.env.BDI_RESEND_WEBHOOK_SECRET || null;
@@ -28,6 +29,26 @@ router.post('/', async (req, res) => {
         await query(`UPDATE crm_emails SET clicked_at = COALESCE(clicked_at, now()) WHERE provider_message_id = $1`, [msgId]);
       } else if (type === 'email.bounced' || type === 'email.complained') {
         await query(`UPDATE crm_emails SET status='failed', error=$2 WHERE provider_message_id = $1 AND status NOT IN ('opened','delivered')`, [msgId, type]);
+
+        // Accuracy loop: a hard bounce / complaint means the address is bad.
+        // Suppress it (never send again) and downgrade the canonical contacts
+        // so the bad address stops being treated as verified data.
+        const kind = type === 'email.complained' ? 'complained' : 'bounced';
+        // Prefer the recipient(s) from the event; fall back to the stored row.
+        let recips = [];
+        const d = evt.data || {};
+        if (Array.isArray(d.to)) recips = d.to;
+        else if (typeof d.to === 'string') recips = [d.to];
+        else if (d.email) recips = [d.email];
+        if (!recips.length) {
+          const r = await query(`SELECT to_email FROM crm_emails WHERE provider_message_id = $1 LIMIT 1`, [msgId]);
+          if (r.rows[0]?.to_email) recips = [r.rows[0].to_email];
+        }
+        const detail = d?.bounce?.message || d?.bounce?.type || null;
+        for (const addr of recips) {
+          try { await handleBounce(addr, kind, { detail, source: 'resend-webhook' }); }
+          catch (e) { console.error('[resend-webhook] suppress', e.message); }
+        }
       }
     }
   } catch (e) { console.error('[resend-webhook]', e.message); }

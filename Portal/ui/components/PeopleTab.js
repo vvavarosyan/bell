@@ -23,6 +23,9 @@ export function PeopleTab({ mode = 'local-admin' } = {}) {
   const [source, setSource]     = useState('');        // '' | 'MoPH' | 'LinkedIn' | 'manual'
   const [company, setCompany]   = useState('');        // employer name text filter
   const [employment, setEmployment] = useState('');   // '' | 'with' | 'without'
+  const [emailStatus, setEmailStatus] = useState(''); // '' | verified | pattern | matched | has | none
+  const [addedAfter, setAddedAfter]   = useState(''); // 'YYYY-MM-DD'
+  const [addedBefore, setAddedBefore] = useState('');
   const [loading, setLoading]   = useState(false);
   const [openedId, setOpenedId] = useState(null);
   const [selected, setSelected] = useState(() => new Set());
@@ -36,12 +39,15 @@ export function PeopleTab({ mode = 'local-admin' } = {}) {
       if (source) params.source = source;
       if (company.trim()) params.company = company.trim();
       if (employment) params.employment = employment;
+      if (emailStatus) params.email_status = emailStatus;
+      if (addedAfter) params.added_after = addedAfter;
+      if (addedBefore) params.added_before = addedBefore;
       const r = await api.people(params);
       setRows(r.rows);
       setTotal(r.total);
     } catch (err) { toast('Load failed: ' + err.message, 'error'); }
     finally { if (!silent) setLoading(false); }
-  }, [limit, offset, q, source, company, archivedMode, employment]);
+  }, [limit, offset, q, source, company, archivedMode, employment, emailStatus, addedAfter, addedBefore]);
 
   useEffect(() => { load(); }, [load]);
 
@@ -181,6 +187,24 @@ export function PeopleTab({ mode = 'local-admin' } = {}) {
         <option value="with">Has employment link</option>
         <option value="without">No employment link</option>
       </select>
+      <select
+        title="Filter by email status"
+        value=${emailStatus}
+        onChange=${e => { setEmailStatus(e.target.value); setOffset(0); }}
+      >
+        <option value="">Any email status</option>
+        <option value="verified">Email verified</option>
+        <option value="pattern">Verified (pattern)</option>
+        <option value="matched">Matched from page</option>
+        <option value="has">Has any email</option>
+        <option value="none">No email</option>
+      </select>
+      <input type="date" title="Added on/after" value=${addedAfter}
+        onChange=${e => { setAddedAfter(e.target.value); setOffset(0); }}
+        style=${{ flex: '0 0 auto' }} />
+      <input type="date" title="Added on/before" value=${addedBefore}
+        onChange=${e => { setAddedBefore(e.target.value); setOffset(0); }}
+        style=${{ flex: '0 0 auto' }} />
       ${loading ? html`<span class="count">loading…</span>` : html`<${Pagination} total=${total} limit=${limit} offset=${offset} onChange=${setOffset} />`}
       <span class="spacer"></span>
       <button onClick=${load}>Refresh</button>

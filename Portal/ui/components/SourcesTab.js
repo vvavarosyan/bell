@@ -10,6 +10,11 @@ const SOURCE_DESCRIPTIONS = {
   QSTP: { label: 'Qatar Science & Tech Park',url: 'https://qstp.qa/directory/' },
   QSE:  { label: 'Qatar Stock Exchange',     url: 'https://www.qe.com.qa/listed-companies' },
   QCCI: { label: 'Qatar Chamber Directory',  url: 'https://www.qatarcid.com/' },
+  MoPH: { label: 'Ministry of Public Health',url: 'https://www.moph.gov.qa/' },
+  Tasmu: { label: 'TASMU Smart Qatar',       url: 'https://tasmu.gov.qa/' },
+  CRA:  { label: 'CRA — ICT Companies',      url: 'https://www.cra.gov.qa/en/Services/ICT-Business/ICT-Business-List/ICT-Business-Directory' },
+  MadeInQatar: { label: 'Made in Qatar',     url: 'https://www.madeinqatar.com.qa/exhibitor-directory-2023/' },
+  QFCRA: { label: 'QFC Regulatory Authority',url: 'https://www.qfcra.com/public_registers/search-authorised-firms/' },
 };
 
 export function SourcesTab() {

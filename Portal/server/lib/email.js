@@ -8,6 +8,7 @@
 
 import { getKey } from '../keychain.js';
 import { query } from '../db.js';
+import { filterSuppressed } from './suppression.js';
 
 const RESEND_URL = 'https://api.resend.com/emails';
 const DEFAULT_FROM = 'Bell <outreach@bell.qa>';
@@ -43,16 +44,22 @@ export async function sendEmail({ from, to, replyTo, subject, html, text, cc }) 
   if (!key) throw new Error('email_provider_key_missing');           // internal — sanitize upstream
   if (!to) throw new Error('missing_recipient');
 
+  // Accuracy loop: never send to a suppressed address (hard bounce / complaint /
+  // manual). Drop suppressed recipients; if every primary recipient is gone, stop.
+  const { allowed: toAllowed } = await filterSuppressed(Array.isArray(to) ? to : [to]);
+  if (!toAllowed.length) throw new Error('recipient_suppressed');
+  const ccAllowed = cc ? (await filterSuppressed(Array.isArray(cc) ? cc : [cc])).allowed : [];
+
   const body = {
     from: from || (await getFromAddress()),
-    to: Array.isArray(to) ? to : [to],
+    to: toAllowed,
     subject: subject || '(no subject)',
   };
   if (html) body.html = html;
   if (text) body.text = text;
   if (!html && !text) body.text = '';
   if (replyTo) body.reply_to = replyTo;
-  if (cc) body.cc = Array.isArray(cc) ? cc : [cc];
+  if (ccAllowed.length) body.cc = ccAllowed;
 
   const res = await fetch(RESEND_URL, {
     method: 'POST',
