@@ -8,7 +8,7 @@ import { useState } from 'react';
 import { html } from '../lib/html.js';
 
 const STATUS_OPTS = ['active', 'inactive', 'suspended', 'withdrawn', 'in_liquidation', 'frozen', 'deregistered', 'not_licensed', 'unknown'];
-const SOURCE_OPTS = ['QFC', 'QFZ', 'MOCI', 'QSTP', 'QSE', 'QCCI', 'MoPH', 'Tasmu'];
+const SOURCE_OPTS = ['QFC', 'QFZ', 'MOCI', 'QSTP', 'QSE', 'QCCI', 'MoPH', 'Tasmu', 'CRA', 'MadeInQatar', 'QFCRA'];
 const EMP_OPTS    = ['1-10', '11-50', '51-200', '201-1000', '1001-5000', '5000+'];
 const COMPLETE    = [['hasEmail', 'Email'], ['hasPhone', 'Phone'], ['hasLinkedin', 'LinkedIn'], ['hasPeople', 'People']];
 const WEBSITE_OPTS = [['has', 'Has website'], ['none', 'No website']];
