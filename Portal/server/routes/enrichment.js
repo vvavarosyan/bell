@@ -11,7 +11,7 @@ import {
   stageList,
 } from '../enrichment/orchestrator.js';
 import { auditFinderFinds, cleanupFinderFinds } from '../enrichment/local/cleanup.js';
-import { listCandidates, countPending, decideCandidate, autoApproveCandidates, undoAutoApprovals } from '../enrichment/local/candidates.js';
+import { listCandidates, countPending, decideCandidate, autoApproveCandidates, undoAutoApprovals, cleanReversedHarvestPeople } from '../enrichment/local/candidates.js';
 import { createLookup, runLookup, listLookups, approveLookup, enrichMatchLookup, rejectLookup } from '../enrichment/local/manual_lookup.js';
 import { crawl4aiAvailable } from '../enrichment/local/crawl4ai.js';
 
@@ -384,6 +384,19 @@ router.post('/website-candidates/undo-auto-approve', async (req, res, next) => {
     res.json({ job_id: job.id, status: job.status });
     (async () => {
       try { jobs.complete(job.id, await undoAutoApprovals({ jobLog: (m) => jobs.log(job.id, m) })); }
+      catch (err) { jobs.fail(job.id, err); }
+    })();
+  } catch (err) { next(err); }
+});
+
+// POST /api/enrichment/website-candidates/clean-harvested-people — remove the
+// PEOPLE + guessed emails harvested from the reversed wrong sites. Background job.
+router.post('/website-candidates/clean-harvested-people', async (req, res, next) => {
+  try {
+    const job = jobs.start({ kind: 'enrichment', source: 'clean_harvested_people' });
+    res.json({ job_id: job.id, status: job.status });
+    (async () => {
+      try { jobs.complete(job.id, await cleanReversedHarvestPeople({ jobLog: (m) => jobs.log(job.id, m) })); }
       catch (err) { jobs.fail(job.id, err); }
     })();
   } catch (err) { next(err); }

@@ -178,6 +178,7 @@ export const api = {
   decideWebsiteCandidate: (id, action) => request(`/api/enrichment/website-candidates/${id}/decide`, { method: 'POST', body: JSON.stringify({ action }) }),
   autoApproveWebsiteCandidates: () => request('/api/enrichment/website-candidates/auto-approve', { method: 'POST', body: '{}' }),
   undoAutoApproveWebsiteCandidates: () => request('/api/enrichment/website-candidates/undo-auto-approve', { method: 'POST', body: '{}' }),
+  cleanHarvestedPeople: () => request('/api/enrichment/website-candidates/clean-harvested-people', { method: 'POST', body: '{}' }),
   relationships:          (companyId) => request('/api/enrichment/relationships/' + companyId),
   enrichmentJob:          (id, since = 0) => request(`/api/enrichment/jobs/${id}?since=${since}`),
   harvestHistory:         (limit = 50) => request('/api/enrichment/harvest-history?limit=' + limit),
