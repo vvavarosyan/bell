@@ -72,6 +72,18 @@ export function WebsiteCandidatesTab() {
     } catch (err) { toast('Could not start: ' + err.message, 'error'); }
   };
 
+  // Remove the people + guessed emails harvested from the reversed wrong sites.
+  const cleanPeople = async () => {
+    if (!window.confirm(
+      'Remove the decision-makers + guessed emails that were harvested from the reversed wrong websites?\n\n' +
+      'Only people at now-website-less companies that the harvester created are removed; anyone with another role or a registry/LinkedIn origin is kept. Runs in the background.',
+    )) return;
+    try {
+      const r = await api.cleanHarvestedPeople();
+      setJob({ id: r.job_id, title: 'Cleaning harvested people from reversed sites' });
+    } catch (err) { toast('Could not start: ' + err.message, 'error'); }
+  };
+
   return html`
     <div class="dr-shell">
       <div class="grid-toolbar">
@@ -84,6 +96,10 @@ export function WebsiteCandidatesTab() {
           <option value="all">All</option>
         </select>
         <span class="spacer"></span>
+        <button disabled=${!!job} onClick=${cleanPeople}
+          title="Remove the people + guessed emails harvested from the reversed wrong websites.">
+          ${job ? 'Running…' : 'Clean harvested residue'}
+        </button>
         <button disabled=${!!job} onClick=${undoAuto}
           title="Reverse every website set by the auto-approve pass and return those candidates to review.">
           ${job ? 'Running…' : 'Undo auto-approvals'}

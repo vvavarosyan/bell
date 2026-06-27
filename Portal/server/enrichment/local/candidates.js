@@ -165,6 +165,65 @@ export async function undoAutoApprovals({ jobLog = null } = {}) {
 }
 
 /**
+ * Clean the residual PEOPLE harvested from the wrong sites. The website reversal
+ * cleared the wrong company emails/phones, but people the harvester scraped from
+ * those pages (decision-makers + guessed emails) survive. The harvester only ever
+ * runs on companies that HAD a website, so a stage7-harvested role
+ * (`person_companies.source_stage=7`) at a company that NOW has no website (+ that
+ * went through the candidate flow) is residue from a reversed site.
+ *
+ * We delete those wrong role links; then any person left with NO roles that was
+ * created by the harvester (`people.extra_fields.source='website-harvest'`) is an
+ * orphan → delete it + its contacts (incl. guessed stage10 emails). People with
+ * another role, or from a registry/LinkedIn origin, are KEPT (they only lose the
+ * wrong link). Safe to run repeatedly. Pass jobLog for live progress.
+ */
+export async function cleanReversedHarvestPeople({ jobLog = null } = {}) {
+  const WHERE = `
+    pc.source_stage = 7
+    AND (c.website IS NULL OR btrim(c.website) = '')
+    AND EXISTS (SELECT 1 FROM website_candidates wc WHERE wc.company_id = c.id)
+  `;
+
+  const affected = (await query(
+    `SELECT DISTINCT pc.person_id
+       FROM person_companies pc JOIN companies c ON c.id = pc.company_id
+      WHERE ${WHERE}`,
+  )).rows.map(r => Number(r.person_id));
+
+  jobLog?.(`Found ${affected.length.toLocaleString()} person(s) linked to reversed (website-less) companies by harvest.`);
+  const stats = { affected_people: affected.length, roles_removed: 0, people_removed: 0, contacts_removed: 0 };
+  if (!affected.length) { jobLog?.('Nothing to clean.'); return stats; }
+
+  // 1) Drop the wrong harvested role links.
+  const delRoles = await query(
+    `DELETE FROM person_companies pc USING companies c
+      WHERE pc.company_id = c.id AND ${WHERE}`,
+  );
+  stats.roles_removed = delRoles.rowCount || 0;
+  jobLog?.(`Removed ${stats.roles_removed.toLocaleString()} harvested role link(s). Checking for orphaned people…`);
+
+  // 2) Delete people now fully orphaned AND created by the harvester (+ contacts).
+  let n = 0;
+  for (const pid of affected) {
+    const stillLinked = (await query(`SELECT 1 FROM person_companies WHERE person_id=$1 LIMIT 1`, [pid])).rows.length;
+    if (stillLinked) continue;
+    const harvested = (await query(
+      `SELECT 1 FROM people WHERE id=$1 AND extra_fields->>'source'='website-harvest' LIMIT 1`, [pid],
+    )).rows.length;
+    if (!harvested) continue;
+    const dc = await query(`DELETE FROM person_contacts WHERE person_id=$1`, [pid]).catch(() => ({ rowCount: 0 }));
+    stats.contacts_removed += dc.rowCount || 0;
+    await query(`DELETE FROM people WHERE id=$1`, [pid]).catch(() => {});
+    stats.people_removed++;
+    if (++n % 100 === 0) jobLog?.(`  …${n}/${affected.length} checked · ${stats.people_removed} orphaned people removed`);
+  }
+
+  jobLog?.(`Done. Removed ${stats.roles_removed.toLocaleString()} role link(s) · ${stats.people_removed.toLocaleString()} orphaned harvested people · ${stats.contacts_removed.toLocaleString()} person contact(s). People with other roles were kept.`);
+  return stats;
+}
+
+/**
  * Decide a candidate.
  *   approve → set companies.website (only if still empty), reset stage7 so the
  *             harvester re-runs, mark approved.
