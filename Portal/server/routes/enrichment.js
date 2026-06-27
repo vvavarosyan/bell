@@ -11,7 +11,7 @@ import {
   stageList,
 } from '../enrichment/orchestrator.js';
 import { auditFinderFinds, cleanupFinderFinds } from '../enrichment/local/cleanup.js';
-import { listCandidates, countPending, decideCandidate } from '../enrichment/local/candidates.js';
+import { listCandidates, countPending, decideCandidate, autoApproveCandidates, undoAutoApprovals } from '../enrichment/local/candidates.js';
 import { createLookup, runLookup, listLookups, approveLookup, enrichMatchLookup, rejectLookup } from '../enrichment/local/manual_lookup.js';
 import { crawl4aiAvailable } from '../enrichment/local/crawl4ai.js';
 
@@ -126,7 +126,7 @@ router.get('/results', async (req, res) => {
         count(*) FILTER (WHERE ${active})::int AS active_total,
         count(*) FILTER (WHERE ${active} AND ${site})::int AS with_website,
         count(*) FILTER (WHERE ${active} AND stage8_at IS NOT NULL AND extra_fields->'website_found'->>'method'='guess')::int AS found_guess,
-        count(*) FILTER (WHERE ${active} AND stage8_at IS NOT NULL AND extra_fields->'website_found'->>'method' LIKE 'search%')::int AS found_search
+        count(*) FILTER (WHERE ${active} AND stage8_at IS NOT NULL AND (extra_fields->'website_found'->>'method' LIKE 'search%' OR extra_fields->'website_found'->>'method' LIKE 'maps%'))::int AS found_search
         FROM companies`),
       query(`SELECT count(*) FILTER (WHERE ${active} AND stage7_at IS NOT NULL)::int AS harvested FROM companies`),
       query(`SELECT
@@ -356,6 +356,36 @@ router.post('/website-candidates/:id/decide', async (req, res, next) => {
     const admin = (await query(`SELECT value FROM settings WHERE key='admin_email'`)).rows[0]?.value || 'admin@local';
     const result = await decideCandidate(Number(req.params.id), req.body?.action, admin);
     res.json(result);
+  } catch (err) { next(err); }
+});
+
+// POST /api/enrichment/website-candidates/auto-approve — FREE bulk approval: for
+// every pending candidate, re-fetch (no Apify/paid search) and auto-approve only
+// the near-certain matches; weak/dead ones stay pending. Runs as a BACKGROUND JOB
+// (re-fetching the whole queue takes minutes) — returns a job_id to poll for live
+// progress, exactly like the engine runs.
+router.post('/website-candidates/auto-approve', async (req, res, next) => {
+  try {
+    const job = jobs.start({ kind: 'enrichment', source: 'candidate_auto_approve' });
+    res.json({ job_id: job.id, status: job.status });
+    (async () => {
+      try { jobs.complete(job.id, await autoApproveCandidates({ jobLog: (m) => jobs.log(job.id, m) })); }
+      catch (err) { jobs.fail(job.id, err); }
+    })();
+  } catch (err) { next(err); }
+});
+
+// POST /api/enrichment/website-candidates/undo-auto-approve — REVERSE every
+// website set by the auto-approve pass (clears wrong sites, returns candidates to
+// the review queue). Background job with live progress.
+router.post('/website-candidates/undo-auto-approve', async (req, res, next) => {
+  try {
+    const job = jobs.start({ kind: 'enrichment', source: 'candidate_undo_auto_approve' });
+    res.json({ job_id: job.id, status: job.status });
+    (async () => {
+      try { jobs.complete(job.id, await undoAutoApprovals({ jobLog: (m) => jobs.log(job.id, m) })); }
+      catch (err) { jobs.fail(job.id, err); }
+    })();
   } catch (err) { next(err); }
 });
 

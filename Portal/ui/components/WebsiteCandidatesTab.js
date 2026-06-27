@@ -7,6 +7,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { html } from '../lib/html.js';
 import { api } from '../lib/api.js';
 import { toast } from '../lib/toast.js';
+import { JobLogPanel } from './JobLogPanel.js';
 
 const STATUS_COLOR = {
   pending:  'var(--amber)',
@@ -19,6 +20,7 @@ export function WebsiteCandidatesTab() {
   const [status, setStatus]   = useState('pending');
   const [loading, setLoading] = useState(true);
   const [busy, setBusy]       = useState(() => new Set());
+  const [job, setJob]         = useState(null);   // { id } while the bulk auto-approve runs
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -39,6 +41,37 @@ export function WebsiteCandidatesTab() {
     finally { setBusy(prev => { const n = new Set(prev); n.delete(id); return n; }); }
   };
 
+  // Free bulk approval — runs as a BACKGROUND JOB (re-fetching the whole queue
+  // takes minutes). Cheap count → confirm → start job → stream live progress in
+  // the log panel. No Apify / paid search. Approvals land inline as it runs.
+  const autoApprove = async () => {
+    let n = rows.length;
+    try { const c = await api.websiteCandidatesCount(); if (typeof c.count === 'number') n = c.count; } catch { /* use loaded count */ }
+    if (!n) { toast('No pending candidates to check.'); return; }
+    if (!window.confirm(
+      `Re-check ${n.toLocaleString()} pending candidate${n === 1 ? '' : 's'} over plain HTTP (free, no Apify) and auto-approve the near-certain ones?\n\n` +
+      `Weaker matches and dead links stay pending for review. This runs in the background — you'll see live progress.`,
+    )) return;
+    try {
+      const r = await api.autoApproveWebsiteCandidates();
+      setJob({ id: r.job_id, title: 'Auto-approving website candidates (free)' });
+    } catch (err) { toast('Could not start: ' + err.message, 'error'); }
+  };
+
+  // Reverse every website set by the auto-approve pass (recovery from the bad
+  // single-word matches). Returns those candidates to the review queue.
+  const undoAuto = async () => {
+    if (!window.confirm(
+      'Reverse ALL websites set by auto-approve?\n\n' +
+      'This clears those (often wrong) websites and returns the candidates to the review queue. ' +
+      'Websites you have since changed by hand are left untouched. Runs in the background.',
+    )) return;
+    try {
+      const r = await api.undoAutoApproveWebsiteCandidates();
+      setJob({ id: r.job_id, title: 'Reversing auto-approved websites' });
+    } catch (err) { toast('Could not start: ' + err.message, 'error'); }
+  };
+
   return html`
     <div class="dr-shell">
       <div class="grid-toolbar">
@@ -51,8 +84,25 @@ export function WebsiteCandidatesTab() {
           <option value="all">All</option>
         </select>
         <span class="spacer"></span>
+        <button disabled=${!!job} onClick=${undoAuto}
+          title="Reverse every website set by the auto-approve pass and return those candidates to review.">
+          ${job ? 'Running…' : 'Undo auto-approvals'}
+        </button>
+        ${status === 'pending' ? html`
+          <button class="accent" disabled=${!!job} onClick=${autoApprove}
+            title="Re-check every pending candidate over plain HTTP (free, no Apify) and approve only the near-certain matches.">
+            ${job ? 'Running…' : 'Auto-approve strong matches (free)'}
+          </button>` : null}
         <button onClick=${load}>Refresh</button>
       </div>
+
+      ${job ? html`
+        <${JobLogPanel}
+          title=${job.title || 'Working…'}
+          jobId=${job.id}
+          kind="enrichment"
+          onClose=${() => { setJob(null); load(); }}
+          onComplete=${() => { window.dispatchEvent(new Event('bdi:website-candidates-changed')); load(); }} />` : null}
 
       ${loading
         ? html`<div class="empty">Loading…</div>`

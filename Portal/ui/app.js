@@ -38,6 +38,7 @@ import { HarvestHistoryTab } from './components/HarvestHistoryTab.js';
 import { EngineTab } from './components/EngineTab.js';
 import { ManualLookupTab } from './components/ManualLookupTab.js';
 import { NotificationBell } from './components/NotificationBell.js';
+import { OnboardingPanel } from './components/OnboardingPanel.js';
 import { AnnouncementsTab } from './components/AnnouncementsTab.js';
 import { EmailTemplatesTab } from './components/EmailTemplatesTab.js';
 
@@ -225,6 +226,8 @@ function App({ initialUser, initialTenant, mode }) {
             <${NotificationBell} />
           </div>
         </div>
+
+        ${(mode?.mode || 'local-admin') === 'user' ? html`<${OnboardingPanel} mode="user" />` : null}
 
         ${Active
           ? html`<${ViewErrorBoundary} key=${tab}><${Active} mode=${mode?.mode || 'local-admin'} /></${ViewErrorBoundary}>`
