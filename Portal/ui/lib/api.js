@@ -51,6 +51,36 @@ async function request(path, options = {}) {
   return body;
 }
 
+// Authenticated file download. Fetches with the Bearer token (a plain <a download>
+// wouldn't carry it), saves the response as a file, and returns the export meta
+// from the X-Export-* response headers. Throws on non-2xx (reads JSON error).
+async function downloadFile(path, fallbackName = 'export.csv') {
+  const auth = await authHeaders();
+  const r = await fetch(BASE + path, { headers: { ...auth } });
+  if (!r.ok) {
+    let msg = 'HTTP ' + r.status;
+    try { const b = await r.json(); msg = b?.message || b?.error || msg; } catch { /* ignore */ }
+    throw new Error(msg);
+  }
+  // Filename from Content-Disposition if present.
+  let name = fallbackName;
+  const cd = r.headers.get('content-disposition') || '';
+  const m = /filename="?([^"]+)"?/i.exec(cd);
+  if (m) name = m[1];
+  const meta = {
+    rows: Number(r.headers.get('x-export-rows') || 0),
+    truncated: r.headers.get('x-export-truncated') === '1',
+    limit: Number(r.headers.get('x-export-limit') || -1),
+  };
+  const blob = await r.blob();
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = name;
+  document.body.appendChild(a); a.click(); a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+  return meta;
+}
+
 export const api = {
   health:                 () => request('/api/health'),
   stats:                  () => request('/api/stats'),
@@ -139,7 +169,15 @@ export const api = {
   finderCleanup:          (buckets) => request('/api/enrichment/finder-cleanup', { method: 'POST', body: JSON.stringify({ buckets }) }),
   websiteCandidates:      (status = 'pending') => request('/api/enrichment/website-candidates?status=' + status),
   websiteCandidatesCount: () => request('/api/enrichment/website-candidates/count'),
+  exportLimits:           () => request('/api/export/limits'),
+  exportCrmCsv:           (params = {}) => downloadFile('/api/export/crm.csv' + (Object.keys(params).length ? '?' + new URLSearchParams(params) : ''), 'bell-crm.csv'),
+  imports:                () => request('/api/imports'),
+  createImport:           (body) => request('/api/imports', { method: 'POST', body: JSON.stringify(body) }),
+  importRows:             (id, params = {}) => request(`/api/imports/${id}/rows` + (Object.keys(params).length ? '?' + new URLSearchParams(params) : '')),
+  deleteImport:           (id) => request(`/api/imports/${id}`, { method: 'DELETE' }),
   decideWebsiteCandidate: (id, action) => request(`/api/enrichment/website-candidates/${id}/decide`, { method: 'POST', body: JSON.stringify({ action }) }),
+  autoApproveWebsiteCandidates: () => request('/api/enrichment/website-candidates/auto-approve', { method: 'POST', body: '{}' }),
+  undoAutoApproveWebsiteCandidates: () => request('/api/enrichment/website-candidates/undo-auto-approve', { method: 'POST', body: '{}' }),
   relationships:          (companyId) => request('/api/enrichment/relationships/' + companyId),
   enrichmentJob:          (id, since = 0) => request(`/api/enrichment/jobs/${id}?since=${since}`),
   harvestHistory:         (limit = 50) => request('/api/enrichment/harvest-history?limit=' + limit),
@@ -256,6 +294,10 @@ export const api = {
 
   // Credits
   creditBalance:          () => request('/api/credits'),
+
+  // Onboarding (new-user Getting Started checklist)
+  onboarding:             () => request('/api/onboarding'),
+  dismissOnboarding:      () => request('/api/onboarding/dismiss', { method: 'POST', body: '{}' }),
   creditLedger:           (limit = 50) => request('/api/credits/ledger?limit=' + limit),
   creditAdjust:           (tenant_id, delta, note) => request('/api/credits/adjust', { method: 'POST', body: JSON.stringify({ tenant_id, delta, note }) }),
 

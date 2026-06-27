@@ -52,6 +52,9 @@ import resendWebhookRouter     from './routes/resend_webhook.js';
 import detailRequestsRouter    from './routes/detail_requests.js';
 import outreachRouter          from './routes/outreach.js';
 import icpRouter               from './routes/icp.js';
+import onboardingRouter        from './routes/onboarding.js';
+import exportRouter            from './routes/export.js';
+import importsRouter           from './routes/imports.js';
 import notificationsRouter     from './routes/notifications.js';
 import emailTemplatesRouter     from './routes/email_templates.js';
 import adminUsersRouter         from './routes/admin_users.js';
@@ -160,6 +163,9 @@ app.use('/api/crm',        ...feature, crmRouter);
 app.use('/api/detail-requests', ...feature, detailRequestsRouter);
 app.use('/api/outreach',        ...feature, outreachRouter);
 app.use('/api/icp',             ...feature, icpRouter);
+app.use('/api/onboarding',      ...feature, onboardingRouter);
+app.use('/api/export',          ...feature, exportRouter);
+app.use('/api/imports',         ...feature, importsRouter);
 // Stats backs the app shell/header — signed in only, no subscription gate so an
 // unsubscribed user still gets a working frame before being routed to /subscribe.
 app.use('/api/stats',      requireAuth, statsRouter);

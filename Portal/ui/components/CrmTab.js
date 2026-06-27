@@ -7,6 +7,11 @@ import { html } from '../lib/html.js';
 import { api } from '../lib/api.js';
 import { toast } from '../lib/toast.js';
 import { navigateTo } from '../lib/router.js';
+import { ImportPanel } from './ImportPanel.js';
+
+// Flat per-export row cap (matches the server's MAX_EXPORT_ROWS). More than this
+// is pulled as successive non-overlapping batches.
+const EXPORT_MAX = 2500;
 
 const STATUS_META = {
   new:       { label: 'New',       color: 'rgb(165 195 255)' },
@@ -47,7 +52,11 @@ export function CrmTab() {
   const [q, setQ] = useState('');
   const [rows, setRows] = useState([]);
   const [stats, setStats] = useState(null);
+  const [total, setTotal] = useState(0);          // full count for the current filter
   const [loading, setLoading] = useState(true);
+  const [exporting, setExporting] = useState(false);
+  const [batchIdx, setBatchIdx] = useState(0);    // which 2,500-row batch to export
+  const [showImport, setShowImport] = useState(false);
   const [openedId, setOpenedId] = useState(null);
   const [view, setView] = useState('records');   // records | pipeline | sequences
   const [selected, setSelected] = useState(() => new Set());
@@ -69,13 +78,49 @@ export function CrmTab() {
       const [r, s] = await Promise.all([api.crmRecords(params), api.crmStats()]);
       setRows(r.rows || []);
       setStats(s);
+      setTotal(r.total || 0);
     } catch (err) { if (!silent) toast('Load failed: ' + err.message, 'error'); }
     finally { if (!silent) setLoading(false); }
   }, [entityType, status, revealedOnly, q]);
 
   useEffect(() => { load(); }, [load]);
-  // Clear selection whenever the visible set changes.
-  useEffect(() => { setSelected(new Set()); }, [entityType, status, revealedOnly, q, view]);
+  // Clear selection + reset the export batch whenever the visible set changes.
+  useEffect(() => { setSelected(new Set()); setBatchIdx(0); }, [entityType, status, revealedOnly, q, view]);
+
+  const batchCount = Math.max(1, Math.ceil(total / EXPORT_MAX));
+
+  // Export ONE batch of the current view (entity type + status). Batches are
+  // ordered by immutable id server-side, so they never overlap or repeat.
+  // Contacts are reveal-masked server-side, so this never leaks unrevealed data.
+  const exportView = async (idx = 0) => {
+    setExporting(true);
+    try {
+      const params = { entity_type: entityType, offset: idx * EXPORT_MAX };
+      if (status) params.status = status;
+      const meta = await api.exportCrmCsv(params);
+      if (!meta.rows) { toast('Nothing to export in this view.'); return; }
+      const tot = meta.total || meta.rows;
+      if (tot > EXPORT_MAX) {
+        const from = idx * EXPORT_MAX + 1, to = idx * EXPORT_MAX + meta.rows;
+        toast(`Exported rows ${from.toLocaleString()}–${to.toLocaleString()} of ${tot.toLocaleString()} (batch ${idx + 1} of ${Math.ceil(tot / EXPORT_MAX)}).`);
+      } else {
+        toast(`Exported ${meta.rows.toLocaleString()} row${meta.rows === 1 ? '' : 's'}.`);
+      }
+    } catch (err) { toast('Export failed: ' + err.message, 'error'); }
+    finally { setExporting(false); }
+  };
+
+  // Export exactly the selected rows (one CSV, capped at EXPORT_MAX).
+  const exportSelected = async () => {
+    if (!selected.size) return;
+    setExporting(true);
+    try {
+      const meta = await api.exportCrmCsv({ ids: [...selected].join(',') });
+      if (meta.truncated) toast(`Exported the first ${meta.rows.toLocaleString()} of ${selected.size.toLocaleString()} selected (max ${EXPORT_MAX.toLocaleString()} per file).`);
+      else toast(`Exported ${meta.rows.toLocaleString()} selected row${meta.rows === 1 ? '' : 's'}.`);
+    } catch (err) { toast('Export failed: ' + err.message, 'error'); }
+    finally { setExporting(false); }
+  };
   // One-time loads: role (for admin-only bulk enroll), saved segments, sequences.
   useEffect(() => {
     (async () => { try { const m = await api.authMe(); setIsAdmin(m?.user?.role === 'platform_admin'); } catch { /* ignore */ } })();
@@ -173,9 +218,27 @@ export function CrmTab() {
           onChange=${e => setQ(e.target.value)}
           style=${{ background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border)', color: 'var(--text)', padding: '6px 10px', borderRadius: '6px', fontSize: '12px', minWidth: '180px' }} />
         <span style=${{ flex: 1 }}></span>
+        <button class="toolbar-toggle" onClick=${() => setShowImport(true)} title="Import your own contacts or companies from a CSV">Import</button>
         <button class="toolbar-toggle" onClick=${saveSegment} title="Save the current filters as a reusable view">Save view</button>
+        ${selected.size > 0
+          ? html`<button class="toolbar-toggle" disabled=${exporting} onClick=${exportSelected}
+              title="Download the selected rows as a CSV (max 2,500 per file)">
+              ${exporting ? 'Exporting…' : `Export selected (${selected.size})`}</button>`
+          : total > EXPORT_MAX
+            ? html`<select value=${batchIdx} onChange=${e => setBatchIdx(Number(e.target.value))}
+                  title="Each CSV holds up to 2,500 rows — pick a batch (batches never overlap)"
+                  style=${{ background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border)', color: 'var(--text)', padding: '6px 10px', borderRadius: '6px', fontSize: '12px' }}>
+                  ${Array.from({ length: batchCount }, (_, i) => html`<option key=${i} value=${i}>Rows ${(i * EXPORT_MAX + 1).toLocaleString()}–${Math.min((i + 1) * EXPORT_MAX, total).toLocaleString()}</option>`)}
+                </select>
+                <button class="toolbar-toggle" disabled=${exporting} onClick=${() => exportView(batchIdx)}
+                  title="Download this batch as a CSV">${exporting ? 'Exporting…' : `Export batch ${batchIdx + 1}/${batchCount}`}</button>`
+            : html`<button class="toolbar-toggle" disabled=${exporting} onClick=${() => exportView(0)}
+                title="Download this view as a CSV (contacts you've revealed are included)">
+                ${exporting ? 'Exporting…' : 'Export CSV'}</button>`}
         <button class="toolbar-toggle" onClick=${() => load()}>Refresh</button>
       </div>
+
+      ${showImport ? html`<${ImportPanel} onClose=${() => setShowImport(false)} onImported=${() => load()} />` : null}
 
       ${segments.length ? html`<div style=${{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '12px' }}>
         ${segments.map(seg => html`<span key=${seg.id} style=${{ display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: '11.5px', color: 'var(--text-muted)', background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border)', borderRadius: '999px', padding: '3px 10px' }}>

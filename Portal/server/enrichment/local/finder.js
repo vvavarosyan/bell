@@ -262,26 +262,47 @@ function rootOf(u) { try { const x = new URL(u); x.pathname = '/'; x.search = ''
 /** Last 8 digits of a phone (Qatar local-number length) for page corroboration. */
 function phoneTail(s) { const d = String(s || '').replace(/\D/g, ''); return d.length >= 8 ? d.slice(-8) : ''; }
 
+// Hosts that are SOURCES / registries / aggregators — never a single company's
+// own website. Corroborating against these produced false matches (every
+// "MOCI CR-… (name missing)" company → moci.gov.qa, "JMJ Property" →
+// propertyfinder.qa, etc.), so they can NEVER count as proof.
+const NON_COMPANY_HOSTS = /(^|\.)(moci\.gov\.qa|qfc\.gov\.qa|gov\.qa|lemoci\.com|google\.[a-z.]+|facebook\.com|fb\.com|instagram\.com|linkedin\.com|youtube\.com|x\.com|twitter\.com|wikipedia\.org|propertyfinder\.|qatarliving\.com|yellowpages|justdial\.com|tripadvisor\.|booking\.com)$/i;
+
+/**
+ * Does this 8-digit phone TAIL appear on the page as a REAL, bounded phone
+ * number — not a coincidental substring of a long digit run or of several
+ * numbers concatenated together (the bug that matched digit-heavy pages like
+ * moci.gov.qa / visiondevelopments / jumeirah). We scan number-like runs,
+ * normalize each to digits, and only accept a run that is a plausible phone
+ * length (8–15 digits) and ENDS with the company's tail.
+ */
+function phoneOnPage(text, tail) {
+  if (!tail || tail.length < 8) return false;
+  const runs = String(text || '').match(/\+?\d[\d\s().\-]{6,20}\d/g) || [];
+  for (const run of runs) {
+    const d = run.replace(/\D/g, '');
+    if (d.length >= 8 && d.length <= 15 && d.endsWith(tail)) return true;
+  }
+  return false;
+}
+
 /**
  * Strong, name-independent proof that a fetched page belongs to `company`:
- *   • the page shows the company's KNOWN phone (we hold these for many companies
- *     from QFC / MOCI / Google Maps), OR
+ *   • the page shows the company's KNOWN phone as a real bounded number, OR
  *   • the site host equals the company's KNOWN email domain.
  * Either is near-certain → safe to AUTO-SAVE even for generic-named companies.
- * Returns 'phone' | 'email-domain' | null.
+ * Source/registry/aggregator hosts are excluded — they are never a company's
+ * own site. Returns 'phone' | 'email-domain' | null.
  */
-function corroborates(page, company) {
+export function corroborates(page, company) {
   if (!page || !page.ok) return null;
   const host = (hostOf(page.finalUrl) || '').toLowerCase();
-  if (!host || REDIRECT_TRAP_HOSTS.test(host)) return null;
+  if (!host || REDIRECT_TRAP_HOSTS.test(host) || NON_COMPANY_HOSTS.test(host)) return null;
   const tail = phoneTail(company.phone);
-  if (tail) {
-    const digits = ((page.title || '') + ' ' + (page.text || '')).replace(/\D/g, '');
-    if (digits.includes(tail)) return 'phone';
-  }
+  if (tail && phoneOnPage((page.title || '') + ' ' + (page.text || ''), tail)) return 'phone';
   const em = String(company.email || '').toLowerCase();
   const dom = em.includes('@') ? em.split('@')[1].trim() : '';
-  if (dom && (host === dom || host.endsWith('.' + dom) || dom.endsWith('.' + host))) return 'email-domain';
+  if (dom && !NON_COMPANY_HOSTS.test(dom) && (host === dom || host.endsWith('.' + dom) || dom.endsWith('.' + host))) return 'email-domain';
   return null;
 }
 
@@ -302,10 +323,11 @@ async function firecrawlSearchUrls(company) {
   }
 }
 
-/** Apify Google Maps → the official website(s) for a company. Maps lists the site
- *  directly, so this is the primary (cheaper, higher-yield) finder. Auto-disables
- *  if the Apify token is missing/unauthorized. */
-async function apifyMapsUrls(company) {
+/** Apify Google Maps → the official website(s) for a company, WITH the place's
+ *  own name + phone (Maps already matched by name+location, so those are strong
+ *  proof the listed website is really theirs). Returns [{url, phone, title}].
+ *  Primary finder (cheap + high-yield). Auto-disables if the token is missing. */
+async function apifyMapsPlaces(company) {
   if (!APIFY_FINDER || AP.disabled) return [];
   try {
     const items = await apify.runSync(MAPS_ACTOR, {
@@ -319,14 +341,42 @@ async function apifyMapsUrls(company) {
       maxReviews: 0,
     }, { timeoutMs: 120_000 });
     AP.runs++;
-    const urls = (items || []).map((p) => p && (p.website || p.websiteUrl)).filter(Boolean);
-    AP.results += urls.length;
-    return [...new Set(urls)];
+    const out = [];
+    const seen = new Set();
+    for (const p of (items || [])) {
+      const url = p && (p.website || p.websiteUrl);
+      if (!url) continue;
+      const key = String(url).toLowerCase();
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push({ url, phone: p.phone || p.phoneUnformatted || null, title: p.title || p.name || null });
+    }
+    AP.results += out.length;
+    return out;
   } catch (e) {
     AP.errors++;
     if (e?.status === 401 || e?.status === 402 || /token|unauthor|key_missing|missing/i.test(String(e?.message))) AP.disabled = true;
     return [];
   }
+}
+
+/**
+ * Does an Apify Google Maps place title plausibly match this company by name?
+ * Maps already matched by name + "Qatar" location, so a shared DISTINCTIVE token
+ * (≥4 chars, non-generic) is strong evidence the listed website is really theirs.
+ * 1 distinctive token (coined name) → must match it; ≥2 → require ≥2 hits so we
+ * don't accept a different business that happens to share one common-ish word.
+ */
+export function mapsNameMatch(title, company) {
+  if (!title) return false;
+  const distinctive = significantTokens(company.name).filter(t => t.length >= 4 && !GENERIC_WORDS.has(t));
+  if (!distinctive.length) return false;
+  const t = String(title).toLowerCase();
+  const hits = distinctive.filter(tok => t.includes(tok)).length;
+  // 1 distinctive token → must match AND be ≥5 chars (a coined/brand-ish word, not
+  // a common 4-letter word that could be a different business). ≥2 tokens →
+  // require ≥2 hits so we don't accept a business that shares only one word.
+  return distinctive.length === 1 ? (distinctive[0].length >= 5 && hits >= 1) : hits >= 2;
 }
 
 // ---------------------------------------------------------------------------
@@ -372,21 +422,34 @@ export async function enrichCompany(company) {
 
   // 2) Find the official site. Apify Google Maps first (cheap + high-yield — Maps
   // lists the website), then optional Firecrawl search, then free headless search.
-  // Every candidate is still verified/corroborated below before it can be saved.
-  let results = await apifyMapsUrls(company);
-  if (!results.length && FIRECRAWL_FINDER) results = await firecrawlSearchUrls(company);
+  // Apify returns rich places ({url, phone, title}); the other two return bare
+  // URL strings, normalized to {url} with no Maps proof. Every candidate is still
+  // verified/corroborated below before it can be saved.
+  let results = await apifyMapsPlaces(company);
+  if (!results.length && FIRECRAWL_FINDER) results = (await firecrawlSearchUrls(company)).map(url => ({ url }));
   if (!results.length && await rendererAvailable()) {
-    results = await searchWeb(`${company.name} Qatar official website`, { limit: 6 });
+    results = (await searchWeb(`${company.name} Qatar official website`, { limit: 6 })).map(url => ({ url }));
   }
   let firstCandidate = null;
-  for (const url of results) {
+  for (const res of results) {
+    const url = res && res.url;
+    if (!url) continue;
     const uhost = (hostOf(url) || '').toLowerCase();
     if (!uhost || rejected.has(uhost)) continue;
     const page = await fetchPage(url, { respectRobots: false, timeoutMs: 9000, retries: 1 });
     if (!page || !page.ok) continue;
+    if (isParked(page) || REDIRECT_TRAP_HOSTS.test(hostOf(page.finalUrl) || '')) continue;
     const corr = corroborates(page, company);
     if (corr || verifyMatch(page, company, { fromGuess: false })) {
       return await saveWebsite(company, rootOf(page.finalUrl), corr ? 'search-' + corr : 'search');
+    }
+    // Apify Maps proof — PHONE ONLY. The place Maps listed for this name+location
+    // carries the company's KNOWN phone ⇒ it's almost certainly them, auto-save.
+    // A shared NAME word is NOT trusted for auto-save (it wrongly matched things
+    // like "Vision Shipping"→visiondevelopments or "Nexus Strategies"→nexus.io);
+    // name-only results fall through to the human review queue below instead.
+    if (res.phone && phoneTail(res.phone) && phoneTail(res.phone) === phoneTail(company.phone)) {
+      return await saveWebsite(company, rootOf(page.finalUrl), 'maps-phone');
     }
     if (!firstCandidate) { const reason = candidateReason(page, company); if (reason) firstCandidate = { root: rootOf(page.finalUrl), reason }; }
   }
