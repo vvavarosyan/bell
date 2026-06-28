@@ -23,12 +23,27 @@ router.post('/', async (req, res, next) => {
     if (!tid) return res.status(401).json({ error: 'no_tenant' });
 
     const kind = req.body?.kind === 'company' ? 'company' : 'contact';
-    const contribute = req.body?.contribute === true;
+    const contribute = true;   // everything imported is captured for admin review (Val's model)
     const filename = String(req.body?.filename || '').slice(0, 200) || null;
     const csv = String(req.body?.csv || '');
     if (!csv.trim()) return res.status(400).json({ error: 'empty_csv' });
 
-    const { headers, records } = parseCsv(csv, { maxRows: MAX_IMPORT_ROWS });
+    // Accept CSV OR JSON (array of row objects).
+    let headers, records;
+    const trimmed = csv.trim();
+    if (trimmed[0] === '[' || trimmed[0] === '{') {
+      try {
+        let arr = JSON.parse(trimmed);
+        if (!Array.isArray(arr)) arr = arr.rows || arr.data || arr.records || [arr];
+        records = (arr || []).filter(o => o && typeof o === 'object').slice(0, MAX_IMPORT_ROWS).map(o => {
+          const low = {}; for (const [kk, vv] of Object.entries(o)) low[String(kk).trim().toLowerCase()] = (vv == null ? '' : String(vv).trim());
+          return low;
+        });
+        headers = records.length ? Object.keys(records[0]) : [];
+      } catch { return res.status(400).json({ error: 'bad_json' }); }
+    } else {
+      ({ headers, records } = parseCsv(csv, { maxRows: MAX_IMPORT_ROWS }));
+    }
     if (!records.length) return res.status(400).json({ error: 'no_rows', headers });
 
     // Map each raw record to our canonical fields; keep the original row in `raw`.
