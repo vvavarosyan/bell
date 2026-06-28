@@ -20,6 +20,7 @@ import { sendEmail, getFromAddress, inboundReplyTo } from '../lib/email.js';
 import { resolveSendIdentity, formatFrom } from '../lib/email_domains.js';
 import { checkDailyLimit } from '../lib/sendlimits.js';
 import { getRevealedSet } from '../lib/credits.js';
+import { addDatapoint, listDatapoints, deleteDatapoint, addNewEntity, DATAPOINT_FIELDS } from '../lib/contributions.js';
 
 const router = Router();
 
@@ -174,6 +175,75 @@ router.patch('/records/:id', async (req, res, next) => {
     }
     res.json(r.rows[0]);
   } catch (err) { next(err); }
+});
+
+// --- Contributed datapoints (Import Phase 2, Layer 1) -----------------------
+// Users add datapoints to a CRM record's entity; captured into the admin pool +
+// shown back as the user's own overlay. Tenant-scoped via the record.
+async function recordEntity(req, recordId) {
+  const r = await query(`SELECT entity_type, entity_id FROM crm_records WHERE id=$1 AND tenant_id=$2`, [Number(recordId), tenantId(req)]);
+  return r.rows[0] || null;
+}
+
+// GET /api/crm/records/:id/datapoints — this tenant's datapoints for the record.
+router.get('/records/:id/datapoints', async (req, res, next) => {
+  try {
+    const ent = await recordEntity(req, req.params.id);
+    if (!ent) return res.status(404).json({ error: 'not_found' });
+    res.json({ rows: await listDatapoints({ tenantId: tenantId(req), entityType: ent.entity_type, entityId: ent.entity_id }), fields: DATAPOINT_FIELDS });
+  } catch (err) { next(err); }
+});
+
+// POST /api/crm/records/:id/datapoints  { field, value, label? }
+router.post('/records/:id/datapoints', async (req, res, next) => {
+  try {
+    const ent = await recordEntity(req, req.params.id);
+    if (!ent) return res.status(404).json({ error: 'not_found' });
+    const { field, value, label } = req.body || {};
+    const row = await addDatapoint({
+      tenantId: tenantId(req), entityType: ent.entity_type, entityId: ent.entity_id,
+      field, value, label: label || null, createdBy: actorEmail(req),
+    });
+    await logActivity(null, tenantId(req), Number(req.params.id), 'datapoint_added', {
+      actorUserId: actorUserId(req), actorEmail: actorEmail(req),
+      summary: `Added ${field}${label ? ` (${label})` : ''}: ${String(value).slice(0, 80)}`,
+      payload: { field, label: label || null },
+    }).catch(() => {});
+    res.json(row);
+  } catch (err) {
+    if (/missing_fields|bad_field|bad_entity_type|empty_value/.test(String(err.message))) {
+      return res.status(400).json({ error: err.message });
+    }
+    next(err);
+  }
+});
+
+// DELETE /api/crm/datapoints/:dpId — remove the tenant's own datapoint.
+router.delete('/datapoints/:dpId', async (req, res, next) => {
+  try {
+    const ok = await deleteDatapoint({ tenantId: tenantId(req), id: req.params.dpId });
+    if (!ok) return res.status(404).json({ error: 'not_found' });
+    res.json({ ok: true });
+  } catch (err) { next(err); }
+});
+
+// POST /api/crm/new-entity { kind:'company'|'person', name, company?, email?, phone?, website?, city?, title?, notes? }
+// Capture a brand-new company/person Bell doesn't have yet — stored as a private,
+// pending-review proposal (no canonical write). Enters the admin curation pool.
+router.post('/new-entity', async (req, res, next) => {
+  try {
+    const b = req.body || {};
+    const row = await addNewEntity({
+      tenantId: tenantId(req), kind: b.kind === 'company' ? 'company' : 'person',
+      name: b.name, company: b.company || null, email: b.email || null, phone: b.phone || null,
+      website: b.website || null, city: b.city || null, title: b.title || null, notes: b.notes || null,
+      createdBy: actorEmail(req),
+    });
+    res.json(row);
+  } catch (err) {
+    if (/name_required|no_tenant/.test(String(err.message))) return res.status(400).json({ error: err.message });
+    next(err);
+  }
 });
 
 // POST /api/crm/records/:id/notes  { body }
