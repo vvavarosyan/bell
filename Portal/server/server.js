@@ -55,6 +55,7 @@ import icpRouter               from './routes/icp.js';
 import onboardingRouter        from './routes/onboarding.js';
 import exportRouter            from './routes/export.js';
 import importsRouter           from './routes/imports.js';
+import contributionsRouter     from './routes/contributions.js';
 import notificationsRouter     from './routes/notifications.js';
 import emailTemplatesRouter     from './routes/email_templates.js';
 import adminUsersRouter         from './routes/admin_users.js';
@@ -207,6 +208,7 @@ app.get('/api/settings/public-token/:name', requireAuth, async (req, res, next) 
 
 app.use('/api/settings',           ...adminOnly, settingsRouter);
 app.use('/api/email-templates',    ...adminOnly, emailTemplatesRouter);
+app.use('/api/contributions',      ...adminOnly, contributionsRouter);
 app.use('/api/admin/users',        ...adminOnly, adminUsersRouter);
 
 // Self-gating / public routers (handle their own auth internally):

@@ -134,8 +134,8 @@ export async function addNewEntity({ tenantId, kind, name, company = null, email
     entityId = ins.rows[0].id; created = true;
   }
 
-  // In the user's CRM immediately.
-  await ensureCrmRecord(null, tenantId, entityType, entityId, 'user_add', createdBy).catch(() => {});
+  // In the user's CRM immediately. (source must be one of reveal|manual|import.)
+  await ensureCrmRecord(null, tenantId, entityType, entityId, 'manual', createdBy);
 
   // The user's provided fields → datapoints (visible to them + admin review).
   for (const [f, v] of [['email', email], ['phone', phone], ['website', website], ['title', title], ['address', city]]) {
