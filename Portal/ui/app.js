@@ -34,6 +34,7 @@ import { BillingTab }    from './components/BillingTab.js';
 import { AccountTab }    from './components/AccountTab.js';
 import { DetailRequestsTab } from './components/DetailRequestsTab.js';
 import { WebsiteCandidatesTab } from './components/WebsiteCandidatesTab.js';
+import { ContributionsTab } from './components/ContributionsTab.js';
 import { HarvestHistoryTab } from './components/HarvestHistoryTab.js';
 import { EngineTab } from './components/EngineTab.js';
 import { ManualLookupTab } from './components/ManualLookupTab.js';
@@ -79,6 +80,7 @@ const VIEWS = {
   'approvals':   { Component: ResearchApprovalsTab },
   'detail-requests': { Component: DetailRequestsTab },
   'website-candidates': { Component: WebsiteCandidatesTab },
+  'contributions': { Component: ContributionsTab },
   'manual-lookup': { Component: ManualLookupTab },
   'engine': { Component: EngineTab },
   'harvest-history': { Component: HarvestHistoryTab },
@@ -108,6 +110,7 @@ const LABELS = {
   'approvals': 'Research Approvals',
   'detail-requests': 'Detail Requests',
   'website-candidates': 'Website Review',
+  'contributions': 'Contributions',
   'manual-lookup': 'Manual Lookup',
   'engine': 'Local Engines',
   'harvest-history': 'Harvest History',

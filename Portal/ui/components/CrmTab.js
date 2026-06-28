@@ -8,6 +8,7 @@ import { api } from '../lib/api.js';
 import { toast } from '../lib/toast.js';
 import { navigateTo } from '../lib/router.js';
 import { ImportPanel } from './ImportPanel.js';
+import { DatapointsPanel } from './DatapointsPanel.js';
 
 // Flat per-export row cap (matches the server's MAX_EXPORT_ROWS). More than this
 // is pulled as successive non-overlapping batches.
@@ -57,6 +58,8 @@ export function CrmTab() {
   const [exporting, setExporting] = useState(false);
   const [batchIdx, setBatchIdx] = useState(0);    // which 2,500-row batch to export
   const [showImport, setShowImport] = useState(false);
+  const [newEntity, setNewEntity] = useState(null);   // null=closed; {kind,name,…}=open
+  const [savingEntity, setSavingEntity] = useState(false);
   const [openedId, setOpenedId] = useState(null);
   const [view, setView] = useState('records');   // records | pipeline | sequences
   const [selected, setSelected] = useState(() => new Set());
@@ -121,6 +124,20 @@ export function CrmTab() {
     } catch (err) { toast('Export failed: ' + err.message, 'error'); }
     finally { setExporting(false); }
   };
+
+  // Capture a brand-new company/person Bell doesn't have — stored private +
+  // queued for Bell's review (no canonical write here).
+  const saveNewEntity = async () => {
+    if (!newEntity?.name?.trim()) { toast('Enter a name first.'); return; }
+    setSavingEntity(true);
+    try {
+      await api.crmAddNewEntity(newEntity);
+      toast('Saved — queued for Bell review.');
+      setNewEntity(null);
+    } catch (err) { toast('Could not save: ' + err.message, 'error'); }
+    finally { setSavingEntity(false); }
+  };
+
   // One-time loads: role (for admin-only bulk enroll), saved segments, sequences.
   useEffect(() => {
     (async () => { try { const m = await api.authMe(); setIsAdmin(m?.user?.role === 'platform_admin'); } catch { /* ignore */ } })();
@@ -218,6 +235,7 @@ export function CrmTab() {
           onChange=${e => setQ(e.target.value)}
           style=${{ background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border)', color: 'var(--text)', padding: '6px 10px', borderRadius: '6px', fontSize: '12px', minWidth: '180px' }} />
         <span style=${{ flex: 1 }}></span>
+        <button class="toolbar-toggle" onClick=${() => setNewEntity({ kind: 'company', name: '' })} title="Add a company or person Bell doesn't have yet">+ New</button>
         <button class="toolbar-toggle" onClick=${() => setShowImport(true)} title="Import your own contacts or companies from a CSV">Import</button>
         <button class="toolbar-toggle" onClick=${saveSegment} title="Save the current filters as a reusable view">Save view</button>
         ${selected.size > 0
@@ -239,6 +257,30 @@ export function CrmTab() {
       </div>
 
       ${showImport ? html`<${ImportPanel} onClose=${() => setShowImport(false)} onImported=${() => load()} />` : null}
+
+      ${newEntity ? html`
+        <div onClick=${() => !savingEntity && setNewEntity(null)} style=${{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.55)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 1000 }}>
+          <div onClick=${e => e.stopPropagation()} style=${{ width: 'min(460px, 94vw)', background: 'var(--bg-elev-2, #1a2034)', border: '1px solid var(--border)', borderRadius: '12px', padding: '20px 22px' }}>
+            <div style=${{ display: 'flex', alignItems: 'center', marginBottom: '4px' }}>
+              <strong style=${{ fontSize: '15px' }}>Add new ${newEntity.kind === 'company' ? 'company' : 'person'}</strong>
+              <span style=${{ flex: 1 }}></span>
+              <button onClick=${() => setNewEntity(null)} style=${{ background: 'transparent', border: 'none', color: 'var(--text-dim)', cursor: 'pointer', fontSize: '18px' }}>✕</button>
+            </div>
+            <div style=${{ fontSize: '11.5px', color: 'var(--text-muted)', marginBottom: '12px', lineHeight: 1.5 }}>For a company or person Bell doesn't have yet. Saved privately to you and queued for Bell's review.</div>
+            <div style=${{ display: 'inline-flex', gap: '4px', marginBottom: '10px' }}>
+              ${[['company', 'Company'], ['person', 'Person']].map(([k, lbl]) => html`
+                <button key=${k} class=${'toolbar-toggle' + (newEntity.kind === k ? ' accent' : '')} onClick=${() => setNewEntity(n => ({ ...n, kind: k }))}>${lbl}</button>`)}
+            </div>
+            ${[['name', newEntity.kind === 'company' ? 'Company name *' : 'Full name *'], ...(newEntity.kind === 'person' ? [['company', 'Company']] : []), ['email', 'Email'], ['phone', 'Phone'], ['website', 'Website'], ['city', 'City']].map(([f, ph]) => html`
+              <input key=${f} placeholder=${ph} value=${newEntity[f] || ''} onInput=${e => setNewEntity(n => ({ ...n, [f]: e.target.value }))}
+                style=${{ width: '100%', boxSizing: 'border-box', background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: '6px', padding: '8px 10px', fontSize: '12.5px', marginBottom: '7px' }} />`)}
+            <div style=${{ display: 'flex', justifyContent: 'flex-end', gap: '8px', marginTop: '8px' }}>
+              <button onClick=${() => setNewEntity(null)} disabled=${savingEntity} class="toolbar-toggle">Cancel</button>
+              <button onClick=${saveNewEntity} disabled=${savingEntity || !newEntity.name?.trim()}
+                style=${{ background: 'var(--accent)', border: '1px solid var(--accent)', color: '#fff', borderRadius: '6px', padding: '7px 16px', fontSize: '12.5px', fontWeight: 600, cursor: 'pointer' }}>${savingEntity ? 'Saving…' : 'Save'}</button>
+            </div>
+          </div>
+        </div>` : null}
 
       ${segments.length ? html`<div style=${{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '12px' }}>
         ${segments.map(seg => html`<span key=${seg.id} style=${{ display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: '11.5px', color: 'var(--text-muted)', background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border)', borderRadius: '999px', padding: '3px 10px' }}>
@@ -866,6 +908,10 @@ function RecordDrawer({ recordId, onClose, onChanged }) {
                   ${t.due_at ? html`<span style=${{ fontSize: '10.5px', color: 'var(--text-dim)' }}>${new Date(t.due_at).toLocaleDateString()}</span>` : null}
                   <button title="Delete task" onClick=${() => removeTask(t.id)} style=${ROW_X}>✕</button>
                 </div>`)}
+
+            <!-- Added details (contributed datapoints) -->
+            ${sectionLabel('Added details')}
+            <${DatapointsPanel} recordId=${recordId} />
 
             <!-- Notes -->
             ${sectionLabel('Notes')}
