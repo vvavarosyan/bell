@@ -55,7 +55,7 @@ export function DatapointsPanel({ recordId }) {
     <div style=${{ marginTop: '14px' }}>
       <div style=${{ fontSize: '12px', fontWeight: 600, color: 'var(--text)', marginBottom: '2px' }}>Add details</div>
       <div style=${{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '10px', lineHeight: 1.5 }}>
-        Add any datapoint you know about this record. It's saved for you and reviewed by Bell before it improves the shared database.
+        Add any datapoint you know about this record — it's saved to your CRM instantly.
       </div>
 
       <div style=${{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '10px' }}>
@@ -75,8 +75,6 @@ export function DatapointsPanel({ recordId }) {
               <div key=${r.id} style=${{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '12px', padding: '5px 0', borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
                 <span style=${{ color: 'var(--text-muted)', minWidth: '92px' }}>${FIELD_LABELS[r.field] || r.field}${r.label ? ` · ${r.label}` : ''}</span>
                 <span style=${{ color: 'var(--text)', flex: 1, wordBreak: 'break-word' }}>${r.value}</span>
-                ${r.validation && r.validation.ok === false ? html`<span title=${'Flagged: ' + (r.validation.reason || 'check')} style=${{ color: 'var(--amber)' }}>⚠</span>` : null}
-                <span style=${{ fontSize: '10.5px', color: STATUS_COLOR[r.status] || 'var(--text-dim)', border: '1px solid ' + (STATUS_COLOR[r.status] || 'var(--border)'), borderRadius: '999px', padding: '1px 7px' }}>${r.status}</span>
                 <button onClick=${() => del(r.id)} title="Remove" style=${{ background: 'transparent', border: 'none', color: 'var(--text-dim)', cursor: 'pointer' }}>✕</button>
               </div>`)}
           </div>`)}

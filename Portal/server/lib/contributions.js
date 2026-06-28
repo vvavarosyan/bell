@@ -91,21 +91,68 @@ export async function deleteDatapoint({ tenantId, id }) {
 // admin's promote-creates-canonical is a separate, audited step. Captures 100%.
 // ---------------------------------------------------------------------------
 
-/** Capture a new company/person the user added to their CRM as a private,
- *  pending-review proposal. Never writes canonical. Returns the stored row. */
+/**
+ * A user adds a new company/person to THEIR CRM. It's added to their CRM
+ * IMMEDIATELY (their data, their choice) — and captured for admin review of
+ * whether it should enter Bell's shared DB. Implementation:
+ *   • COMPANY: if a same-name Qatar company already exists → LINK it (the user's
+ *     extra fields become datapoints for admin "enrich" review). Otherwise CREATE
+ *     it HIDDEN (is_active=false → only in the user's CRM, never public) and queue
+ *     it for admin "add to Bell" review.
+ *   • PERSON: created (flagged private/user-contributed); admin promotion is
+ *     lawyer-gated.
+ * The provided email/phone/website are stored as datapoints so the user sees them
+ * and the admin can review/enrich. Returns { entity_type, entity_id, created }.
+ */
 export async function addNewEntity({ tenantId, kind, name, company = null, email = null, phone = null, website = null, city = null, title = null, notes = null, createdBy = null }) {
   if (!tenantId) throw new Error('no_tenant');
   const nm = String(name || '').trim();
   if (!nm) throw new Error('name_required');
-  const k = kind === 'company' ? 'company' : 'contact';   // imported_records kinds
-  const r = await query(`
-    INSERT INTO imported_records
-      (tenant_id, batch_id, kind, name, email, phone, company_name, title, website, city, notes, raw, enrich_status, created_by)
-    VALUES ($1, NULL, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, 'pending_review', $12)
-    RETURNING id, kind, name, enrich_status, created_at
-  `, [tenantId, k, nm, email, phone, company, title, website, city, notes,
-      JSON.stringify({ source: 'crm_add' }), createdBy]);
-  return r.rows[0];
+  const entityType = kind === 'company' ? 'company' : 'person';
+  let entityId, created = false;
+
+  if (entityType === 'company') {
+    const nn = normalizeName(nm);
+    const ex = (await query(
+      `SELECT id FROM companies WHERE name_normalized=$1 AND COALESCE(archived,false)=false ORDER BY id LIMIT 1`, [nn],
+    )).rows[0];
+    if (ex) { entityId = ex.id; }
+    else {
+      const ins = await query(
+        `INSERT INTO companies (name, name_normalized, website, country, is_active, archived, status_normalized, extra_fields)
+         VALUES ($1,$2,$3,'Qatar',false,false,'active',$4::jsonb) RETURNING id`,
+        [nm, nn, website || null, JSON.stringify({ created_via: 'user_contributed', contributor_tenant: tenantId })],
+      );
+      entityId = ins.rows[0].id; created = true;
+      await recomputeBellScoreForCompany(entityId).catch(() => {});
+    }
+  } else {
+    const ins = await query(
+      `INSERT INTO people (full_name, extra_fields) VALUES ($1,$2::jsonb) RETURNING id`,
+      [nm, JSON.stringify({ created_via: 'user_contributed', contributor_tenant: tenantId, private: true, company_hint: company || null })],
+    );
+    entityId = ins.rows[0].id; created = true;
+  }
+
+  // In the user's CRM immediately.
+  await ensureCrmRecord(null, tenantId, entityType, entityId, 'user_add', createdBy).catch(() => {});
+
+  // The user's provided fields → datapoints (visible to them + admin review).
+  for (const [f, v] of [['email', email], ['phone', phone], ['website', website], ['title', title], ['address', city]]) {
+    if (v && String(v).trim()) await addDatapoint({ tenantId, entityType, entityId, field: f, value: v, createdBy, source: 'crm_add' }).catch(() => {});
+  }
+
+  // Queue a NEW (hidden) entity for admin "add to Bell" review.
+  if (created) {
+    await query(`
+      INSERT INTO imported_records
+        (tenant_id, batch_id, kind, name, email, phone, company_name, title, website, city, notes, raw, enrich_status, matched_entity_type, matched_entity_id, created_by)
+      VALUES ($1, NULL, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11::jsonb, 'pending_review', $12, $13, $14)
+    `, [tenantId, kind === 'company' ? 'company' : 'contact', nm, email, phone, company, title, website, city, notes,
+        JSON.stringify({ source: 'crm_add' }), entityType, entityId, createdBy]);
+  }
+
+  return { entity_type: entityType, entity_id: entityId, created };
 }
 
 // ---------------------------------------------------------------------------
@@ -281,54 +328,61 @@ export async function promoteNewEntity({ id, decidedBy = 'admin' }) {
   const entityType = irEntity(ir.kind);
   if (entityType === 'person' && !(await peopleEnrichEnabled())) throw new Error('person_gated');
 
-  let entityId = null, created = false;
+  let entityId = ir.matched_entity_id ? Number(ir.matched_entity_id) : null;
+  let created = false;
 
   if (entityType === 'company') {
-    const nn = normalizeName(ir.name);
-    const existing = (await query(
-      `SELECT id FROM companies WHERE name_normalized=$1 AND COALESCE(archived,false)=false ORDER BY id LIMIT 1`, [nn],
-    )).rows[0];
-    if (existing) { entityId = existing.id; }
-    else {
-      const ins = await query(
-        `INSERT INTO companies (name, name_normalized, website, country, is_active, archived, status_normalized, extra_fields)
-         VALUES ($1,$2,$3,'Qatar',true,false,'active',$4::jsonb) RETURNING id`,
-        [ir.name, nn, ir.website || null, JSON.stringify({ created_via: 'user_contributed', contributor_tenant: ir.tenant_id })],
-      );
-      entityId = ins.rows[0].id; created = true;
-      await recomputeBellScoreForCompany(entityId).catch(() => {});
+    if (entityId) {
+      // "+ New" already created it HIDDEN → make it live in Bell.
+      await query(`UPDATE companies SET is_active=true WHERE id=$1`, [entityId]);
+    } else {
+      // CSV import row → dedupe-link or create live.
+      const nn = normalizeName(ir.name);
+      const existing = (await query(`SELECT id FROM companies WHERE name_normalized=$1 AND COALESCE(archived,false)=false ORDER BY id LIMIT 1`, [nn])).rows[0];
+      if (existing) { entityId = existing.id; }
+      else {
+        const ins = await query(
+          `INSERT INTO companies (name, name_normalized, website, country, is_active, archived, status_normalized, extra_fields)
+           VALUES ($1,$2,$3,'Qatar',true,false,'active',$4::jsonb) RETURNING id`,
+          [ir.name, nn, ir.website || null, JSON.stringify({ created_via: 'user_contributed', contributor_tenant: ir.tenant_id })],
+        );
+        entityId = ins.rows[0].id; created = true;
+        await recomputeBellScoreForCompany(entityId).catch(() => {});
+      }
+      if (ir.email) await upsertContact('company', entityId, { type: 'email', value: ir.email, value_display: ir.email, source: 'contributed' }).catch(() => {});
+      if (ir.phone) await upsertContact('company', entityId, { type: 'phone', value: ir.phone, value_display: ir.phone, source: 'contributed' }).catch(() => {});
     }
-    if (ir.email) await upsertContact('company', entityId, { type: 'email', value: ir.email, value_display: ir.email, source: 'contributed' }).catch(() => {});
-    if (ir.phone) await upsertContact('company', entityId, { type: 'phone', value: ir.phone, value_display: ir.phone, source: 'contributed' }).catch(() => {});
   } else { // person (gated above)
-    const ins = await query(
-      `INSERT INTO people (full_name, extra_fields) VALUES ($1,$2::jsonb) RETURNING id`,
-      [ir.name, JSON.stringify({ created_via: 'user_contributed', contributor_tenant: ir.tenant_id, company_hint: ir.company_name || null })],
-    );
-    entityId = ins.rows[0].id; created = true;
+    if (!entityId) {
+      const ins = await query(`INSERT INTO people (full_name, extra_fields) VALUES ($1,$2::jsonb) RETURNING id`,
+        [ir.name, JSON.stringify({ created_via: 'user_contributed', contributor_tenant: ir.tenant_id, company_hint: ir.company_name || null })]);
+      entityId = ins.rows[0].id; created = true;
+    }
+    await query(`UPDATE people SET extra_fields = extra_fields - 'private' WHERE id=$1`, [entityId]).catch(() => {});
     if (ir.email) await upsertContact('person', entityId, { type: 'email', value: ir.email, value_display: ir.email, source: 'contributed' }).catch(() => {});
     if (ir.phone) await upsertContact('person', entityId, { type: 'phone', value: ir.phone, value_display: ir.phone, source: 'contributed' }).catch(() => {});
   }
 
-  // Add the now-canonical entity to the contributor's CRM (best-effort).
   await ensureCrmRecord(null, ir.tenant_id, entityType, entityId, 'import', decidedBy).catch(() => {});
-
-  await query(`UPDATE imported_records SET enrich_status='promoted', matched_entity_type=$2, matched_entity_id=$3 WHERE id=$1`,
-    [ir.id, entityType, entityId]);
+  await query(`UPDATE imported_records SET enrich_status='promoted', matched_entity_type=$2, matched_entity_id=$3 WHERE id=$1`, [ir.id, entityType, entityId]);
   await query(`INSERT INTO enrichment_audit (datapoint_id, entity_type, entity_id, field, new_value, contributor_tenant, decided_by, action)
-               VALUES (NULL,$1,$2,'__new_entity__',$3,$4,$5,'promote')`,
-    [entityType, entityId, ir.name, ir.tenant_id, decidedBy]);
+               VALUES (NULL,$1,$2,'__new_entity__',$3,$4,$5,'promote')`, [entityType, entityId, ir.name, ir.tenant_id, decidedBy]);
   return { id: ir.id, status: 'promoted', entity_type: entityType, entity_id: entityId, created };
 }
 
-/** Reject a new-entity proposal — it never enters canonical. */
+/** Reject a new-entity proposal — it never enters Bell's shared DB. If "+ New"
+ *  had created a hidden company, archive it (it stays out of Bell; the user keeps
+ *  their CRM copy). CSV rows just get marked rejected. */
 export async function rejectNewEntity({ id, decidedBy = 'admin' }) {
-  const ir = (await query(`SELECT id, kind, name, tenant_id, enrich_status FROM imported_records WHERE id=$1`, [Number(id)])).rows[0];
+  const ir = (await query(`SELECT id, kind, name, tenant_id, enrich_status, matched_entity_type, matched_entity_id FROM imported_records WHERE id=$1`, [Number(id)])).rows[0];
   if (!ir) throw new Error('not_found');
   if (ir.enrich_status !== 'pending_review') return { id: ir.id, status: ir.enrich_status, noop: true };
+  if (ir.matched_entity_type === 'company' && ir.matched_entity_id) {
+    await query(`UPDATE companies SET is_active=false, archived=true WHERE id=$1 AND is_active=false`, [Number(ir.matched_entity_id)]).catch(() => {});
+  }
   await query(`UPDATE imported_records SET enrich_status='rejected' WHERE id=$1`, [ir.id]);
   await query(`INSERT INTO enrichment_audit (datapoint_id, entity_type, entity_id, field, new_value, contributor_tenant, decided_by, action)
-               VALUES (NULL,$1,0,'__new_entity__',$2,$3,$4,'reject')`,
-    [irEntity(ir.kind), ir.name, ir.tenant_id, decidedBy]);
+               VALUES (NULL,$1,$2,'__new_entity__',$3,$4,$5,'reject')`,
+    [irEntity(ir.kind), Number(ir.matched_entity_id) || 0, ir.name, ir.tenant_id, decidedBy]);
   return { id: ir.id, status: 'rejected' };
 }

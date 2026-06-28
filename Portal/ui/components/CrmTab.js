@@ -132,8 +132,9 @@ export function CrmTab() {
     setSavingEntity(true);
     try {
       await api.crmAddNewEntity(newEntity);
-      toast('Saved — queued for Bell review.');
+      toast('Added to your CRM.');
       setNewEntity(null);
+      load();   // show it immediately
     } catch (err) { toast('Could not save: ' + err.message, 'error'); }
     finally { setSavingEntity(false); }
   };
