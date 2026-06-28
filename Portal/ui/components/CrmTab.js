@@ -131,10 +131,13 @@ export function CrmTab() {
     if (!newEntity?.name?.trim()) { toast('Enter a name first.'); return; }
     setSavingEntity(true);
     try {
+      const kindAdded = newEntity.kind === 'company' ? 'company' : 'person';
       await api.crmAddNewEntity(newEntity);
       toast('Added to your CRM.');
       setNewEntity(null);
-      load();   // show it immediately
+      // Switch to the matching tab + clear filters so the new record is visible.
+      setStatus(''); setRevealedOnly(false); setQ('');
+      if (entityType !== kindAdded) setEntityType(kindAdded); else load();
     } catch (err) { toast('Could not save: ' + err.message, 'error'); }
     finally { setSavingEntity(false); }
   };

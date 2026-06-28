@@ -82,7 +82,7 @@ export const ADMIN_ONLY_NAV_IDS = new Set([
 // tier in server/lib/capabilities.js.
 export const LOCAL_ENGINE_NAV_IDS = new Set([
   'sources', 'recent-jobs', 'sync', 'dedup-queue', 'approvals', 'website-candidates',
-  'manual-lookup', 'harvest-history', 'engine', 'contributions',
+  'manual-lookup', 'harvest-history', 'engine',
 ]);
 
 /** True if an item should be shown to a user with the given role, in this mode. */

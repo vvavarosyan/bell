@@ -12,8 +12,6 @@ import {
 } from '../enrichment/orchestrator.js';
 import { auditFinderFinds, cleanupFinderFinds } from '../enrichment/local/cleanup.js';
 import { listCandidates, countPending, decideCandidate, autoApproveCandidates, undoAutoApprovals, cleanReversedHarvestPeople } from '../enrichment/local/candidates.js';
-import { listPool, poolCounts, promoteDatapoint, rejectDatapoint, peopleEnrichEnabled,
-         listNewEntities, newEntityCounts, promoteNewEntity, rejectNewEntity } from '../lib/contributions.js';
 import { createLookup, runLookup, listLookups, approveLookup, enrichMatchLookup, rejectLookup } from '../enrichment/local/manual_lookup.js';
 import { crawl4aiAvailable } from '../enrichment/local/crawl4ai.js';
 
@@ -404,75 +402,8 @@ router.post('/website-candidates/clean-harvested-people', async (req, res, next)
   } catch (err) { next(err); }
 });
 
-// --- Contributed datapoints admin curation (Import Phase 2, Layer 2) ---------
-// Canonical mutation → localTools-gated (this router). Admin reviews the pool of
-// user-contributed datapoints and promotes them into canonical or rejects them.
-router.get('/contributions', async (req, res, next) => {
-  try {
-    const status = req.query.status || 'pending';
-    const entityType = req.query.entity_type || null;
-    const limit = Math.min(Number(req.query.limit ?? 200), 500);
-    const offset = Math.max(Number(req.query.offset ?? 0), 0);
-    const [pool, counts, peopleGate] = await Promise.all([
-      listPool({ status, entityType, limit, offset }),
-      poolCounts(),
-      peopleEnrichEnabled(),
-    ]);
-    res.json({ ...pool, counts, people_enabled: peopleGate });
-  } catch (err) { next(err); }
-});
-
-router.post('/contributions/:id/promote', async (req, res, next) => {
-  try {
-    res.json(await promoteDatapoint({ id: req.params.id, decidedBy: req.user?.email || 'admin' }));
-  } catch (err) {
-    if (/person_gated/.test(String(err.message))) return res.status(403).json({ error: 'person_gated' });
-    if (/not_found/.test(String(err.message))) return res.status(404).json({ error: 'not_found' });
-    next(err);
-  }
-});
-
-router.post('/contributions/:id/reject', async (req, res, next) => {
-  try {
-    res.json(await rejectDatapoint({ id: req.params.id, decidedBy: req.user?.email || 'admin' }));
-  } catch (err) {
-    if (/not_found/.test(String(err.message))) return res.status(404).json({ error: 'not_found' });
-    next(err);
-  }
-});
-
-// New-entity proposals (a user added a company/person Bell doesn't have).
-router.get('/new-entities', async (req, res, next) => {
-  try {
-    const status = req.query.status || 'pending_review';
-    const kind = req.query.kind || null;
-    const [pool, counts, peopleGate] = await Promise.all([
-      listNewEntities({ status, kind, limit: Math.min(Number(req.query.limit ?? 200), 500), offset: Math.max(Number(req.query.offset ?? 0), 0) }),
-      newEntityCounts(),
-      peopleEnrichEnabled(),
-    ]);
-    res.json({ ...pool, counts, people_enabled: peopleGate });
-  } catch (err) { next(err); }
-});
-
-router.post('/new-entities/:id/promote', async (req, res, next) => {
-  try {
-    res.json(await promoteNewEntity({ id: req.params.id, decidedBy: req.user?.email || 'admin' }));
-  } catch (err) {
-    if (/person_gated/.test(String(err.message))) return res.status(403).json({ error: 'person_gated' });
-    if (/not_found/.test(String(err.message))) return res.status(404).json({ error: 'not_found' });
-    next(err);
-  }
-});
-
-router.post('/new-entities/:id/reject', async (req, res, next) => {
-  try {
-    res.json(await rejectNewEntity({ id: req.params.id, decidedBy: req.user?.email || 'admin' }));
-  } catch (err) {
-    if (/not_found/.test(String(err.message))) return res.status(404).json({ error: 'not_found' });
-    next(err);
-  }
-});
+// Contributed datapoints + new-entity admin curation moved to /api/contributions
+// (adminOnly — it's customer state reviewed on the admin deployment, not localTools).
 
 // GET /api/enrichment/relationships/:companyId — Engine 3 network edges for a
 // company, in BOTH directions (as source and as target), for the drawer.

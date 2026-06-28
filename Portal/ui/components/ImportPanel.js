@@ -111,7 +111,6 @@ export function ImportPanel({ onClose, onImported }) {
               <div key=${b.id} style=${{ display: 'flex', alignItems: 'center', gap: '10px', fontSize: '11.5px', padding: '6px 0', borderBottom: '1px solid rgba(255,255,255,0.04)' }}>
                 <span style=${{ color: 'var(--text)' }}>${b.filename || (b.kind === 'company' ? 'Companies' : 'Contacts')}</span>
                 <span style=${{ color: 'var(--text-muted)' }}>${b.row_count.toLocaleString()} rows</span>
-                ${b.contribute ? html`<span style=${{ color: 'var(--amber)' }} title="Opted in to Bell review">${b.pending ? `${b.pending} pending` : (b.approved ? `${b.approved} approved` : 'shared')}</span>` : html`<span style=${{ color: 'var(--text-dim)' }}>private</span>`}
                 <span style=${{ flex: 1 }}></span>
                 <span style=${{ color: 'var(--text-dim)' }}>${new Date(b.created_at).toLocaleDateString()}</span>
                 <button onClick=${() => del(b.id)} title="Delete" style=${{ background: 'transparent', border: 'none', color: 'var(--text-dim)', cursor: 'pointer' }}>✕</button>
