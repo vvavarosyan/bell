@@ -182,6 +182,7 @@ export const api = {
   contributions:          (params = {}) => request('/api/contributions/datapoints' + (Object.keys(params).length ? '?' + new URLSearchParams(params) : '')),
   promoteContribution:    (id) => request(`/api/contributions/datapoints/${id}/promote`, { method: 'POST', body: '{}' }),
   rejectContribution:     (id) => request(`/api/contributions/datapoints/${id}/reject`, { method: 'POST', body: '{}' }),
+  setPeopleGate:          (enabled) => request('/api/contributions/people-gate', { method: 'POST', body: JSON.stringify({ enabled }) }),
   newEntityProposals:     (params = {}) => request('/api/contributions/new-entities' + (Object.keys(params).length ? '?' + new URLSearchParams(params) : '')),
   promoteNewEntity:       (id) => request(`/api/contributions/new-entities/${id}/promote`, { method: 'POST', body: '{}' }),
   rejectNewEntity:        (id) => request(`/api/contributions/new-entities/${id}/reject`, { method: 'POST', body: '{}' }),

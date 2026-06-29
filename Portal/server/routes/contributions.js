@@ -9,12 +9,18 @@
 
 import { Router } from 'express';
 import {
-  listPool, poolCounts, promoteDatapoint, rejectDatapoint, peopleEnrichEnabled,
+  listPool, poolCounts, promoteDatapoint, rejectDatapoint, peopleEnrichEnabled, setPeopleEnrichEnabled,
   listNewEntities, newEntityCounts, promoteNewEntity, rejectNewEntity,
 } from '../lib/contributions.js';
 
 const router = Router();
 const by = (req) => req.user?.email || 'admin';
+
+// Toggle the lawyer-gate that lets the admin promote PERSON data into Bell.
+router.post('/people-gate', async (req, res, next) => {
+  try { res.json({ people_enabled: await setPeopleEnrichEnabled(req.body?.enabled === true) }); }
+  catch (err) { next(err); }
+});
 
 // ── Datapoints ──────────────────────────────────────────────────────────────
 router.get('/datapoints', async (req, res, next) => {
