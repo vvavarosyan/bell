@@ -137,10 +137,11 @@ export async function addNewEntity({ tenantId, kind, name, company = null, email
   // In the user's CRM immediately. (source must be one of reveal|manual|import.)
   await ensureCrmRecord(null, tenantId, entityType, entityId, 'manual', createdBy);
 
-  // The user's provided fields → datapoints (visible to them + admin review).
-  for (const [f, v] of [['email', email], ['phone', phone], ['website', website], ['title', title], ['address', city]]) {
-    if (v && String(v).trim()) await addDatapoint({ tenantId, entityType, entityId, field: f, value: v, createdBy, source: 'crm_add' }).catch(() => {});
-  }
+  // The provided contact fields are written straight onto the (hidden/private)
+  // entity so the user sees them on their record. The admin reviews the WHOLE
+  // entity at once in "New entities" (website already on the company row).
+  if (email && String(email).trim()) await upsertContact(entityType, entityId, { type: 'email', value: email, value_display: email, source: 'contributed' }).catch(() => {});
+  if (phone && String(phone).trim()) await upsertContact(entityType, entityId, { type: 'phone', value: phone, value_display: phone, source: 'contributed' }).catch(() => {});
 
   // Queue a NEW (hidden) entity for admin "add to Bell" review.
   if (created) {

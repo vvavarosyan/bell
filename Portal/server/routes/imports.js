@@ -7,6 +7,7 @@
 import { Router } from 'express';
 import { query, withTransaction } from '../db.js';
 import { parseCsv, mapImportRecord } from '../lib/csvparse.js';
+import { addNewEntity } from '../lib/contributions.js';
 
 const router = Router();
 
@@ -56,43 +57,32 @@ router.post('/', async (req, res, next) => {
 
     if (!mapped.length) return res.status(400).json({ error: 'no_usable_rows', headers });
 
-    const enrichStatus = contribute ? 'pending_review' : 'private';
     const actor = actorEmail(req);
+    const entityKind = kind === 'company' ? 'company' : 'person';
 
-    const result = await withTransaction(async (client) => {
-      const batch = (await client.query(
-        `INSERT INTO import_batches (tenant_id, kind, filename, row_count, contribute, created_by)
-         VALUES ($1,$2,$3,$4,$5,$6) RETURNING id, created_at`,
-        [tid, kind, filename, mapped.length, contribute, actor],
-      )).rows[0];
+    // History row for the user's "Your imports" list.
+    const batch = (await query(
+      `INSERT INTO import_batches (tenant_id, kind, filename, row_count, contribute, created_by)
+       VALUES ($1,$2,$3,$4,true,$5) RETURNING id, created_at`,
+      [tid, kind, filename, mapped.length, actor],
+    )).rows[0];
 
-      // Bulk insert rows in chunks (parameterized).
-      let inserted = 0;
-      const CHUNK = 500;
-      for (let i = 0; i < mapped.length; i += CHUNK) {
-        const slice = mapped.slice(i, i + CHUNK);
-        const vals = [];
-        const ph = [];
-        slice.forEach((m, k) => {
-          const b = k * 14;
-          ph.push(`($${b+1},$${b+2},$${b+3},$${b+4},$${b+5},$${b+6},$${b+7},$${b+8},$${b+9},$${b+10},$${b+11},$${b+12},$${b+13},$${b+14})`);
-          vals.push(
-            tid, batch.id, kind,
-            m.name || null, m.email || null, m.phone || null, m.company_name || null,
-            m.title || null, m.website || null, m.city || null, m.country || null,
-            m.notes || null, JSON.stringify(m.raw || {}), enrichStatus,
-          );
+    // Each row flows through the SAME path as "+ New": added to the user's CRM
+    // immediately (hidden company / private person) + captured for the admin's
+    // grouped review. Capped per request (large imports → future background job).
+    const CAP = 2000;
+    let inserted = 0;
+    for (const m of mapped.slice(0, CAP)) {
+      try {
+        await addNewEntity({
+          tenantId: tid, kind: entityKind, name: m.name, company: m.company_name || null,
+          email: m.email || null, phone: m.phone || null, website: m.website || null,
+          city: m.city || null, title: m.title || null, notes: m.notes || null, createdBy: actor,
         });
-        const r = await client.query(
-          `INSERT INTO imported_records
-             (tenant_id, batch_id, kind, name, email, phone, company_name, title, website, city, country, notes, raw, enrich_status)
-           VALUES ${ph.join(',')}`,
-          vals,
-        );
-        inserted += r.rowCount;
-      }
-      return { batch_id: batch.id, inserted };
-    });
+        inserted++;
+      } catch { /* skip a bad row, keep going */ }
+    }
+    const result = { batch_id: batch.id, inserted };
 
     res.json({
       ok: true,
