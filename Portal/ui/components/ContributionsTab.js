@@ -91,7 +91,7 @@ export function ContributionsTab() {
       <div style=${{ display: 'flex', alignItems: 'center', gap: '10px', fontSize: '11.5px', color: peopleEnabled ? 'var(--green)' : 'var(--amber)', background: peopleEnabled ? 'rgba(111,207,151,0.08)' : 'rgba(255,196,99,0.08)', border: '1px solid ' + (peopleEnabled ? 'rgba(111,207,151,0.3)' : 'rgba(255,196,99,0.3)'), borderRadius: '8px', padding: '8px 12px', margin: '0 0 12px' }}>
         <span style=${{ flex: 1 }}>Adding <strong>person</strong> records to Bell is currently <strong>${peopleEnabled ? 'ON' : 'OFF (lawyer-gated)'}</strong>. ${peopleEnabled ? '' : 'Company data is always free to add. Only enable person data once your lawyer has cleared it (Qatar PDPPL).'}</span>
         <button class=${peopleEnabled ? 'ghost' : 'accent'} onClick=${togglePeopleGate}>${peopleEnabled ? 'Turn off' : 'Enable person data'}</button>
-      </div>`}
+      </div>
 
       ${loading ? html`<div class="empty">Loading…</div>`
         : (rows.length === 0
