@@ -46,6 +46,12 @@ export function ContributionsTab() {
     } finally { setBusy(prev => { const n = new Set(prev); n.delete(id); return n; }); }
   };
 
+  const togglePeopleGate = async () => {
+    if (!peopleEnabled && !window.confirm('Enable adding PERSON records into Bell\'s shared database?\n\nOnly turn this on once your lawyer has cleared person data under Qatar PDPPL. Company data is unaffected.')) return;
+    try { const r = await api.setPeopleGate(!peopleEnabled); setPeopleEnabled(!!r.people_enabled); }
+    catch (err) { toast('Failed: ' + err.message, 'error'); }
+  };
+
   // Group datapoints under the record they belong to.
   const groups = view === 'datapoints'
     ? Object.values(rows.reduce((acc, r) => {
@@ -82,16 +88,17 @@ export function ContributionsTab() {
         <button onClick=${load}>Refresh</button>
       </div>
 
-      ${!peopleEnabled ? html`<div style=${{ fontSize: '11.5px', color: 'var(--amber)', background: 'rgba(255,196,99,0.08)', border: '1px solid rgba(255,196,99,0.3)', borderRadius: '8px', padding: '8px 12px', margin: '0 0 12px' }}>
-        Person records are <strong>lawyer-gated</strong> — reviewable but not added to Bell until you enable person enrichment (setting <code>enrich_people_enabled</code>). Company data is free to add.
-      </div>` : null}
+      <div style=${{ display: 'flex', alignItems: 'center', gap: '10px', fontSize: '11.5px', color: peopleEnabled ? 'var(--green)' : 'var(--amber)', background: peopleEnabled ? 'rgba(111,207,151,0.08)' : 'rgba(255,196,99,0.08)', border: '1px solid ' + (peopleEnabled ? 'rgba(111,207,151,0.3)' : 'rgba(255,196,99,0.3)'), borderRadius: '8px', padding: '8px 12px', margin: '0 0 12px' }}>
+        <span style=${{ flex: 1 }}>Adding <strong>person</strong> records to Bell is currently <strong>${peopleEnabled ? 'ON' : 'OFF (lawyer-gated)'}</strong>. ${peopleEnabled ? '' : 'Company data is always free to add. Only enable person data once your lawyer has cleared it (Qatar PDPPL).'}</span>
+        <button class=${peopleEnabled ? 'ghost' : 'accent'} onClick=${togglePeopleGate}>${peopleEnabled ? 'Turn off' : 'Enable person data'}</button>
+      </div>`}
 
       ${loading ? html`<div class="empty">Loading…</div>`
         : (rows.length === 0
           ? html`<div class="empty">No ${status === 'all' ? '' : status} ${view === 'entities' ? 'new records' : 'added details'}.</div>`
 
           : view === 'entities'
-            ? html`<div class="dr-list">
+            ? html`<div class="dr-list" style=${{ overflowY: 'auto', maxHeight: 'calc(100vh - 240px)', paddingBottom: '40px' }}>
                 ${rows.map(r => {
                   const isPerson = r.kind !== 'company';
                   const gated = isPerson && !peopleEnabled;
@@ -119,7 +126,7 @@ export function ContributionsTab() {
                 })}
               </div>`
 
-            : html`<div class="dr-list">
+            : html`<div class="dr-list" style=${{ overflowY: 'auto', maxHeight: 'calc(100vh - 240px)', paddingBottom: '40px' }}>
                 ${groups.map(g => html`
                   <div class="dr-card" key=${g.key}>
                     <div class="dr-card-head">

@@ -78,15 +78,25 @@ export function ImportPanel({ onClose, onImported }) {
           <button onClick=${onClose} style=${{ background: 'transparent', border: 'none', color: 'var(--text-dim)', cursor: 'pointer', fontSize: '18px' }}>✕</button>
         </div>
         <div style=${{ fontSize: '11.5px', color: 'var(--text-muted)', marginBottom: '14px', lineHeight: 1.5 }}>
-          Upload a <strong>CSV</strong> or <strong>JSON</strong> file. We auto-detect common columns (name, email, phone, company, title, website, city). It's added to your workspace — <button onClick=${downloadSample} style=${{ background: 'none', border: 'none', color: 'var(--accent)', cursor: 'pointer', padding: 0, font: 'inherit', textDecoration: 'underline' }}>download a sample CSV</button> to see the format.
+          Upload a CSV or JSON. It's added to your workspace. We auto-detect common columns (name, email, phone, company, title, website, city).
         </div>
 
-        <div style=${{ display: 'flex', gap: '8px', alignItems: 'center', marginBottom: '12px', flexWrap: 'wrap' }}>
-          <div style=${{ display: 'inline-flex', gap: '4px' }}>
-            ${[['contact', 'Contacts'], ['company', 'Companies']].map(([k, lbl]) => html`
-              <button key=${k} class=${'toolbar-toggle' + (kind === k ? ' accent' : '')} onClick=${() => setKind(k)}>${lbl}</button>`)}
-          </div>
-          <span style=${{ flex: 1 }}></span>
+        <div style=${{ fontSize: '12px', fontWeight: 600, color: 'var(--text)', marginBottom: '6px' }}>1 · What are you importing?</div>
+        <div style=${{ display: 'flex', gap: '8px', marginBottom: '14px' }}>
+          ${[['contact', '👤  People (contacts)'], ['company', '🏢  Companies']].map(([k, lbl]) => html`
+            <button key=${k} onClick=${() => { setKind(k); setFilename(''); setCsvText(''); }}
+              style=${{ flex: 1, padding: '11px', borderRadius: '8px', cursor: 'pointer', fontSize: '12.5px', fontWeight: 600,
+                background: kind === k ? 'var(--accent)' : 'rgba(255,255,255,0.04)', color: kind === k ? '#fff' : 'var(--text-muted)',
+                border: '1px solid ' + (kind === k ? 'var(--accent)' : 'var(--border)') }}>${lbl}${kind === k ? '  ✓' : ''}</button>`)}
+        </div>
+
+        <div style=${{ fontSize: '12px', fontWeight: 600, color: 'var(--text)', marginBottom: '6px' }}>
+          2 · Upload your ${kind === 'company' ? 'companies' : 'people'} file
+          <button onClick=${downloadSample} style=${{ marginLeft: '8px', background: 'none', border: 'none', color: 'var(--accent)', cursor: 'pointer', padding: 0, font: 'inherit', fontWeight: 400, fontSize: '11.5px', textDecoration: 'underline' }}>
+            download a sample ${kind === 'company' ? 'companies' : 'people'} CSV
+          </button>
+        </div>
+        <div style=${{ marginBottom: '12px' }}>
           <label style=${{ ...field, cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
             <input type="file" accept=".csv,text/csv,.json,application/json" onChange=${onFile} style=${{ display: 'none' }} />
             ${filename ? `📄 ${filename}` : 'Choose CSV / JSON file…'}

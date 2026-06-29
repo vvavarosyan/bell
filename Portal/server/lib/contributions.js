@@ -127,11 +127,19 @@ export async function addNewEntity({ tenantId, kind, name, company = null, email
       await recomputeBellScoreForCompany(entityId).catch(() => {});
     }
   } else {
-    const ins = await query(
-      `INSERT INTO people (full_name, extra_fields) VALUES ($1,$2::jsonb) RETURNING id`,
-      [nm, JSON.stringify({ created_via: 'user_contributed', contributor_tenant: tenantId, private: true, company_hint: company || null })],
-    );
-    entityId = ins.rows[0].id; created = true;
+    // Dedupe people by email → link an existing person instead of duplicating.
+    let ex = null;
+    if (email && String(email).includes('@')) {
+      ex = (await query(`SELECT person_id FROM person_contacts WHERE type='email' AND lower(value)=lower($1) LIMIT 1`, [String(email).trim()])).rows[0];
+    }
+    if (ex) { entityId = Number(ex.person_id); }
+    else {
+      const ins = await query(
+        `INSERT INTO people (full_name, extra_fields) VALUES ($1,$2::jsonb) RETURNING id`,
+        [nm, JSON.stringify({ created_via: 'user_contributed', contributor_tenant: tenantId, private: true, company_hint: company || null })],
+      );
+      entityId = ins.rows[0].id; created = true;
+    }
   }
 
   // In the user's CRM immediately. (source must be one of reveal|manual|import.)
@@ -168,6 +176,16 @@ export async function peopleEnrichEnabled() {
   const r = await query(`SELECT value FROM settings WHERE key='enrich_people_enabled'`).catch(() => ({ rows: [] }));
   const v = String(r.rows[0]?.value || '').toLowerCase();
   return v === 'true' || v === '1' || v === 'on';
+}
+
+/** Turn person→canonical promotion on/off (the lawyer gate). */
+export async function setPeopleEnrichEnabled(enabled) {
+  await query(
+    `INSERT INTO settings (key, value) VALUES ('enrich_people_enabled', $1)
+     ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value`,
+    [enabled ? 'true' : 'false'],
+  );
+  return !!enabled;
 }
 
 /** The admin review pool, joined to its target entity + contributor. Valid rows
