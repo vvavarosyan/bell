@@ -254,6 +254,15 @@ const renderBootMessage = (msg) => {
 };
 
 async function bootstrap() {
+  // 0. Capture a 0 Risk "join" intent NOW, before any auth redirect can drop the
+  //    ?zero-risk=join query param (sign-in bounces to /sign-in and Clerk returns
+  //    to "/" without the query). We persist it and read it back in step 5b.
+  try {
+    if (new URLSearchParams(window.location.search).get('zero-risk') === 'join') {
+      localStorage.setItem('bdi_zr_join', '1');
+    }
+  } catch { /* ignore */ }
+
   // 1. Ask the server what mode we're in
   let mode;
   try {
@@ -346,10 +355,13 @@ async function bootstrap() {
   //     marketing CTA (?zero-risk=join) is enrolled into 0 Risk mode here.
   try {
     let zr = await api.zrStatus();
-    const wantsJoin = new URLSearchParams(window.location.search).get('zero-risk') === 'join';
+    let wantsJoin = new URLSearchParams(window.location.search).get('zero-risk') === 'join';
+    try { if (!wantsJoin && localStorage.getItem('bdi_zr_join') === '1') wantsJoin = true; } catch { /* ignore */ }
     if (zr.account_type !== 'zero_risk' && wantsJoin && me.user.role !== 'platform_admin') {
       try { await api.zrEnroll(); zr = await api.zrStatus(); } catch { /* fall through to normal flow */ }
     }
+    // Intent consumed (whether or not enrolment succeeded) — don't re-trigger later.
+    if (wantsJoin) { try { localStorage.removeItem('bdi_zr_join'); } catch { /* ignore */ } }
     if (zr.account_type === 'zero_risk') {
       createRoot(rootEl).render(createElement(ZeroRiskPortal, { user: me.user, status: zr }));
       return;

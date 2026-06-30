@@ -232,6 +232,7 @@ export const PRIMARY_NAV: NavItem[] = [
     },
   },
   { kind: 'link', label: 'Pricing', href: '/pricing' },
+  { kind: 'link', label: '0 Risk', href: '/0-risk' },
 ];
 
 /** Header right-side CTAs.
