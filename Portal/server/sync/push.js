@@ -11,7 +11,7 @@
 
 import { query } from '../db.js';
 import { getKey } from '../keychain.js';
-import { MIRROR_TABLES, CHUNK_SIZE } from './tables.js';
+import { MIRROR_TABLES, CHUNK_SIZE, CONTRIB_EXCLUDE } from './tables.js';
 import { runPull } from './pull.js';
 
 const EPOCH = '1970-01-01T00:00:00Z';
@@ -92,22 +92,54 @@ async function pushDeletions(base, token, summary) {
   }
 }
 
+// Import Phase 2 — sync reconciliation. Belt-and-braces companion to the
+// `syncWhere` keep-predicates: proactively tell prod to drop any un-promoted
+// user-contributed entity that may have leaked there in an earlier push (before
+// this gate existed) or that has since been REJECTED by the admin. Idempotent —
+// prod returns deleted:0 when the row isn't present, so it's safe to run every
+// push. Child contacts are removed by prod's ON DELETE CASCADE, so we only need
+// to send the parent (company/person) ids.
+async function reconcileContributedDeletions(base, token, summary) {
+  for (const table of ['companies', 'people']) {
+    const ids = (await query(
+      `SELECT id FROM ${table} WHERE ${CONTRIB_EXCLUDE[table]}`,
+    ).catch(() => ({ rows: [] }))).rows.map((r) => Number(r.id));
+    if (!ids.length) continue;
+    try {
+      const res = await postDeletions(base, token, table, ids);
+      const d = res.deleted || 0;
+      const prev = summary.deletions[table] || { requested: 0, deleted: 0 };
+      summary.deletions[table] = {
+        requested: prev.requested + ids.length,
+        deleted: prev.deleted + d,
+      };
+      summary.total_deleted += d;
+    } catch (err) {
+      if (summary.errors.length < 50) summary.errors.push({ table, phase: 'contrib-reconcile', error: err.message });
+    }
+  }
+}
+
 // Pull every row whose watermark column is newer than `wm`. SELECT * mirrors all
 // columns; table/watermark/selfRef come from the trusted MIRROR_TABLES constant.
 // When a self-referential FK exists, order canonical/standalone rows (selfRef IS
 // NULL) first so a duplicate never references a not-yet-inserted canonical.
-async function selectRows(table, watermarkCol, wm, selfRef, full = false) {
+async function selectRows(table, watermarkCol, wm, selfRef, full = false, syncWhere = null) {
   const order = selfRef
     ? `("${selfRef}" IS NOT NULL), "${watermarkCol}"`
     : `"${watermarkCol}"`;
+  // `syncWhere` (Import Phase 2) is a KEEP predicate that holds un-promoted
+  // user-contributed rows local-only. It must apply in BOTH modes — even a full
+  // mirror/rebuild must never carry a contributed-but-unreviewed entity to prod.
+  const keep = syncWhere ? ` AND (${syncWhere})` : '';
   // A full/reset push mirrors EVERY row. An incremental push takes rows changed
   // since the watermark — PLUS any row whose watermark is NULL. A plain
   // `watermarkCol > wm` silently DROPS NULL-watermark rows (NULL > x is never
   // true), which is how contacts / employment links inserted without an
   // updated_at went missing on prod after a rebuild.
   const sql = full
-    ? `SELECT * FROM "${table}" ORDER BY ${order} NULLS FIRST`
-    : `SELECT * FROM "${table}" WHERE ("${watermarkCol}" > $1 OR "${watermarkCol}" IS NULL) ORDER BY ${order} NULLS FIRST`;
+    ? `SELECT * FROM "${table}"${syncWhere ? ` WHERE (${syncWhere})` : ''} ORDER BY ${order} NULLS FIRST`
+    : `SELECT * FROM "${table}" WHERE ("${watermarkCol}" > $1 OR "${watermarkCol}" IS NULL)${keep} ORDER BY ${order} NULLS FIRST`;
   const r = await query(sql, full ? [] : [wm]);
   return r.rows;
 }
@@ -169,10 +201,14 @@ export async function runPush({ full = false, reset = false } = {}) {
     // UNIQUE (company_id, type, value) slot — otherwise the survivor collides
     // with the stale dupe and gets skipped. (Deletions used to run last.)
     await pushDeletions(base, token, summary);
+    // Hold-back reconciliation: ensure no un-promoted / rejected contributed
+    // entity remains on prod (covers pre-gate leaks). Runs before the upserts so
+    // a freshly-promoted row in this same push is still re-asserted afterwards.
+    await reconcileContributedDeletions(base, token, summary);
   }
 
-  for (const { name, watermark, selfRef } of MIRROR_TABLES) {
-    const rows = await selectRows(name, watermark, wm, selfRef, full || reset);
+  for (const { name, watermark, selfRef, syncWhere } of MIRROR_TABLES) {
+    const rows = await selectRows(name, watermark, wm, selfRef, full || reset, syncWhere);
     let upserted = 0, skipped = 0;
     for (let i = 0; i < rows.length; i += CHUNK_SIZE) {
       const chunk = rows.slice(i, i + CHUNK_SIZE);
