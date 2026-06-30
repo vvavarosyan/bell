@@ -7,13 +7,16 @@
   <link rel="stylesheet" href="/styles.css?v=20260618b" />
   <link rel="icon" href="data:," />
 
-  <!-- Import map pins exact ESM versions of React + helpers (loaded from esm.sh). -->
+  <!-- Import map pins exact ESM versions of React + helpers (loaded from esm.sh).
+       xlsx (SheetJS) is loaded lazily by the import panel from SheetJS's own ESM
+       CDN — used to parse uploaded .xlsx/.xls files in the browser. -->
   <script type="importmap">
   {
     "imports": {
       "react":     "https://esm.sh/react@18.3.1?dev",
       "react-dom": "https://esm.sh/react-dom@18.3.1/client?dev&deps=react@18.3.1",
-      "htm":       "https://esm.sh/htm@3.1.1"
+      "htm":       "https://esm.sh/htm@3.1.1",
+      "xlsx":      "https://cdn.sheetjs.com/xlsx-0.20.3/package/xlsx.mjs"
     }
   }
   </script>

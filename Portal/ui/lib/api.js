@@ -173,6 +173,8 @@ export const api = {
   exportCrmCsv:           (params = {}) => downloadFile('/api/export/crm.csv' + (Object.keys(params).length ? '?' + new URLSearchParams(params) : ''), 'bell-crm.csv'),
   imports:                () => request('/api/imports'),
   createImport:           (body) => request('/api/imports', { method: 'POST', body: JSON.stringify(body) }),
+  previewImport:          (body) => request('/api/imports/preview', { method: 'POST', body: JSON.stringify(body) }),
+  commitImport:           (body) => request('/api/imports/commit', { method: 'POST', body: JSON.stringify(body) }),
   importRows:             (id, params = {}) => request(`/api/imports/${id}/rows` + (Object.keys(params).length ? '?' + new URLSearchParams(params) : '')),
   deleteImport:           (id) => request(`/api/imports/${id}`, { method: 'DELETE' }),
   decideWebsiteCandidate: (id, action) => request(`/api/enrichment/website-candidates/${id}/decide`, { method: 'POST', body: JSON.stringify({ action }) }),

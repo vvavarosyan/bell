@@ -19,17 +19,54 @@
 // exists when the duplicate is inserted — otherwise the FK fails across chunk
 // boundaries. Dedup is one level deep (duplicate → canonical), so a single
 // NULLs-first ordering is sufficient.
+//
+// `syncWhere` (Import Phase 2 — sync reconciliation): an extra KEEP predicate.
+// A row is only pushed to prod when this SQL is true. It exists so user-
+// CONTRIBUTED new entities that an admin has NOT yet promoted stay LOCAL-ONLY —
+// the same doctrine as research_candidates (never grow the online DB with
+// un-curated data), and, for people, the PDPPL lawyer-gate (a contributed
+// person must not enter the shared/resold DB before promotion). See
+// CONTRIB_EXCLUDE below.
+
+// Rows that must NEVER reach prod until an admin promotes them: user-contributed
+// new entities still awaiting (or denied) review.
+//   • A company added via "+ New"/import is created HIDDEN (is_active=false) and
+//     only flips to is_active=true when promoteNewEntity() runs. Rejected ones
+//     stay is_active=false (also archived) — they must never appear on prod.
+//   • A contributed person carries an extra_fields.private flag that is removed
+//     ONLY by the (lawyer-gated) person promotion. While the flag is present the
+//     person is local-only.
+// Their child contacts ride the same gate via the subqueries below. Promotion
+// bumps the entity's updated_at (BEFORE UPDATE touch trigger), so a promoted
+// row is naturally re-selected by the next incremental push.
+// NOTE on the COALESCE: `extra_fields->>'created_via'` is NULL for the vast
+// majority of rows (registry/scraped data), and `NULL = 'user_contributed'` is
+// NULL — not FALSE. A bare `NULL AND is_active=false` evaluates to NULL, and the
+// KEEP predicate `NOT (NULL)` is also NULL, which a WHERE treats as false — so a
+// normal ARCHIVED company (is_active=false, no created_via) would be wrongly
+// held back from prod. COALESCE(..., false) forces two-valued logic so only
+// genuine user-contributed rows are ever excluded.
+export const CONTRIB_EXCLUDE = {
+  companies: `COALESCE(extra_fields->>'created_via' = 'user_contributed', false) AND is_active = false`,
+  people:    `COALESCE(extra_fields->>'created_via' = 'user_contributed', false) AND jsonb_exists(extra_fields, 'private')`,
+};
+
 export const MIRROR_TABLES = [
-  { name: 'companies',        watermark: 'updated_at',   selfRef: 'canonical_id' },
-  { name: 'people',           watermark: 'updated_at',   selfRef: 'canonical_id' },
+  { name: 'companies',        watermark: 'updated_at',   selfRef: 'canonical_id',
+    syncWhere: `NOT (${CONTRIB_EXCLUDE.companies})` },
+  { name: 'people',           watermark: 'updated_at',   selfRef: 'canonical_id',
+    syncWhere: `NOT (${CONTRIB_EXCLUDE.people})` },
   { name: 'jobs',             watermark: 'updated_at'  },
   { name: 'company_sources',  watermark: 'last_seen_at' },
   { name: 'person_companies', watermark: 'updated_at'  },
   // Contact details (emails / phones / socials) live here — without these the
   // reveal feature unlocks empty records on prod. Parents (companies/people)
-  // are mirrored first so the FK ids resolve.
-  { name: 'company_contacts', watermark: 'updated_at'  },
-  { name: 'person_contacts',  watermark: 'updated_at'  },
+  // are mirrored first so the FK ids resolve. A contact is held back whenever
+  // its parent entity is being held back (otherwise the FK would dangle on prod).
+  { name: 'company_contacts', watermark: 'updated_at',
+    syncWhere: `company_id NOT IN (SELECT id FROM companies WHERE ${CONTRIB_EXCLUDE.companies})` },
+  { name: 'person_contacts',  watermark: 'updated_at',
+    syncWhere: `person_id NOT IN (SELECT id FROM people WHERE ${CONTRIB_EXCLUDE.people})` },
   // Rich research data — structured facts attached to companies.
   { name: 'company_financials',   watermark: 'updated_at' },
   { name: 'company_shareholders', watermark: 'updated_at' },
