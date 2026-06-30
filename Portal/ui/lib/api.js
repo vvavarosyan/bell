@@ -175,6 +175,34 @@ export const api = {
   createImport:           (body) => request('/api/imports', { method: 'POST', body: JSON.stringify(body) }),
   previewImport:          (body) => request('/api/imports/preview', { method: 'POST', body: JSON.stringify(body) }),
   commitImport:           (body) => request('/api/imports/commit', { method: 'POST', body: JSON.stringify(body) }),
+  // ---- 0 Risk (user) ----
+  zrStatus:               () => request('/api/zero-risk/status'),
+  zrEnroll:               () => request('/api/zero-risk/enroll', { method: 'POST', body: '{}' }),
+  zrProfile:              () => request('/api/zero-risk/profile'),
+  zrSaveProfile:          (body) => request('/api/zero-risk/profile', { method: 'PUT', body: JSON.stringify(body) }),
+  zrUploadDocument:       (body) => request('/api/zero-risk/documents', { method: 'POST', body: JSON.stringify(body) }),
+  zrSubmit:               () => request('/api/zero-risk/submit', { method: 'POST', body: '{}' }),
+  zrListRequests:         () => request('/api/zero-risk/list-requests'),
+  zrRequestList:          () => request('/api/zero-risk/list-requests', { method: 'POST', body: '{}' }),
+  zrDeals:                () => request('/api/zero-risk/deals'),
+  zrReportDeal:           (body) => request('/api/zero-risk/deals', { method: 'POST', body: JSON.stringify(body) }),
+  // ---- 0 Risk (admin) ----
+  zrAdminAccounts:        () => request('/api/zero-risk-admin/accounts'),
+  zrAdminApprove:         (tid) => request(`/api/zero-risk-admin/accounts/${tid}/approve`, { method: 'POST', body: '{}' }),
+  zrAdminReject:          (tid, note) => request(`/api/zero-risk-admin/accounts/${tid}/reject`, { method: 'POST', body: JSON.stringify({ note }) }),
+  zrAdminLists:           () => request('/api/zero-risk-admin/lists'),
+  zrAdminDeliver:         (id, items) => request(`/api/zero-risk-admin/lists/${id}/deliver`, { method: 'POST', body: JSON.stringify({ items }) }),
+  zrAdminDeals:           () => request('/api/zero-risk-admin/deals'),
+  zrAdminFinalize:        (id, admin_status) => request(`/api/zero-risk-admin/deals/${id}/finalize`, { method: 'POST', body: JSON.stringify({ admin_status }) }),
+  zrAdminSetLimits:       (tid, body) => request(`/api/zero-risk-admin/limits/${tid}`, { method: 'POST', body: JSON.stringify(body) }),
+  zrAdminOpenDocument:    async (id) => {
+    const auth = await authHeaders();
+    const r = await fetch(`/api/zero-risk-admin/documents/${id}/content`, { headers: { ...auth } });
+    if (!r.ok) throw new Error('Could not load document');
+    const url = URL.createObjectURL(await r.blob());
+    window.open(url, '_blank');
+    setTimeout(() => URL.revokeObjectURL(url), 60000);
+  },
   importRows:             (id, params = {}) => request(`/api/imports/${id}/rows` + (Object.keys(params).length ? '?' + new URLSearchParams(params) : '')),
   deleteImport:           (id) => request(`/api/imports/${id}`, { method: 'DELETE' }),
   decideWebsiteCandidate: (id, action) => request(`/api/enrichment/website-candidates/${id}/decide`, { method: 'POST', body: JSON.stringify({ action }) }),

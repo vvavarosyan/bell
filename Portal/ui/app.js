@@ -42,6 +42,8 @@ import { NotificationBell } from './components/NotificationBell.js';
 import { OnboardingPanel } from './components/OnboardingPanel.js';
 import { AnnouncementsTab } from './components/AnnouncementsTab.js';
 import { EmailTemplatesTab } from './components/EmailTemplatesTab.js';
+import { ZeroRiskPortal } from './components/ZeroRiskPortal.js';
+import { ZeroRiskAdmin } from './components/ZeroRiskAdmin.js';
 
 // Error boundary so a crash in ONE view shows a readable message instead of
 // blanking the whole app. Reset per-view via a `key` on the active tab.
@@ -81,6 +83,7 @@ const VIEWS = {
   'detail-requests': { Component: DetailRequestsTab },
   'website-candidates': { Component: WebsiteCandidatesTab },
   'contributions': { Component: ContributionsTab },
+  'zero-risk-admin': { Component: ZeroRiskAdmin },
   'manual-lookup': { Component: ManualLookupTab },
   'engine': { Component: EngineTab },
   'harvest-history': { Component: HarvestHistoryTab },
@@ -111,6 +114,7 @@ const LABELS = {
   'detail-requests': 'Detail Requests',
   'website-candidates': 'Website Review',
   'contributions': 'Contributions',
+  'zero-risk-admin': '0 Risk Agreements',
   'manual-lookup': 'Manual Lookup',
   'engine': 'Local Engines',
   'harvest-history': 'Harvest History',
@@ -336,6 +340,21 @@ async function bootstrap() {
       await new Promise(r => setTimeout(r, 1500));
     }
   }
+
+  // 5b. 0 Risk accounts get a dedicated portal and pay via revenue-share, so they
+  //     must skip the subscription gate below. A fresh joiner arriving from the
+  //     marketing CTA (?zero-risk=join) is enrolled into 0 Risk mode here.
+  try {
+    let zr = await api.zrStatus();
+    const wantsJoin = new URLSearchParams(window.location.search).get('zero-risk') === 'join';
+    if (zr.account_type !== 'zero_risk' && wantsJoin && me.user.role !== 'platform_admin') {
+      try { await api.zrEnroll(); zr = await api.zrStatus(); } catch { /* fall through to normal flow */ }
+    }
+    if (zr.account_type === 'zero_risk') {
+      createRoot(rootEl).render(createElement(ZeroRiskPortal, { user: me.user, status: zr }));
+      return;
+    }
+  } catch { /* not a 0 Risk account or endpoint unavailable — continue normally */ }
 
   // 6. Subscription gate: non-platform_admin users with no active sub get
   //    bounced to /subscribe. Bell has no free tier.

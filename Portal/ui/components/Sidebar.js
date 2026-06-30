@@ -53,6 +53,7 @@ export const NAV_SECTIONS = [
       { id: 'email-templates', label: 'Email Templates', icon: 'mail', placeholder: false, visibility: ['platform_admin'] },
       { id: 'website-candidates', label: 'Website Review', icon: 'globe', placeholder: false, visibility: ['platform_admin'] },
       { id: 'contributions', label: 'Contributions', icon: 'inbox', placeholder: false, visibility: ['platform_admin'] },
+      { id: 'zero-risk-admin', label: '0 Risk', icon: 'inbox', placeholder: false, visibility: ['platform_admin'] },
       { id: 'manual-lookup', label: 'Manual Lookup', icon: 'search', placeholder: false, visibility: ['platform_admin'] },
       { id: 'approvals',   label: 'Research Approvals', icon: 'research', placeholder: false, visibility: ['platform_admin'] },
       { id: 'recent-jobs', label: 'Recent Jobs', icon: 'history',  placeholder: false, visibility: ['platform_admin'] },
@@ -72,7 +73,7 @@ export const NAV_SECTIONS = [
 // we also hide them from the nav to avoid dead 403 links — even for a
 // platform_admin who happens to be on app.bell.qa.
 export const ADMIN_ONLY_NAV_IDS = new Set([
-  'sources', 'db-stats', 'admin-users', 'recent-jobs', 'sync', 'settings', 'dedup-queue', 'announcements', 'email-templates', 'contributions',
+  'sources', 'db-stats', 'admin-users', 'recent-jobs', 'sync', 'settings', 'dedup-queue', 'announcements', 'email-templates', 'contributions', 'zero-risk-admin',
 ]);
 
 // LOCAL-ENGINE-ONLY tools. These read local directory files and/or originate
