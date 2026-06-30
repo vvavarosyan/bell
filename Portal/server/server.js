@@ -34,6 +34,7 @@ import assemblyRouter          from './routes/assembly.js';
 import jobRunsRouter           from './routes/job_runs.js';
 import researchRouter          from './routes/research.js';
 import researchCandidatesRouter from './routes/research_candidates.js';
+import { userRouter as zeroRiskRouter, adminRouter as zeroRiskAdminRouter } from './routes/zero_risk.js';
 import { startPoller as startResearchPoller } from './research/poller.js';
 import openDataRouter          from './routes/open_data.js';
 import { startScheduler as startOpenDataScheduler } from './sources/qatar_open_data/scheduler.js';
@@ -179,6 +180,10 @@ app.use('/api/account',    requireAuth, accountRouter);
 // (no subscription gate) so the header bell always loads, like credits/stats.
 app.use('/api/notifications', requireAuth, notificationsRouter);
 
+// 0 Risk offering — authenticated but NOT subscription-gated (0 Risk accounts
+// pay via revenue-share, not a plan). Tenant-scoped inside the router.
+app.use('/api/zero-risk', requireAuth, zeroRiskRouter);
+
 // Local-engine-only tools — these read local directory files and/or originate
 // canonical data, so they run ONLY on Val's Mac (blocked on app AND admin).
 app.use('/api/sources',             ...localTools, sourcesRouter);
@@ -209,6 +214,7 @@ app.get('/api/settings/public-token/:name', requireAuth, async (req, res, next) 
 app.use('/api/settings',           ...adminOnly, settingsRouter);
 app.use('/api/email-templates',    ...adminOnly, emailTemplatesRouter);
 app.use('/api/contributions',      ...adminOnly, contributionsRouter);
+app.use('/api/zero-risk-admin',    ...adminOnly, zeroRiskAdminRouter);
 app.use('/api/admin/users',        ...adminOnly, adminUsersRouter);
 
 // Self-gating / public routers (handle their own auth internally):
