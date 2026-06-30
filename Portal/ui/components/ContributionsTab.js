@@ -98,7 +98,7 @@ export function ContributionsTab() {
           ? html`<div class="empty">No ${status === 'all' ? '' : status} ${view === 'entities' ? 'new records' : 'added details'}.</div>`
 
           : view === 'entities'
-            ? html`<div class="dr-list" style=${{ overflowY: 'auto', maxHeight: 'calc(100vh - 240px)', paddingBottom: '40px' }}>
+            ? html`<div class="dr-list" style=${{ overflowY: 'auto', maxHeight: 'calc(100vh - 170px)' }}>
                 ${rows.map(r => {
                   const isPerson = r.kind !== 'company';
                   const gated = isPerson && !peopleEnabled;
@@ -126,7 +126,7 @@ export function ContributionsTab() {
                 })}
               </div>`
 
-            : html`<div class="dr-list" style=${{ overflowY: 'auto', maxHeight: 'calc(100vh - 240px)', paddingBottom: '40px' }}>
+            : html`<div class="dr-list" style=${{ overflowY: 'auto', maxHeight: 'calc(100vh - 170px)' }}>
                 ${groups.map(g => html`
                   <div class="dr-card" key=${g.key}>
                     <div class="dr-card-head">
