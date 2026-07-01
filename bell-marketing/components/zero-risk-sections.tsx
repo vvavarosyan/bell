@@ -18,7 +18,7 @@ import {
  * user up and enrols them into 0 Risk mode.
  */
 
-const JOIN_URL = 'https://app.bell.qa/?zero-risk=join';
+const JOIN_URL = 'https://0risk.bell.qa';
 const GREEN = 'rgb(63 185 80)';
 const GREEN_BRIGHT = 'rgb(110 210 120)';
 

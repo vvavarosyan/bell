@@ -18,6 +18,18 @@ export const DEFAULT_LIST_SIZE = 100;
 const DOC_KINDS = ['cr', 'qid', 'company_doc', 'signed_agreement'];
 const REQUIRED_DOC_KINDS = ['cr', 'qid', 'signed_agreement'];   // company_doc optional in v1
 
+// Field validators (shared shape with the client). QID = 11 digits, phone = a
+// valid Qatar number, email = valid, CR/CC = numeric. Empty is NOT valid — these
+// gate the agreement, so a real value is required.
+const digitsOnly = (v) => String(v == null ? '' : v).replace(/\D/g, '');
+export const ZR_VALID = {
+  email: (v) => /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(String(v || '').trim()),
+  phone: (v) => { const d = digitsOnly(v); return d.length === 8 || (d.length === 11 && d.startsWith('974')); },
+  qid:   (v) => digitsOnly(v).length === 11,
+  cr:    (v) => { const d = digitsOnly(v); return d.length >= 4 && d.length <= 12; },
+  cc:    (v) => { const d = digitsOnly(v); return d.length >= 4 && d.length <= 15; },
+};
+
 // ---------------------------------------------------------------------------
 // Enrolment + status
 // ---------------------------------------------------------------------------
@@ -54,12 +66,14 @@ export async function profileCompleteness(tenantId) {
     ['Target industries',   Array.isArray(p.target_industries) && p.target_industries.length > 0],
     ['Target company size', Array.isArray(p.target_sizes) && p.target_sizes.length > 0],
     ['Decision-maker titles', Array.isArray(p.target_titles) && p.target_titles.length > 0],
-    // Legal identifiers — required, and auto-filled into the agreement (migration 068).
-    ['CR number',           has(p.cr_number)],
-    ['Computer Card number', has(p.cc_number)],
-    ['QID number',          has(p.qid_number)],
-    ['Contact number',      has(p.contact_number)],
-    ['Contact email',       has(p.contact_email)],
+    // Legal identifiers — required + FORMAT-VALIDATED, and auto-filled into the
+    // agreement (migration 068). Invalid values do not count toward completeness,
+    // so the agreement can't unlock with a bad QID/phone/email.
+    ['CR number',           ZR_VALID.cr(p.cr_number)],
+    ['Computer Card number', ZR_VALID.cc(p.cc_number)],
+    ['QID number',          ZR_VALID.qid(p.qid_number)],
+    ['Contact number',      ZR_VALID.phone(p.contact_number)],
+    ['Contact email',       ZR_VALID.email(p.contact_email)],
   ];
   const done = checks.filter(([, ok]) => ok).length;
   const pct = Math.round((done / checks.length) * 100);
