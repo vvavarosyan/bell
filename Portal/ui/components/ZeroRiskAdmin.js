@@ -14,15 +14,17 @@ const inp = { background: 'rgba(255,255,255,0.04)', border: '1px solid var(--bor
 
 export function ZeroRiskAdmin() {
   const [accounts, setAccounts] = useState([]);
+  const [all, setAll] = useState([]);
   const [lists, setLists] = useState([]);
   const [deals, setDeals] = useState([]);
   const [busy, setBusy] = useState(false);
   const [deliverIds, setDeliverIds] = useState({});   // requestId -> "id,id,id"
+  const [limEdits, setLimEdits] = useState({});        // tenantId -> { cpr, la }
 
   const load = useCallback(async () => {
     try {
-      const [a, l, d] = await Promise.all([api.zrAdminAccounts(), api.zrAdminLists(), api.zrAdminDeals()]);
-      setAccounts(a.rows || []); setLists(l.rows || []); setDeals(d.rows || []);
+      const [a, ac, l, d] = await Promise.all([api.zrAdminAccounts(), api.zrAdminAllAccounts(), api.zrAdminLists(), api.zrAdminDeals()]);
+      setAccounts(a.rows || []); setAll(ac.rows || []); setLists(l.rows || []); setDeals(d.rows || []);
     } catch (e) { toast('Could not load 0 Risk admin data: ' + e.message, 'error'); }
   }, []);
   useEffect(() => { load(); }, [load]);
@@ -42,6 +44,21 @@ export function ZeroRiskAdmin() {
   return html`
     <div style=${{ padding: '18px 22px', maxWidth: '1000px' }}>
       <div style=${{ ...muted, marginBottom: '14px' }}>Review 0 Risk applications, prepare prospect lists, and finalize deals. A finalized <b>won</b> deal grants the company +1 list request.</div>
+
+      <div style=${card}>
+        <div style=${{ fontWeight: 700, marginBottom: '8px' }}>All 0 Risk users ${all.length ? `(${all.length})` : ''}</div>
+        ${!all.length ? html`<div style=${muted}>No 0 Risk accounts yet.</div>` : all.map((a) => {
+          const e = limEdits[a.tenant_id] || {};
+          return html`<div key=${a.tenant_id} style=${{ borderTop: '1px solid var(--border)', paddingTop: '9px', marginTop: '9px', display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+            <strong style=${{ fontSize: '13px', minWidth: '150px' }}>${a.name}</strong>
+            <span style=${muted}>#${a.tenant_id} · ${a.zero_risk_status || '—'} · ${a.list_count} lists · ${a.wins} wins</span>
+            <span style=${{ flex: 1 }}></span>
+            <label style=${muted}>per-list <input style=${inp} value=${e.cpr ?? a.companies_per_request} onInput=${(ev) => setLimEdits((s) => ({ ...s, [a.tenant_id]: { ...s[a.tenant_id], cpr: ev.target.value } }))} /></label>
+            <label style=${muted}>allowance <input style=${{ ...inp, width: '70px' }} value=${e.la ?? a.lists_allowed} onInput=${(ev) => setLimEdits((s) => ({ ...s, [a.tenant_id]: { ...s[a.tenant_id], la: ev.target.value } }))} /></label>
+            <button style=${btn(false)} disabled=${busy} onClick=${() => act(() => api.zrAdminSetLimits(a.tenant_id, { companies_per_request: Number((limEdits[a.tenant_id] || {}).cpr ?? a.companies_per_request), lists_allowed: Number((limEdits[a.tenant_id] || {}).la ?? a.lists_allowed) }), 'Limits updated')}>Save limits</button>
+          </div>`;
+        })}
+      </div>
 
       <div style=${card}>
         <div style=${{ fontWeight: 700, marginBottom: '8px' }}>Pending approvals ${accounts.length ? `(${accounts.length})` : ''}</div>

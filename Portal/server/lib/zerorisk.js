@@ -43,15 +43,22 @@ export async function enroll(tenantId, actor = null) {
 /** Profile completeness for the onboarding meter. Returns { pct, missing[] }. */
 export async function profileCompleteness(tenantId) {
   const p = (await query(`SELECT * FROM tenant_profile WHERE tenant_id=$1`, [tenantId])).rows[0] || {};
+  const has = (v) => !!(v && String(v).trim());
   const checks = [
-    ['Company name',        !!(p.company_name && p.company_name.trim())],
-    ['Company overview',    !!(p.company_overview && p.company_overview.trim())],
-    ['Products / services', !!(p.products_services && String(p.products_services).trim()) || (Array.isArray(p.services_offered) && p.services_offered.length > 0)],
-    ['Existing customers',  !!(p.existing_customers && p.existing_customers.trim())],
+    ['Company name',        has(p.company_name)],
+    ['Company overview',    has(p.company_overview)],
+    ['Products / services', has(p.products_services) || (Array.isArray(p.services_offered) && p.services_offered.length > 0)],
+    ['Existing customers',  has(p.existing_customers)],
     ['Pricing',             Array.isArray(p.pricing_items) && p.pricing_items.length > 0],
     ['Target industries',   Array.isArray(p.target_industries) && p.target_industries.length > 0],
     ['Target company size', Array.isArray(p.target_sizes) && p.target_sizes.length > 0],
     ['Decision-maker titles', Array.isArray(p.target_titles) && p.target_titles.length > 0],
+    // Legal identifiers — required, and auto-filled into the agreement (migration 068).
+    ['CR number',           has(p.cr_number)],
+    ['Computer Card number', has(p.cc_number)],
+    ['QID number',          has(p.qid_number)],
+    ['Contact number',      has(p.contact_number)],
+    ['Contact email',       has(p.contact_email)],
   ];
   const done = checks.filter(([, ok]) => ok).length;
   const pct = Math.round((done / checks.length) * 100);
@@ -75,6 +82,7 @@ export async function getStatus(tenantId) {
     zero_risk_status: t.zero_risk_status || null,
     revenue_share_pct: agreement?.revenue_share_pct ?? REVENUE_SHARE_PCT,
     completeness,
+    agreement_ready: completeness.pct === 100,   // the agreement unlocks at 100% (incl. legal identifiers)
     documents: DOC_KINDS.map((k) => ({ kind: k, required: REQUIRED_DOC_KINDS.includes(k), ...(docByKind[k] || { status: 'missing' }) })),
     agreement,
     limits,
@@ -116,6 +124,31 @@ export async function submitForApproval(tenantId) {
   if (missingDocs.length) { const e = new Error('documents_missing'); e.missing = missingDocs; throw e; }
   await query(`UPDATE tenants SET zero_risk_status='pending_approval', updated_at=now() WHERE id=$1 AND account_type='zero_risk'`, [tenantId]);
   return { ok: true, status: 'pending_approval' };
+}
+
+/** Data for the in-portal agreement review — auto-filled with the company's own
+ *  details so the user reviews the exact terms (their CR/CC/QID/contact) before
+ *  signing & stamping. Mirrors what will appear on the document they receive. */
+export async function getAgreementTerms(tenantId) {
+  const p = (await query(`SELECT company_name, cr_number, cc_number, qid_number, contact_number, contact_email FROM tenant_profile WHERE tenant_id=$1`, [tenantId])).rows[0] || {};
+  const a = (await query(`SELECT revenue_share_pct, jurisdiction, status FROM zero_risk_agreements WHERE tenant_id=$1 ORDER BY id DESC LIMIT 1`, [tenantId])).rows[0] || {};
+  return {
+    company_name: p.company_name || null,
+    cr_number: p.cr_number || null, cc_number: p.cc_number || null, qid_number: p.qid_number || null,
+    contact_number: p.contact_number || null, contact_email: p.contact_email || null,
+    revenue_share_pct: a.revenue_share_pct ?? REVENUE_SHARE_PCT,
+    jurisdiction: a.jurisdiction || 'State of Qatar',
+    status: a.status || 'presented',
+  };
+}
+
+/** User elects to move from 0 Risk to a normal (paid) Bell account. Flips the
+ *  account type so the app stops diverting them to the 0 Risk portal (their 0
+ *  Risk history is retained). They still complete the /subscribe flow to unlock
+ *  the full product. */
+export async function switchToPaid(tenantId) {
+  await query(`UPDATE tenants SET account_type='standard', updated_at=now() WHERE id=$1 AND account_type='zero_risk'`, [tenantId]);
+  return { ok: true };
 }
 
 // ---------------------------------------------------------------------------
@@ -192,6 +225,21 @@ export async function listDeals(tenantId) {
 // ---------------------------------------------------------------------------
 // ADMIN (admin.bell.qa / local engine) — approvals, list prep, finalization
 // ---------------------------------------------------------------------------
+
+/** ALL 0 Risk accounts (not just pending) with status, limits + quick counts. */
+export async function adminAllAccounts() {
+  return (await query(`
+    SELECT t.id AS tenant_id, t.name, t.zero_risk_status,
+           COALESCE(l.companies_per_request,100) AS companies_per_request,
+           COALESCE(l.lists_allowed,0)          AS lists_allowed,
+           COALESCE(l.finalized_won_count,0)    AS finalized_won_count,
+           (SELECT count(*) FROM zero_risk_list_requests r WHERE r.tenant_id=t.id) AS list_count,
+           (SELECT count(*) FROM zero_risk_deals d WHERE d.tenant_id=t.id AND d.admin_status='finalized_won') AS wins
+      FROM tenants t
+      LEFT JOIN zero_risk_limits l ON l.tenant_id=t.id
+     WHERE t.account_type='zero_risk'
+     ORDER BY t.updated_at DESC`)).rows;
+}
 
 export async function adminPendingAccounts() {
   return (await query(`
