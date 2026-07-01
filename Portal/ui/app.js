@@ -356,6 +356,10 @@ async function bootstrap() {
   try {
     let zr = await api.zrStatus();
     let wantsJoin = new URLSearchParams(window.location.search).get('zero-risk') === 'join';
+    // On the dedicated 0 Risk surface (0risk.bell.qa) EVERY visitor is a 0 Risk
+    // user — enrol + show the portal with a clean URL, no ?zero-risk=join needed.
+    const zrHost = /^0risk\b/i.test(location.hostname);
+    if (zrHost) wantsJoin = true;
     try { if (!wantsJoin && localStorage.getItem('bdi_zr_join') === '1') wantsJoin = true; } catch { /* ignore */ }
     if (zr.account_type !== 'zero_risk' && wantsJoin && me.user.role !== 'platform_admin') {
       try { await api.zrEnroll(); zr = await api.zrStatus(); } catch { /* fall through to normal flow */ }

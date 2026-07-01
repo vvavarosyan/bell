@@ -16,6 +16,15 @@ const rightRail = { width: '300px', flexShrink: 0, borderLeft: '1px solid var(--
 const muted = { color: 'var(--text-dim)', fontSize: '12px', lineHeight: 1.55 };
 
 const has = (v) => !!String(v == null ? '' : v).trim();
+// Field validators (mirror server ZR_VALID): QID = 11 digits, phone = valid Qatar
+// number, email valid, CR/CC numeric. Empty is invalid — these gate the agreement.
+const V = {
+  email: (v) => /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(String(v || '').trim()),
+  phone: (v) => { const d = String(v || '').replace(/\D/g, ''); return d.length === 8 || (d.length === 11 && d.startsWith('974')); },
+  qid:   (v) => String(v || '').replace(/\D/g, '').length === 11,
+  cr:    (v) => { const d = String(v || '').replace(/\D/g, ''); return d.length >= 4 && d.length <= 12; },
+  cc:    (v) => { const d = String(v || '').replace(/\D/g, ''); return d.length >= 4 && d.length <= 15; },
+};
 const toArr = (s) => String(s || '').split(/[,\n]/).map((x) => x.trim()).filter(Boolean);
 const arrStr = (a) => (Array.isArray(a) ? a.join(', ') : '');
 const fileToBase64 = (file) => new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result).split(',')[1] || ''); r.onerror = rej; r.readAsDataURL(file); });
@@ -38,7 +47,8 @@ async function downloadAgreementPdf(t = {}) {
   doc.setFont('helvetica', 'italic'); doc.setFontSize(9); doc.setTextColor(150, 40, 40);
   doc.text('DRAFT — pending legal review. Final wording subject to confirmation by counsel.', PW / 2, y, { align: 'center' }); y += 20;
   doc.setTextColor(20, 20, 20);
-  P(`This 0 Risk Agreement ("Agreement") is made on __________ between Bell Data Intelligence ("Bell") and ${t.company_name || '[Company]'} ("the Company").`);
+  const today = new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'long', year: 'numeric' });
+  P(`This 0 Risk Agreement ("Agreement") is made on ${today} between Bell Data Intelligence ("Bell") and ${t.company_name || '[Company]'} ("the Company").`);
   H('1. Parties & details');
   P(`Company: ${t.company_name || '____'}     CR No.: ${t.cr_number || '____'}     Computer Card No.: ${t.cc_number || '____'}`);
   P(`Authorised signatory QID No.: ${t.qid_number || '____'}     Contact: ${[t.contact_number, t.contact_email].filter(Boolean).join('   ·   ') || '____'}`);
@@ -150,8 +160,8 @@ export function ZeroRiskPortal({ user = null, status: initialStatus = null }) {
     ['Products / services', has(f.products_services) || toArr(f.services).length > 0], ['Existing customers', has(f.existing_customers)],
     ['Pricing', toArr(f.pricing).length > 0], ['Target industries', toArr(f.target_industries).length > 0],
     ['Target company size', toArr(f.target_sizes).length > 0], ['Decision-maker titles', toArr(f.target_titles).length > 0],
-    ['CR number', has(f.cr_number)], ['Computer Card number', has(f.cc_number)], ['QID number', has(f.qid_number)],
-    ['Contact number', has(f.contact_number)], ['Contact email', has(f.contact_email)],
+    ['CR number', V.cr(f.cr_number)], ['Computer Card number', V.cc(f.cc_number)], ['QID number', V.qid(f.qid_number)],
+    ['Contact number', V.phone(f.contact_number)], ['Contact email', V.email(f.contact_email)],
   ];
   const donePct = Math.round((checklist.filter((c) => c[1]).length / checklist.length) * 100);
   const st = status || {};
@@ -230,11 +240,15 @@ function renderOverview({ phase, donePct, setSection, approved }) {
 }
 
 function renderProfile({ f, set, busy, saveProfile }) {
-  const fld = (k, label, opts = {}) => html`<div class=${'sys-field' + (opts.full ? ' full' : '')}>
-    <label>${label}</label>
-    ${opts.area ? html`<textarea class="sys-textarea" value=${f[k]} onInput=${set(k)} placeholder=${opts.ph || ''}></textarea>`
-      : html`<input class="sys-input" value=${f[k]} onInput=${set(k)} placeholder=${opts.ph || ''} />`}
-  </div>`;
+  const fld = (k, label, opts = {}) => {
+    const bad = opts.validate && has(f[k]) && !opts.validate(f[k]);
+    return html`<div class=${'sys-field' + (opts.full ? ' full' : '')}>
+      <label>${label}</label>
+      ${opts.area ? html`<textarea class="sys-textarea" value=${f[k]} onInput=${set(k)} placeholder=${opts.ph || ''}></textarea>`
+        : html`<input class="sys-input" style=${bad ? { borderColor: 'var(--red)' } : {}} value=${f[k]} onInput=${set(k)} placeholder=${opts.ph || ''} />`}
+      ${bad ? html`<span style=${{ fontSize: '11px', color: 'var(--red)' }}>${opts.err || 'Invalid'}</span>` : null}
+    </div>`;
+  };
   return html`
     <div class="sys-section">
       <h2>Company & customers</h2>
@@ -261,11 +275,11 @@ function renderProfile({ f, set, busy, saveProfile }) {
       <h2>Legal details</h2>
       <div class="sys-hint">Required — these are auto-filled into your agreement.</div>
       <div class="sys-grid">
-        ${fld('cr_number', 'CR number (Commercial Registration)')}
-        ${fld('cc_number', 'Computer Card (CC) number')}
-        ${fld('qid_number', 'Authorised signatory QID number')}
-        ${fld('contact_number', 'Contact number')}
-        ${fld('contact_email', 'Contact email')}
+        ${fld('cr_number', 'CR number (Commercial Registration)', { validate: V.cr, err: 'Numbers only (4–12 digits).' })}
+        ${fld('cc_number', 'Computer Card (CC) number', { validate: V.cc, err: 'Numbers only.' })}
+        ${fld('qid_number', 'Authorised signatory QID number', { validate: V.qid, err: 'QID must be exactly 11 digits.' })}
+        ${fld('contact_number', 'Contact number', { validate: V.phone, err: 'Valid Qatar number — 8 digits (optionally +974).' })}
+        ${fld('contact_email', 'Contact email', { validate: V.email, err: 'Enter a valid email address.' })}
       </div>
       <div class="sys-actions"><button class="sys-btn" disabled=${busy} onClick=${saveProfile}>${busy ? 'Saving…' : 'Save profile'}</button></div>
     </div>`;
@@ -288,10 +302,18 @@ function renderDocuments({ docByKind, uploadDoc }) {
 }
 
 function renderAgreement({ st, donePct, terms, docByKind, uploadDoc, signedConfirmed, setSignedConfirmed, submitApp, busy }) {
-  if (!st.agreement_ready && donePct < 100) {
+  if (!st.agreement_ready) {
     return html`<div class="sys-section">
       <h2>Agreement</h2>
-      <div class="sys-hint">Your agreement unlocks once your profile is 100% complete — including your CR, Computer Card, QID, contact number and email, which are filled into it automatically. You’re at <b style=${{ color: 'var(--text)' }}>${donePct}%</b>. Finish the profile, then come back to review and sign.</div>
+      <div class="sys-hint">Your agreement unlocks once your profile is 100% complete (with a valid CR, Computer Card, QID, contact number and email — these fill into it automatically). You’re at <b style=${{ color: 'var(--text)' }}>${donePct}%</b>. Complete and save your profile, then come back to review and sign.</div>
+    </div>`;
+  }
+  const crUp = (docByKind.cr || {}).status && docByKind.cr.status !== 'missing';
+  const qidUp = (docByKind.qid || {}).status && docByKind.qid.status !== 'missing';
+  if (!crUp || !qidUp) {
+    return html`<div class="sys-section">
+      <h2>Agreement</h2>
+      <div class="sys-hint">Before you can download and sign the agreement, please upload your <b style=${{ color: 'var(--text)' }}>CR</b> and <b style=${{ color: 'var(--text)' }}>QID</b> in the <b style=${{ color: 'var(--text)' }}>Documents</b> section.</div>
     </div>`;
   }
   const t = terms || {};
