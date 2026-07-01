@@ -21,6 +21,51 @@ const arrStr = (a) => (Array.isArray(a) ? a.join(', ') : '');
 const fileToBase64 = (file) => new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result).split(',')[1] || ''); r.onerror = rej; r.readAsDataURL(file); });
 const DOC_LABELS = { cr: 'Commercial Registration (CR)', qid: 'Authorised signatory QID', company_doc: 'Company documentation', signed_agreement: 'Signed & stamped agreement' };
 
+// Generate the company's agreement as a filled PDF (client-side jsPDF via the
+// import map). Auto-fills the company's CR/CC/QID/contact + the revenue share.
+async function downloadAgreementPdf(t = {}) {
+  const mod = await import('jspdf');
+  const JsPDF = mod.jsPDF || mod.default;
+  const doc = new JsPDF({ unit: 'pt', format: 'a4' });
+  const M = 56, PW = doc.internal.pageSize.getWidth(), PH = doc.internal.pageSize.getHeight(), W = PW - M * 2;
+  let y = M;
+  const ensure = (h) => { if (y + h > PH - M) { doc.addPage(); y = M; } };
+  const H = (txt, size = 12) => { ensure(size + 14); doc.setFont('helvetica', 'bold'); doc.setFontSize(size); doc.text(txt, M, y); y += size + 8; };
+  const P = (txt, size = 10) => { doc.setFont('helvetica', 'normal'); doc.setFontSize(size); for (const ln of doc.splitTextToSize(txt, W)) { ensure(size + 4); doc.text(ln, M, y); y += size + 4; } y += 6; };
+  const pct = t.revenue_share_pct ?? 15;
+  const juris = t.jurisdiction || 'State of Qatar';
+  doc.setFont('helvetica', 'bold'); doc.setFontSize(15); doc.text('BELL DATA INTELLIGENCE — 0 RISK AGREEMENT', PW / 2, y, { align: 'center' }); y += 22;
+  doc.setFont('helvetica', 'italic'); doc.setFontSize(9); doc.setTextColor(150, 40, 40);
+  doc.text('DRAFT — pending legal review. Final wording subject to confirmation by counsel.', PW / 2, y, { align: 'center' }); y += 20;
+  doc.setTextColor(20, 20, 20);
+  P(`This 0 Risk Agreement ("Agreement") is made on __________ between Bell Data Intelligence ("Bell") and ${t.company_name || '[Company]'} ("the Company").`);
+  H('1. Parties & details');
+  P(`Company: ${t.company_name || '____'}     CR No.: ${t.cr_number || '____'}     Computer Card No.: ${t.cc_number || '____'}`);
+  P(`Authorised signatory QID No.: ${t.qid_number || '____'}     Contact: ${[t.contact_number, t.contact_email].filter(Boolean).join('   ·   ') || '____'}`);
+  H('2. The arrangement');
+  P('Bell provides the Company with curated, deeply-researched lists of prospective customers ("Provided Companies") at no upfront cost. The Company pays Bell a share of the revenue it earns from any Provided Company, as set out below.');
+  H('3. Revenue share');
+  P(`The Company shall pay Bell ${pct}% of all revenue it (or any affiliate) earns from a binding sale, contract or engagement with any Provided Company, for the full duration of that engagement including renewals, whether concluded during the term or within a twelve-month tail period. Amounts are payable within 30 days of invoicing or receipt.`);
+  H('4. Reporting & finalisation');
+  P('The Company shall record the status of each dealing with a Provided Company in the Bell portal. A deal is a finalised, revenue-share-bearing "Closed Deal" only when Bell marks it finalised. The Company shall keep accurate records and provide statements on request; Bell may audit them.');
+  H('5. Non-circumvention & confidentiality');
+  P('The Company shall not avoid or reduce the revenue share by routing deals through third parties, mischaracterising revenue, or transacting off-book. The lists and research are Bell’s confidential property and may not be resold, shared or disclosed.');
+  H('6. Term, breach & enforcement');
+  P('This Agreement continues until terminated on 30 days’ notice; Bell may suspend or terminate immediately for breach or non-payment. Failure to report a Closed Deal, underpayment, circumvention, or misuse of the lists is a material breach entitling Bell to recover all amounts owed plus costs and to pursue all legal remedies. The Company acknowledges this signed and stamped Agreement is binding and may be relied upon as evidence in proceedings.');
+  H('7. Data protection & governing law');
+  P(`The Company is responsible for using any information lawfully, including under Qatar Law No. (13) of 2016 (PDPPL). This Agreement is governed by the laws of the ${juris}, and the Parties submit to its competent courts.`);
+  ensure(150);
+  y += 8; doc.setFont('helvetica', 'bold'); doc.setFontSize(11); doc.text('Signatures', M, y); y += 22;
+  doc.setFont('helvetica', 'normal'); doc.setFontSize(10);
+  const c2 = M + W / 2 + 10;
+  doc.text('For Bell Data Intelligence', M, y); doc.text('For ' + (t.company_name || 'the Company'), c2, y); y += 34;
+  doc.text('Name: __________________', M, y); doc.text('Name: __________________', c2, y); y += 26;
+  doc.text('Signature: ______________', M, y); doc.text('Signature: ______________', c2, y); y += 26;
+  doc.text('Date: __________________', M, y); doc.text('Date: __________________', c2, y); y += 30;
+  doc.text('Company stamp:', c2, y);
+  doc.save(`Bell-0Risk-Agreement-${String(t.company_name || 'company').replace(/[^a-z0-9]+/gi, '-')}.pdf`);
+}
+
 export function ZeroRiskPortal({ user = null, status: initialStatus = null }) {
   const [status, setStatus] = useState(initialStatus);
   const [loading, setLoading] = useState(!initialStatus);
@@ -254,12 +299,15 @@ function renderAgreement({ st, donePct, terms, docByKind, uploadDoc, signedConfi
   const signed = (docByKind.signed_agreement || {}).status && docByKind.signed_agreement.status !== 'missing';
   return html`<div class="sys-section">
     <h2>Your 0 Risk Agreement</h2>
-    <div class="sys-hint">Review the details below (auto-filled from your profile). Your account manager will provide the full agreement containing these details — sign it, affix your company stamp, and upload it here.</div>
+    <div class="sys-hint">Review the details below (auto-filled from your profile), download the agreement, sign it and affix your company stamp, then upload the signed copy.</div>
     <div style=${{ maxWidth: '620px', border: '1px solid var(--border)', borderRadius: '10px', background: 'var(--bg-elev)', padding: '16px 18px' }}>
       ${line('Company', t.company_name)} ${line('CR number', t.cr_number)} ${line('Computer Card', t.cc_number)}
       ${line('Signatory QID', t.qid_number)} ${line('Contact', [t.contact_number, t.contact_email].filter(Boolean).join(' · '))}
       ${line('Revenue share', (t.revenue_share_pct ?? 15) + '% of revenue from provided companies')}
       <div style=${{ display: 'flex', gap: '10px', padding: '5px 0', fontSize: '13px' }}><span style=${{ color: 'var(--text-muted)', minWidth: '160px' }}>Governing law</span><span>${t.jurisdiction || 'State of Qatar'}</span></div>
+    </div>
+    <div class="sys-actions" style=${{ marginTop: '16px' }}>
+      <button class="sys-btn" onClick=${() => downloadAgreementPdf(t).catch((e) => toast('Could not build the PDF: ' + (e.message || e), 'error'))}>Download agreement (PDF)</button>
     </div>
     <div style=${{ display: 'flex', alignItems: 'center', gap: '12px', marginTop: '16px', maxWidth: '620px' }}>
       <label class="sys-btn sys-btn-secondary" style=${{ cursor: 'pointer' }}><input type="file" accept=".pdf,image/*" style=${{ display: 'none' }} onChange=${(e) => uploadDoc('signed_agreement', e.target.files && e.target.files[0])} />Upload signed & stamped agreement</label>
