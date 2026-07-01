@@ -9,6 +9,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { html } from '../lib/html.js';
 import { api } from '../lib/api.js';
 import { toast } from '../lib/toast.js';
+import { NotificationBell } from './NotificationBell.js';
 
 const page = { display: 'flex', flexDirection: 'column', height: '100vh', background: 'var(--bg)', color: 'var(--text)' };
 const header = { display: 'flex', alignItems: 'center', gap: '12px', padding: '12px 20px', borderBottom: '1px solid var(--border)', background: 'var(--bg-elev)', flexShrink: 0 };
@@ -179,6 +180,7 @@ export function ZeroRiskPortal({ user = null, status: initialStatus = null }) {
         <span style=${{ ...muted, borderLeft: '1px solid var(--border)', paddingLeft: '12px' }}>Pay only when you win — ${st.revenue_share_pct ?? 15}% revenue share</span>
         <span style=${{ flex: 1 }}></span>
         ${user?.email ? html`<span style=${muted}>${user.email}</span>` : null}
+        <${NotificationBell} />
         <button class="sys-btn sys-btn-secondary" onClick=${signOut}>Sign out</button>
       </div>
 

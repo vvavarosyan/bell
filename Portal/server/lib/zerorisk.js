@@ -273,7 +273,7 @@ export async function adminApprove(tenantId, by) {
   await query(`INSERT INTO zero_risk_limits (tenant_id, lists_allowed, updated_by) VALUES ($1,1,$2)
                 ON CONFLICT (tenant_id) DO UPDATE SET lists_allowed=GREATEST(zero_risk_limits.lists_allowed,1), updated_at=now()`, [tenantId, by]);
   await notifyTenant(tenantId, { category: 'zero_risk', type: 'zr_approved', title: 'Your 0 Risk account is approved',
-    body: 'You can now request your first list of 100 perfectly-matched prospects.', icon: 'check' }).catch(() => {});
+    body: 'You can now request your first list of 100 perfectly-matched prospects.', icon: 'check', email: true }).catch(() => {});
   return { ok: true, status: 'approved' };
 }
 
@@ -301,7 +301,7 @@ export async function adminDeliverList(requestId, items, by) {
   }
   await query(`UPDATE zero_risk_list_requests SET status='delivered', prepared_by=$2, delivered_at=now() WHERE id=$1`, [requestId, by]);
   await notifyTenant(req.tenant_id, { category: 'zero_risk', type: 'zr_list_delivered', title: 'Your prospect list is ready',
-    body: `${(items || []).length} companies are ready to work in your 0 Risk portal.`, icon: 'inbox' }).catch(() => {});
+    body: `${(items || []).length} companies are ready to work in your 0 Risk portal.`, icon: 'inbox', email: true }).catch(() => {});
   return { ok: true, delivered: (items || []).length };
 }
 
@@ -318,7 +318,7 @@ export async function adminFinalizeDeal(dealId, adminStatus, by) {
                  ON CONFLICT (tenant_id) DO UPDATE SET lists_allowed = zero_risk_limits.lists_allowed+1,
                    finalized_won_count = zero_risk_limits.finalized_won_count+1, updated_at=now()`, [d.tenant_id, by]);
     await notifyTenant(d.tenant_id, { category: 'zero_risk', type: 'zr_deal_won', title: 'Deal confirmed — new list unlocked',
-      body: 'A deal was finalized as won. You’ve earned another list request.', icon: 'check' }).catch(() => {});
+      body: 'A deal was finalized as won. You’ve earned another list request.', icon: 'check', email: true }).catch(() => {});
   }
   return { ok: true, admin_status: adminStatus };
 }
