@@ -186,8 +186,11 @@ export const api = {
   zrRequestList:          () => request('/api/zero-risk/list-requests', { method: 'POST', body: '{}' }),
   zrDeals:                () => request('/api/zero-risk/deals'),
   zrReportDeal:           (body) => request('/api/zero-risk/deals', { method: 'POST', body: JSON.stringify(body) }),
+  zrAgreementTerms:       () => request('/api/zero-risk/agreement-terms'),
+  zrSwitch:               () => request('/api/zero-risk/switch', { method: 'POST', body: '{}' }),
   // ---- 0 Risk (admin) ----
   zrAdminAccounts:        () => request('/api/zero-risk-admin/accounts'),
+  zrAdminAllAccounts:     () => request('/api/zero-risk-admin/accounts/all'),
   zrAdminApprove:         (tid) => request(`/api/zero-risk-admin/accounts/${tid}/approve`, { method: 'POST', body: '{}' }),
   zrAdminReject:          (tid, note) => request(`/api/zero-risk-admin/accounts/${tid}/reject`, { method: 'POST', body: JSON.stringify({ note }) }),
   zrAdminLists:           () => request('/api/zero-risk-admin/lists'),

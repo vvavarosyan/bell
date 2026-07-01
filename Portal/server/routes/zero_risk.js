@@ -8,8 +8,8 @@
 import { Router } from 'express';
 import {
   enroll, getStatus, profileCompleteness, saveDocument, submitForApproval,
-  requestList, listRequests, reportDeal, listDeals,
-  adminPendingAccounts, adminApprove, adminReject, adminPendingLists,
+  requestList, listRequests, reportDeal, listDeals, getAgreementTerms, switchToPaid,
+  adminPendingAccounts, adminAllAccounts, adminApprove, adminReject, adminPendingLists,
   adminDeliverList, adminFinalizeDeal, adminSetLimits,
 } from '../lib/zerorisk.js';
 import { query } from '../db.js';
@@ -40,7 +40,8 @@ userRouter.post('/enroll', async (req, res, next) => {
 // Reuses tenant_profile (the ICP builder's table). GET returns the full profile.
 const PROFILE_COLS = ['company_name', 'company_overview', 'existing_customers', 'services_offered',
   'products_services', 'pricing_items', 'target_industries', 'target_sizes', 'target_titles',
-  'target_keywords', 'target_tech_stack', 'target_has_website', 'icp_notes'];
+  'target_keywords', 'target_tech_stack', 'target_has_website', 'icp_notes',
+  'cr_number', 'cc_number', 'qid_number', 'contact_number', 'contact_email'];
 
 userRouter.get('/profile', async (req, res, next) => {
   try {
@@ -62,6 +63,9 @@ userRouter.put('/profile', async (req, res, next) => {
     if (b.products_services !== undefined)  set('products_services', String(b.products_services || ''));
     if (b.icp_notes !== undefined)          set('icp_notes', String(b.icp_notes || ''));
     if (b.target_has_website !== undefined) set('target_has_website', b.target_has_website || null);
+    for (const s of ['cr_number', 'cc_number', 'qid_number', 'contact_number', 'contact_email']) {
+      if (b[s] !== undefined) set(s, String(b[s] || '').slice(0, 120));
+    }
     if (Array.isArray(b.services_offered))  set('services_offered', JSON.stringify(b.services_offered));
     if (Array.isArray(b.pricing_items))     set('pricing_items', JSON.stringify(b.pricing_items));
     for (const arr of ['target_industries', 'target_sizes', 'target_titles', 'target_keywords', 'target_tech_stack']) {
@@ -101,6 +105,16 @@ userRouter.post('/submit', async (req, res, next) => {
     if (err.message === 'documents_missing') return res.status(400).json({ error: 'documents_missing', missing: err.missing });
     next(err);
   }
+});
+
+userRouter.get('/agreement-terms', async (req, res, next) => {
+  try { if (!tid(req)) return res.status(401).json({ error: 'no_tenant' }); res.json(await getAgreementTerms(tid(req))); }
+  catch (err) { next(err); }
+});
+
+userRouter.post('/switch', async (req, res, next) => {
+  try { if (!tid(req)) return res.status(401).json({ error: 'no_tenant' }); res.json(await switchToPaid(tid(req))); }
+  catch (err) { next(err); }
 });
 
 userRouter.get('/list-requests', async (req, res, next) => {
@@ -143,6 +157,9 @@ export const adminRouter = Router();
 
 adminRouter.get('/accounts', async (req, res, next) => {
   try { res.json({ rows: await adminPendingAccounts() }); } catch (err) { next(err); }
+});
+adminRouter.get('/accounts/all', async (req, res, next) => {
+  try { res.json({ rows: await adminAllAccounts() }); } catch (err) { next(err); }
 });
 adminRouter.post('/accounts/:tenantId/approve', async (req, res, next) => {
   try { res.json(await adminApprove(Number(req.params.tenantId), actor(req))); } catch (err) { next(err); }
