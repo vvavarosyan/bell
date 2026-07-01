@@ -1,26 +1,19 @@
 // 0 Risk portal — full-screen experience for a tenant whose account_type is
-// 'zero_risk'. Three-column layout: left nav · main section · right progress.
-// Completeness updates LIVE (computed client-side from the form). The agreement
-// (auto-filled with the company's CR/CC/QID/contact) unlocks at 100% for the
-// user to review, sign & stamp, and upload — then submit for admin approval.
-// Includes an "Upgrade to Bell" section to switch to a paid subscription.
+// 'zero_risk'. Uses Bell's own design system (sys-page / settings-rail /
+// sys-section / sys-grid / sys-field / sys-input / sys-btn) so it matches the
+// rest of the product. Left rail nav · main body · right live-progress rail.
+// Completeness updates LIVE from the form. The agreement (auto-filled with the
+// company's CR/CC/QID/contact) unlocks at 100% to review, sign, upload → submit.
 
 import { useState, useEffect, useCallback } from 'react';
 import { html } from '../lib/html.js';
 import { api } from '../lib/api.js';
 import { toast } from '../lib/toast.js';
 
-const shell = { minHeight: '100vh', background: 'var(--bg, #0e1320)', color: 'var(--text, #e9edf5)' };
-const topbar = { display: 'flex', alignItems: 'center', gap: '12px', padding: '12px 22px', borderBottom: '1px solid var(--border)', position: 'sticky', top: 0, background: 'var(--bg-elev-1, #141a2b)', zIndex: 10, flexWrap: 'wrap' };
-const bodyRow = { display: 'flex', alignItems: 'flex-start', gap: '0', flexWrap: 'wrap' };
-const leftNav = { width: '210px', flexShrink: 0, borderRight: '1px solid var(--border)', padding: '16px 10px', minHeight: 'calc(100vh - 54px)' };
-const mainCol = { flex: 1, minWidth: '340px', padding: '22px 24px', maxWidth: '720px' };
-const rightBar = { width: '290px', flexShrink: 0, borderLeft: '1px solid var(--border)', padding: '18px 18px' };
-const card = { background: 'var(--bg-elev-2, #1a2034)', border: '1px solid var(--border)', borderRadius: '12px', padding: '18px 20px', marginBottom: '16px' };
-const field = { background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: '6px', padding: '9px 11px', fontSize: '13px', width: '100%', boxSizing: 'border-box' };
-const lbl = { fontSize: '12px', fontWeight: 600, color: 'var(--text)', margin: '12px 0 5px' };
-const muted = { color: 'var(--text-muted)', fontSize: '12.5px', lineHeight: 1.55 };
-const btn = (p) => ({ background: p ? 'var(--accent)' : 'rgba(255,255,255,0.05)', border: '1px solid ' + (p ? 'var(--accent)' : 'var(--border)'), color: p ? '#fff' : 'var(--text)', borderRadius: '7px', padding: '9px 16px', fontSize: '13px', fontWeight: 600, cursor: 'pointer' });
+const page = { display: 'flex', flexDirection: 'column', height: '100vh', background: 'var(--bg)', color: 'var(--text)' };
+const header = { display: 'flex', alignItems: 'center', gap: '12px', padding: '12px 20px', borderBottom: '1px solid var(--border)', background: 'var(--bg-elev)', flexShrink: 0 };
+const rightRail = { width: '300px', flexShrink: 0, borderLeft: '1px solid var(--border)', background: 'var(--bg-elev)', padding: '22px 20px', overflowY: 'auto' };
+const muted = { color: 'var(--text-dim)', fontSize: '12px', lineHeight: 1.55 };
 
 const has = (v) => !!String(v == null ? '' : v).trim();
 const toArr = (s) => String(s || '').split(/[,\n]/).map((x) => x.trim()).filter(Boolean);
@@ -58,8 +51,6 @@ export function ZeroRiskPortal({ user = null, status: initialStatus = null }) {
   }, []);
 
   useEffect(() => { (async () => { setLoading(true); await Promise.all([initialStatus ? Promise.resolve() : loadStatus(), loadProfile()]); setLoading(false); })(); }, [loadStatus, loadProfile, initialStatus]);
-
-  // Load the auto-filled agreement terms when viewing the agreement section.
   useEffect(() => { if (section === 'agreement' && !terms) { api.zrAgreementTerms().then(setTerms).catch(() => {}); } }, [section, terms]);
 
   const set = (k) => (e) => setF((s) => ({ ...s, [k]: e.target.value }));
@@ -121,32 +112,30 @@ export function ZeroRiskPortal({ user = null, status: initialStatus = null }) {
   const st = status || {};
   const phase = st.zero_risk_status || 'onboarding';
   const approved = phase === 'approved';
-
   const NAV = [
     ['overview', 'Overview'], ['profile', 'Company profile'], ['documents', 'Documents'],
     ['agreement', 'Agreement'], ...(approved ? [['lists', 'My lists']] : []), ['upgrade', 'Upgrade to Bell'],
   ];
 
   return html`
-    <div style=${shell}>
-      <div style=${topbar}>
-        <strong style=${{ fontSize: '15px' }}>Bell · <span style=${{ color: 'var(--accent)' }}>0 Risk</span></strong>
-        <span style=${muted}>Pay only when you win — ${st.revenue_share_pct ?? 15}% revenue share</span>
+    <div style=${page}>
+      <div style=${header}>
+        <strong style=${{ fontSize: '15px', letterSpacing: '.3px' }}>Bell <span style=${{ color: 'var(--text-dim)', fontWeight: 400 }}>/</span> <span style=${{ color: 'var(--accent-bright)' }}>0 Risk</span></strong>
+        <span style=${{ ...muted, borderLeft: '1px solid var(--border)', paddingLeft: '12px' }}>Pay only when you win — ${st.revenue_share_pct ?? 15}% revenue share</span>
         <span style=${{ flex: 1 }}></span>
         ${user?.email ? html`<span style=${muted}>${user.email}</span>` : null}
-        <button onClick=${signOut} style=${btn(false)}>Sign out</button>
+        <button class="sys-btn sys-btn-secondary" onClick=${signOut}>Sign out</button>
       </div>
-      ${loading ? html`<div style=${{ padding: '30px', ...muted }}>Loading…</div>` : html`
-      <div style=${bodyRow}>
-        <div style=${leftNav}>
-          ${NAV.map(([id, label]) => html`<button key=${id} onClick=${() => setSection(id)}
-            style=${{ display: 'block', width: '100%', textAlign: 'left', padding: '9px 12px', marginBottom: '3px', borderRadius: '7px', cursor: 'pointer',
-              fontSize: '13px', fontWeight: 600, border: '1px solid ' + (section === id ? 'var(--accent)' : 'transparent'),
-              background: section === id ? 'rgba(96,165,250,0.12)' : 'transparent', color: section === id ? 'var(--text)' : 'var(--text-muted)' }}>${label}</button>`)}
-          <div style=${{ ...muted, marginTop: '16px', padding: '0 12px' }}>Status: <b style=${{ color: 'var(--text)' }}>${phaseLabel(phase)}</b></div>
+
+      ${loading ? html`<div class="sys-page"><div class="sys-body"><div class="empty">Loading…</div></div></div>` : html`
+      <div class="sys-page">
+        <div class="settings-rail">
+          <div class="settings-rail-title">0 Risk</div>
+          ${NAV.map(([id, label]) => html`<button key=${id} class=${'settings-rail-item' + (section === id ? ' active' : '')} onClick=${() => setSection(id)}>${label}</button>`)}
+          <div style=${{ marginTop: 'auto', padding: '14px 10px 4px', ...muted }}>Status<br/><b style=${{ color: 'var(--text)', fontSize: '13px' }}>${phaseLabel(phase)}</b></div>
         </div>
 
-        <div style=${mainCol}>
+        <div class="sys-body">
           ${section === 'overview' ? renderOverview({ phase, donePct, setSection, approved })
             : section === 'profile' ? renderProfile({ f, set, busy, saveProfile })
             : section === 'documents' ? renderDocuments({ docByKind, uploadDoc })
@@ -156,16 +145,19 @@ export function ZeroRiskPortal({ user = null, status: initialStatus = null }) {
             : null}
         </div>
 
-        <div style=${rightBar}>
-          <div style=${{ fontSize: '15px', fontWeight: 700, marginBottom: '6px' }}>Welcome to Bell 0 Risk</div>
+        <div style=${rightRail}>
+          <div style=${{ fontSize: '14px', fontWeight: 700, marginBottom: '6px' }}>Welcome to Bell 0 Risk</div>
           <div style=${muted}>Complete every item, upload your documents, and sign the agreement to get approved for your first list.</div>
-          <div style=${{ margin: '14px 0 6px', height: '8px', background: 'rgba(255,255,255,0.08)', borderRadius: '5px', overflow: 'hidden' }}>
-            <div style=${{ width: donePct + '%', height: '100%', background: donePct >= 100 ? 'var(--green, #3fb950)' : 'var(--accent)', transition: 'width .25s' }}></div>
+          <div style=${{ margin: '16px 0 6px', display: 'flex', alignItems: 'baseline', justifyContent: 'space-between' }}>
+            <span style=${{ fontSize: '11px', textTransform: 'uppercase', letterSpacing: '1px', color: 'var(--text-muted)', fontWeight: 600 }}>Profile</span>
+            <b style=${{ fontSize: '18px', color: donePct >= 100 ? 'var(--green)' : 'var(--text)' }}>${donePct}%</b>
           </div>
-          <div style=${muted}><b style=${{ color: 'var(--text)' }}>${donePct}%</b> complete (live)</div>
-          <div style=${{ marginTop: '14px' }}>
-            ${checklist.map(([label, ok]) => html`<div key=${label} style=${{ display: 'flex', gap: '7px', alignItems: 'center', padding: '3px 0', fontSize: '12px', color: ok ? 'var(--text-muted)' : 'var(--text)' }}>
-              <span style=${{ color: ok ? 'var(--green,#3fb950)' : 'var(--text-dim)' }}>${ok ? '✓' : '○'}</span> ${label}</div>`)}
+          <div style=${{ height: '7px', background: 'var(--bg-elev-2)', borderRadius: '5px', overflow: 'hidden' }}>
+            <div style=${{ width: donePct + '%', height: '100%', background: donePct >= 100 ? 'var(--green)' : 'var(--accent)', transition: 'width .25s' }}></div>
+          </div>
+          <div style=${{ marginTop: '16px', display: 'flex', flexDirection: 'column', gap: '2px' }}>
+            ${checklist.map(([label, ok]) => html`<div key=${label} style=${{ display: 'flex', gap: '8px', alignItems: 'center', padding: '4px 0', fontSize: '12px', color: ok ? 'var(--text-muted)' : 'var(--text)' }}>
+              <span style=${{ width: '15px', textAlign: 'center', color: ok ? 'var(--green)' : 'var(--text-dim)' }}>${ok ? '✓' : '○'}</span> ${label}</div>`)}
           </div>
         </div>
       </div>`}
@@ -176,98 +168,109 @@ export function ZeroRiskPortal({ user = null, status: initialStatus = null }) {
 function phaseLabel(p) { return ({ onboarding: 'Onboarding', pending_approval: 'Under review', approved: 'Approved', suspended: 'Suspended' }[p]) || p; }
 
 function renderOverview({ phase, donePct, setSection, approved }) {
-  return html`<div style=${card}>
-    <div style=${{ fontSize: '17px', fontWeight: 700, marginBottom: '8px' }}>${approved ? '✅ You’re approved' : phase === 'pending_approval' ? '⏳ Under review' : 'Let’s get you set up'}</div>
-    <div style=${muted}>${approved
+  return html`<div class="sys-section">
+    <h2>${approved ? 'You’re approved' : phase === 'pending_approval' ? 'Under review' : 'Let’s get you set up'}</h2>
+    <div class="sys-hint">${approved
       ? 'Head to “My lists” to request your first 100 perfectly-matched prospects.'
       : phase === 'pending_approval'
         ? 'Your application is with the Bell team. We’ll notify you here once it’s approved — then you can request your first list.'
-        : 'Complete your company profile (including CR, QID and Computer Card numbers), upload your documents, then review and sign the agreement. When you’re at 100%, submit for approval.'}</div>
-    <div style=${{ marginTop: '14px', display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+        : 'Complete your company profile (including CR, QID and Computer Card numbers), upload your documents, then review and sign the agreement. When you reach 100%, submit for approval.'}</div>
+    <div class="sys-actions">
       ${!approved && phase !== 'pending_approval' ? html`
-        <button onClick=${() => setSection('profile')} style=${btn(true)}>${donePct < 100 ? `Continue profile (${donePct}%)` : 'Profile complete ✓'}</button>
-        <button onClick=${() => setSection('agreement')} style=${btn(false)}>Review agreement</button>` : null}
-      ${approved ? html`<button onClick=${() => setSection('lists')} style=${btn(true)}>Go to my lists</button>` : null}
+        <button class="sys-btn" onClick=${() => setSection('profile')}>${donePct < 100 ? `Continue profile (${donePct}%)` : 'Review agreement'}</button>
+        <button class="sys-btn sys-btn-secondary" onClick=${() => setSection('agreement')}>View agreement</button>` : null}
+      ${approved ? html`<button class="sys-btn" onClick=${() => setSection('lists')}>Go to my lists</button>` : null}
     </div>
   </div>`;
 }
 
 function renderProfile({ f, set, busy, saveProfile }) {
-  const ta = { ...field, minHeight: '64px', resize: 'vertical', fontFamily: 'inherit' };
+  const fld = (k, label, opts = {}) => html`<div class=${'sys-field' + (opts.full ? ' full' : '')}>
+    <label>${label}</label>
+    ${opts.area ? html`<textarea class="sys-textarea" value=${f[k]} onInput=${set(k)} placeholder=${opts.ph || ''}></textarea>`
+      : html`<input class="sys-input" value=${f[k]} onInput=${set(k)} placeholder=${opts.ph || ''} />`}
+  </div>`;
   return html`
-    <div style=${card}>
-      <div style=${{ fontSize: '15px', fontWeight: 700, marginBottom: '4px' }}>Company & customers</div>
-      <div style=${lbl}>Company name</div><input style=${field} value=${f.company_name} onInput=${set('company_name')} placeholder="Acme Trading W.L.L." />
-      <div style=${lbl}>Everything about your company</div><textarea style=${ta} value=${f.company_overview} onInput=${set('company_overview')} placeholder="What you do, your story, scale, strengths…"></textarea>
-      <div style=${lbl}>Products / services you sell</div><textarea style=${ta} value=${f.products_services} onInput=${set('products_services')}></textarea>
-      <div style=${lbl}>Services list (one per line)</div><textarea style=${ta} value=${f.services} onInput=${set('services')}></textarea>
-      <div style=${lbl}>Existing customers</div><textarea style=${ta} value=${f.existing_customers} onInput=${set('existing_customers')}></textarea>
-      <div style=${lbl}>Pricing (one item per line)</div><textarea style=${ta} value=${f.pricing} onInput=${set('pricing')}></textarea>
+    <div class="sys-section">
+      <h2>Company & customers</h2>
+      <div class="sys-hint">Tell us everything about your business and who you sell to — the more precise, the better Bell matches you to high-fit prospects.</div>
+      <div class="sys-grid">
+        ${fld('company_name', 'Company name', { full: true, ph: 'Acme Trading W.L.L.' })}
+        ${fld('company_overview', 'Everything about your company', { full: true, area: true, ph: 'What you do, your story, scale, strengths…' })}
+        ${fld('products_services', 'Products / services you sell', { full: true, area: true })}
+        ${fld('services', 'Services list (one per line)', { full: true, area: true })}
+        ${fld('existing_customers', 'Existing customers', { full: true, area: true, ph: 'Who buys from you today' })}
+        ${fld('pricing', 'Pricing (one item per line)', { full: true, area: true, ph: 'Monthly retainer — QAR 5,000\nProject — from QAR 20,000' })}
+      </div>
     </div>
-    <div style=${card}>
-      <div style=${{ fontSize: '15px', fontWeight: 700, marginBottom: '4px' }}>Ideal customer (comma-separated)</div>
-      <div style=${lbl}>Target industries</div><input style=${field} value=${f.target_industries} onInput=${set('target_industries')} placeholder="Construction, Hospitality, Oil & Gas" />
-      <div style=${lbl}>Target company sizes</div><input style=${field} value=${f.target_sizes} onInput=${set('target_sizes')} placeholder="SME, Mid-market, Enterprise" />
-      <div style=${lbl}>Decision-maker titles</div><input style=${field} value=${f.target_titles} onInput=${set('target_titles')} placeholder="Procurement Manager, IT Director" />
+    <div class="sys-section">
+      <h2>Ideal customer</h2>
+      <div class="sys-hint">Comma-separated. Bell finds Qatar companies matching this profile.</div>
+      <div class="sys-grid">
+        ${fld('target_industries', 'Target industries', { full: true, ph: 'Construction, Hospitality, Oil & Gas' })}
+        ${fld('target_sizes', 'Target company sizes', { ph: 'SME, Mid-market, Enterprise' })}
+        ${fld('target_titles', 'Decision-maker titles', { ph: 'Procurement Manager, IT Director' })}
+      </div>
     </div>
-    <div style=${card}>
-      <div style=${{ fontSize: '15px', fontWeight: 700, marginBottom: '4px' }}>Legal details</div>
-      <div style=${muted}>These are required and are auto-filled into your agreement.</div>
-      <div style=${lbl}>CR number (Commercial Registration)</div><input style=${field} value=${f.cr_number} onInput=${set('cr_number')} />
-      <div style=${lbl}>Computer Card (CC) number</div><input style=${field} value=${f.cc_number} onInput=${set('cc_number')} />
-      <div style=${lbl}>Authorised signatory QID number</div><input style=${field} value=${f.qid_number} onInput=${set('qid_number')} />
-      <div style=${lbl}>Contact number</div><input style=${field} value=${f.contact_number} onInput=${set('contact_number')} />
-      <div style=${lbl}>Contact email</div><input style=${field} value=${f.contact_email} onInput=${set('contact_email')} />
-      <div style=${{ marginTop: '14px' }}><button onClick=${saveProfile} disabled=${busy} style=${btn(true)}>${busy ? 'Saving…' : 'Save profile'}</button></div>
+    <div class="sys-section">
+      <h2>Legal details</h2>
+      <div class="sys-hint">Required — these are auto-filled into your agreement.</div>
+      <div class="sys-grid">
+        ${fld('cr_number', 'CR number (Commercial Registration)')}
+        ${fld('cc_number', 'Computer Card (CC) number')}
+        ${fld('qid_number', 'Authorised signatory QID number')}
+        ${fld('contact_number', 'Contact number')}
+        ${fld('contact_email', 'Contact email')}
+      </div>
+      <div class="sys-actions"><button class="sys-btn" disabled=${busy} onClick=${saveProfile}>${busy ? 'Saving…' : 'Save profile'}</button></div>
     </div>`;
 }
 
 function renderDocuments({ docByKind, uploadDoc }) {
-  return html`<div style=${card}>
-    <div style=${{ fontSize: '15px', fontWeight: 700, marginBottom: '4px' }}>Documents</div>
-    <div style=${muted}>Upload your CR, the signatory’s QID, and any company documentation. Max ~7MB each (PDF or image). The signed agreement is uploaded in the Agreement section.</div>
-    ${['cr', 'qid', 'company_doc'].map((kind) => {
-      const s = (docByKind[kind] || {}).status || 'missing';
-      return html`<div key=${kind} style=${{ display: 'flex', alignItems: 'center', gap: '10px', marginTop: '12px', flexWrap: 'wrap' }}>
-        <label style=${{ ...btn(false), cursor: 'pointer', display: 'inline-flex' }}><input type="file" accept=".pdf,image/*" style=${{ display: 'none' }} onChange=${(e) => uploadDoc(kind, e.target.files && e.target.files[0])} />Upload</label>
-        <span style=${{ fontSize: '12.5px' }}>${DOC_LABELS[kind]}</span><span style=${{ flex: 1 }}></span>
-        <span style=${{ fontSize: '11.5px', color: s === 'missing' ? 'var(--text-dim)' : 'var(--green,#3fb950)' }}>${s === 'missing' ? 'not uploaded' : s}</span>
-      </div>`;
-    })}
+  const row = (kind) => {
+    const s = (docByKind[kind] || {}).status || 'missing';
+    return html`<div key=${kind} style=${{ display: 'flex', alignItems: 'center', gap: '12px', padding: '12px 0', borderBottom: '1px solid var(--border)' }}>
+      <label class="sys-btn sys-btn-secondary" style=${{ cursor: 'pointer' }}><input type="file" accept=".pdf,image/*" style=${{ display: 'none' }} onChange=${(e) => uploadDoc(kind, e.target.files && e.target.files[0])} />Upload</label>
+      <span style=${{ fontSize: '13px' }}>${DOC_LABELS[kind]}</span><span style=${{ flex: 1 }}></span>
+      <span style=${{ fontSize: '12px', color: s === 'missing' ? 'var(--text-dim)' : 'var(--green)' }}>${s === 'missing' ? 'not uploaded' : s}</span>
+    </div>`;
+  };
+  return html`<div class="sys-section">
+    <h2>Documents</h2>
+    <div class="sys-hint">Upload your CR, the signatory’s QID, and any company documentation. Max ~7MB each (PDF or image). The signed agreement is uploaded in the Agreement section.</div>
+    <div style=${{ maxWidth: '640px' }}>${['cr', 'qid', 'company_doc'].map(row)}</div>
   </div>`;
 }
 
 function renderAgreement({ st, donePct, terms, docByKind, uploadDoc, signedConfirmed, setSignedConfirmed, submitApp, busy }) {
   if (!st.agreement_ready && donePct < 100) {
-    return html`<div style=${card}>
-      <div style=${{ fontSize: '15px', fontWeight: 700, marginBottom: '6px' }}>Agreement</div>
-      <div style=${muted}>Your agreement unlocks once your profile is 100% complete — including your CR, Computer Card, QID, contact number and email, which are filled into it automatically. You’re at <b style=${{ color: 'var(--text)' }}>${donePct}%</b>. Finish the profile, then come back here to review and sign.</div>
+    return html`<div class="sys-section">
+      <h2>Agreement</h2>
+      <div class="sys-hint">Your agreement unlocks once your profile is 100% complete — including your CR, Computer Card, QID, contact number and email, which are filled into it automatically. You’re at <b style=${{ color: 'var(--text)' }}>${donePct}%</b>. Finish the profile, then come back to review and sign.</div>
     </div>`;
   }
   const t = terms || {};
-  const line = (k, v) => html`<div style=${{ display: 'flex', gap: '8px', padding: '3px 0', fontSize: '12.5px' }}><span style=${{ color: 'var(--text-dim)', minWidth: '150px' }}>${k}</span><span style=${{ color: 'var(--text)' }}>${v || '—'}</span></div>`;
+  const line = (k, v) => html`<div style=${{ display: 'flex', gap: '10px', padding: '5px 0', fontSize: '13px', borderBottom: '1px solid var(--border)' }}><span style=${{ color: 'var(--text-muted)', minWidth: '160px' }}>${k}</span><span>${v || '—'}</span></div>`;
   const signed = (docByKind.signed_agreement || {}).status && docByKind.signed_agreement.status !== 'missing';
-  return html`
-    <div style=${card}>
-      <div style=${{ fontSize: '15px', fontWeight: 700, marginBottom: '6px' }}>Your 0 Risk Agreement</div>
-      <div style=${muted}>Review the details below (auto-filled from your profile). Your account manager will provide the full agreement document containing these details; sign it, affix your company stamp, and upload it here.</div>
-      <div style=${{ margin: '14px 0', padding: '12px 14px', border: '1px solid var(--border)', borderRadius: '8px', background: 'rgba(255,255,255,0.02)' }}>
-        ${line('Company', t.company_name)} ${line('CR number', t.cr_number)} ${line('Computer Card', t.cc_number)}
-        ${line('Signatory QID', t.qid_number)} ${line('Contact', [t.contact_number, t.contact_email].filter(Boolean).join(' · '))}
-        ${line('Revenue share', (t.revenue_share_pct ?? 15) + '% of revenue from provided companies')} ${line('Governing law', t.jurisdiction || 'State of Qatar')}
-      </div>
-      <div style=${{ display: 'flex', alignItems: 'center', gap: '10px', marginTop: '8px', flexWrap: 'wrap' }}>
-        <label style=${{ ...btn(false), cursor: 'pointer', display: 'inline-flex' }}><input type="file" accept=".pdf,image/*" style=${{ display: 'none' }} onChange=${(e) => uploadDoc('signed_agreement', e.target.files && e.target.files[0])} />Upload signed & stamped agreement</label>
-        <span style=${{ fontSize: '11.5px', color: signed ? 'var(--green,#3fb950)' : 'var(--text-dim)' }}>${signed ? 'uploaded' : 'not uploaded'}</span>
-      </div>
-      <label style=${{ display: 'flex', gap: '8px', alignItems: 'center', marginTop: '14px', fontSize: '12.5px', cursor: 'pointer' }}>
-        <input type="checkbox" checked=${signedConfirmed} onChange=${(e) => setSignedConfirmed(e.target.checked)} />
-        I confirm I have signed and stamped the agreement and agree to its terms.
-      </label>
-      <div style=${{ marginTop: '14px' }}>
-        <button onClick=${submitApp} disabled=${busy || !signedConfirmed || !signed} style=${btn(true)}>${busy ? 'Submitting…' : 'Submit for approval'}</button>
-      </div>
-    </div>`;
+  return html`<div class="sys-section">
+    <h2>Your 0 Risk Agreement</h2>
+    <div class="sys-hint">Review the details below (auto-filled from your profile). Your account manager will provide the full agreement containing these details — sign it, affix your company stamp, and upload it here.</div>
+    <div style=${{ maxWidth: '620px', border: '1px solid var(--border)', borderRadius: '10px', background: 'var(--bg-elev)', padding: '16px 18px' }}>
+      ${line('Company', t.company_name)} ${line('CR number', t.cr_number)} ${line('Computer Card', t.cc_number)}
+      ${line('Signatory QID', t.qid_number)} ${line('Contact', [t.contact_number, t.contact_email].filter(Boolean).join(' · '))}
+      ${line('Revenue share', (t.revenue_share_pct ?? 15) + '% of revenue from provided companies')}
+      <div style=${{ display: 'flex', gap: '10px', padding: '5px 0', fontSize: '13px' }}><span style=${{ color: 'var(--text-muted)', minWidth: '160px' }}>Governing law</span><span>${t.jurisdiction || 'State of Qatar'}</span></div>
+    </div>
+    <div style=${{ display: 'flex', alignItems: 'center', gap: '12px', marginTop: '16px', maxWidth: '620px' }}>
+      <label class="sys-btn sys-btn-secondary" style=${{ cursor: 'pointer' }}><input type="file" accept=".pdf,image/*" style=${{ display: 'none' }} onChange=${(e) => uploadDoc('signed_agreement', e.target.files && e.target.files[0])} />Upload signed & stamped agreement</label>
+      <span style=${{ fontSize: '12px', color: signed ? 'var(--green)' : 'var(--text-dim)' }}>${signed ? 'uploaded' : 'not uploaded'}</span>
+    </div>
+    <label style=${{ display: 'flex', gap: '9px', alignItems: 'center', marginTop: '16px', fontSize: '13px', cursor: 'pointer' }}>
+      <input type="checkbox" style=${{ width: '16px', height: '16px', accentColor: 'var(--accent)' }} checked=${signedConfirmed} onChange=${(e) => setSignedConfirmed(e.target.checked)} />
+      I confirm I have signed and stamped the agreement and agree to its terms.
+    </label>
+    <div class="sys-actions"><button class="sys-btn" disabled=${busy || !signedConfirmed || !signed} onClick=${submitApp}>${busy ? 'Submitting…' : 'Submit for approval'}</button></div>
+  </div>`;
 }
 
 function renderUpgrade({ switchToBell }) {
@@ -277,11 +280,11 @@ function renderUpgrade({ switchToBell }) {
     'Unlimited self-serve prospecting on your own schedule, no request limits.',
     'Keep everything you’ve built in 0 Risk — your data carries over.',
   ];
-  return html`<div style=${card}>
-    <div style=${{ fontSize: '17px', fontWeight: 700, marginBottom: '6px' }}>Explore all of Qatar with Bell</div>
-    <div style=${muted}>0 Risk gives you targeted lists. A full Bell subscription unlocks the entire Qatari market to explore yourself, any time.</div>
-    <ul style=${{ margin: '14px 0', paddingLeft: '18px' }}>${benefits.map((b) => html`<li key=${b} style=${{ ...muted, marginBottom: '6px' }}>${b}</li>`)}</ul>
-    <button onClick=${switchToBell} style=${btn(true)}>Switch to a Bell subscription →</button>
+  return html`<div class="sys-section">
+    <h2>Explore all of Qatar with Bell</h2>
+    <div class="sys-hint">0 Risk gives you targeted lists. A full Bell subscription unlocks the entire Qatari market to explore yourself, any time.</div>
+    <ul style=${{ margin: '0 0 18px', paddingLeft: '18px', maxWidth: '640px' }}>${benefits.map((b) => html`<li key=${b} style=${{ fontSize: '13px', color: 'var(--text-muted)', marginBottom: '8px', lineHeight: 1.5 }}>${b}</li>`)}</ul>
+    <div class="sys-actions"><button class="sys-btn" onClick=${switchToBell}>Switch to a Bell subscription →</button></div>
   </div>`;
 }
 
@@ -295,26 +298,27 @@ function RequestsAndDeals({ canRequest, blockReason, requestList, busy, limits }
   const report = async (companyId, requestId, user_status) => { setB2(true); try { await api.zrReportDeal({ company_id: companyId, request_id: requestId, user_status }); toast('Deal status updated'); await load(); } catch (e) { toast('Update failed: ' + e.message, 'error'); } finally { setB2(false); } };
   const dealFor = (cid) => deals.find((d) => Number(d.company_id) === Number(cid));
   const lim = limits || {};
+  const btnMini = (on) => ({ background: on ? 'var(--accent)' : 'var(--bg-elev-2)', border: '1px solid ' + (on ? 'var(--accent)' : 'var(--border)'), color: on ? '#fff' : 'var(--text-muted)', borderRadius: '6px', padding: '4px 10px', fontSize: '11px', fontWeight: 600, cursor: 'pointer' });
   return html`
-    <div style=${card}>
-      <div style=${{ fontSize: '15px', fontWeight: 700, marginBottom: '6px' }}>Request a list</div>
-      <div style=${muted}>Allowance: <b style=${{ color: 'var(--text)' }}>${lim.lists_allowed ?? 0}</b> · up to <b style=${{ color: 'var(--text)' }}>${lim.companies_per_request ?? 100}</b> companies each · ${lim.finalized_won_count ?? 0} deals won.</div>
-      <div style=${{ marginTop: '12px' }}>
-        <button onClick=${requestList} disabled=${busy || !canRequest} style=${btn(true)}>${busy ? 'Requesting…' : 'Request a list'}</button>
-        ${!canRequest ? html`<span style=${{ ...muted, marginLeft: '10px' }}>${({ request_outstanding: 'A list is being prepared — finish it first.', no_allowance: 'Close a deal to unlock the next request.' }[blockReason]) || ''}</span>` : null}
+    <div class="sys-section">
+      <h2>Request a list</h2>
+      <div class="sys-hint">Allowance: <b style=${{ color: 'var(--text)' }}>${lim.lists_allowed ?? 0}</b> · up to <b style=${{ color: 'var(--text)' }}>${lim.companies_per_request ?? 100}</b> companies each · ${lim.finalized_won_count ?? 0} deals won.</div>
+      <div class="sys-actions">
+        <button class="sys-btn" disabled=${busy || !canRequest} onClick=${requestList}>${busy ? 'Requesting…' : 'Request a list'}</button>
+        ${!canRequest ? html`<span style=${{ ...muted, alignSelf: 'center' }}>${({ request_outstanding: 'A list is being prepared — finish it first.', no_allowance: 'Close a deal to unlock the next request.' }[blockReason]) || ''}</span>` : null}
       </div>
     </div>
-    <div style=${card}>
-      <div style=${{ fontSize: '15px', fontWeight: 700, marginBottom: '6px' }}>Your lists</div>
-      ${!reqs.length ? html`<div style=${muted}>No lists yet.</div>` : reqs.map((rq) => html`
-        <div key=${rq.id} style=${{ borderTop: '1px solid var(--border)', paddingTop: '10px', marginTop: '10px' }}>
-          <div style=${{ fontWeight: 600, fontSize: '13px' }}>List #${rq.seq} · ${rq.size} companies · <span style=${{ color: rq.status === 'delivered' ? 'var(--green,#3fb950)' : 'var(--text-muted)' }}>${rq.status}</span></div>
+    <div class="sys-section">
+      <h2>Your lists</h2>
+      ${!reqs.length ? html`<div class="empty">No lists yet.</div>` : reqs.map((rq) => html`
+        <div key=${rq.id} style=${{ marginBottom: '14px' }}>
+          <div style=${{ fontWeight: 600, fontSize: '13px', marginBottom: '4px' }}>List #${rq.seq} · ${rq.size} companies · <span style=${{ color: rq.status === 'delivered' ? 'var(--green)' : 'var(--text-muted)' }}>${rq.status}</span></div>
           ${rq.status !== 'delivered' ? html`<div style=${muted}>Being prepared by the Bell team.</div>` : (rq.items || []).map((it) => {
             const d = dealFor(it.company_id);
-            return html`<div key=${it.id} style=${{ display: 'flex', alignItems: 'center', gap: '8px', padding: '7px 0', borderBottom: '1px solid rgba(255,255,255,0.04)', flexWrap: 'wrap' }}>
-              <span style=${{ fontSize: '12.5px', minWidth: '180px' }}>${it.company_name || ('Company #' + it.company_id)}</span><span style=${{ flex: 1 }}></span>
-              ${d?.admin_status && d.admin_status !== 'open' ? html`<span style=${{ fontSize: '11.5px', color: 'var(--green,#3fb950)' }}>${d.admin_status.replace('finalized_', '')}</span>`
-                : ['contacted', 'negotiating', 'won', 'lost'].map((s) => html`<button key=${s} onClick=${() => report(it.company_id, rq.id, s)} disabled=${b2} style=${{ ...btn(d?.user_status === s), padding: '4px 9px', fontSize: '11px' }}>${s}</button>`)}
+            return html`<div key=${it.id} style=${{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 0', borderBottom: '1px solid var(--border)', flexWrap: 'wrap' }}>
+              <span style=${{ fontSize: '13px', minWidth: '190px' }}>${it.company_name || ('Company #' + it.company_id)}</span><span style=${{ flex: 1 }}></span>
+              ${d?.admin_status && d.admin_status !== 'open' ? html`<span style=${{ fontSize: '11.5px', color: 'var(--green)' }}>${d.admin_status.replace('finalized_', '')}</span>`
+                : ['contacted', 'negotiating', 'won', 'lost'].map((s) => html`<button key=${s} onClick=${() => report(it.company_id, rq.id, s)} disabled=${b2} style=${btnMini(d?.user_status === s)}>${s}</button>`)}
             </div>`;
           })}
         </div>`)}
