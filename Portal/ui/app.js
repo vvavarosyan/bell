@@ -370,6 +370,14 @@ async function bootstrap() {
       createRoot(rootEl).render(createElement(ZeroRiskPortal, { user: me.user, status: zr }));
       return;
     }
+    // On the 0risk.bell.qa surface but NOT a 0 Risk account (a paid customer or
+    // admin) — the 0risk host is 0-Risk-only, so send them to the equivalent
+    // page on the main app domain (0risk.bell.qa → app.bell.qa, staging too).
+    if (zrHost) {
+      const appHost = location.hostname.replace(/^0risk/i, 'app');
+      window.location.replace(`${location.protocol}//${appHost}${location.pathname}${location.search}`);
+      return;
+    }
   } catch { /* not a 0 Risk account or endpoint unavailable — continue normally */ }
 
   // 6. Subscription gate: non-platform_admin users with no active sub get
