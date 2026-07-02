@@ -140,6 +140,21 @@ function App({ initialUser, initialTenant, mode }) {
     if (!NAV_IDS.includes(raw)) navigateTo(tab);
   }, []);
 
+  // Honor Settings → Preferences → "Default landing page" (A4-S2): when the
+  // user arrives WITHOUT an explicit tab in the URL, open their chosen one.
+  // Deep links always win; runs once per load; customer portal only.
+  useEffect(() => {
+    if (mode !== 'user') return;
+    const { tab: raw } = currentRoute();
+    if (NAV_IDS.includes(raw)) return;   // explicit destination — respect it
+    let dead = false;
+    api.getAccount().then((a) => {
+      const pref = a?.preferences?.default_landing;
+      if (!dead && pref && NAV_IDS.includes(pref)) navigateTo(pref);
+    }).catch(() => { /* keep the normal default */ });
+    return () => { dead = true; };
+  }, []);
+
   // Re-sync the active tab on SPA navigation + browser back/forward.
   useEffect(() => {
     const onNav = () => {

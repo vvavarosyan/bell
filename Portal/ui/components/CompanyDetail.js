@@ -14,6 +14,7 @@ import { CompanyLogo } from './CompanyLogo.js';
 import { SourceBadge } from './SourceBadge.js';
 import { ContactsList } from './ContactsList.js';
 import { EditableKv } from './EditableKv.js';
+import { PeopleLockedBanner } from './PeopleLockedBanner.js';
 
 // Human labels for the archive/reconciliation reason codes set by the engine.
 const ARCHIVE_REASON_LABEL = {
@@ -471,7 +472,7 @@ export function CompanyDetail({ companyId, onMutated, onDeleted, canHardDelete =
 
       <div class="detail-tabs">
         <button class=${tab==='company'?'active':''} onClick=${()=>setTab('company')}>Company</button>
-        <button class=${tab==='people'?'active':''}  onClick=${()=>setTab('people')}>People (${data.people.length})</button>
+        <button class=${tab==='people'?'active':''}  onClick=${()=>setTab('people')}>People (${data.people_locked ? (data.people_count ?? 0) : data.people.length})</button>
         <button class=${tab==='intel'?'active':''}   onClick=${()=>setTab('intel')}>Intel${intelCount ? ` (${intelCount})` : ''}</button>
         ${isLocalEngine ? html`<button class=${tab==='sources'?'active':''} onClick=${()=>setTab('sources')}>Sources</button>` : null}
         <button class=${tab==='legal'?'active':''}   onClick=${()=>setTab('legal')}>Legal (${legalTabCount})</button>
@@ -479,7 +480,9 @@ export function CompanyDetail({ companyId, onMutated, onDeleted, canHardDelete =
 
       <div class="detail-body" ref=${bodyRef}>
         ${tab === 'company' ? html`<${CompanyTab} company=${c} extra=${extra} similar=${similar} relationships=${rels} contacts=${data.contacts || []} onReload=${reload} needsReveal=${needsReveal} onReveal=${revealContacts} isUser=${isUser} isLocalEngine=${isLocalEngine} />` : null}
-        ${tab === 'people'  ? html`<${PeopleView}  people=${data.people} isUser=${isUser} onReveal=${revealPerson} />` : null}
+        ${tab === 'people'  ? (data.people_locked
+          ? html`<${PeopleLockedBanner} count=${data.people_count ?? 0} compact=${true} />`
+          : html`<${PeopleView}  people=${data.people} isUser=${isUser} onReveal=${revealPerson} />`) : null}
         ${tab === 'intel'   ? html`<${IntelTab} financials=${data.financials || []} shareholders=${data.shareholders || []} partnerships=${data.partnerships || []} />` : null}
         ${isLocalEngine && tab === 'sources' ? html`<${SourcesActivityTab} company=${c} extra=${extra} contacts=${data.contacts || []} people=${data.people || []} financials=${data.financials || []} shareholders=${data.shareholders || []} rejects=${data.rejects || []} />` : null}
         ${tab === 'legal'   ? html`<${LegalTab}    sources=${sources} extra=${extra} isUser=${isUser} />` : null}

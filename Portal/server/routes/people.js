@@ -24,6 +24,24 @@ router.use((req, res, next) => {
   return denyUnlessLocalEngine(req, res, next);
 });
 
+// ── PEOPLE PUBLIC LOCKDOWN (Val 2026-07-02) ────────────────────────────────
+// Individual-person data is hidden from CUSTOMERS everywhere until Qatar's
+// personal-data framework is finalized (PDPPL). Gated by ROLE, not deployment,
+// so it holds on every surface: platform_admin (admin.bell.qa + the local
+// engine's synthetic admin) keeps FULL access; everyone else gets a banner.
+// The list route still answers with the TOTAL so the sidebar count and the
+// section header stay honest; every other people route returns 403.
+router.use(async (req, res, next) => {
+  if (req.user?.role === 'platform_admin') return next();
+  if (req.method === 'GET' && (req.path === '/' || req.path === '')) {
+    try {
+      const total = (await query(`SELECT count(*)::int AS n FROM people WHERE COALESCE(archived, false) = false`)).rows[0].n;
+      return res.json({ locked: true, total, rows: [], limit: 0, offset: 0 });
+    } catch (err) { return next(err); }
+  }
+  return res.status(403).json({ error: 'people_locked' });
+});
+
 // Contact types that are credit-gated (the "valuable details" — emails/numbers).
 const SENSITIVE_CONTACT_TYPES = new Set(['email', 'phone', 'mobile', 'whatsapp', 'telephone', 'tel']);
 

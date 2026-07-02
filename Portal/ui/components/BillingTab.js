@@ -23,6 +23,21 @@ const fmtDate = (s) => s ? new Date(s).toLocaleDateString(undefined, { year: 'nu
 const cardBrand = (b) => ({ visa: 'Visa', mastercard: 'Mastercard', amex: 'Amex', discover: 'Discover' }[b] || (b ? b[0].toUpperCase() + b.slice(1) : 'Card'));
 const pill = (st) => html`<span class="sys-pill" style=${{ color: STATUS_COLOR[st] || 'var(--text-muted)', borderColor: STATUS_COLOR[st] || 'var(--border)' }}>${(st || 'none').replace('_', ' ')}</span>`;
 
+// Human tier text generated from the SERVER's live pricing (A4-B2) — the old
+// hardcoded string could silently drift from what checkout actually charges.
+const tierText = (pr) => {
+  if (!pr?.tiers?.length) return '';
+  const parts = pr.tiers.map((t, i) => {
+    const prev = i === 0 ? 0 : Number(pr.tiers[i - 1].upTo) || 0;
+    const cap = Number(t.upTo);
+    const label = !Number.isFinite(cap)
+      ? `${prev.toLocaleString()}+`
+      : i === 0 ? `up to ${cap.toLocaleString()}` : `${(prev + 1).toLocaleString()}–${cap.toLocaleString()}`;
+    return `${label} @ QAR ${Number(t.rate).toFixed(2)}`;
+  });
+  return `Rate: ${parts.join(' · ')} per credit`;
+};
+
 // Load Stripe.js once for a publishable key.
 let _stripePromise = null;
 function loadStripe(pk) {
@@ -310,6 +325,20 @@ export function BillingTab() {
     <div class="sys-page">
       <div class="sys-body">
 
+        ${/* At-a-glance summary strip (A4-B1) — the whole billing state in one row. */ null}
+        <div style=${{ display: 'flex', flexWrap: 'wrap', gap: '10px', marginBottom: '18px' }}>
+          ${[
+            ['Plan', sub?.plan_label || sub?.plan || 'No plan', pill(sub?.subscription_status)],
+            ['Credit balance', (usage?.balance ?? 0).toLocaleString(), null],
+            [sub?.cancel_at_period_end ? 'Access until' : 'Renews', fmtDate(sub?.plan_expires_at), null],
+            ['Card', card ? `${cardBrand(card.brand)} •••• ${card.last4}` : 'None on file', null],
+          ].map(([k, v, extra]) => html`
+            <div key=${k} style=${{ flex: '1 1 160px', minWidth: '160px', border: '1px solid var(--border)', borderRadius: '10px', padding: '10px 14px', background: 'var(--bg-elev, rgba(255,255,255,0.02))' }}>
+              <div style=${{ fontSize: '10.5px', textTransform: 'uppercase', letterSpacing: '.08em', color: 'var(--text-dim)', marginBottom: '4px' }}>${k}</div>
+              <div style=${{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '14px', fontWeight: 700, color: 'var(--text)' }}>${v}${extra}</div>
+            </div>`)}
+        </div>
+
         ${sub && (sub.subscription_status === 'past_due' || sub.frozen) ? html`
           <div style=${{ marginBottom: '18px', padding: '12px 16px', borderRadius: '10px', display: 'flex', alignItems: 'center', gap: '14px', flexWrap: 'wrap', border: '1px solid ' + (sub.frozen ? 'var(--red)' : 'var(--amber)'), background: sub.frozen ? 'rgba(229,83,75,0.10)' : 'rgba(245,158,11,0.10)' }}>
             <span style=${{ fontSize: '13px', color: 'var(--text)', flex: 1, minWidth: '240px' }}>
@@ -400,7 +429,7 @@ export function BillingTab() {
               <div style=${{ marginTop: '8px', fontSize: '13px', minHeight: '18px', color: q?.error ? 'var(--red)' : 'var(--text-muted)' }}>
                 ${q?.error ? q.error
                   : q ? html`${q.credits.toLocaleString()} credits × ${qar(q.rate)}/credit = <b style=${{ color: 'var(--text)' }}>${qar(q.total)}</b>`
-                  : (pricing ? html`Rate: up to 15,000 @ QAR 1.00 · 15k–60k @ QAR 0.75 · 60k+ @ QAR 0.50 per credit` : '')}
+                  : tierText(pricing)}
               </div>
             `}
           </div>

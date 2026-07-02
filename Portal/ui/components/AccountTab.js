@@ -335,8 +335,10 @@ export function AccountTab() {
         <h2>Notifications</h2>
         <div class="sys-hint">Choose which emails Bell sends you.</div>
         ${[
+          // NOTE: the weekly-digest toggle was REMOVED (A4, Val-approved
+          // 2026-07-02) — the digest feature doesn't exist yet; the toggle
+          // returns together with the digest itself. No placeholders.
           ['sequence_replies', 'Sequence replies', 'When a prospect replies to one of your sequences'],
-          ['weekly_digest', 'Weekly digest', 'A weekly summary of your activity and performance'],
           ['credit_low', 'Low credit warning', 'When your credit balance is running low'],
           ['product_updates', 'Product updates', 'New Bell features and announcements'],
         ].map(([k, t, d]) => html`
@@ -351,14 +353,13 @@ export function AccountTab() {
       <div class="sys-section">
         <h2>Preferences</h2>
         <div class="sys-grid">
-          <div class="sys-field"><label>Timezone</label><input class="sys-input" placeholder="e.g. Asia/Qatar" value=${data.preferences?.timezone || ''} onInput=${e => setPref('timezone', e.target.value)} /></div>
-          <div class="sys-field"><label>Language</label>
-            <select class="sys-select" value=${data.preferences?.locale || 'en'} onChange=${e => setPref('locale', e.target.value)}>
-              <option value="en">English</option><option value="ar">العربية</option>
-            </select></div>
+          <div class="sys-field"><label>Timezone</label><input class="sys-input" placeholder="e.g. Asia/Qatar" value=${data.preferences?.timezone || ''} onInput=${e => setPref('timezone', e.target.value)} />
+            <span style=${{ fontSize: '11px', color: 'var(--text-dim)' }}>Used by scheduling features (digests, send windows) as they roll out.</span></div>
+          ${/* Language selector removed (A4): Arabic ships with the Arabic
+              phase on the roadmap — no dropdowns that do nothing. */ null}
           <div class="sys-field"><label>Default landing page</label>
             <select class="sys-select" value=${data.preferences?.default_landing || 'companies'} onChange=${e => setPref('default_landing', e.target.value)}>
-              ${[['companies', 'Companies'], ['market-feed', 'Market Feed'], ['crm', 'CRM'], ['people', 'People']].map(([v, l]) => html`<option key=${v} value=${v}>${l}</option>`)}
+              ${[['companies', 'Companies'], ['market-feed', 'Market Feed'], ['crm', 'CRM'], ['map', 'Map']].map(([v, l]) => html`<option key=${v} value=${v}>${l}</option>`)}
             </select></div>
         </div>
         <div class="sys-actions"><button class="sys-btn" disabled=${saving} onClick=${() => save({ preferences: data.preferences }, 'Preferences saved')}>${saving ? 'Saving…' : 'Save preferences'}</button></div>

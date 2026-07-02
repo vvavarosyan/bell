@@ -264,7 +264,7 @@ export const SOCIAL_LINKS: { label: string; href: string }[] = [
   { label: 'LinkedIn',  href: 'https://www.linkedin.com/company/bell-data-intelligence' },
   { label: 'X',         href: 'https://x.com/BellDataIntel' },
   { label: 'Instagram', href: 'https://www.instagram.com/bell_data_intelligence' },
-  { label: 'Facebook',  href: 'https://www.facebook.com/share/1BRe1WSdyz/?mibextid=wwXIfr' },
+  { label: 'Facebook',  href: 'https://www.facebook.com/profile.php?id=61591474925350' },
   { label: 'TikTok',    href: 'https://vt.tiktok.com/ZSCxLgB39/' },
 ];
 

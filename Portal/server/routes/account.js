@@ -22,9 +22,9 @@ const EXTRA_PROFILE = [
 function defaultNotifications() {
   return {
     sequence_replies: true,    // a prospect replied to a sequence
-    weekly_digest:    true,    // weekly performance digest
     credit_low:       true,    // credit balance running low
     product_updates:  true,    // Bell product news
+    // weekly_digest returns together with the digest feature itself (A4).
   };
 }
 function defaultPreferences() {

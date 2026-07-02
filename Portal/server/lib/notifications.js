@@ -33,6 +33,26 @@ export async function notifyEmail({ to, title, body, link }) {
   }
 }
 
+// ── Email preference gate (A4-S1, Val-approved 2026-07-02) ─────────────────
+// Settings → Notifications toggles were saved but never enforced. Types listed
+// here honor the user's preference key (users.extra_fields.notifications.*);
+// anything unlisted (welcome, billing, 0 Risk lifecycle) is transactional and
+// always sends. Missing pref = allowed (defaults are ON).
+const EMAIL_PREF_FOR_TYPE = {
+  crm_reply:    'sequence_replies',
+  credits_low:  'credit_low',
+  credits_out:  'credit_low',
+  announcement: 'product_updates',
+};
+async function emailAllowedFor(userId, type) {
+  const key = EMAIL_PREF_FOR_TYPE[type || ''];
+  if (!key || !userId) return true;
+  try {
+    const r = await query(`SELECT extra_fields->'notifications'->>$2 AS v FROM users WHERE id = $1`, [userId, key]);
+    return r.rows[0]?.v !== 'false';
+  } catch { return true; }
+}
+
 /** Create one notification for one recipient. Returns the new id. */
 export async function createNotification({
   tenantId, userId, category = 'system', type = null,
@@ -46,8 +66,13 @@ export async function createNotification({
      RETURNING id`,
     [tenantId, userId, category, type, title, body, link, icon, data ? JSON.stringify(data) : null, announcementId],
   );
-  // Optional email channel — fire-and-forget so it never blocks/fails the in-app notif.
-  if (email && recipientEmail) notifyEmail({ to: recipientEmail, title, body, link }).catch(() => {});
+  // Optional email channel — fire-and-forget so it never blocks/fails the
+  // in-app notif. Honors the user's Settings → Notifications preference (A4-S1).
+  if (email && recipientEmail) {
+    emailAllowedFor(userId, type)
+      .then((ok) => (ok ? notifyEmail({ to: recipientEmail, title, body, link }) : false))
+      .catch(() => {});
+  }
   return r.rows[0].id;
 }
 
