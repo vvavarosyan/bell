@@ -29,6 +29,7 @@ import { ResearchApprovalsTab } from './components/ResearchApprovalsTab.js';
 import { DeepDataTab }   from './components/DeepDataTab.js';
 import { SyncTab }       from './components/SyncTab.js';
 import { MarketFeedTab } from './components/MarketFeedTab.js';
+import { SignalsTab } from './components/SignalsTab.js';
 import { CrmTab }        from './components/CrmTab.js';
 import { BillingTab }    from './components/BillingTab.js';
 import { AccountTab }    from './components/AccountTab.js';
@@ -65,6 +66,7 @@ class ViewErrorBoundary extends Component {
 // to a ComingSoon placeholder with the item's label.
 const VIEWS = {
   'market-feed': { Component: MarketFeedTab },
+  'signals':     { Component: SignalsTab },
   'crm':         { Component: CrmTab },
   'companies':   { Component: CompaniesTab },
   'people':      { Component: PeopleTab },

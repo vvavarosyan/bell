@@ -1,4 +1,5 @@
-// Market Feed engine — starts the poller + the enrichment loop.
+// Market Feed engine — starts the poller + the enrichment loop + the signal
+// generator (Phase C).
 //
 // Gated by env BDI_NEWS_ENGINE=1 so it runs on exactly ONE deployment (the
 // production portal), not on every service that shares the prod DB — otherwise
@@ -7,12 +8,15 @@
 import { startPoller, getPollerState } from './poller.js';
 import { enrichBatch, getEnrichState } from './enrich.js';
 import { runProducers } from './producers.js';
+import { generateSignals, getSignalsState } from './signals.js';
 
 const ENRICH_TICK_MS    = 30_000;
 const PRODUCERS_TICK_MS  = 5 * 60_000;   // company registrations etc. every 5 min
+const SIGNALS_TICK_MS    = 15 * 60_000;  // signal derivation every 15 min (idempotent)
 
 let enrichTimer = null;
 let producersTimer = null;
+let signalsTimer = null;
 let enrichRunning = false;
 let enabled = false;
 
@@ -38,9 +42,15 @@ export function startNewsEngine() {
     runProducers().catch((e) => console.error('[news] producers:', e.message));
   }, PRODUCERS_TICK_MS);
 
-  console.log('[news] engine started (poller + enrichment + producers)');
+  // Signal derivation (Phase C) — idempotent via dedup keys; boot pass after 25s.
+  setTimeout(() => generateSignals().catch((e) => console.error('[signals] boot:', e.message)), 25_000);
+  signalsTimer = setInterval(() => {
+    generateSignals().catch((e) => console.error('[signals] tick:', e.message));
+  }, SIGNALS_TICK_MS);
+
+  console.log('[news] engine started (poller + enrichment + producers + signals)');
 }
 
 export function getNewsState() {
-  return { enabled, poller: getPollerState(), enrich: getEnrichState() };
+  return { enabled, poller: getPollerState(), enrich: getEnrichState(), signals: getSignalsState() };
 }

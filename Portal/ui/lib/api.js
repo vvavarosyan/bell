@@ -344,6 +344,8 @@ export const api = {
   feedStats:              () => request('/api/feed/stats'),
   feedTrending:           () => request('/api/feed/trending'),
   feedSources:            () => request('/api/feed/sources'),
+  signals:                (q = {}) => request('/api/signals?' + new URLSearchParams(q)),
+  signalStats:            () => request('/api/signals/stats'),
 
   // Credits
   creditBalance:          () => request('/api/credits'),
