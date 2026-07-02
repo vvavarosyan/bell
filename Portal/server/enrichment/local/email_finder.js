@@ -118,6 +118,16 @@ export async function enrichCompany(company) {
       if (assigned.has(p.id) || !hasFullName(p)) continue;
       const gen = emailFromFormat(learned.format, p, domain);
       if (!gen || isJunkEmail(gen)) continue;
+      // Phase E: skip addresses that already FAILED verification recently —
+      // the reject log doubles as a retry-suppression list (re-tested after
+      // 60 days), so re-scans never re-spend SMTP/API checks on known-bads.
+      const known = await query(
+        `SELECT 1 FROM enrichment_rejects
+          WHERE company_id = $1 AND kind = 'email' AND value = $2
+            AND created_at > now() - interval '60 days' LIMIT 1`,
+        [company.id, gen],
+      );
+      if (known.rows.length) continue;
       budget--;
       let v;
       try { v = await verifyEmail(gen, { smtp: true }); } catch { v = { result: 'unknown' }; }

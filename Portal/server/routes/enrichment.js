@@ -94,22 +94,65 @@ router.post('/engine/control', async (req, res, next) => {
 });
 
 // POST /api/enrichment/engine/rescan — re-queue companies for the engines by
-// clearing their stage flags. Body: { scope: 'all'|'find'|'harvest'|'map' }.
+// clearing their stage flags. Body: { scope: 'all'|'find'|'harvest'|'map'|'email'|'facts', limit? }.
 // Idempotent; never deletes data — the engines simply process them again.
+//
+// `limit` (Phase E — Val's $-cap rule 2026-07-02): re-queue only the N most
+// valuable companies, which BOUNDS any paid-API spend to the batch explicitly
+// clicked. Priorities per scope: find → website-less first (that's where the
+// Apify Maps spend earns most); others → least-recently processed first.
 router.post('/engine/rescan', async (req, res, next) => {
   try {
     const scope = String(req.body?.scope || 'all');
+    const nLim = Number(req.body?.limit);
+    const limit = Number.isFinite(nLim) && nLim > 0 ? Math.min(Math.floor(nLim), 100000) : null;
     const active = `COALESCE(archived,false)=false AND is_active IS NOT false`;
     const hasSite = `website IS NOT NULL AND btrim(website)<>''`;
-    let sql, label;
-    if (scope === 'find')         { sql = `UPDATE companies SET stage8_at=NULL WHERE ${active}`; label = 'website finding'; }
-    else if (scope === 'harvest') { sql = `UPDATE companies SET stage7_at=NULL WHERE ${active} AND ${hasSite}`; label = 'harvesting'; }
-    else if (scope === 'map')     { sql = `UPDATE companies SET stage9_at=NULL WHERE ${active} AND ${hasSite}`; label = 'network mapping'; }
-    else if (scope === 'email')   { sql = `UPDATE companies SET stage10_at=NULL WHERE ${active} AND ${hasSite}`; label = 'email finding'; }
-    else if (scope === 'facts')   { sql = `UPDATE companies SET stage11_at=NULL WHERE ${active} AND ${hasSite}`; label = 'company facts'; }
-    else                          { sql = `UPDATE companies SET stage7_at=NULL, stage8_at=NULL, stage9_at=NULL, stage10_at=NULL, stage11_at=NULL WHERE ${active}`; label = 'all engines'; }
+    const SCOPES = {
+      find:    { set: 'stage8_at=NULL',  where: active,                     prio: `(website IS NULL OR btrim(website)='') DESC, stage8_at ASC NULLS FIRST`,  label: 'website finding' },
+      harvest: { set: 'stage7_at=NULL',  where: `${active} AND ${hasSite}`, prio: 'stage7_at ASC NULLS FIRST',  label: 'harvesting' },
+      map:     { set: 'stage9_at=NULL',  where: `${active} AND ${hasSite}`, prio: 'stage9_at ASC NULLS FIRST',  label: 'network mapping' },
+      email:   { set: 'stage10_at=NULL', where: `${active} AND ${hasSite}`, prio: 'stage10_at ASC NULLS FIRST', label: 'email finding' },
+      facts:   { set: 'stage11_at=NULL', where: `${active} AND ${hasSite}`, prio: 'stage11_at ASC NULLS FIRST', label: 'company facts' },
+      all:     { set: 'stage7_at=NULL, stage8_at=NULL, stage9_at=NULL, stage10_at=NULL, stage11_at=NULL', where: active, prio: 'updated_at ASC', label: 'all engines' },
+    };
+    const sc = SCOPES[scope] || SCOPES.all;
+    const sql = limit
+      ? `UPDATE companies SET ${sc.set} WHERE id IN (SELECT id FROM companies WHERE ${sc.where} ORDER BY ${sc.prio} LIMIT ${limit})`
+      : `UPDATE companies SET ${sc.set} WHERE ${sc.where}`;
     const r = await query(sql);
-    res.json({ ok: true, scope, reset: r.rowCount || 0, label });
+    res.json({ ok: true, scope, limit, reset: r.rowCount || 0, label: sc.label });
+  } catch (err) { next(err); }
+});
+
+// GET /api/enrichment/coverage — per-field coverage across ACTIVE companies and
+// people (Phase E dashboard). You can't push what you can't measure: this is
+// the before/after meter for every enrichment push.
+router.get('/coverage', async (req, res, next) => {
+  try {
+    const active = `COALESCE(archived,false)=false AND is_active IS NOT false`;
+    const [c, p, j] = await Promise.all([
+      query(`SELECT count(*)::int AS total,
+        count(*) FILTER (WHERE website IS NOT NULL AND btrim(website)<>'')::int AS website,
+        count(*) FILTER (WHERE phone IS NOT NULL AND btrim(phone)<>'')::int AS phone,
+        count(*) FILTER (WHERE email IS NOT NULL AND btrim(email)<>'')::int AS email,
+        count(*) FILTER (WHERE linkedin_url IS NOT NULL)::int AS linkedin,
+        count(*) FILTER (WHERE latitude IS NOT NULL AND longitude IS NOT NULL)::int AS geo,
+        count(*) FILTER (WHERE industry IS NOT NULL AND industry<>'')::int AS industry,
+        count(*) FILTER (WHERE linkedin_logo_url IS NOT NULL)::int AS logo,
+        count(*) FILTER (WHERE employee_count IS NOT NULL)::int AS employees,
+        count(*) FILTER (WHERE incorporation_date IS NOT NULL OR founded_year IS NOT NULL)::int AS founded
+        FROM companies WHERE ${active}`),
+      query(`SELECT count(*)::int AS total,
+        count(*) FILTER (WHERE EXISTS (SELECT 1 FROM person_companies pc WHERE pc.person_id = people.id AND pc.is_current = true))::int AS with_role,
+        count(*) FILTER (WHERE linkedin_url IS NOT NULL)::int AS linkedin,
+        (SELECT count(DISTINCT person_id)::int FROM person_contacts WHERE type = 'email' AND is_verified = true) AS verified_email
+        FROM people WHERE COALESCE(archived,false)=false`),
+      query(`SELECT count(*)::int AS total,
+        count(*) FILTER (WHERE is_active = true AND (expires_at IS NULL OR expires_at > now()))::int AS active
+        FROM jobs`),
+    ]);
+    res.json({ companies: c.rows[0], people: p.rows[0], jobs: j.rows[0] });
   } catch (err) { next(err); }
 });
 
