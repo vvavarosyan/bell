@@ -107,7 +107,11 @@ router.get('/stats', async (req, res, next) => {
         (SELECT count(*)::int FROM companies WHERE is_active = true) AS bdi_companies,
         (SELECT count(*)::int FROM people)                            AS bdi_people,
         ((SELECT count(*) FROM companies WHERE updated_at > now() - interval '7 days')
-         + (SELECT count(*) FROM people WHERE updated_at > now() - interval '7 days'))::int AS bdi_fresh_7d
+         + (SELECT count(*) FROM people WHERE updated_at > now() - interval '7 days'))::int AS bdi_fresh_7d,
+        -- Phase B additions — more genuinely useful sidebar stats
+        (SELECT count(*)::int FROM companies WHERE is_active = true AND created_at > now() - interval '7 days') AS bdi_new_companies_7d,
+        (SELECT count(*)::int FROM jobs WHERE is_active = true AND (expires_at IS NULL OR expires_at > now())) AS bdi_jobs_active,
+        (SELECT count(DISTINCT industry)::int FROM companies WHERE industry IS NOT NULL AND industry <> '') AS bdi_industries
     `);
     const news = getNewsState();
     res.json({
@@ -119,6 +123,25 @@ router.get('/stats', async (req, res, next) => {
       poller_error: news.poller?.last_error || null,
       enrich_skipped: news.enrich?.last_error || null,
     });
+  } catch (err) { next(err); }
+});
+
+// GET /api/feed/sources — active news sources + activity, grouped by publisher
+// (Google News topic feeds collapse into one "Google News" node). Powers the
+// Market Feed's sources→Bell network visual (Phase B).
+router.get('/sources', async (req, res, next) => {
+  try {
+    const r = await query(`
+      SELECT split_part(s.name, ' — ', 1) AS name,
+             count(i.id) FILTER (WHERE i.created_at > now() - interval '7 days')::int AS items_7d,
+             count(i.id)::int AS items_total
+        FROM news_sources s
+        LEFT JOIN news_items i ON i.source_id = s.id
+       WHERE s.active = true
+       GROUP BY 1
+       ORDER BY items_total DESC, name ASC
+       LIMIT 12`);
+    res.json({ rows: r.rows });
   } catch (err) { next(err); }
 });
 
