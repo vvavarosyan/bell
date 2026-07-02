@@ -40,6 +40,7 @@ import { startPoller as startResearchPoller } from './research/poller.js';
 import openDataRouter          from './routes/open_data.js';
 import { startScheduler as startOpenDataScheduler } from './sources/qatar_open_data/scheduler.js';
 import { startNewsEngine, getNewsState } from './news/engine.js';
+import publicNewsRouter        from './routes/public_news.js';
 import { startCrmScheduler } from './crm/sequences.js';
 import { startInboundPoller } from './crm/inbound_poller.js';
 import authRouter              from './routes/auth.js';
@@ -228,6 +229,9 @@ app.use('/api/admin/users',        ...adminOnly, adminUsersRouter);
 //   auth   → /mode is public; /me requires a token
 //   billing→ requires auth but NOT a subscription (users must reach it to pay)
 //   sync   → /ingest + /reset use the BDI_SYNC_TOKEN; push/status/rebuild are localOnly
+// PUBLIC, unauthenticated, CDN-cacheable — powers bell.qa's /news SEO pages.
+app.use('/api/public/news',        publicNewsRouter);
+
 app.use('/api/auth',               authRouter);
 app.use('/api/billing',            billingRouter);
 app.use('/api/sync',               syncRouter);
