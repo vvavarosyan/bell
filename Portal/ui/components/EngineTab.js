@@ -42,6 +42,8 @@ export function EngineTab() {
   const [savingPace, setSavingPace] = useState(false);
   const [rescanning, setRescanning] = useState(false);
   const [results, setResults] = useState(null);
+  const [coverage, setCoverage] = useState(null);     // Phase E — per-field dashboard
+  const [batchLimit, setBatchLimit] = useState('');   // Phase E — $-capped batch size
 
   const load = async () => {
     try {
@@ -54,6 +56,7 @@ export function EngineTab() {
     load();
     (async () => { try { const r = await api.enrichmentRuns(12); setRuns((r && r.rows) || []); } catch { /* ignore */ } })();
     (async () => { try { const r = await api.enrichmentResults(); setResults(r || null); } catch { /* ignore */ } })();
+    (async () => { try { const c = await api.enrichmentCoverage(); setCoverage(c || null); } catch { /* ignore */ } })();
     const t = setInterval(load, 10000);
     return () => clearInterval(t);
   }, []);
@@ -73,9 +76,14 @@ export function EngineTab() {
   };
   const setPaceField = (k, v) => setPace((p) => ({ ...p, [k]: v, touched: true }));
   const rescan = async (scope, label) => {
-    if (!window.confirm(`Re-scan ${label}? This re-queues all matching companies for the engines to process again. Safe + idempotent (never deletes data); it runs in the background and can take a long while for the whole database.`)) return;
+    const lim = Math.floor(Number(batchLimit));
+    const capped = Number.isFinite(lim) && lim > 0 ? lim : null;
+    const scopeMsg = capped
+      ? `Re-scan ${label} — CAPPED to the ${lim.toLocaleString()} highest-priority companies? Any paid API spend is bounded to this batch.`
+      : `Re-scan ${label}? This re-queues ALL matching companies. Safe + idempotent (never deletes data); it runs in the background and can take a long while for the whole database. Tip: set a batch limit above to cap paid-API spend.`;
+    if (!window.confirm(scopeMsg)) return;
     setRescanning(true);
-    try { const r = await api.engineRescan(scope); toast(`Re-queued ${Number((r && r.reset) || 0).toLocaleString()} companies. The always-on engine will work through them (or run a sweep from Companies → Harvest stale to start immediately).`); await load(); }
+    try { const r = await api.engineRescan(scope, capped); toast(`Re-queued ${Number((r && r.reset) || 0).toLocaleString()} companies${capped ? ' (capped batch)' : ''}. The always-on engine will work through them (or run a sweep from Companies → Harvest stale to start immediately).`); await load(); }
     catch (e) { toast((e && e.message) || 'Re-scan failed', 'error'); }
     finally { setRescanning(false); }
   };
@@ -157,11 +165,51 @@ export function EngineTab() {
           <b>All ${nf(total)} companies have been processed by Engines 1–5.</b> The engines are caught up and idle until new companies arrive or you re-scan.
         </div>` : null}
 
+        ${coverage && coverage.companies ? html`<div style=${CARD}>
+          <div style=${{ fontWeight: 700, fontSize: '14px', marginBottom: '4px' }}>Coverage dashboard</div>
+          <div class="muted" style=${{ fontSize: '12px', marginBottom: '12px' }}>Per-field coverage across ${nf(coverage.companies.total)} active companies — the before/after meter for every enrichment push.</div>
+          <div style=${{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(170px, 1fr))', gap: '10px 18px' }}>
+            ${[
+              ['Website', coverage.companies.website], ['Phone', coverage.companies.phone],
+              ['Email (company)', coverage.companies.email], ['LinkedIn', coverage.companies.linkedin],
+              ['Geo (on map)', coverage.companies.geo], ['Industry', coverage.companies.industry],
+              ['Logo', coverage.companies.logo], ['Employee count', coverage.companies.employees],
+              ['Founded / incorporated', coverage.companies.founded],
+            ].map(([label, n]) => {
+              const p = coverage.companies.total ? Math.round((Number(n) / coverage.companies.total) * 100) : 0;
+              return html`<div key=${label}>
+                <div style=${{ display: 'flex', justifyContent: 'space-between', fontSize: '12px', marginBottom: '3px' }}>
+                  <span class="muted">${label}</span><b>${p}%</b>
+                </div>
+                <div class="sys-bar"><span style=${{ width: p + '%', background: p < 30 ? 'var(--red, #ff5d5d)' : p < 60 ? 'var(--amber, #f59e0b)' : 'var(--green, #22c55e)' }}></span></div>
+                <div class="muted" style=${{ fontSize: '10.5px', marginTop: '2px' }}>${nf(n)} of ${nf(coverage.companies.total)}</div>
+              </div>`;
+            })}
+          </div>
+          ${coverage.people ? html`<div style=${{ marginTop: '14px', paddingTop: '12px', borderTop: '1px solid var(--border)', display: 'flex', gap: '26px', flexWrap: 'wrap', fontSize: '12.5px' }}>
+            <div><div class="muted" style=${{ fontSize: '11px' }}>People in graph</div><b>${nf(coverage.people.total)}</b></div>
+            <div><div class="muted" style=${{ fontSize: '11px' }}>With a current role</div><b>${nf(coverage.people.with_role)}</b></div>
+            <div><div class="muted" style=${{ fontSize: '11px' }}>With LinkedIn</div><b>${nf(coverage.people.linkedin)}</b></div>
+            <div><div class="muted" style=${{ fontSize: '11px' }}>Verified email</div><b style=${{ color: 'var(--amber, #f59e0b)' }}>${nf(coverage.people.verified_email)}</b> <span class="muted" style=${{ fontSize: '10.5px' }}>← the outreach bottleneck</span></div>
+            ${coverage.jobs ? html`<div><div class="muted" style=${{ fontSize: '11px' }}>Jobs (active)</div><b>${nf(coverage.jobs.active)}</b> <span class="muted" style=${{ fontSize: '10.5px' }}>of ${nf(coverage.jobs.total)}</span></div>` : null}
+          </div>` : null}
+        </div>` : null}
+
         <div style=${CARD}>
           <div style=${{ fontWeight: 700, fontSize: '14px', marginBottom: '4px' }}>Re-scan the database</div>
           <div class="muted" style=${{ fontSize: '12px', marginBottom: '10px' }}>Re-queue companies so the engines process them again — to re-check coverage or after improving extraction. Safe + idempotent; never deletes data. Large jobs run in the background and take a while.</div>
+          <div style=${{ display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap', marginBottom: '10px', padding: '8px 10px', border: '1px dashed var(--border)', borderRadius: '8px' }}>
+            <span style=${{ fontSize: '12px', color: 'var(--text)' }}>Batch limit</span>
+            <input class="sys-input" type="number" min="1" step="50" placeholder="e.g. 500" value=${batchLimit}
+              onInput=${(e) => setBatchLimit(e.target.value)} style=${{ width: '110px' }} />
+            <span class="muted" style=${{ fontSize: '11.5px', lineHeight: 1.4 }}>
+              Caps any re-scan to the N highest-priority companies — this is the $-spend control for paid-API test runs
+              (websites ≈ $4–7 per 1,000 via Maps · emails ≈ $1 per 1,000 verifications). Blank = whole database.
+            </span>
+          </div>
           <div style=${{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
             <button class="sys-btn" disabled=${rescanning} onClick=${() => rescan('all', `all three engines on every active company (${nf(total)})`)}>${rescanning ? 'Working…' : `Re-scan everything (${nf(total)})`}</button>
+            <button class="sys-btn sys-btn-secondary" disabled=${rescanning} onClick=${() => rescan('find', 'website finding (website-less companies first — this is the Apify Maps spender, use the batch limit!)')}>Find websites</button>
             <button class="sys-btn sys-btn-secondary" disabled=${rescanning} onClick=${() => rescan('harvest', `re-harvesting every known site (${nf(fr.with_website)})`)}>Re-harvest sites (${nf(fr.with_website)})</button>
             <button class="sys-btn sys-btn-secondary" disabled=${rescanning} onClick=${() => rescan('email', `re-finding emails on every harvested site (${nf(fr.with_website)})`)}>Re-find emails (${nf(fr.with_website)})</button>
             <button class="sys-btn sys-btn-secondary" disabled=${rescanning} onClick=${() => rescan('facts', `re-checking facts on every harvested site (${nf(fr.with_website)})`)}>Re-check facts (${nf(fr.with_website)})</button>
