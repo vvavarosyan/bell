@@ -349,6 +349,12 @@ export const api = {
   signalStats:            () => request('/api/signals/stats'),
   signalsMap:             () => request('/api/signals/map'),
   companyMapNetwork:      (id) => request(`/api/companies/${id}/map-network`),
+  // ---- WhatsApp (CRM) ----
+  waConfig:               () => request('/api/whatsapp/config'),
+  waSaveConfig:           (body) => request('/api/whatsapp/config', { method: 'PUT', body: JSON.stringify(body) }),
+  waDisconnect:           () => request('/api/whatsapp/disconnect', { method: 'POST', body: '{}' }),
+  waThread:               (recordId) => request('/api/whatsapp/thread?record_id=' + recordId),
+  waSend:                 (body) => request('/api/whatsapp/send', { method: 'POST', body: JSON.stringify(body) }),
 
   // Credits
   creditBalance:          () => request('/api/credits'),

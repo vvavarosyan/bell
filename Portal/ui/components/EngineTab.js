@@ -83,7 +83,7 @@ export function EngineTab() {
       : `Re-scan ${label}? This re-queues ALL matching companies. Safe + idempotent (never deletes data); it runs in the background and can take a long while for the whole database. Tip: set a batch limit above to cap paid-API spend.`;
     if (!window.confirm(scopeMsg)) return;
     setRescanning(true);
-    try { const r = await api.engineRescan(scope, capped); toast(`Re-queued ${Number((r && r.reset) || 0).toLocaleString()} companies${capped ? ' (capped batch)' : ''}. The always-on engine will work through them (or run a sweep from Companies → Harvest stale to start immediately).`); await load(); }
+    try { const r = await api.engineRescan(scope, capped); toast(`Re-queued ${Number((r && r.reset) || 0).toLocaleString()} companies${capped ? ' (capped batch)' : ''}. They now process in the BACKGROUND — watch the Coverage bars above rise over the next minutes, or for a live per-company log use Companies → select rows → the engine buttons.`); await load(); }
     catch (e) { toast((e && e.message) || 'Re-scan failed', 'error'); }
     finally { setRescanning(false); }
   };

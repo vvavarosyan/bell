@@ -913,6 +913,10 @@ function RecordDrawer({ recordId, onClose, onChanged }) {
                   <button title="Delete task" onClick=${() => removeTask(t.id)} style=${ROW_X}>✕</button>
                 </div>`)}
 
+            <!-- WhatsApp thread (Phase F1) -->
+            ${sectionLabel('WhatsApp')}
+            <${WhatsAppPanel} recordId=${recordId} suggestedWa=${data.suggested_wa} initialThread=${data.whatsapp || []} onChanged=${() => load()} />
+
             <!-- Added details (contributed datapoints) -->
             ${sectionLabel('Added details')}
             <${DatapointsPanel} recordId=${recordId} />
@@ -958,4 +962,82 @@ function RecordDrawer({ recordId, onClose, onChanged }) {
       </div>
     </div>
   `;
+}
+
+// ── WhatsApp thread on a CRM record (Phase F1) ──────────────────────────────
+// Shows the message thread + a composer. If WhatsApp isn't connected for the
+// workspace, it shows a connect prompt (→ Settings). Free-form replies work
+// inside WhatsApp's 24-hour window; the composer surfaces that rule honestly.
+function WhatsAppPanel({ recordId, suggestedWa, initialThread = [], onChanged }) {
+  const [connected, setConnected] = useState(null);   // null=loading
+  const [rows, setRows] = useState(initialThread);
+  const [to, setTo] = useState(suggestedWa || '');
+  const [body, setBody] = useState('');
+  const [sending, setSending] = useState(false);
+
+  useEffect(() => {
+    let dead = false;
+    api.waConfig().then((c) => { if (!dead) setConnected(!!c.connected); }).catch(() => { if (!dead) setConnected(false); });
+    return () => { dead = true; };
+  }, []);
+  useEffect(() => { setRows(initialThread); }, [recordId]);
+
+  const reload = async () => { try { const r = await api.waThread(recordId); setRows(r.rows || []); } catch { /* ignore */ } };
+
+  const send = async () => {
+    const t = String(to).trim(), b = String(body).trim();
+    if (!t || !b) return;
+    setSending(true);
+    try {
+      await api.waSend({ record_id: recordId, to: t, body: b });
+      setBody('');
+      toast('WhatsApp sent');
+      await reload(); onChanged?.();
+    } catch (e) {
+      toast(e.body?.reason || e.message || 'Send failed', 'error');
+      await reload();
+    } finally { setSending(false); }
+  };
+
+  if (connected === null) return html`<div class="muted small">Loading…</div>`;
+  if (!connected) {
+    return html`<div style=${{ fontSize: '12px', color: 'var(--text-muted)', lineHeight: 1.55, padding: '2px 0 4px' }}>
+      WhatsApp isn’t connected yet. Connect your WhatsApp Business number in
+      <button onClick=${() => navigateTo('account')} style=${{ background: 'transparent', border: 'none', color: 'var(--accent-bright, #a5c3ff)', cursor: 'pointer', fontSize: '12px', padding: '0 3px', textDecoration: 'underline' }}>Settings → WhatsApp</button>
+      to message contacts and see replies here.
+    </div>`;
+  }
+
+  const bubble = (m) => {
+    const out = m.direction === 'out';
+    const failed = m.status === 'failed';
+    return html`<div key=${m.id} style=${{ display: 'flex', justifyContent: out ? 'flex-end' : 'flex-start', marginBottom: '6px' }}>
+      <div style=${{ maxWidth: '78%', padding: '7px 11px', borderRadius: '10px', fontSize: '12.5px', lineHeight: 1.45, whiteSpace: 'pre-wrap',
+        background: out ? (failed ? 'rgba(255,93,93,0.12)' : 'rgba(37,211,102,0.14)') : 'rgba(255,255,255,0.05)',
+        border: '1px solid ' + (failed ? 'var(--red, #ff5d5d)' : out ? 'rgba(37,211,102,0.4)' : 'var(--border)'), color: 'var(--text)' }}>
+        ${m.body || (failed ? '(not sent)' : '')}
+        <div style=${{ fontSize: '9.5px', color: 'var(--text-dim)', marginTop: '3px', textAlign: 'right' }}>
+          ${out ? (m.sent_by ? m.sent_by.split('@')[0] + ' · ' : '') : ''}${timeAgo(m.created_at)}${out ? ' · ' + (m.status || '') : ''}
+        </div>
+      </div>
+    </div>`;
+  };
+
+  return html`<div>
+    <div style=${{ maxHeight: '240px', overflowY: 'auto', padding: '4px 2px', marginBottom: '8px' }}>
+      ${rows.length === 0 ? html`<div class="muted small" style=${{ padding: '4px 0' }}>No WhatsApp messages yet.</div>` : rows.map(bubble)}
+    </div>
+    <div style=${{ display: 'flex', gap: '6px', marginBottom: '6px' }}>
+      <input value=${to} onInput=${(e) => setTo(e.target.value)} placeholder="+974 …"
+        style=${{ width: '150px', background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border)', color: 'var(--text)', padding: '7px 9px', borderRadius: '6px', fontSize: '12px' }} />
+      <span class="muted small" style=${{ alignSelf: 'center' }}>recipient number</span>
+    </div>
+    <div style=${{ display: 'flex', gap: '8px' }}>
+      <textarea value=${body} onInput=${(e) => setBody(e.target.value)} placeholder="Type a WhatsApp message…"
+        style=${{ flex: 1, background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border)', color: 'var(--text)', padding: '8px 10px', borderRadius: '6px', fontSize: '12.5px', minHeight: '48px', resize: 'vertical', fontFamily: 'inherit' }}></textarea>
+      <button onClick=${send} disabled=${sending || !to.trim() || !body.trim()}
+        style=${{ alignSelf: 'flex-end', background: '#25D366', border: '1px solid #25D366', color: '#0b3d20', borderRadius: '6px', padding: '7px 14px', fontSize: '12px', fontWeight: 700, cursor: sending ? 'wait' : 'pointer' }}>${sending ? '…' : 'Send'}</button>
+    </div>
+    <div class="muted small" style=${{ marginTop: '5px', fontSize: '10.5px', lineHeight: 1.4 }}>Free-form messages reach contacts within 24h of their last message to you. Cold-outreach templates come next.</div>
+  </div>`;
 }
