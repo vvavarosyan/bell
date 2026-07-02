@@ -18,6 +18,7 @@ import { useState, useEffect, useRef } from 'react';
 import { html } from '../lib/html.js';
 import { api } from '../lib/api.js';
 import { toast } from '../lib/toast.js';
+import { navigateTo } from '../lib/router.js';
 
 // --- CDN-pinned deps ------------------------------------------------------
 const MAPBOX_VERSION   = '3.7.0';
@@ -133,6 +134,87 @@ function pointInPolygon(pt, ring) {
   return inside;
 }
 
+// --- Signals on the map (Phase D) ------------------------------------------
+// Same kind palette as the Signals radar — distinct from company source dots.
+const SIGNAL_COLOR = {
+  hiring: '#22c55e', newly_licensed: '#5b8cff', partnership: '#14b8a6',
+  leadership: '#a855f7', news_event: '#f59e0b',
+};
+const sigColorExpr = () => ['match', ['get', 'kind'],
+  'hiring', SIGNAL_COLOR.hiring, 'newly_licensed', SIGNAL_COLOR.newly_licensed,
+  'partnership', SIGNAL_COLOR.partnership, 'leadership', SIGNAL_COLOR.leadership,
+  'news_event', SIGNAL_COLOR.news_event, '#5b8cff'];
+
+// --- Network arcs (Phase D) --------------------------------------------------
+// Click a company → animated arcs spread to its partners / clients / group
+// members (Engine 3 edges) that have coordinates. Background click clears.
+const relColorExpr = () => ['match', ['get', 'relation'],
+  'partner', '#14b8a6', 'client', '#22c55e', 'affiliate', '#a855f7',
+  'parent', '#f59e0b', 'subsidiary', '#f59e0b', '#5b8cff'];
+
+// Quadratic-bezier "great-circle feel" arc between two [lng,lat] points.
+function arcCoords(a, b, steps = 32) {
+  const mx = (a[0] + b[0]) / 2, my = (a[1] + b[1]) / 2;
+  const dx = b[0] - a[0], dy = b[1] - a[1];
+  const dist = Math.sqrt(dx * dx + dy * dy) || 1e-9;
+  const lift = Math.min(dist * 0.25, 3);
+  const cx = mx - (dy / dist) * lift, cy = my + (dx / dist) * lift;
+  const pts = [];
+  for (let i = 0; i <= steps; i++) {
+    const t = i / steps, u = 1 - t;
+    pts.push([u * u * a[0] + 2 * u * t * cx + t * t * b[0], u * u * a[1] + 2 * u * t * cy + t * t * b[1]]);
+  }
+  return pts;
+}
+
+let arcAnimTimer = null;
+function clearNetwork(map) {
+  if (arcAnimTimer) { clearInterval(arcAnimTimer); arcAnimTimer = null; }
+  try { if (map.getLayer('network-arcs')) map.removeLayer('network-arcs'); } catch { /* ignore */ }
+  try { if (map.getLayer('network-arcs-glow')) map.removeLayer('network-arcs-glow'); } catch { /* ignore */ }
+  try { if (map.getSource('network')) map.removeSource('network'); } catch { /* ignore */ }
+}
+
+async function showNetwork(map, companyId, origin) {
+  try {
+    const r = await api.companyMapNetwork(companyId);
+    clearNetwork(map);
+    const all = r.edges || [];
+    const edges = all.filter((e) => Number.isFinite(Number(e.t_lng)) && Number.isFinite(Number(e.t_lat)));
+    if (!edges.length) {
+      if (all.length) toast(`${all.length} network link${all.length === 1 ? '' : 's'} known — none with map coordinates yet.`);
+      return;
+    }
+    const fc = {
+      type: 'FeatureCollection',
+      features: edges.map((e) => ({
+        type: 'Feature',
+        geometry: { type: 'LineString', coordinates: arcCoords(origin, [Number(e.t_lng), Number(e.t_lat)]) },
+        properties: { relation: e.relation_type, name: e.target_name },
+      })),
+    };
+    map.addSource('network', { type: 'geojson', data: fc });
+    map.addLayer({
+      id: 'network-arcs-glow', type: 'line', source: 'network',
+      paint: { 'line-color': relColorExpr(), 'line-width': 5, 'line-opacity': 0.18, 'line-blur': 3 },
+    });
+    map.addLayer({
+      id: 'network-arcs', type: 'line', source: 'network',
+      paint: { 'line-color': relColorExpr(), 'line-width': 1.8, 'line-opacity': 0.9, 'line-dasharray': [0, 4, 3] },
+    });
+    // Marching-ants flow animation (stepped dasharray cycle).
+    const seq = [[0, 4, 3], [0.5, 4, 2.5], [1, 4, 2], [1.5, 4, 1.5], [2, 4, 1], [2.5, 4, 0.5], [3, 4, 0]];
+    let step = 0;
+    arcAnimTimer = setInterval(() => {
+      step = (step + 1) % seq.length;
+      try { map.setPaintProperty('network-arcs', 'line-dasharray', seq[step]); }
+      catch { clearInterval(arcAnimTimer); arcAnimTimer = null; }
+    }, 90);
+    const more = all.length - edges.length;
+    toast(`Network: ${edges.length} link${edges.length === 1 ? '' : 's'} drawn${more > 0 ? ` · ${more} more without coordinates` : ''}`);
+  } catch { /* soft — the popup already opened */ }
+}
+
 // --- Component ------------------------------------------------------------
 
 export function MapTab() {
@@ -149,6 +231,8 @@ export function MapTab() {
   const [showHeatmap,  setShowHeatmap]  = useState(false);
   const [showTraffic,  setShowTraffic]  = useState(false);
   const [showWeather,  setShowWeather]  = useState(false);
+  const [showSignals,  setShowSignals]  = useState(true);   // Phase D — live signal pins
+  const [toolsOpen,    setToolsOpen]    = useState(true);   // collapsible toolbox
   const [activeSources, setActiveSources] = useState(new Set(SOURCES));
   const [yearRange,    setYearRange]    = useState({ min: 1950, max: new Date().getFullYear() });
   const [yearBounds,   setYearBounds]   = useState({ min: 1950, max: new Date().getFullYear() });
@@ -163,7 +247,9 @@ export function MapTab() {
     setLayerVisibility(map, 'company-heatmap', showHeatmap);
     setLayerVisibility(map, 'traffic',         showTraffic);
     setLayerVisibility(map, 'weather-radar',   showWeather);
-  }, [showHeatmap, showTraffic, showWeather, activeSources, yearRange]);
+    setLayerVisibility(map, 'signal-rings',    showSignals);
+    setLayerVisibility(map, 'signal-points',   showSignals);
+  }, [showHeatmap, showTraffic, showWeather, showSignals, activeSources, yearRange]);
 
   // ---- Boot -------------------------------------------------------------
   useEffect(() => {
@@ -195,14 +281,23 @@ export function MapTab() {
         ]);
         mapboxgl.accessToken = token;
 
-        // Fetch company GeoJSON + latest weather radar timestamp in parallel
-        const [geo, weatherMeta] = await Promise.all([
+        // Fetch company GeoJSON + weather timestamp + live signals in parallel
+        const [geo, weatherMeta, sigData] = await Promise.all([
           api.companiesMap(),
           fetch('https://api.rainviewer.com/public/weather-maps.json').then(r => r.json()).catch(() => null),
+          api.signalsMap().catch(() => ({ rows: [] })),
         ]);
         if (cancelled) return;
         geoDataRef.current = geo;
         setStats({ total: geo.total });
+        const sigGeo = {
+          type: 'FeatureCollection',
+          features: (sigData.rows || []).map((s) => ({
+            type: 'Feature',
+            geometry: { type: 'Point', coordinates: [Number(s.longitude), Number(s.latitude)] },
+            properties: { kind: s.kind, title: s.title, company_id: s.company_id, company_name: s.company_name },
+          })),
+        };
 
         // Compute year bounds from data for slider
         const years = (geo.features || [])
@@ -229,13 +324,33 @@ export function MapTab() {
         map.addControl(new mapboxgl.ScaleControl({ unit: 'metric' }), 'bottom-right');
         map.addControl(new mapboxgl.AttributionControl({ compact: true }), 'bottom-left');
 
+        // Phase D: the search box now finds BELL COMPANIES as well as places —
+        // company matches (from the loaded map data) merge into the dropdown
+        // above Mapbox's place results.
+        const companyGeocoder = (q) => {
+          const ql = String(q || '').trim().toLowerCase();
+          if (ql.length < 2) return [];
+          return (geoDataRef.current?.features || [])
+            .filter((f) => String(f.properties.name || '').toLowerCase().includes(ql))
+            .slice(0, 6)
+            .map((f) => ({
+              type: 'Feature',
+              geometry: f.geometry,
+              center: f.geometry.coordinates,
+              place_name: `● ${f.properties.name}${f.properties.city ? ' — ' + f.properties.city : ''}`,
+              place_type: ['place'],
+              text: f.properties.name,
+              properties: f.properties,
+            }));
+        };
         const geocoder = new MapboxGeocoder({
           accessToken: token, mapboxgl: window.mapboxgl,
           marker: { color: '#5b8cff' },
-          placeholder: 'Search place in Qatar…',
+          placeholder: 'Search companies & places…',
           countries: 'qa', bbox: [50.55, 24.40, 51.85, 26.30],
           proximity: { longitude: DOHA[0], latitude: DOHA[1] },
           flyTo: { zoom: 13, speed: 1.4 },
+          localGeocoder: companyGeocoder,
         });
         map.addControl(geocoder, 'top-left');
 
@@ -382,6 +497,50 @@ export function MapTab() {
             }, 'clusters');
           }
 
+          // ---- SIGNALS layer (Phase D) — market movement pinned on the map,
+          // visually DISTINCT from company dots (white core stroke + halo ring,
+          // kind-colored — the same palette as the Signals radar).
+          map.addSource('signals', { type: 'geojson', data: sigGeo });
+          map.addLayer({
+            id: 'signal-rings', type: 'circle', source: 'signals',
+            paint: {
+              'circle-radius': ['interpolate', ['linear'], ['zoom'], 8, 9, 14, 16],
+              'circle-color': sigColorExpr(),
+              'circle-opacity': 0.18,
+            },
+          });
+          map.addLayer({
+            id: 'signal-points', type: 'circle', source: 'signals',
+            paint: {
+              'circle-radius': ['interpolate', ['linear'], ['zoom'], 8, 3.5, 14, 5.5],
+              'circle-color': sigColorExpr(),
+              'circle-stroke-color': '#ffffff',
+              'circle-stroke-width': 1.4,
+              'circle-opacity': 0.95,
+            },
+          });
+          map.on('click', 'signal-points', (e) => {
+            const f = e.features[0]; if (!f) return;
+            const p = f.properties || {};
+            const el = document.createElement('div');
+            el.style.cssText = 'font-size:12px;max-width:250px;line-height:1.45';
+            const kindEl = document.createElement('div');
+            kindEl.style.cssText = `text-transform:uppercase;font-size:9.5px;letter-spacing:.08em;font-weight:700;color:${SIGNAL_COLOR[p.kind] || '#5b8cff'}`;
+            kindEl.textContent = String(p.kind || 'signal').replace(/_/g, ' ');
+            const titleEl = document.createElement('div');
+            titleEl.style.cssText = 'font-weight:600;margin:3px 0 6px;color:#111';
+            titleEl.textContent = p.title || '';
+            el.appendChild(kindEl); el.appendChild(titleEl);
+            if (p.company_id) {
+              const btn = document.createElement('button');
+              btn.textContent = (p.company_name || 'Open company') + ' →';
+              btn.style.cssText = 'background:none;border:none;padding:0;color:#3b64c4;font-size:12px;font-weight:600;cursor:pointer';
+              btn.onclick = () => navigateTo('companies', Number(p.company_id));
+              el.appendChild(btn);
+            }
+            new mapboxgl.Popup({ offset: 10 }).setLngLat(f.geometry.coordinates).setDOMContent(el).addTo(map);
+          });
+
           // ---- Cluster click → zoom or spider --------------------------
           map.on('click', 'clusters', (e) => {
             const features = map.queryRenderedFeatures(e.point, { layers: ['clusters'] });
@@ -402,13 +561,26 @@ export function MapTab() {
             });
           });
 
-          // ---- Point click → popup ------------------------------------
+          // ---- Point click → popup + network spread (Phase D) ----------
           map.on('click', 'company-points', (e) => {
             const f = e.features[0]; if (!f) return;
             openPopup(map, f.geometry.coordinates, f.properties, mapboxgl);
+            // Spread this company's network: animated arcs to its partners /
+            // clients / group members that have coordinates.
+            const cid = Number(f.properties.id);
+            if (Number.isFinite(cid) && cid > 0) {
+              showNetwork(map, cid, f.geometry.coordinates.slice());
+            }
           });
 
-          ['clusters', 'company-points'].forEach(layer => {
+          // Background click (no pin under the cursor) clears the arcs.
+          map.on('click', (e) => {
+            const layers = ['company-points', 'clusters', 'signal-points'].filter((l) => map.getLayer(l));
+            const hits = layers.length ? map.queryRenderedFeatures(e.point, { layers }) : [];
+            if (!hits.length) clearNetwork(map);
+          });
+
+          ['clusters', 'company-points', 'signal-points'].forEach(layer => {
             map.on('mouseenter', layer, () => { map.getCanvas().style.cursor = 'pointer'; });
             map.on('mouseleave', layer, () => { map.getCanvas().style.cursor = ''; });
           });
@@ -451,6 +623,7 @@ export function MapTab() {
     return () => {
       cancelled = true;
       stopSpin?.();
+      if (arcAnimTimer) { clearInterval(arcAnimTimer); arcAnimTimer = null; }
       try { mapRef.current?.remove(); } catch {}
       mapRef.current = null;
     };
@@ -571,8 +744,21 @@ export function MapTab() {
 
       ${status === 'ready' ? html`
         <div class="map-controls">
+          <div style=${{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', userSelect: 'none' }}
+            onClick=${() => setToolsOpen(o => !o)} title=${toolsOpen ? 'Collapse tools' : 'Expand tools'}>
+            <strong style=${{ fontSize: '11px', letterSpacing: '.09em', color: 'var(--text)' }}>BELL MAP TOOLS</strong>
+            <span style=${{ flex: 1 }}></span>
+            <span class="muted small">${toolsOpen ? '▾' : '▸'}</span>
+          </div>
+          ${toolsOpen ? html`
           <div class="map-controls-section">
             <div class="map-controls-label">Layers</div>
+            <label class="map-toggle">
+              <input type="checkbox" checked=${showSignals}
+                onChange=${e => setShowSignals(e.target.checked)} />
+              <span>Signals</span>
+              <span class="map-toggle-hint">live · 7d</span>
+            </label>
             <label class="map-toggle">
               <input type="checkbox" checked=${showHeatmap}
                 onChange=${e => setShowHeatmap(e.target.checked)} />
@@ -640,7 +826,10 @@ export function MapTab() {
             </button>
             <button class="map-tool-btn-secondary" onClick=${clearLasso}>Clear lasso</button>
             <button class="map-flyto-btn" onClick=${flyToQatar}>↻ Recenter on Qatar</button>
-          </div>
+            <div class="muted small" style=${{ marginTop: '6px', lineHeight: 1.45 }}>
+              Tip: click any company pin to spread its <b>network arcs</b> — partners, clients, and group members. Click empty map to clear.
+            </div>
+          </div>` : null}
         </div>
       ` : null}
 

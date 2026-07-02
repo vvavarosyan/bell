@@ -1054,17 +1054,22 @@ a.contact-icon.on { cursor: pointer; text-decoration: none; position: relative; 
 }
 .mapboxgl-ctrl-attrib a { color: var(--accent-bright); }
 
-/* Layer / source control panel (top-left under the geocoder) */
+/* "Bell Map Tools" panel (Phase D) — docked bottom-left, collapsible. Sits
+   ABOVE the Mapbox attribution line: the attribution stays visible (their
+   terms require it), just compact and out of the visual path. */
 .map-controls {
   position: absolute;
-  top: 60px; left: 10px;
+  bottom: 40px; left: 10px;
   z-index: 3;
-  background: rgba(20, 24, 36, 0.92);
+  background: rgba(20, 24, 36, 0.94);
   border: 1px solid var(--border);
-  border-radius: 8px;
+  border-radius: 10px;
   padding: 10px 12px;
   display: flex; flex-direction: column; gap: 10px;
-  min-width: 200px;
+  min-width: 210px;
+  max-width: 244px;
+  max-height: calc(100% - 130px);
+  overflow-y: auto;
   backdrop-filter: blur(8px);
   box-shadow: 0 4px 16px rgba(0,0,0,.4);
 }

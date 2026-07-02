@@ -53,6 +53,23 @@ router.get('/', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+// GET /api/signals/map — recent signals WITH coordinates for the Map's signal
+// layer (Phase D). Distinct pins from company dots; joined via the company.
+router.get('/map', async (req, res, next) => {
+  try {
+    const r = await query(`
+      SELECT s.id, s.kind, s.title, s.company_id, s.company_name, s.occurred_at,
+             c.latitude, c.longitude
+        FROM signals s
+        JOIN companies c ON c.id = s.company_id
+       WHERE s.occurred_at > now() - interval '7 days'
+         AND c.latitude IS NOT NULL AND c.longitude IS NOT NULL
+       ORDER BY s.occurred_at DESC
+       LIMIT 500`);
+    res.json({ rows: r.rows });
+  } catch (err) { next(err); }
+});
+
 // GET /api/signals/stats — per-kind counts for the radar legend (24h + 7d).
 router.get('/stats', async (req, res, next) => {
   try {
