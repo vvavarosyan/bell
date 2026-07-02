@@ -117,7 +117,9 @@ app.get('/api/health', async (req, res) => {
     const ok = await pingDatabase();
     // `email` tells us at a glance whether THIS deployment can actually send
     // (Resend key present) — diagnoses "in-app arrived but email didn't".
-    res.json({ ok, db: ok ? 'connected' : 'down', build: BUILD_SHA, email: emailProviderConfigured(), ts: new Date().toISOString() });
+    // NB: emailProviderConfigured() is async — must await or JSON shows "{}".
+    const email = await emailProviderConfigured().catch(() => false);
+    res.json({ ok, db: ok ? 'connected' : 'down', build: BUILD_SHA, email, ts: new Date().toISOString() });
   } catch (err) {
     res.status(500).json({ ok: false, db: 'down', error: err.message });
   }

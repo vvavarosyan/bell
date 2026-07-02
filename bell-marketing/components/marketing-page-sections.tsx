@@ -329,7 +329,7 @@ function PersonaFact({ label, value }: { label: string; value: string }) {
 type TriggerPlay = {
   number:   string;
   type:     string;
-  icon:     React.ComponentType<{ size?: number }>;
+  icon:     React.ComponentType<{ size?: number | string }>;
   tint:     string;
   trigger:  string;
   audience: string;
@@ -509,7 +509,7 @@ function TriggerCard({ play, index }: { play: TriggerPlay; index: number }) {
 function PlayRow({
   icon: Icon, label, body, tint, emphasized = false,
 }: {
-  icon:        React.ComponentType<{ size?: number }>;
+  icon:        React.ComponentType<{ size?: number | string }>;
   label:       string;
   body:        string;
   tint:        string;
@@ -1085,7 +1085,7 @@ function MarketingComparison() {
 // ───────────────────────────────────────────────────────────────────────────
 
 type PlatformLink = {
-  icon:  React.ComponentType<{ size?: number }>;
+  icon:  React.ComponentType<{ size?: number | string }>;
   label: string;
   href:  string;
   body:  string;
@@ -1274,7 +1274,7 @@ function MidPageCta() {
 // ───────────────────────────────────────────────────────────────────────────
 
 type OtherFunctionCard = {
-  icon:    React.ComponentType<{ size?: number }>;
+  icon:    React.ComponentType<{ size?: number | string }>;
   team:    string;
   href:    string;
   tagline: string;

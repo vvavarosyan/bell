@@ -125,9 +125,9 @@ export const SITEMAP_SECTIONS: SitemapSection[] = [
     description: 'Tools, documentation, and product features.',
     routes: [
       { label: 'Free Tools',     href: '/free-tools',     description: 'Public utilities anyone can use.',          status: 'coming-soon' },
-      { label: 'Documentation',  href: '/docs',           description: 'API reference, schemas, integrations.',     status: 'coming-soon' },
-      { label: 'Knowledge Base', href: '/knowledge-base', description: 'Guides, how-tos, and best practices.',      status: 'coming-soon' },
-      { label: 'FAQ',            href: '/faq',            description: 'Answers to the most-asked questions.',      status: 'coming-soon' },
+      { label: 'Documentation',  href: '/docs',           description: 'The platform, explained end to end.',       status: 'live' },
+      { label: 'Knowledge Base', href: '/knowledge-base', description: 'Guides, how-tos, and best practices.',      status: 'live' },
+      { label: 'FAQ',            href: '/faq',            description: 'Answers to the most-asked questions.',      status: 'live' },
     ],
   },
   {
@@ -145,9 +145,9 @@ export const SITEMAP_SECTIONS: SitemapSection[] = [
     label:       'Company',
     description: 'Who we are and how to get in touch.',
     routes: [
-      { label: 'About Us',             href: '/about',     description: 'Our mission and the team behind it.',                    status: 'coming-soon' },
-      { label: 'Roadmap',              href: '/roadmap',   description: 'What we\'re building next.',                              status: 'coming-soon' },
-      { label: 'Support',              href: '/support',   description: 'Get help from the team.',                                 status: 'coming-soon' },
+      { label: 'About Us',             href: '/about',     description: 'Our mission and the team behind it.',                    status: 'live' },
+      { label: 'Roadmap',              href: '/roadmap',   description: 'What we\'re building next.',                              status: 'live' },
+      { label: 'Support',              href: '/support',   description: 'Get help from the team.',                                 status: 'live' },
       { label: 'Contact',              href: '/contact',   description: 'Reach the Bell.qa team.',                                 status: 'live' },
       // /sovereign is intentionally live-quiet — visible to anyone browsing
       // the HTML sitemap, but excluded from /sitemap.xml so it doesn't get
@@ -160,9 +160,9 @@ export const SITEMAP_SECTIONS: SitemapSection[] = [
     label:       'Legal',
     description: 'Policies, terms, and compliance.',
     routes: [
-      { label: 'Privacy Policy',   href: '/privacy',       description: 'How Bell.qa handles your data.',  status: 'coming-soon' },
-      { label: 'Terms of Service', href: '/terms',         description: 'Terms of using Bell.qa.',         status: 'coming-soon' },
-      { label: 'Cookie Policy',    href: '/cookie-policy', description: 'How Bell.qa uses cookies.',       status: 'coming-soon' },
+      { label: 'Privacy Policy',   href: '/privacy',       description: 'How Bell.qa handles your data.',  status: 'live' },
+      { label: 'Terms of Service', href: '/terms',         description: 'Terms of using Bell.qa.',         status: 'live' },
+      { label: 'Cookie Policy',    href: '/cookie-policy', description: 'How Bell.qa uses cookies.',       status: 'live' },
     ],
   },
   {
@@ -170,8 +170,8 @@ export const SITEMAP_SECTIONS: SitemapSection[] = [
     label:       'For crawlers and AI',
     description: 'Files that help search engines and AI tools understand Bell.qa.',
     routes: [
-      { label: 'Bell.qa AI Information', href: '/ai-information', description: 'Our policies on AI use and AI-assisted content.',     status: 'coming-soon' },
-      { label: 'llm.txt',                href: '/llms-txt',       description: 'Bell.qa instructions for large language models.',     status: 'coming-soon' },
+      { label: 'Bell.qa AI Information', href: '/ai-information', description: 'What AI assistants should know about Bell.qa.',       status: 'live' },
+      { label: 'llms.txt',               href: '/llms-txt',       description: 'Bell.qa instructions for large language models.',     status: 'live' },
       { label: 'Sitemap',                href: '/sitemap',        description: 'This page — every section of Bell.qa, in one place.', status: 'live' },
     ],
   },

@@ -2401,7 +2401,7 @@ const M05_SIGNAL_FEED: {
   },
 ];
 
-const SIGNAL_ICONS: Record<SignalKind, React.ComponentType<{ size?: number }>> = {
+const SIGNAL_ICONS: Record<SignalKind, React.ComponentType<{ size?: number | string }>> = {
   hiring:     Briefcase,
   funding:    TrendingUp,
   leadership: Users,
@@ -2905,7 +2905,7 @@ const M06_ACTIVITY_FEED: { kind: M06ActivityKind; when: string; text: string }[]
   { kind: 'followup', when: '11m ago', text: 'Follow-up sequence triggered for 4 unanswered threads'    },
   { kind: 'crm',      when: '14m ago', text: 'CRM updated · 3 deals advanced to Negotiation'            },
 ];
-const M06_ACTIVITY_ICONS: Record<M06ActivityKind, React.ComponentType<{ size?: number }>> = {
+const M06_ACTIVITY_ICONS: Record<M06ActivityKind, React.ComponentType<{ size?: number | string }>> = {
   sent:     Send,
   reply:    MessageSquare,
   meeting:  CalendarClock,
@@ -3839,7 +3839,7 @@ function SurfaceArea() {
 // ───────────────────────────────────────────────────────────────────────────
 
 type DeptCard = {
-  icon: React.ComponentType<{ size?: number }>;
+  icon: React.ComponentType<{ size?: number | string }>;
   team: string;
   tagline: string;
   capabilities: string[];

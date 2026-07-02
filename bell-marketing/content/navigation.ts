@@ -155,21 +155,18 @@ export const PRIMARY_NAV: NavItem[] = [
             href:  '/knowledge-base',
             icon:  'book-open',
             description: 'Guides, how-tos, and best practices.',
-            comingSoon: true,
           },
           {
             label: 'Documentation',
             href:  '/docs',
             icon:  'file-text',
-            description: 'API reference, schemas, integrations.',
-            comingSoon: true,
+            description: 'The platform, explained end to end.',
           },
           {
             label: 'FAQ',
             href:  '/faq',
             icon:  'help-circle',
             description: 'Answers to the most-asked questions.',
-            comingSoon: true,
           },
         ],
       },
@@ -207,27 +204,24 @@ export const PRIMARY_NAV: NavItem[] = [
             href:  '/about',
             icon:  'users',
             description: 'Our mission and the team behind it.',
-            comingSoon: true,
           },
           {
             label: 'Roadmap',
             href:  '/roadmap',
             icon:  'compass',
             description: 'What we\'re building next.',
-            comingSoon: true,
           },
           {
             label: 'Support',
             href:  '/support',
             icon:  'life-buoy',
             description: 'Get help from the team.',
-            comingSoon: true,
           },
         ],
       },
     ],
     footer: {
-      text: 'Resources launching soon. Want early access?',
+      text: 'Guides, documentation, and the company behind Bell. Built for Qatar.',
       cta:  { label: 'Get in touch', href: '/contact' },
     },
   },
@@ -251,16 +245,27 @@ export const HEADER_CTAS = {
 /** Small links at the very bottom of the footer, alongside the copyright.
  *  Two groups so they can render as two visual rows. */
 export const FOOTER_LEGAL: NavLeaf[] = [
-  { label: 'Privacy',        href: '/privacy',        comingSoon: true },
-  { label: 'Terms',          href: '/terms',          comingSoon: true },
-  { label: 'Cookie Policy',  href: '/cookie-policy',  comingSoon: true },
+  { label: 'Privacy',        href: '/privacy' },
+  { label: 'Terms',          href: '/terms' },
+  { label: 'Cookie Policy',  href: '/cookie-policy' },
   { label: 'Status',         href: '/status' },
 ];
 
 export const FOOTER_SYSTEM: NavLeaf[] = [
-  { label: 'Bell.qa AI Information', href: '/ai-information', comingSoon: true },
-  { label: 'llm.txt',                href: '/llms-txt',       comingSoon: true },
-  { label: 'Sitemap',                href: '/sitemap',        comingSoon: true },
+  { label: 'Bell.qa AI Information', href: '/ai-information' },
+  { label: 'llms.txt',               href: '/llms-txt' },
+  { label: 'Sitemap',                href: '/sitemap' },
+];
+
+/** Official Bell social profiles (provided by Val 2026-07-02). Used by the
+ *  footer icon row and the Organization JSON-LD `sameAs` (so Google links the
+ *  profiles to the brand entity). */
+export const SOCIAL_LINKS: { label: string; href: string }[] = [
+  { label: 'LinkedIn',  href: 'https://www.linkedin.com/company/bell-data-intelligence' },
+  { label: 'X',         href: 'https://x.com/BellDataIntel' },
+  { label: 'Instagram', href: 'https://www.instagram.com/bell_data_intelligence' },
+  { label: 'Facebook',  href: 'https://www.facebook.com/share/1BRe1WSdyz/?mibextid=wwXIfr' },
+  { label: 'TikTok',    href: 'https://vt.tiktok.com/ZSCxLgB39/' },
 ];
 
 export const FOOTER_NAV: { label: string; links: NavLeaf[]; wide?: boolean }[] = [
@@ -308,9 +313,9 @@ export const FOOTER_NAV: { label: string; links: NavLeaf[]; wide?: boolean }[] =
   {
     label: 'Company',
     links: [
-      { label: 'About Us',                href: '/about',     comingSoon: true },
-      { label: 'Roadmap',                 href: '/roadmap',   comingSoon: true },
-      { label: 'Support',                 href: '/support',   comingSoon: true },
+      { label: 'About Us',                href: '/about' },
+      { label: 'Roadmap',                 href: '/roadmap' },
+      { label: 'Support',                 href: '/support' },
       { label: 'Contact',                 href: '/contact' },
       // Government licensing entry point. Deliberately tucked at the bottom
       // of the Company column rather than the Product column so it doesn't
