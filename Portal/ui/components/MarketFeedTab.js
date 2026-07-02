@@ -8,6 +8,7 @@ import { html } from '../lib/html.js';
 import { api } from '../lib/api.js';
 import { toast } from '../lib/toast.js';
 import { navigateTo } from '../lib/router.js';
+import { FeedSourcesNetwork } from './FeedSourcesNetwork.js';
 
 const CATEGORIES = [
   ['', 'All'], ['economic', 'Economic'], ['political', 'Political'], ['corporate', 'Corporate'],
@@ -39,6 +40,7 @@ export function MarketFeedTab() {
   const [loadingMore, setLoadingMore] = useState(false);
   const [stats, setStats]     = useState(null);
   const [trending, setTrending] = useState([]);
+  const [sources, setSources] = useState([]);   // live sources for the network visual
   const [category, setCategory] = useState('');
   const [kind, setKind] = useState('');
   const [q, setQ] = useState('');
@@ -102,6 +104,7 @@ export function MarketFeedTab() {
   useEffect(() => {
     refreshStats();
     (async () => { try { const t = await api.feedTrending(); setTrending(t.companies || []); } catch {} })();
+    (async () => { try { const s = await api.feedSources(); setSources(s.rows || []); } catch {} })();
   }, [refreshStats]);
 
   // Live updates: prepend new items + refresh stats every 20s.
@@ -151,6 +154,9 @@ export function MarketFeedTab() {
         ${stats && stats.engine_enabled && (stats.events_today || 0) === 0 && stats.poller_error ? html`
           <div class="feed-warn">No items ingested yet — last poll error: ${stats.poller_error}</div>
         ` : null}
+
+        <!-- Sources → Bell live network (Phase B) -->
+        <${FeedSourcesNetwork} sources=${sources} scanning=${!!stats?.scanning} />
 
         <!-- Breaking ticker -->
         ${breaking.length ? html`
@@ -218,6 +224,10 @@ export function MarketFeedTab() {
             <div class="feed-bdi-stat"><b>${(stats.bdi_people || 0).toLocaleString()}</b><span>People</span></div>
             <div class="feed-bdi-stat"><b>${(stats.bdi_datapoints || 0).toLocaleString()}</b><span>Data points</span></div>
             <div class="feed-bdi-stat feed-bdi-fresh"><b>${(stats.bdi_fresh_7d || 0).toLocaleString()}</b><span>Updated · 7d</span></div>
+            <div class="feed-bdi-stat"><b>${(stats.bdi_new_companies_7d || 0).toLocaleString()}</b><span>New cos · 7d</span></div>
+            <div class="feed-bdi-stat"><b>${(stats.bdi_jobs_active || 0).toLocaleString()}</b><span>Open jobs</span></div>
+            <div class="feed-bdi-stat"><b>${(stats.bdi_industries || 0).toLocaleString()}</b><span>Industries</span></div>
+            <div class="feed-bdi-stat"><b>${(stats.items_today || 0).toLocaleString()}</b><span>News · 24h</span></div>
           </div>
         ` : null}
         <div class="feed-aside-title">Trending companies</div>

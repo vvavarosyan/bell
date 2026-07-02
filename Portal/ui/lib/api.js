@@ -343,6 +343,7 @@ export const api = {
   feedItem:               (id) => request('/api/feed/' + id),
   feedStats:              () => request('/api/feed/stats'),
   feedTrending:           () => request('/api/feed/trending'),
+  feedSources:            () => request('/api/feed/sources'),
 
   // Credits
   creditBalance:          () => request('/api/credits'),
