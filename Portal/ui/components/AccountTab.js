@@ -10,6 +10,7 @@ const SECTIONS = [
   { id: 'profile',       label: 'Profile' },
   { id: 'email',         label: 'Email' },
   { id: 'domain',        label: 'Sending domain' },
+  { id: 'whatsapp',      label: 'WhatsApp' },
   { id: 'icp',           label: 'Company & ICP' },
   { id: 'notifications', label: 'Notifications' },
   { id: 'preferences',   label: 'Preferences' },
@@ -47,6 +48,15 @@ export function AccountTab() {
       catch (e) { toast('Load failed: ' + (e.message || ''), 'error'); setIdentities([]); }
     })();
   }, [section, identities]);
+
+  // WhatsApp connection hooks — above the early return (Rules of Hooks).
+  const [wa, setWa] = useState(null);            // status
+  const [waForm, setWaForm] = useState({ phone_number_id: '', business_account_id: '', access_token: '', verify_token: '', display_number: '' });
+  const [waBusy, setWaBusy] = useState(false);
+  useEffect(() => {
+    if (section !== 'whatsapp' || wa !== null) return;
+    (async () => { try { setWa(await api.waConfig()); } catch { setWa({ connected: false }); } })();
+  }, [section, wa]);
 
   // ICP / company-profile hooks — above the early return (Rules of Hooks).
   const [icp, setIcp] = useState(null);
@@ -219,6 +229,28 @@ export function AccountTab() {
         value=${p[k] || ''} onInput=${e => setProfile(k, e.target.value)} />
     </div>`;
 
+  // ── WhatsApp connect handlers ──
+  const WEBHOOK_URL = (typeof window !== 'undefined' ? window.location.origin : 'https://app.bell.qa') + '/api/whatsapp-webhook';
+  const saveWa = async () => {
+    setWaBusy(true);
+    try { const r = await api.waSaveConfig({ ...waForm, active: true }); setWa(r); setWaForm(f => ({ ...f, access_token: '' })); toast('WhatsApp connected'); }
+    catch (e) { toast(e.body?.error === 'admin_only' ? 'Only an owner/admin can connect WhatsApp.' : (e.message || 'Save failed'), 'error'); }
+    finally { setWaBusy(false); }
+  };
+  const disconnectWa = async () => {
+    if (!window.confirm('Disconnect WhatsApp? Message history is kept; sending stops until you reconnect.')) return;
+    setWaBusy(true);
+    try { await api.waDisconnect(); setWa({ connected: false }); toast('WhatsApp disconnected'); }
+    catch (e) { toast(e.message || 'Failed', 'error'); }
+    finally { setWaBusy(false); }
+  };
+  const waField = (k, lbl, ph, opts = {}) => html`
+    <div class="sys-field ${opts.full ? 'full' : ''}">
+      <label>${lbl}</label>
+      <input class="sys-input" type=${opts.type || 'text'} placeholder=${ph || ''} value=${waForm[k] || ''}
+        onInput=${e => setWaForm(f => ({ ...f, [k]: e.target.value }))} />
+    </div>`;
+
   const PAGES = {
     profile: html`
       <div class="sys-section">
@@ -248,6 +280,42 @@ export function AccountTab() {
           </div>
         </div>
         <div class="sys-actions"><button class="sys-btn" disabled=${saving} onClick=${() => save({ profile: data.profile }, 'Profile saved')}>${saving ? 'Saving…' : 'Save profile'}</button></div>
+      </div>`,
+
+    whatsapp: html`
+      <div class="sys-section">
+        <h2>WhatsApp</h2>
+        <div class="sys-hint">Connect your WhatsApp Business number (Meta Cloud API) to message CRM contacts and see their replies right on each record — shared with your whole team.</div>
+        ${wa === null ? html`<div class="empty">Loading…</div>` : wa.connected ? html`
+          <div style=${{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap', padding: '12px 14px', border: '1px solid var(--green, #22c55e)', background: 'rgba(34,197,94,0.08)', borderRadius: '10px' }}>
+            <span style=${{ fontSize: '20px' }}>✓</span>
+            <div style=${{ flex: 1, minWidth: '200px' }}>
+              <div style=${{ fontWeight: 600, fontSize: '13px' }}>Connected${wa.display_number ? ' · ' + wa.display_number : ''}</div>
+              <div class="sys-hint" style=${{ margin: '2px 0 0' }}>Phone number ID ${wa.phone_number_id}. Team members can now WhatsApp contacts from the CRM.</div>
+            </div>
+            <button class="sys-btn sys-btn-secondary" style=${{ color: 'var(--red)' }} disabled=${waBusy} onClick=${disconnectWa}>Disconnect</button>
+          </div>
+          <div class="sys-hint" style=${{ marginTop: '14px' }}>Webhook URL (already set if it’s working): <code>${WEBHOOK_URL}</code></div>
+        ` : html`
+          <div style=${{ padding: '12px 14px', border: '1px solid var(--border)', borderRadius: '10px', background: 'var(--bg-elev)', marginBottom: '14px' }}>
+            <div style=${{ fontWeight: 600, fontSize: '13px', marginBottom: '6px' }}>Setup steps (one-time, in Meta)</div>
+            <ol style=${{ margin: 0, paddingLeft: '18px', fontSize: '12px', color: 'var(--text-muted)', lineHeight: 1.7 }}>
+              <li>At <a href="https://business.facebook.com" target="_blank" rel="noopener" style=${{ color: 'var(--accent-bright)' }}>business.facebook.com</a> → WhatsApp → add/verify your business number.</li>
+              <li>Copy the <b>Phone number ID</b>, <b>WhatsApp Business Account ID</b>, and a <b>long-lived access token</b> (System User token recommended).</li>
+              <li>Pick any secret word as your <b>Verify token</b> and paste it below.</li>
+              <li>In Meta → WhatsApp → Configuration → Webhook, set the callback URL to <code>${WEBHOOK_URL}</code> with that same verify token, and subscribe to <b>messages</b>.</li>
+            </ol>
+          </div>
+          <div class="sys-grid">
+            ${waField('display_number', 'Display number', '+974 5555 5555')}
+            ${waField('phone_number_id', 'Phone number ID', 'from Meta')}
+            ${waField('business_account_id', 'WhatsApp Business Account ID', 'from Meta')}
+            ${waField('verify_token', 'Verify token', 'any secret word you choose')}
+            ${waField('access_token', 'Access token', 'long-lived / system-user token', { full: true, type: 'password' })}
+          </div>
+          <div class="sys-actions"><button class="sys-btn" disabled=${waBusy || !waForm.phone_number_id || !waForm.access_token} onClick=${saveWa}>${waBusy ? 'Connecting…' : 'Connect WhatsApp'}</button></div>
+          <div class="sys-hint" style=${{ marginTop: '8px' }}>Your token is stored securely to send on your behalf and is never shown again. Free-form replies work within WhatsApp’s 24-hour window; cold-outreach templates come next.</div>
+        `}
       </div>`,
 
     icp: html`

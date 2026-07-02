@@ -42,6 +42,8 @@ import { startScheduler as startOpenDataScheduler } from './sources/qatar_open_d
 import { startNewsEngine, getNewsState } from './news/engine.js';
 import publicNewsRouter        from './routes/public_news.js';
 import signalsRouter           from './routes/signals.js';
+import whatsappRouter          from './routes/whatsapp.js';
+import whatsappWebhookRouter   from './routes/whatsapp_webhook.js';
 import { startCrmScheduler } from './crm/sequences.js';
 import { startInboundPoller } from './crm/inbound_poller.js';
 import authRouter              from './routes/auth.js';
@@ -171,6 +173,7 @@ app.use('/api/research',   ...feature, researchRouter);
 app.use('/api/open-data',  ...feature, openDataRouter);
 app.use('/api/feed',       ...feature, feedRouter);
 app.use('/api/signals',    ...feature, signalsRouter);
+app.use('/api/whatsapp',   ...feature, whatsappRouter);
 app.use('/api/crm',        ...feature, crmRouter);
 app.use('/api/detail-requests', ...feature, detailRequestsRouter);
 app.use('/api/outreach',        ...feature, outreachRouter);
@@ -233,6 +236,8 @@ app.use('/api/admin/users',        ...adminOnly, adminUsersRouter);
 //   sync   → /ingest + /reset use the BDI_SYNC_TOKEN; push/status/rebuild are localOnly
 // PUBLIC, unauthenticated, CDN-cacheable — powers bell.qa's /news SEO pages.
 app.use('/api/public/news',        publicNewsRouter);
+// PUBLIC Meta WhatsApp webhook (GET verify + POST events). No auth by design.
+app.use('/api/whatsapp-webhook',   whatsappWebhookRouter);
 
 app.use('/api/auth',               authRouter);
 app.use('/api/billing',            billingRouter);

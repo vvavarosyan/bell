@@ -150,18 +150,27 @@ router.get('/records/:id', async (req, res, next) => {
     const rec = r.rows[0];
     // Only expose the recipient email + send capability to admins (who can send).
     let suggestedTo = null;
+    let suggestedWa = null;
     if (canSendEmail(req)) {
       const e = await query(
         rec.entity_type === 'company'
-          ? `SELECT email FROM companies WHERE id=$1`
-          : `SELECT email FROM people WHERE id=$1`,
+          ? `SELECT email, phone FROM companies WHERE id=$1`
+          : `SELECT email, phone FROM people WHERE id=$1`,
         [rec.entity_id]);
       suggestedTo = e.rows[0]?.email || null;
+      suggestedWa = e.rows[0]?.phone || null;   // pre-fill for the WhatsApp composer
     }
+    // WhatsApp thread for this record (present whether or not connected — the UI
+    // shows the connect prompt when empty).
+    const wa = await query(
+      `SELECT id, direction, wa_from, wa_to, body, status, error, sent_by, created_at
+         FROM whatsapp_messages WHERE record_id=$1 AND tenant_id=$2 ORDER BY created_at ASC LIMIT 200`,
+      [id, tenantId(req)]);
     res.json({
       record: rec, notes: notes.rows, activities: activities.rows, tasks: tasks.rows,
       emails: emails.rows, enrollments: enrollments.rows, deals: deals.rows,
-      can_send: canSendEmail(req), suggested_to: suggestedTo,
+      whatsapp: wa.rows,
+      can_send: canSendEmail(req), suggested_to: suggestedTo, suggested_wa: suggestedWa,
     });
   } catch (err) { next(err); }
 });
