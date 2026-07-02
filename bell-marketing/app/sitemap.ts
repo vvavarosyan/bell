@@ -6,8 +6,13 @@ import {
   getDefaultSeoMeta,
   findSectionForRoute,
 } from '@/content/sitemap-data';
+import { getNewsSitemapEntries } from '@/lib/news';
 
 const BASE = 'https://bell.qa';
+
+// Re-generate periodically so freshly-published news pages enter the sitemap
+// without a deploy (Phase B2 — the "daily fresh pages" snowball).
+export const revalidate = 3600;
 
 /**
  * Machine-readable sitemap at /sitemap.xml.
@@ -25,7 +30,7 @@ const BASE = 'https://bell.qa';
  * will plug into the database once collections start producing content.
  * For a million-item scale, swap to Next's sitemap-index pattern.
  */
-export default function sitemap(): MetadataRoute.Sitemap {
+export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
   const now = new Date();
 
   // Static page entries
@@ -58,5 +63,17 @@ export default function sitemap(): MetadataRoute.Sitemap {
     priority:        item.priority        ?? 0.6,
   }));
 
-  return [...staticEntries, ...collectionEntries, ...dynamicItemEntries];
+  // Live news pages (Bell-written summaries) — fetched from the platform's
+  // public endpoint; fails soft to an empty list so the sitemap never breaks.
+  let newsEntries: MetadataRoute.Sitemap = [];
+  try {
+    newsEntries = (await getNewsSitemapEntries()).map(e => ({
+      url:             e.url,
+      lastModified:    e.lastModified,
+      changeFrequency: 'weekly' as const,
+      priority:        0.6,
+    }));
+  } catch { /* soft */ }
+
+  return [...staticEntries, ...collectionEntries, ...dynamicItemEntries, ...newsEntries];
 }

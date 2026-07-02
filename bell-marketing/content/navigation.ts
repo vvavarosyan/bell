@@ -191,8 +191,7 @@ export const PRIMARY_NAV: NavItem[] = [
             label: 'News',
             href:  '/news',
             icon:  'newspaper',
-            description: 'Press releases and announcements.',
-            comingSoon: true,
+            description: 'Qatar business news, summarized daily by Bell.',
           },
         ],
       },
@@ -306,7 +305,7 @@ export const FOOTER_NAV: { label: string; links: NavLeaf[]; wide?: boolean }[] =
     label: 'Insights',
     links: [
       { label: 'Blog',     href: '/blog',     comingSoon: true },
-      { label: 'News',     href: '/news',     comingSoon: true },
+      { label: 'News',     href: '/news' },
       { label: 'Research', href: '/research', comingSoon: true },
     ],
   },

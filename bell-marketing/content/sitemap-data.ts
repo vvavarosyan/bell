@@ -136,7 +136,7 @@ export const SITEMAP_SECTIONS: SitemapSection[] = [
     description: 'Editorial and analytical content from the Bell.qa team.',
     routes: [
       { label: 'Blog',     href: '/blog',     description: 'Market commentary and product updates.', status: 'coming-soon' },
-      { label: 'News',     href: '/news',     description: 'Press releases and announcements.',      status: 'coming-soon' },
+      { label: 'News',     href: '/news',     description: 'Qatar business news, summarized daily by Bell.', status: 'live', changeFrequency: 'daily', priority: 0.8 },
       { label: 'Research', href: '/research', description: 'Reports, briefings, and longitudinal studies.', status: 'coming-soon' },
     ],
   },
@@ -214,10 +214,10 @@ export const DYNAMIC_COLLECTIONS: DynamicCollection[] = [
     id:           'news',
     label:        'News',
     href:         '/news',
-    description:  'Every news item published by or about Qatari companies, with its own page for permanent reference. Cross-linked back to relevant company profiles.',
+    description:  'Qatar business news, summarized daily by Bell — every story has its own page, cross-linked to the market it moves.',
     itemCount:    0,
-    exampleUrl:   '/news/{year}/{slug}',
-    status:       'coming-soon',
+    exampleUrl:   '/news/{id}-{slug}',
+    status:       'live',
   },
   {
     id:           'research',
