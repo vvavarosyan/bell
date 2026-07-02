@@ -192,7 +192,7 @@ router.post('/commit', async (req, res, next) => {
       [tid, kind, filename, Math.min(rows.length, COMMIT_CAP), actor],
     )).rows[0];
 
-    let linked = 0, created = 0;
+    let linked = 0, created = 0, skipped = 0;
     for (const r of rows.slice(0, COMMIT_CAP)) {
       const m = r.mapped || {};
       try {
@@ -224,9 +224,9 @@ router.post('/commit', async (req, res, next) => {
           await createNewFromRow(tid, entityType, m, actor);
           created++;
         }
-      } catch { /* skip a bad row, keep going */ }
+      } catch { skipped++; /* keep going — the count is reported so failures aren't silent */ }
     }
-    res.json({ ok: true, batch_id: batch.id, linked, created, total: linked + created });
+    res.json({ ok: true, batch_id: batch.id, linked, created, skipped, total: linked + created });
   } catch (err) { next(err); }
 });
 

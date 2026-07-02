@@ -12,6 +12,8 @@
 
 import { query } from '../db.js';
 import { notifyTenant } from './notifications.js';
+import { listCompanyContacts, loadPersonContactsByIds } from './contacts.js';
+import { toCsv } from './csv.js';
 
 export const REVENUE_SHARE_PCT = 15;          // placeholder, adjustable (migration default matches)
 export const DEFAULT_LIST_SIZE = 100;
@@ -43,7 +45,10 @@ export async function enroll(tenantId, actor = null) {
   if (t.subscription_status === 'active' || (t.plan && !['free', 'internal'].includes(t.plan))) {
     throw new Error('already_paid');   // paying customers use the normal app, not 0 Risk
   }
-  await query(`UPDATE tenants SET account_type='zero_risk', zero_risk_status='onboarding', updated_at=now() WHERE id=$1`, [tenantId]);
+  // COALESCE preserves an existing lifecycle status — a previously-approved
+  // tenant who bounced out (e.g. explored switching to paid, then came back)
+  // re-enters WITHOUT being reset to onboarding.
+  await query(`UPDATE tenants SET account_type='zero_risk', zero_risk_status=COALESCE(zero_risk_status,'onboarding'), updated_at=now() WHERE id=$1`, [tenantId]);
   await query(`INSERT INTO zero_risk_limits (tenant_id, updated_by) VALUES ($1,$2) ON CONFLICT (tenant_id) DO NOTHING`, [tenantId, actor]);
   await query(
     `INSERT INTO zero_risk_agreements (tenant_id, revenue_share_pct) SELECT $1,$2
@@ -92,7 +97,15 @@ export async function getStatus(tenantId) {
     || { companies_per_request: DEFAULT_LIST_SIZE, lists_allowed: 1, finalized_won_count: 0 };
   const openReq = (await query(`SELECT id, seq, size, status FROM zero_risk_list_requests WHERE tenant_id=$1 AND status IN ('pending','preparing') ORDER BY seq DESC LIMIT 1`, [tenantId])).rows[0] || null;
   const gate = await canRequestList(tenantId);
+  const review = (await query(`SELECT decision, reasons, note, created_at FROM zero_risk_reviews WHERE tenant_id=$1 ORDER BY id DESC LIMIT 1`, [tenantId])).rows[0] || null;
+  // Post-signature lock: once the signed agreement is uploaded (or the app is
+  // submitted / approved / rejected) the profile must not change — EXCEPT while
+  // the admin has requested a resubmission, which reopens the form.
+  const locked = ['pending_approval', 'approved', 'rejected'].includes(t.zero_risk_status)
+    || (!!docByKind.signed_agreement && t.zero_risk_status !== 'resubmission_required');
   return {
+    locked,
+    latest_review: review,
     account_type: t.account_type || 'standard',
     zero_risk_status: t.zero_risk_status || null,
     revenue_share_pct: agreement?.revenue_share_pct ?? REVENUE_SHARE_PCT,
@@ -105,6 +118,14 @@ export async function getStatus(tenantId) {
     can_request_list: gate.ok,
     request_block_reason: gate.reason || null,
   };
+}
+
+/** Server-side twin of the portal's field lock (see getStatus.locked). */
+export async function isProfileLocked(tenantId) {
+  const t = (await query(`SELECT zero_risk_status FROM tenants WHERE id=$1`, [tenantId])).rows[0] || {};
+  if (['pending_approval', 'approved', 'rejected'].includes(t.zero_risk_status)) return true;
+  if (t.zero_risk_status === 'resubmission_required') return false;
+  return !!(await query(`SELECT 1 FROM zero_risk_documents WHERE tenant_id=$1 AND kind='signed_agreement' LIMIT 1`, [tenantId])).rows.length;
 }
 
 // ---------------------------------------------------------------------------
@@ -249,6 +270,8 @@ export async function adminAllAccounts() {
            COALESCE(l.lists_allowed,0)          AS lists_allowed,
            COALESCE(l.finalized_won_count,0)    AS finalized_won_count,
            (SELECT count(*) FROM zero_risk_list_requests r WHERE r.tenant_id=t.id) AS list_count,
+           (SELECT count(*) FROM zero_risk_list_requests r JOIN zero_risk_list_items i ON i.request_id=r.id WHERE r.tenant_id=t.id) AS items_total,
+           (SELECT count(*) FROM zero_risk_deals d WHERE d.tenant_id=t.id AND (d.user_status IN ('won','lost') OR d.admin_status <> 'open')) AS worked_count,
            (SELECT count(*) FROM zero_risk_deals d WHERE d.tenant_id=t.id AND d.admin_status='finalized_won') AS wins
       FROM tenants t
       LEFT JOIN zero_risk_limits l ON l.tenant_id=t.id
@@ -268,19 +291,46 @@ export async function adminPendingAccounts() {
 }
 
 export async function adminApprove(tenantId, by) {
-  await query(`UPDATE tenants SET zero_risk_status='approved', updated_at=now() WHERE id=$1 AND account_type='zero_risk'`, [tenantId]);
+  const u = await query(`UPDATE tenants SET zero_risk_status='approved', updated_at=now() WHERE id=$1 AND account_type='zero_risk' RETURNING id`, [tenantId]);
+  if (!u.rows.length) throw new Error('not_found');   // no such tenant / not a 0 Risk account — don't report a phantom success
   await query(`UPDATE zero_risk_agreements SET status='approved', approved_by=$2, approved_at=now() WHERE tenant_id=$1 AND id=(SELECT id FROM zero_risk_agreements WHERE tenant_id=$1 ORDER BY id DESC LIMIT 1)`, [tenantId, by]);
   await query(`INSERT INTO zero_risk_limits (tenant_id, lists_allowed, updated_by) VALUES ($1,1,$2)
                 ON CONFLICT (tenant_id) DO UPDATE SET lists_allowed=GREATEST(zero_risk_limits.lists_allowed,1), updated_at=now()`, [tenantId, by]);
+  await query(`INSERT INTO zero_risk_reviews (tenant_id, decision, created_by) VALUES ($1,'approved',$2)`, [tenantId, by]).catch(() => {});
   await notifyTenant(tenantId, { category: 'zero_risk', type: 'zr_approved', title: 'Your 0 Risk account is approved',
     body: 'You can now request your first list of 100 perfectly-matched prospects.', icon: 'check', email: true }).catch(() => {});
   return { ok: true, status: 'approved' };
 }
 
-export async function adminReject(tenantId, by, note = null) {
-  await query(`UPDATE tenants SET zero_risk_status='onboarding', updated_at=now() WHERE id=$1 AND account_type='zero_risk'`, [tenantId]);
+/** Terminal rejection (red banner, form stays locked). For a FIXABLE
+ *  application use adminRequestResubmission — that reopens the form. */
+export async function adminReject(tenantId, by, note = null, reasons = []) {
+  const u = await query(`UPDATE tenants SET zero_risk_status='rejected', updated_at=now() WHERE id=$1 AND account_type='zero_risk' RETURNING id`, [tenantId]);
+  if (!u.rows.length) throw new Error('not_found');
   await query(`UPDATE zero_risk_agreements SET status='rejected' WHERE tenant_id=$1 AND id=(SELECT id FROM zero_risk_agreements WHERE tenant_id=$1 ORDER BY id DESC LIMIT 1)`, [tenantId]);
-  return { ok: true, status: 'onboarding', note };
+  const rs = Array.isArray(reasons) ? reasons.filter(Boolean) : [];
+  await query(`INSERT INTO zero_risk_reviews (tenant_id, decision, reasons, note, created_by) VALUES ($1,'rejected',$2,$3,$4)`, [tenantId, rs, note, by]);
+  await notifyTenant(tenantId, {
+    category: 'zero_risk', type: 'zr_rejected', title: 'Your 0 Risk application was not approved',
+    body: [...rs, note].filter(Boolean).join(' · ') || 'Please contact the Bell team for details.',
+    icon: 'megaphone', email: true,
+  }).catch(() => {});
+  return { ok: true, status: 'rejected', note };
+}
+
+/** Ask the company to fix specific problems and submit again (yellow banner —
+ *  the profile + documents UNLOCK so they can correct and resubmit). */
+export async function adminRequestResubmission(tenantId, by, note = null, reasons = []) {
+  const u = await query(`UPDATE tenants SET zero_risk_status='resubmission_required', updated_at=now() WHERE id=$1 AND account_type='zero_risk' RETURNING id`, [tenantId]);
+  if (!u.rows.length) throw new Error('not_found');
+  const rs = Array.isArray(reasons) ? reasons.filter(Boolean) : [];
+  await query(`INSERT INTO zero_risk_reviews (tenant_id, decision, reasons, note, created_by) VALUES ($1,'resubmission_required',$2,$3,$4)`, [tenantId, rs, note, by]);
+  await notifyTenant(tenantId, {
+    category: 'zero_risk', type: 'zr_resubmission', title: 'Your 0 Risk application needs updates',
+    body: ([...rs, note].filter(Boolean).join(' · ') || 'Please review your application.') + ' — please fix the mentioned items and submit again.',
+    icon: 'megaphone', email: true,
+  }).catch(() => {});
+  return { ok: true, status: 'resubmission_required', note };
 }
 
 export async function adminPendingLists() {
@@ -313,12 +363,15 @@ export async function adminFinalizeDeal(dealId, adminStatus, by) {
   if (!d) throw new Error('not_found');
   await query(`UPDATE zero_risk_deals SET admin_status=$2, finalized_by=$3, finalized_at=now(), updated_at=now() WHERE id=$1`, [dealId, adminStatus, by]);
   if (adminStatus === 'finalized_won' && d.admin_status !== 'finalized_won') {
+    // Record the win — NO automatic list grant (Val 2026-07-02): the company
+    // works through its whole current list first, and the admin decides any new
+    // allowance manually via adminSetLimits.
     await query(`INSERT INTO zero_risk_limits (tenant_id, lists_allowed, finalized_won_count, updated_by)
-                 VALUES ($1,1,1,$2)
-                 ON CONFLICT (tenant_id) DO UPDATE SET lists_allowed = zero_risk_limits.lists_allowed+1,
+                 VALUES ($1,0,1,$2)
+                 ON CONFLICT (tenant_id) DO UPDATE SET
                    finalized_won_count = zero_risk_limits.finalized_won_count+1, updated_at=now()`, [d.tenant_id, by]);
-    await notifyTenant(d.tenant_id, { category: 'zero_risk', type: 'zr_deal_won', title: 'Deal confirmed — new list unlocked',
-      body: 'A deal was finalized as won. You’ve earned another list request.', icon: 'check', email: true }).catch(() => {});
+    await notifyTenant(d.tenant_id, { category: 'zero_risk', type: 'zr_deal_won', title: 'Deal confirmed as won',
+      body: 'Bell confirmed your deal as won — congratulations. Keep working your list; the Bell team reviews progress when granting further requests.', icon: 'check', email: true }).catch(() => {});
   }
   return { ok: true, admin_status: adminStatus };
 }
@@ -332,4 +385,97 @@ export async function adminSetLimits(tenantId, { companiesPerRequest, listsAllow
   await query(`INSERT INTO zero_risk_limits (tenant_id) VALUES ($1) ON CONFLICT (tenant_id) DO NOTHING`, [tenantId]);
   await query(`UPDATE zero_risk_limits SET ${sets.join(', ')}, updated_by=$${++i}, updated_at=now() WHERE tenant_id=$1`, params);
   return { ok: true };
+}
+
+/** Live workload counts — drives the yellow sidebar badge + tab section headers. */
+export async function adminCounts() {
+  const approvals = (await query(`SELECT count(*)::int AS n FROM tenants WHERE account_type='zero_risk' AND zero_risk_status='pending_approval'`)).rows[0].n;
+  const lists = (await query(`SELECT count(*)::int AS n FROM zero_risk_list_requests WHERE status IN ('pending','preparing')`)).rows[0].n;
+  const deals = (await query(`SELECT count(*)::int AS n FROM zero_risk_deals WHERE admin_status='open' AND user_status='won'`)).rows[0].n;
+  return { approvals, lists, deals, total: approvals + lists + deals };
+}
+
+/** Admin list-prep company search — by NAME (contains) or exact numeric id. */
+export async function adminSearchCompanies(q, limit = 15) {
+  const term = String(q || '').trim();
+  if (!term) return [];
+  const digits = /^\d+$/.test(term) ? Number(term) : null;
+  return (await query(
+    `SELECT id, name, city, industry, website
+       FROM companies
+      WHERE COALESCE(archived,false)=false AND COALESCE(is_active,true)=true
+        AND (($2::bigint IS NOT NULL AND id = $2) OR name ILIKE '%' || $1 || '%')
+      ORDER BY (CASE WHEN $2::bigint IS NOT NULL AND id = $2 THEN 0 ELSE 1 END),
+               bell_score DESC NULLS LAST, name
+      LIMIT $3`,
+    [term, digits, Math.min(Number(limit) || 15, 30)])).rows;
+}
+
+// ---------------------------------------------------------------------------
+// Delivered-list dossiers (user-facing detail + CSV export)
+// ---------------------------------------------------------------------------
+
+/** Full company dossier for a 0 Risk tenant — ONLY for companies DELIVERED to
+ *  them in a list. Same response shape as GET /api/companies/:id, but UNMASKED:
+ *  a delivered dossier includes contact details (that IS the 0 Risk promise).
+ *  Everything not on their delivered lists stays out of reach. */
+export async function zrCompanyDetail(tenantId, companyId) {
+  const member = (await query(
+    `SELECT 1 FROM zero_risk_list_items i JOIN zero_risk_list_requests r ON r.id = i.request_id
+      WHERE r.tenant_id=$1 AND r.status='delivered' AND i.company_id=$2 LIMIT 1`,
+    [tenantId, companyId])).rows.length;
+  if (!member) throw new Error('not_in_list');
+  const [company, sources, people, contacts, financials, shareholders, partnerships] = await Promise.all([
+    query('SELECT * FROM companies WHERE id = $1', [companyId]),
+    query(`SELECT id, source, source_record_id, source_url, raw_payload, first_seen_at, last_seen_at
+             FROM company_sources WHERE company_id = $1 ORDER BY first_seen_at`, [companyId]),
+    query(`SELECT p.id, p.pin, p.full_name, p.headline, p.linkedin_url,
+                  p.is_revealed, p.email, p.phone, p.profile_picture_url, p.bell_score,
+                  pc.title, pc.seniority_level, pc.org_chart_level, pc.is_current
+             FROM person_companies pc JOIN people p ON p.id = pc.person_id
+            WHERE pc.company_id = $1
+            ORDER BY pc.org_chart_level NULLS LAST, p.full_name LIMIT 200`, [companyId]),
+    listCompanyContacts(companyId),
+    query(`SELECT id, metric, value_text, value_num, currency, period, as_of, confidence, source
+             FROM company_financials WHERE company_id = $1 ORDER BY metric, period`, [companyId]),
+    query(`SELECT id, holder_name, holder_type, stake_pct, stake_text, as_of, confidence, source
+             FROM company_shareholders WHERE company_id = $1 ORDER BY stake_pct DESC NULLS LAST, holder_name`, [companyId]),
+    query(`SELECT id, partner_name, partner_company_id, relationship, description, since, confidence, source
+             FROM company_partnerships WHERE company_id = $1 ORDER BY partner_name`, [companyId]),
+  ]);
+  if (!company.rows.length) throw new Error('not_found');
+  const row = company.rows[0];
+  row.revealed_by_tenant = true;   // delivered dossier — the drawer shows everything, no reveal gate
+  const peopleRows = people.rows;
+  if (peopleRows.length) {
+    const pcMap = await loadPersonContactsByIds(peopleRows.map((p) => p.id));
+    for (const p of peopleRows) { p.contacts = pcMap.get(p.id) || []; p.revealed_by_tenant = true; p.is_revealed = true; }
+  }
+  return {
+    company: row, sources: sources.rows, people: peopleRows, contacts,
+    financials: financials.rows, shareholders: shareholders.rows, partnerships: partnerships.rows, rejects: [],
+  };
+}
+
+const LIST_CSV_COLUMNS = [
+  { key: 'id', label: 'Bell ID' }, { key: 'name', label: 'Company' }, { key: 'legal_name', label: 'Legal name' },
+  { key: 'industry', label: 'Industry' }, { key: 'city', label: 'City' }, { key: 'country', label: 'Country' },
+  { key: 'website', label: 'Website' }, { key: 'email', label: 'Email' }, { key: 'phone', label: 'Phone' },
+  { key: 'linkedin_url', label: 'LinkedIn' }, { key: 'employee_count', label: 'Employees' },
+  { key: 'incorporation_date', label: 'Incorporated' }, { key: 'deal_status', label: 'Your deal status' },
+];
+
+/** CSV of one DELIVERED list (tenant-scoped). Returns { filename, csv }. */
+export async function exportListCsv(tenantId, requestId) {
+  const rq = (await query(`SELECT id, seq, status FROM zero_risk_list_requests WHERE id=$1 AND tenant_id=$2`, [requestId, tenantId])).rows[0];
+  if (!rq || rq.status !== 'delivered') throw new Error('not_found');
+  const rows = (await query(
+    `SELECT c.id, c.name, c.legal_name, c.industry, c.city, c.country, c.website, c.email, c.phone,
+            c.linkedin_url, c.employee_count, c.incorporation_date, d.user_status AS deal_status
+       FROM zero_risk_list_items i
+       JOIN companies c ON c.id = i.company_id
+       LEFT JOIN zero_risk_deals d ON d.tenant_id = $2 AND d.company_id = c.id
+      WHERE i.request_id = $1
+      ORDER BY i.id`, [requestId, tenantId])).rows;
+  return { filename: `bell-0risk-list-${rq.seq}.csv`, csv: toCsv(rows, LIST_CSV_COLUMNS) };
 }

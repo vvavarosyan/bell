@@ -366,7 +366,11 @@ async function bootstrap() {
     }
     // Intent consumed (whether or not enrolment succeeded) — don't re-trigger later.
     if (wantsJoin) { try { localStorage.removeItem('bdi_zr_join'); } catch { /* ignore */ } }
-    if (zr.account_type === 'zero_risk') {
+    // Returning from Stripe payment (?stripe=success): skip the 0 Risk divert so
+    // the subscription gate below can poll until the webhook flips this account
+    // to 'standard' — landing the newly-paid customer in the full app.
+    const zrFromStripe = new URLSearchParams(window.location.search).get('stripe') === 'success';
+    if (zr.account_type === 'zero_risk' && !zrFromStripe) {
       createRoot(rootEl).render(createElement(ZeroRiskPortal, { user: me.user, status: zr }));
       return;
     }
