@@ -76,7 +76,8 @@ export function ImportPanel({ onClose, onImported }) {
         : { mapped: r.mapped, action: 'new' };
     });
     const res = await api.commitImport({ kind: pv.kind, filename, rows });
-    toast(`Imported ${res.total.toLocaleString()} ${isCompany ? 'companies' : 'contacts'} · ${res.linked} linked to Bell, ${res.created} new — sent to Bell for review.`);
+    const skippedNote = res.skipped ? ` · ${res.skipped} skipped (couldn’t be saved)` : '';
+    toast(`Imported ${res.total.toLocaleString()} ${isCompany ? 'companies' : 'contacts'} · ${res.linked} linked to Bell, ${res.created} new${skippedNote} — sent to Bell for review.`);
     resetForm(); await loadBatches(); onImported && onImported();
   };
 

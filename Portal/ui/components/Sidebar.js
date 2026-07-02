@@ -3,6 +3,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { html } from '../lib/html.js';
+import { api } from '../lib/api.js';
 
 // Role-based visibility per sidebar item.
 //   'all' = visible to every signed-in user (including viewers)
@@ -161,6 +162,21 @@ export function Sidebar({ activeId, onSelect, dbStatus, settings, stats, current
     return () => window.removeEventListener('mousedown', onClick);
   }, [menuOpen]);
 
+  // Yellow workload badge on the "0 Risk" admin tab: pending approvals + list
+  // requests to prepare + won-deals awaiting finalization. Admin surfaces only.
+  const [zrPending, setZrPending] = useState(0);
+  useEffect(() => {
+    if (mode === 'user' || currentRole !== 'platform_admin') return;
+    let dead = false;
+    const loadCounts = async () => {
+      try { const c = await api.zrAdminCounts(); if (!dead) setZrPending(Number(c.total) || 0); }
+      catch { /* endpoint unavailable — leave badge hidden */ }
+    };
+    loadCounts();
+    const t = setInterval(loadCounts, 60000);
+    return () => { dead = true; clearInterval(t); };
+  }, [mode, currentRole]);
+
   // In user/admin mode, show the actual signed-in user (from /api/auth/me).
   // In local-admin mode there's no Clerk user — fall back to the local setting.
   const email = currentUser?.email || settings?.admin_email || 'admin@local';
@@ -204,6 +220,7 @@ export function Sidebar({ activeId, onSelect, dbStatus, settings, stats, current
                   <span class="nav-icon">${ICONS[item.icon] || null}</span>
                   <span class="nav-label">${item.label}</span>
                   ${compact != null ? html`<span class="nav-count">${compact}</span>` : null}
+                  ${item.id === 'zero-risk-admin' && zrPending > 0 ? html`<span title="Pending: approvals, list requests, deals to finalize" style=${{ marginLeft: 'auto', minWidth: '18px', height: '17px', padding: '0 5px', borderRadius: '9px', background: 'var(--yellow, #f5c84c)', color: '#141414', fontSize: '10px', fontWeight: 700, display: 'inline-flex', alignItems: 'center', justifyContent: 'center', lineHeight: 1 }}>${zrPending > 99 ? '99+' : zrPending}</span>` : null}
                   ${item.placeholder ? html`<span class="nav-soon">soon</span>` : null}
                 </button>
               `;

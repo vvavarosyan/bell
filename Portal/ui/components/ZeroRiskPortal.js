@@ -10,6 +10,7 @@ import { html } from '../lib/html.js';
 import { api } from '../lib/api.js';
 import { toast } from '../lib/toast.js';
 import { NotificationBell } from './NotificationBell.js';
+import { CompanyDetail } from './CompanyDetail.js';
 
 const page = { display: 'flex', flexDirection: 'column', height: '100vh', background: 'var(--bg)', color: 'var(--text)' };
 const header = { display: 'flex', alignItems: 'center', gap: '12px', padding: '12px 20px', borderBottom: '1px solid var(--border)', background: 'var(--bg-elev)', flexShrink: 0 };
@@ -125,7 +126,12 @@ export function ZeroRiskPortal({ user = null, status: initialStatus = null }) {
   };
 
   const uploadDoc = async (kind, file) => {
-    if (!file) return; setBusy(true);
+    if (!file) return;
+    // Pre-check the size client-side: past ~7.5MB raw the base64 JSON body would
+    // blow the server's 10mb limit and the user would see a raw 413 instead of
+    // this friendly message. Server still enforces its own 7MB cap.
+    if (file.size > 7 * 1024 * 1024) { toast('That file is over the 7MB limit — compress the PDF or use a smaller scan/photo.', 'error'); return; }
+    setBusy(true);
     try { await api.zrUploadDocument({ kind, filename: file.name, mime_type: file.type, content_base64: await fileToBase64(file) }); toast(`${DOC_LABELS[kind]} uploaded`); await loadStatus(); }
     catch (e) { toast(e.message === 'file_too_large' ? 'File too large (max ~7MB).' : 'Upload failed: ' + e.message, 'error'); } finally { setBusy(false); }
   };
@@ -146,10 +152,15 @@ export function ZeroRiskPortal({ user = null, status: initialStatus = null }) {
     catch (e) { toast(e.message === 'cannot_request' ? 'You can’t request a list right now.' : 'Request failed: ' + e.message, 'error'); } finally { setBusy(false); }
   };
 
-  const switchToBell = async () => {
-    if (!window.confirm('Switch to a paid Bell account? You’ll be taken to choose a plan. Your 0 Risk history is kept.')) return;
-    try { await api.zrSwitch(); } catch { /* proceed anyway */ }
-    window.location.href = '/subscribe';
+  const switchToBell = () => {
+    if (!window.confirm('Switch to a paid Bell account? You’ll be taken to choose a plan. Nothing changes unless you complete the payment — your 0 Risk account stays intact.')) return;
+    // NO account flip here: the conversion happens server-side only when the
+    // Stripe subscription actually activates (billing webhook). Cancelling
+    // checkout keeps the user a 0 Risk member — fixes the stranded-account bug.
+    const onZrHost = /^0risk/i.test(location.hostname);
+    window.location.href = onZrHost
+      ? `${location.protocol}//${location.hostname.replace(/^0risk/i, 'app')}/subscribe`
+      : '/subscribe';
   };
 
   const signOut = () => { try { window.__bdiAuth?.signOut?.(); } catch { window.location.href = '/sign-in'; } };
@@ -168,6 +179,8 @@ export function ZeroRiskPortal({ user = null, status: initialStatus = null }) {
   const st = status || {};
   const phase = st.zero_risk_status || 'onboarding';
   const approved = phase === 'approved';
+  const locked = !!st.locked;                 // post-signature form lock (server-enforced too)
+  const review = st.latest_review || null;    // latest admin decision + reasons
   const NAV = [
     ['overview', 'Overview'], ['profile', 'Company profile'], ['documents', 'Documents'],
     ['agreement', 'Agreement'], ...(approved ? [['lists', 'My lists']] : []), ['upgrade', 'Upgrade to Bell'],
@@ -193,10 +206,10 @@ export function ZeroRiskPortal({ user = null, status: initialStatus = null }) {
         </div>
 
         <div class="sys-body">
-          ${section === 'overview' ? renderOverview({ phase, donePct, setSection, approved })
-            : section === 'profile' ? renderProfile({ f, set, busy, saveProfile })
-            : section === 'documents' ? renderDocuments({ docByKind, uploadDoc })
-            : section === 'agreement' ? renderAgreement({ st, donePct, terms, docByKind, uploadDoc, signedConfirmed, setSignedConfirmed, submitApp, busy })
+          ${section === 'overview' ? renderOverview({ phase, donePct, setSection, approved, review })
+            : section === 'profile' ? renderProfile({ f, set, busy, saveProfile, locked })
+            : section === 'documents' ? renderDocuments({ docByKind, uploadDoc, phase })
+            : section === 'agreement' ? renderAgreement({ st, donePct, terms, docByKind, uploadDoc, signedConfirmed, setSignedConfirmed, submitApp, busy, phase })
             : section === 'lists' ? html`<${RequestsAndDeals} canRequest=${st.can_request_list} blockReason=${st.request_block_reason} requestList=${requestList} busy=${busy} limits=${st.limits} />`
             : section === 'upgrade' ? renderUpgrade({ switchToBell })
             : null}
@@ -222,36 +235,67 @@ export function ZeroRiskPortal({ user = null, status: initialStatus = null }) {
   `;
 }
 
-function phaseLabel(p) { return ({ onboarding: 'Onboarding', pending_approval: 'Under review', approved: 'Approved', suspended: 'Suspended' }[p]) || p; }
+function phaseLabel(p) { return ({ onboarding: 'Onboarding', pending_approval: 'Under review', approved: 'Approved', suspended: 'Suspended', rejected: 'Rejected', resubmission_required: 'Needs updates' }[p]) || p; }
 
-function renderOverview({ phase, donePct, setSection, approved }) {
-  return html`<div class="sys-section">
-    <h2>${approved ? 'You’re approved' : phase === 'pending_approval' ? 'Under review' : 'Let’s get you set up'}</h2>
+// Status banner (Val 2026-07-02): green congratulations on approval, neutral
+// "under review by Bell Administration" after submit, yellow resubmission with
+// the admin's reasons, red rejection with reasons.
+function StatusBanner({ phase, review }) {
+  const P = {
+    approved:              { bg: 'rgba(46,204,113,.10)', bd: 'rgba(46,204,113,.45)', fg: 'var(--green, #2ecc71)', title: 'Congratulations — your 0 Risk account is approved!', body: 'You have the green light. Head to “My lists” and request your first list of perfectly-matched prospects.' },
+    pending_approval:      { bg: 'rgba(90,140,255,.08)', bd: 'rgba(90,140,255,.35)', fg: 'var(--accent-bright, #7aa2ff)', title: 'Submitted — under review by Bell Administration', body: 'Your application and signed agreement are with the Bell team. You’ll be notified here and by email the moment a decision is made. Your details are locked while under review.' },
+    resubmission_required: { bg: 'rgba(245,200,76,.10)', bd: 'rgba(245,200,76,.45)', fg: 'var(--yellow, #f5c84c)', title: 'Updates required — please fix and submit again', body: 'The Bell team reviewed your application and needs the items below corrected. Your profile and documents are unlocked — fix them, then submit again from the Agreement section.' },
+    rejected:              { bg: 'rgba(255,93,93,.10)', bd: 'rgba(255,93,93,.45)', fg: 'var(--red, #ff5d5d)', title: 'Application rejected', body: 'Your 0 Risk application was not approved. The reasons are listed below — contact the Bell team if you believe this is a mistake.' },
+  }[phase];
+  if (!P) return null;
+  const reasons = (review && Array.isArray(review.reasons)) ? review.reasons.filter(Boolean) : [];
+  const showReasons = phase === 'resubmission_required' || phase === 'rejected';
+  return html`<div style=${{ border: '1px solid ' + P.bd, background: P.bg, borderRadius: '10px', padding: '14px 16px', marginBottom: '18px' }}>
+    <div style=${{ fontSize: '13.5px', fontWeight: 700, color: P.fg, marginBottom: '4px' }}>${P.title}</div>
+    <div style=${{ fontSize: '12.5px', color: 'var(--text-muted)', lineHeight: 1.55 }}>${P.body}</div>
+    ${showReasons && (reasons.length || review?.note) ? html`
+      <div style=${{ marginTop: '10px', display: 'flex', flexDirection: 'column', gap: '4px' }}>
+        ${reasons.map((r) => html`<div key=${r} style=${{ fontSize: '12.5px', color: 'var(--text)' }}>• ${r}</div>`)}
+        ${review?.note ? html`<div style=${{ fontSize: '12.5px', color: 'var(--text)', fontStyle: 'italic' }}>“${review.note}”</div>` : null}
+      </div>` : null}
+  </div>`;
+}
+
+function renderOverview({ phase, donePct, setSection, approved, review }) {
+  return html`<div>
+    <${StatusBanner} phase=${phase} review=${review} />
+    <div class="sys-section">
+    <h2>${approved ? 'You’re approved' : phase === 'pending_approval' ? 'Under review' : phase === 'rejected' ? 'Application closed' : phase === 'resubmission_required' ? 'Fix & resubmit' : 'Let’s get you set up'}</h2>
     <div class="sys-hint">${approved
       ? 'Head to “My lists” to request your first 100 perfectly-matched prospects.'
       : phase === 'pending_approval'
         ? 'Your application is with the Bell team. We’ll notify you here once it’s approved — then you can request your first list.'
-        : 'Complete your company profile (including CR, QID and Computer Card numbers), upload your documents, then review and sign the agreement. When you reach 100%, submit for approval.'}</div>
+        : phase === 'rejected'
+          ? 'This application was not approved. Reach out to the Bell team if you’d like to discuss it.'
+          : phase === 'resubmission_required'
+            ? 'Correct the items listed above in your profile and documents, then submit again from the Agreement section.'
+            : 'Complete your company profile (including CR, QID and Computer Card numbers), upload your documents, then review and sign the agreement. When you reach 100%, submit for approval.'}</div>
     <div class="sys-actions">
-      ${!approved && phase !== 'pending_approval' ? html`
+      ${!approved && !['pending_approval', 'rejected'].includes(phase) ? html`
         <button class="sys-btn" onClick=${() => setSection('profile')}>${donePct < 100 ? `Continue profile (${donePct}%)` : 'Review agreement'}</button>
         <button class="sys-btn sys-btn-secondary" onClick=${() => setSection('agreement')}>View agreement</button>` : null}
       ${approved ? html`<button class="sys-btn" onClick=${() => setSection('lists')}>Go to my lists</button>` : null}
     </div>
-  </div>`;
+  </div></div>`;
 }
 
-function renderProfile({ f, set, busy, saveProfile }) {
+function renderProfile({ f, set, busy, saveProfile, locked }) {
   const fld = (k, label, opts = {}) => {
     const bad = opts.validate && has(f[k]) && !opts.validate(f[k]);
     return html`<div class=${'sys-field' + (opts.full ? ' full' : '')}>
       <label>${label}</label>
-      ${opts.area ? html`<textarea class="sys-textarea" value=${f[k]} onInput=${set(k)} placeholder=${opts.ph || ''}></textarea>`
-        : html`<input class="sys-input" style=${bad ? { borderColor: 'var(--red)' } : {}} value=${f[k]} onInput=${set(k)} placeholder=${opts.ph || ''} />`}
+      ${opts.area ? html`<textarea class="sys-textarea" disabled=${locked} style=${locked ? { opacity: .55 } : {}} value=${f[k]} onInput=${set(k)} placeholder=${opts.ph || ''}></textarea>`
+        : html`<input class="sys-input" disabled=${locked} style=${{ ...(bad ? { borderColor: 'var(--red)' } : {}), ...(locked ? { opacity: .55 } : {}) }} value=${f[k]} onInput=${set(k)} placeholder=${opts.ph || ''} />`}
       ${bad ? html`<span style=${{ fontSize: '11px', color: 'var(--red)' }}>${opts.err || 'Invalid'}</span>` : null}
     </div>`;
   };
   return html`
+    ${locked ? html`<div class="sys-hint" style=${{ marginBottom: '14px', color: 'var(--yellow, #f5c84c)' }}>Locked — your details can’t change after the signed agreement is uploaded. If something must be corrected, the Bell team can request a resubmission, which unlocks the form.</div>` : null}
     <div class="sys-section">
       <h2>Company & customers</h2>
       <div class="sys-hint">Tell us everything about your business and who you sell to — the more precise, the better Bell matches you to high-fit prospects.</div>
@@ -283,27 +327,45 @@ function renderProfile({ f, set, busy, saveProfile }) {
         ${fld('contact_number', 'Contact number', { validate: V.phone, err: 'Valid Qatar number — 8 digits (optionally +974).' })}
         ${fld('contact_email', 'Contact email', { validate: V.email, err: 'Enter a valid email address.' })}
       </div>
-      <div class="sys-actions"><button class="sys-btn" disabled=${busy} onClick=${saveProfile}>${busy ? 'Saving…' : 'Save profile'}</button></div>
+      ${locked ? null : html`<div class="sys-actions"><button class="sys-btn" disabled=${busy} onClick=${saveProfile}>${busy ? 'Saving…' : 'Save profile'}</button></div>`}
     </div>`;
 }
 
-function renderDocuments({ docByKind, uploadDoc }) {
+function renderDocuments({ docByKind, uploadDoc, phase }) {
+  // While under review / decided, documents are frozen (server enforces too).
+  const docsLocked = ['pending_approval', 'approved', 'rejected'].includes(phase);
   const row = (kind) => {
     const s = (docByKind[kind] || {}).status || 'missing';
     return html`<div key=${kind} style=${{ display: 'flex', alignItems: 'center', gap: '12px', padding: '12px 0', borderBottom: '1px solid var(--border)' }}>
-      <label class="sys-btn sys-btn-secondary" style=${{ cursor: 'pointer' }}><input type="file" accept=".pdf,image/*" style=${{ display: 'none' }} onChange=${(e) => uploadDoc(kind, e.target.files && e.target.files[0])} />Upload</label>
+      ${docsLocked
+        ? html`<span class="sys-btn sys-btn-secondary" style=${{ opacity: .45, cursor: 'not-allowed' }}>Upload</span>`
+        : html`<label class="sys-btn sys-btn-secondary" style=${{ cursor: 'pointer' }}><input type="file" accept=".pdf,image/*" style=${{ display: 'none' }} onChange=${(e) => uploadDoc(kind, e.target.files && e.target.files[0])} />Upload</label>`}
       <span style=${{ fontSize: '13px' }}>${DOC_LABELS[kind]}</span><span style=${{ flex: 1 }}></span>
       <span style=${{ fontSize: '12px', color: s === 'missing' ? 'var(--text-dim)' : 'var(--green)' }}>${s === 'missing' ? 'not uploaded' : s}</span>
     </div>`;
   };
   return html`<div class="sys-section">
     <h2>Documents</h2>
-    <div class="sys-hint">Upload your CR, the signatory’s QID, and any company documentation. Max ~7MB each (PDF or image). The signed agreement is uploaded in the Agreement section.</div>
+    <div class="sys-hint">${docsLocked
+      ? 'Documents are locked while your application is under review or after a decision. If the Bell team requests a resubmission they unlock automatically.'
+      : 'Upload your CR, the signatory’s QID, and any company documentation. Max ~7MB each (PDF or image). The signed agreement is uploaded in the Agreement section.'}</div>
     <div style=${{ maxWidth: '640px' }}>${['cr', 'qid', 'company_doc'].map(row)}</div>
   </div>`;
 }
 
-function renderAgreement({ st, donePct, terms, docByKind, uploadDoc, signedConfirmed, setSignedConfirmed, submitApp, busy }) {
+function renderAgreement({ st, donePct, terms, docByKind, uploadDoc, signedConfirmed, setSignedConfirmed, submitApp, busy, phase }) {
+  // Submitted / decided — read-only summary, no re-signing UI.
+  if (['pending_approval', 'approved', 'rejected'].includes(phase)) {
+    return html`<div class="sys-section">
+      <h2>Your 0 Risk Agreement</h2>
+      <div class="sys-hint">${phase === 'approved'
+        ? 'Your signed agreement is approved and on file with Bell.'
+        : phase === 'pending_approval'
+          ? 'Your signed agreement has been submitted and is under review by Bell Administration. No changes are possible while it’s being reviewed.'
+          : 'This application was rejected — see the Overview for the reasons.'}</div>
+      <div class="sys-hint">Revenue share: <b style=${{ color: 'var(--text)' }}>${st.revenue_share_pct ?? 15}%</b> · Governing law: State of Qatar</div>
+    </div>`;
+  }
   if (!st.agreement_ready) {
     return html`<div class="sys-section">
       <h2>Agreement</h2>
@@ -360,14 +422,19 @@ function renderUpgrade({ switchToBell }) {
   </div>`;
 }
 
-// Approved-only: request lists + work deliveries + report deals.
+// Approved-only: request lists + work deliveries + report deals. Every delivered
+// company opens the SAME full dossier drawer paid Bell users see (CompanyDetail,
+// fed by the delivered-list-gated /api/zero-risk/companies/:id — unmasked), and
+// each delivered list exports to CSV.
 function RequestsAndDeals({ canRequest, blockReason, requestList, busy, limits }) {
   const [reqs, setReqs] = useState([]);
   const [deals, setDeals] = useState([]);
   const [b2, setB2] = useState(false);
+  const [openId, setOpenId] = useState(null);   // company-dossier drawer
   const load = useCallback(async () => { try { const [a, b] = await Promise.all([api.zrListRequests(), api.zrDeals()]); setReqs(a.rows || []); setDeals(b.rows || []); } catch { /* ignore */ } }, []);
   useEffect(() => { load(); }, [load]);
   const report = async (companyId, requestId, user_status) => { setB2(true); try { await api.zrReportDeal({ company_id: companyId, request_id: requestId, user_status }); toast('Deal status updated'); await load(); } catch (e) { toast('Update failed: ' + e.message, 'error'); } finally { setB2(false); } };
+  const exportCsv = async (rq) => { try { await api.zrExportList(rq.id); } catch (e) { toast('Export failed: ' + e.message, 'error'); } };
   const dealFor = (cid) => deals.find((d) => Number(d.company_id) === Number(cid));
   const lim = limits || {};
   const btnMini = (on) => ({ background: on ? 'var(--accent)' : 'var(--bg-elev-2)', border: '1px solid ' + (on ? 'var(--accent)' : 'var(--border)'), color: on ? '#fff' : 'var(--text-muted)', borderRadius: '6px', padding: '4px 10px', fontSize: '11px', fontWeight: 600, cursor: 'pointer' });
@@ -377,22 +444,39 @@ function RequestsAndDeals({ canRequest, blockReason, requestList, busy, limits }
       <div class="sys-hint">Allowance: <b style=${{ color: 'var(--text)' }}>${lim.lists_allowed ?? 0}</b> · up to <b style=${{ color: 'var(--text)' }}>${lim.companies_per_request ?? 100}</b> companies each · ${lim.finalized_won_count ?? 0} deals won.</div>
       <div class="sys-actions">
         <button class="sys-btn" disabled=${busy || !canRequest} onClick=${requestList}>${busy ? 'Requesting…' : 'Request a list'}</button>
-        ${!canRequest ? html`<span style=${{ ...muted, alignSelf: 'center' }}>${({ request_outstanding: 'A list is being prepared — finish it first.', no_allowance: 'Close a deal to unlock the next request.' }[blockReason]) || ''}</span>` : null}
+        ${!canRequest ? html`<span style=${{ ...muted, alignSelf: 'center' }}>${({ request_outstanding: 'A list is being prepared — finish it first.', no_allowance: 'Complete your current list — the Bell team reviews your progress and grants the next request.' }[blockReason]) || ''}</span>` : null}
       </div>
     </div>
     <div class="sys-section">
       <h2>Your lists</h2>
+      ${reqs.some((r) => r.status === 'delivered') ? html`<div class="sys-hint">Click a company to open its full dossier — everything Bell knows about it, contacts included.</div>` : null}
       ${!reqs.length ? html`<div class="empty">No lists yet.</div>` : reqs.map((rq) => html`
         <div key=${rq.id} style=${{ marginBottom: '14px' }}>
-          <div style=${{ fontWeight: 600, fontSize: '13px', marginBottom: '4px' }}>List #${rq.seq} · ${rq.size} companies · <span style=${{ color: rq.status === 'delivered' ? 'var(--green)' : 'var(--text-muted)' }}>${rq.status}</span></div>
+          <div style=${{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '4px' }}>
+            <span style=${{ fontWeight: 600, fontSize: '13px' }}>List #${rq.seq} · ${rq.size} companies · <span style=${{ color: rq.status === 'delivered' ? 'var(--green)' : 'var(--text-muted)' }}>${rq.status}</span></span>
+            ${rq.status === 'delivered' ? html`<button class="sys-btn sys-btn-secondary" style=${{ padding: '3px 10px', fontSize: '11px' }} onClick=${() => exportCsv(rq)}>Export CSV</button>` : null}
+          </div>
           ${rq.status !== 'delivered' ? html`<div style=${muted}>Being prepared by the Bell team.</div>` : (rq.items || []).map((it) => {
             const d = dealFor(it.company_id);
             return html`<div key=${it.id} style=${{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 0', borderBottom: '1px solid var(--border)', flexWrap: 'wrap' }}>
-              <span style=${{ fontSize: '13px', minWidth: '190px' }}>${it.company_name || ('Company #' + it.company_id)}</span><span style=${{ flex: 1 }}></span>
+              <button onClick=${() => setOpenId(Number(it.company_id))} title="Open the full dossier"
+                style=${{ background: 'transparent', border: 'none', padding: 0, minWidth: '190px', textAlign: 'left', fontSize: '13px', fontWeight: 600, color: 'var(--accent-bright, #7aa2ff)', cursor: 'pointer' }}>${it.company_name || ('Company #' + it.company_id)}</button>
+              <span style=${{ flex: 1 }}></span>
               ${d?.admin_status && d.admin_status !== 'open' ? html`<span style=${{ fontSize: '11.5px', color: 'var(--green)' }}>${d.admin_status.replace('finalized_', '')}</span>`
                 : ['contacted', 'negotiating', 'won', 'lost'].map((s) => html`<button key=${s} onClick=${() => report(it.company_id, rq.id, s)} disabled=${b2} style=${btnMini(d?.user_status === s)}>${s}</button>`)}
             </div>`;
           })}
         </div>`)}
-    </div>`;
+    </div>
+    ${openId ? html`
+      <div style=${{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,.45)', zIndex: 60 }} onClick=${() => setOpenId(null)}></div>
+      <div style=${{ position: 'fixed', top: 0, right: 0, bottom: 0, width: 'min(560px, 94vw)', zIndex: 61, background: 'var(--bg)', borderLeft: '1px solid var(--border)', display: 'flex', flexDirection: 'column' }}>
+        <div style=${{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '8px 12px', borderBottom: '1px solid var(--border)', flexShrink: 0 }}>
+          <span style=${{ fontSize: '12px', color: 'var(--text-muted)' }}>Company dossier</span>
+          <button class="sys-btn sys-btn-secondary" onClick=${() => setOpenId(null)}>Close</button>
+        </div>
+        <div style=${{ flex: 1, overflow: 'auto', display: 'flex' }}>
+          <${CompanyDetail} companyId=${openId} isUser=${true} fetchCompany=${api.zrCompanyDetail} />
+        </div>
+      </div>` : null}`;
 }

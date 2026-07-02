@@ -712,6 +712,11 @@ async function handleSubscriptionChange(sub) {
          SET plan                   = COALESCE($2, plan),
              stripe_subscription_id = $3,
              subscription_status    = $4,
+             -- A 0 Risk account converts to a normal paid account ONLY here, at
+             -- the moment its subscription actually becomes active (the portal's
+             -- "Switch" button no longer flips anything up front — cancelling
+             -- checkout must leave the 0 Risk account untouched).
+             account_type           = CASE WHEN $4 IN ('active','trialing') AND account_type = 'zero_risk' THEN 'standard' ELSE account_type END,
              plan_renewed_at        = COALESCE($5, plan_renewed_at),
              plan_expires_at        = $6,
              past_due_at            = CASE WHEN $4 IN ('active','trialing') THEN NULL ELSE past_due_at END,
@@ -774,7 +779,8 @@ async function handleInvoicePaid(inv) {
     UPDATE tenants
        SET subscription_status = 'active',
            plan_renewed_at     = now(),
-           past_due_at         = NULL
+           past_due_at         = NULL,
+           account_type        = CASE WHEN account_type = 'zero_risk' THEN 'standard' ELSE account_type END
      WHERE id = $1
   `, [t.id]);
   console.log(`[billing] tenant ${t.id} invoice paid plan=${plan.id} — credits via monthly grant`);

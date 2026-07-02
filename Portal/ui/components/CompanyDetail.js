@@ -279,7 +279,7 @@ const ADMIN_ONLY_LEGAL_FIELDS = new Set([
 
 // ============================================================================
 
-export function CompanyDetail({ companyId, onMutated, onDeleted, canHardDelete = false, isLocalEngine = false, isUser = false }) {
+export function CompanyDetail({ companyId, onMutated, onDeleted, canHardDelete = false, isLocalEngine = false, isUser = false, fetchCompany = null }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [similar, setSimilar] = useState([]);
@@ -294,7 +294,7 @@ export function CompanyDetail({ companyId, onMutated, onDeleted, canHardDelete =
   const reload = async () => {
     if (!companyId) return;
     try {
-      const r = await api.company(companyId);
+      const r = await (fetchCompany || api.company)(companyId);
       setData(r);
     } catch (err) { toast('Reload failed: ' + err.message, 'error'); }
   };
@@ -306,8 +306,10 @@ export function CompanyDetail({ companyId, onMutated, onDeleted, canHardDelete =
       setLoading(true);
       try {
         const [r, sim, rel] = await Promise.all([
-          api.company(companyId),
-          api.similarBySource(companyId).catch(() => ({ rows: [] })),
+          (fetchCompany || api.company)(companyId),
+          // A custom fetcher (0 Risk portal) means the caller has no access to
+          // the feature-gated similar-companies endpoint — skip it cleanly.
+          fetchCompany ? Promise.resolve({ rows: [] }) : api.similarBySource(companyId).catch(() => ({ rows: [] })),
           isLocalEngine ? api.relationships(companyId).catch(() => ({ outgoing: [], incoming: [] })) : Promise.resolve({ outgoing: [], incoming: [] }),
         ]);
         if (!cancelled) {

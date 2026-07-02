@@ -9,13 +9,17 @@ import { Router } from 'express';
 import {
   enroll, getStatus, profileCompleteness, saveDocument, submitForApproval,
   requestList, listRequests, reportDeal, listDeals, getAgreementTerms, switchToPaid,
-  adminPendingAccounts, adminAllAccounts, adminApprove, adminReject, adminPendingLists,
-  adminDeliverList, adminFinalizeDeal, adminSetLimits,
+  isProfileLocked, zrCompanyDetail, exportListCsv,
+  adminPendingAccounts, adminAllAccounts, adminApprove, adminReject, adminRequestResubmission,
+  adminPendingLists, adminDeliverList, adminFinalizeDeal, adminSetLimits, adminCounts, adminSearchCompanies,
 } from '../lib/zerorisk.js';
 import { query } from '../db.js';
 
 const tid = (req) => req.tenant?.id;
 const actor = (req) => req.user?.email || null;
+// Admin routes take numeric ids in the path — reject junk up front instead of
+// letting NaN reach the SQL layer (500s / phantom no-op successes).
+const pathId = (v) => { const n = Number(v); return Number.isFinite(n) && n > 0 ? Math.floor(n) : null; };
 
 // ---------------------------------------------------------------------------
 // USER router
@@ -54,6 +58,10 @@ userRouter.get('/profile', async (req, res, next) => {
 userRouter.put('/profile', async (req, res, next) => {
   try {
     if (!tid(req)) return res.status(401).json({ error: 'no_tenant' });
+    // Post-signature lock: no profile changes after the signed agreement is
+    // uploaded / the application is submitted — unless admin asked for a
+    // resubmission (which reopens the form).
+    if (await isProfileLocked(tid(req))) return res.status(409).json({ error: 'locked' });
     const b = req.body || {};
     const cols = [], vals = [tid(req)]; let i = 1;
     const set = (col, val) => { vals.push(val); cols.push(`${col}=$${++i}`); };
@@ -85,6 +93,10 @@ userRouter.put('/profile', async (req, res, next) => {
 userRouter.post('/documents', async (req, res, next) => {
   try {
     if (!tid(req)) return res.status(401).json({ error: 'no_tenant' });
+    // No document changes while the application is under review / decided.
+    // (During onboarding re-uploads are fine; resubmission reopens everything.)
+    const st = (await query(`SELECT zero_risk_status FROM tenants WHERE id=$1`, [tid(req)])).rows[0]?.zero_risk_status;
+    if (['pending_approval', 'approved', 'rejected'].includes(st)) return res.status(409).json({ error: 'locked' });
     const { kind, filename, mime_type, content_base64 } = req.body || {};
     if (!content_base64) return res.status(400).json({ error: 'no_content' });
     const buffer = Buffer.from(String(content_base64), 'base64');
@@ -132,6 +144,37 @@ userRouter.post('/list-requests', async (req, res, next) => {
   }
 });
 
+// Full dossier for ONE delivered company — the same drawer data paid users get,
+// but gated to the tenant's delivered list items and returned unmasked.
+userRouter.get('/companies/:id', async (req, res, next) => {
+  try {
+    if (!tid(req)) return res.status(401).json({ error: 'no_tenant' });
+    const id = pathId(req.params.id);
+    if (!id) return res.status(400).json({ error: 'bad_id' });
+    res.json(await zrCompanyDetail(tid(req), id));
+  } catch (err) {
+    if (err.message === 'not_in_list') return res.status(403).json({ error: 'not_in_list' });
+    if (err.message === 'not_found') return res.status(404).json({ error: 'not_found' });
+    next(err);
+  }
+});
+
+// CSV export of one delivered list.
+userRouter.get('/list-requests/:id/export.csv', async (req, res, next) => {
+  try {
+    if (!tid(req)) return res.status(401).json({ error: 'no_tenant' });
+    const id = pathId(req.params.id);
+    if (!id) return res.status(400).json({ error: 'bad_id' });
+    const { filename, csv } = await exportListCsv(tid(req), id);
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`);
+    res.send(csv);
+  } catch (err) {
+    if (err.message === 'not_found') return res.status(404).json({ error: 'not_found' });
+    next(err);
+  }
+});
+
 userRouter.get('/deals', async (req, res, next) => {
   try { if (!tid(req)) return res.status(401).json({ error: 'no_tenant' }); res.json({ rows: await listDeals(tid(req)) }); }
   catch (err) { next(err); }
@@ -162,17 +205,43 @@ adminRouter.get('/accounts/all', async (req, res, next) => {
   try { res.json({ rows: await adminAllAccounts() }); } catch (err) { next(err); }
 });
 adminRouter.post('/accounts/:tenantId/approve', async (req, res, next) => {
-  try { res.json(await adminApprove(Number(req.params.tenantId), actor(req))); } catch (err) { next(err); }
+  try {
+    const id = pathId(req.params.tenantId);
+    if (!id) return res.status(400).json({ error: 'bad_id' });
+    res.json(await adminApprove(id, actor(req)));
+  } catch (err) { if (err.message === 'not_found') return res.status(404).json({ error: 'not_found' }); next(err); }
 });
 adminRouter.post('/accounts/:tenantId/reject', async (req, res, next) => {
-  try { res.json(await adminReject(Number(req.params.tenantId), actor(req), req.body?.note || null)); } catch (err) { next(err); }
+  try {
+    const id = pathId(req.params.tenantId);
+    if (!id) return res.status(400).json({ error: 'bad_id' });
+    res.json(await adminReject(id, actor(req), req.body?.note || null, req.body?.reasons || []));
+  } catch (err) { if (err.message === 'not_found') return res.status(404).json({ error: 'not_found' }); next(err); }
+});
+adminRouter.post('/accounts/:tenantId/resubmission', async (req, res, next) => {
+  try {
+    const id = pathId(req.params.tenantId);
+    if (!id) return res.status(400).json({ error: 'bad_id' });
+    res.json(await adminRequestResubmission(id, actor(req), req.body?.note || null, req.body?.reasons || []));
+  } catch (err) { if (err.message === 'not_found') return res.status(404).json({ error: 'not_found' }); next(err); }
+});
+// Workload counts (sidebar badge + section headers).
+adminRouter.get('/counts', async (req, res, next) => {
+  try { res.json(await adminCounts()); } catch (err) { next(err); }
+});
+// Company search for list prep (name contains / exact id).
+adminRouter.get('/companies', async (req, res, next) => {
+  try { res.json({ rows: await adminSearchCompanies(req.query.q || '') }); } catch (err) { next(err); }
 });
 adminRouter.get('/lists', async (req, res, next) => {
   try { res.json({ rows: await adminPendingLists() }); } catch (err) { next(err); }
 });
 adminRouter.post('/lists/:id/deliver', async (req, res, next) => {
-  try { res.json(await adminDeliverList(Number(req.params.id), req.body?.items || [], actor(req))); }
-  catch (err) { if (err.message === 'not_found') return res.status(404).json({ error: 'not_found' }); next(err); }
+  try {
+    const id = pathId(req.params.id);
+    if (!id) return res.status(400).json({ error: 'bad_id' });
+    res.json(await adminDeliverList(id, req.body?.items || [], actor(req)));
+  } catch (err) { if (err.message === 'not_found') return res.status(404).json({ error: 'not_found' }); next(err); }
 });
 adminRouter.get('/deals', async (req, res, next) => {
   try {
@@ -185,12 +254,17 @@ adminRouter.get('/deals', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 adminRouter.post('/deals/:id/finalize', async (req, res, next) => {
-  try { res.json(await adminFinalizeDeal(Number(req.params.id), req.body?.admin_status, actor(req))); }
-  catch (err) { if (['bad_status', 'not_found'].includes(err.message)) return res.status(400).json({ error: err.message }); next(err); }
+  try {
+    const id = pathId(req.params.id);
+    if (!id) return res.status(400).json({ error: 'bad_id' });
+    res.json(await adminFinalizeDeal(id, req.body?.admin_status, actor(req)));
+  } catch (err) { if (['bad_status', 'not_found'].includes(err.message)) return res.status(400).json({ error: err.message }); next(err); }
 });
 adminRouter.post('/limits/:tenantId', async (req, res, next) => {
   try {
-    res.json(await adminSetLimits(Number(req.params.tenantId),
+    const id = pathId(req.params.tenantId);
+    if (!id) return res.status(400).json({ error: 'bad_id' });
+    res.json(await adminSetLimits(id,
       { companiesPerRequest: Number(req.body?.companies_per_request), listsAllowed: Number(req.body?.lists_allowed) }, actor(req)));
   } catch (err) { next(err); }
 });
@@ -198,7 +272,9 @@ adminRouter.post('/limits/:tenantId', async (req, res, next) => {
 // View an uploaded document (admin reviewing CR/QID/signed agreement).
 adminRouter.get('/documents/:id/content', async (req, res, next) => {
   try {
-    const d = (await query(`SELECT filename, mime_type, content FROM zero_risk_documents WHERE id=$1`, [Number(req.params.id)])).rows[0];
+    const id = pathId(req.params.id);
+    if (!id) return res.status(400).json({ error: 'bad_id' });
+    const d = (await query(`SELECT filename, mime_type, content FROM zero_risk_documents WHERE id=$1`, [id])).rows[0];
     if (!d || !d.content) return res.status(404).json({ error: 'not_found' });
     res.setHeader('Content-Type', d.mime_type || 'application/octet-stream');
     res.setHeader('Content-Disposition', `inline; filename="${(d.filename || 'document').replace(/"/g, '')}"`);

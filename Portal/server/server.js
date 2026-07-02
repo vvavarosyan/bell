@@ -21,6 +21,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { pingDatabase } from './db.js';
 import { runPendingMigrations } from './migrate.js';
+import { emailProviderConfigured } from './lib/email.js';
 
 import companiesRouter         from './routes/companies.js';
 import peopleRouter            from './routes/people.js';
@@ -108,11 +109,15 @@ app.use('/api/auth/clerk-webhook',     express.raw({ type: 'application/json', l
 app.use('/api/billing/stripe-webhook', express.raw({ type: 'application/json', limit: '2mb' }));
 app.use(express.json({ limit: '10mb' }));
 
-// Health
+// Health. `build` = the deployed commit (Railway injects RAILWAY_GIT_COMMIT_SHA),
+// so "which version is live?" is answered by GET /api/health — no more digging.
+const BUILD_SHA = String(process.env.RAILWAY_GIT_COMMIT_SHA || process.env.SOURCE_COMMIT || '').slice(0, 7) || null;
 app.get('/api/health', async (req, res) => {
   try {
     const ok = await pingDatabase();
-    res.json({ ok, db: ok ? 'connected' : 'down', ts: new Date().toISOString() });
+    // `email` tells us at a glance whether THIS deployment can actually send
+    // (Resend key present) — diagnoses "in-app arrived but email didn't".
+    res.json({ ok, db: ok ? 'connected' : 'down', build: BUILD_SHA, email: emailProviderConfigured(), ts: new Date().toISOString() });
   } catch (err) {
     res.status(500).json({ ok: false, db: 'down', error: err.message });
   }
