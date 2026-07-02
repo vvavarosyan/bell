@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useMemo } from 'react';
+import { PeopleLockedBanner } from './PeopleLockedBanner.js';
 import { html } from '../lib/html.js';
 import { api } from '../lib/api.js';
 import { toast } from '../lib/toast.js';
@@ -30,6 +31,7 @@ export function PeopleTab({ mode = 'local-admin' } = {}) {
   const [openedId, setOpenedId] = useState(null);
   const [selected, setSelected] = useState(() => new Set());
   const [activeJob, setActiveJob] = useState(null);
+  const [locked, setLocked]     = useState(false);   // PEOPLE PUBLIC LOCKDOWN (server-driven)
 
   const load = useCallback(async ({ silent = false } = {}) => {
     if (!silent) setLoading(true);
@@ -43,6 +45,7 @@ export function PeopleTab({ mode = 'local-admin' } = {}) {
       if (addedAfter) params.added_after = addedAfter;
       if (addedBefore) params.added_before = addedBefore;
       const r = await api.people(params);
+      setLocked(!!r.locked);
       setRows(r.rows);
       setTotal(r.total);
     } catch (err) { toast('Load failed: ' + err.message, 'error'); }
@@ -161,6 +164,21 @@ export function PeopleTab({ mode = 'local-admin' } = {}) {
     const next = archivedMode ? 'active' : 'archived';
     setArchiveMode(next); setOffset(0); setSelected(new Set()); setOpenedId(null);
   };
+
+  // ── PEOPLE PUBLIC LOCKDOWN ── the server returned locked:true (customer
+  // account): show the banner + honest total instead of the grid. NOTE: this
+  // early return sits BELOW every hook in this component (page-blank rule).
+  if (locked) {
+    return html`
+      <div style=${{ padding: '18px 24px' }}>
+        <div style=${{ display: 'flex', alignItems: 'baseline', gap: '10px' }}>
+          <h2 style=${{ margin: 0, fontSize: '17px' }}>People</h2>
+          <span class="muted small">${Number(total).toLocaleString()} records</span>
+        </div>
+        <${PeopleLockedBanner} count=${total} />
+      </div>
+    `;
+  }
 
   return html`
     <div class="grid-toolbar">

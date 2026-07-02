@@ -16,6 +16,7 @@ import { denyUnlessLocalEngine } from '../lib/auth.js';
 import { addRevealedToCrm } from '../lib/crm.js';
 import { normalizeName } from '../ingest/normalize.js';
 import { mapLabelToCanonical, industryKeywordsIn } from '../lib/industry.js';
+import { getIndustryGroups } from '../lib/industry_groups.js';
 
 // Escape LIKE wildcards in user input so a literal % or _ doesn't widen the match.
 function likeEscape(s) { return String(s).replace(/[\\%_]/g, '\\$&'); }
@@ -378,6 +379,12 @@ router.get('/industries', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+// Umbrella SECTOR groups with live counts + tag search-synonyms (A3
+// findability). Must be declared before /:id so the literal path matches.
+router.get('/industry-groups', async (req, res, next) => {
+  try { res.json(await getIndustryGroups()); } catch (err) { next(err); }
+});
+
 router.get('/:id', async (req, res, next) => {
   try {
     const id = Number(req.params.id);
@@ -421,10 +428,15 @@ router.get('/:id', async (req, res, next) => {
     const maskedContacts = row.contacts;
     delete row.contacts;
 
-    // Drawer People tab: attach each person's contacts + per-tenant reveal
-    // status (masking hides the values until the user reveals that person).
-    const peopleRows = people.rows;
-    if (peopleRows.length) {
+    // Drawer People tab. PEOPLE PUBLIC LOCKDOWN (Val 2026-07-02): customers get
+    // only the COUNT (the UI shows a banner); full rows stay for platform_admin.
+    const peopleLocked = req.user?.role !== 'platform_admin';
+    let peopleRows = people.rows;
+    let peopleCount = peopleRows.length;
+    if (peopleLocked) {
+      peopleCount = (await query(`SELECT count(*)::int AS n FROM person_companies WHERE company_id = $1`, [id])).rows[0].n;
+      peopleRows = [];
+    } else if (peopleRows.length) {
       const pcMap = await loadPersonContactsByIds(peopleRows.map(p => p.id));
       for (const p of peopleRows) p.contacts = pcMap.get(p.id) || [];
       await maskPeople(req, peopleRows);
@@ -434,6 +446,8 @@ router.get('/:id', async (req, res, next) => {
       company:  row,
       sources:  sources.rows,
       people:   peopleRows,
+      people_locked: peopleLocked,
+      people_count:  peopleCount,
       contacts: maskedContacts,
       financials:   financials.rows,
       shareholders: shareholders.rows,

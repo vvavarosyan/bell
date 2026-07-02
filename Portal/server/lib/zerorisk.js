@@ -445,14 +445,13 @@ export async function zrCompanyDetail(tenantId, companyId) {
   ]);
   if (!company.rows.length) throw new Error('not_found');
   const row = company.rows[0];
-  row.revealed_by_tenant = true;   // delivered dossier — the drawer shows everything, no reveal gate
-  const peopleRows = people.rows;
-  if (peopleRows.length) {
-    const pcMap = await loadPersonContactsByIds(peopleRows.map((p) => p.id));
-    for (const p of peopleRows) { p.contacts = pcMap.get(p.id) || []; p.revealed_by_tenant = true; p.is_revealed = true; }
-  }
+  row.revealed_by_tenant = true;   // delivered dossier — company data fully open, no reveal gate
+  // PEOPLE PUBLIC LOCKDOWN (Val 2026-07-02): applies to 0 Risk dossiers too —
+  // the drawer shows the banner + honest count; person rows stay admin-only
+  // until Qatar's personal-data framework is resolved.
   return {
-    company: row, sources: sources.rows, people: peopleRows, contacts,
+    company: row, sources: sources.rows,
+    people: [], people_locked: true, people_count: people.rows.length, contacts,
     financials: financials.rows, shareholders: shareholders.rows, partnerships: partnerships.rows, rejects: [],
   };
 }

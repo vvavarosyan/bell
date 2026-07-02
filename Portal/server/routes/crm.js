@@ -19,6 +19,27 @@ import { ensureCrmRecord, logActivity, markContacted, buildMergeVars, applyMerge
 import { sendEmail, getFromAddress, inboundReplyTo } from '../lib/email.js';
 import { resolveSendIdentity, formatFrom } from '../lib/email_domains.js';
 import { checkDailyLimit } from '../lib/sendlimits.js';
+
+// ── Sender signature (A4-S3, Val-approved 2026-07-02) ──────────────────────
+// Settings → Email stores a per-user signature + an "append to CRM emails"
+// toggle (users.extra_fields.profile.email_signature / preferences.
+// append_signature). These were saved but never APPLIED — now every CRM send
+// path appends the signature unless the user turned it off.
+async function getUserSignature(userId) {
+  try {
+    if (!userId) return null;
+    const r = await query(`SELECT extra_fields FROM users WHERE id = $1`, [userId]);
+    const extra = r.rows[0]?.extra_fields || {};
+    if ((extra.preferences || {}).append_signature === false) return null;
+    const sig = String((extra.profile || {}).email_signature || '').trim();
+    return sig || null;
+  } catch { return null; }
+}
+function appendSig(text, sig) {
+  const t = String(text || '');
+  if (!sig || !t || t.includes(sig)) return t;   // already present (composer) → don't double it
+  return t.replace(/\s+$/, '') + '\n\n' + sig;
+}
 import { getRevealedSet } from '../lib/credits.js';
 import { addDatapoint, listDatapoints, deleteDatapoint, addNewEntity, DATAPOINT_FIELDS } from '../lib/contributions.js';
 
@@ -419,12 +440,15 @@ router.post('/records/:id/email', async (req, res, next) => {
     const subject  = applyMerge(String(req.body?.subject || '').trim(), vars);
     const bodyText = applyMerge(String(req.body?.body || '').trim(), vars);
     if (!subject && !bodyText) return res.status(400).json({ error: 'empty_email' });
+    // Settings → Email → "Append signature to CRM emails" (A4-S3): stored and
+    // sent WITH the signature so the record matches what the prospect received.
+    const bodyOut = appendSig(bodyText, await getUserSignature(actorUserId(req)));
     const replyTo = actorEmail(req);
 
     const ins = await query(
       `INSERT INTO crm_emails (tenant_id, record_id, direction, to_email, cc_email, reply_to, subject, body_text, status, sent_by)
        VALUES ($1,$2,'out',$3,$4,$5,$6,$7,'queued',$8) RETURNING id`,
-      [tenantId(req), id, to, cc.length ? cc.join(', ') : null, replyTo, subject, bodyText, replyTo]);
+      [tenantId(req), id, to, cc.length ? cc.join(', ') : null, replyTo, subject, bodyOut, replyTo]);
     const emailId = Number(ins.rows[0].id);
     // If inbound is configured, route replies through Bell (so they thread + stop
     // sequences); otherwise replies go straight to the human sender.
@@ -434,7 +458,7 @@ router.post('/records/:id/email', async (req, res, next) => {
       let from;
       try { from = formatFrom(await resolveSendIdentity(tenantId(req))); } catch (e) { console.error('[crm] identity resolve failed:', e.message); }
       from = from || await getFromAddress();
-      const sent = await sendEmail({ from, to, cc: cc.length ? cc : undefined, replyTo: effReplyTo, subject, text: bodyText });
+      const sent = await sendEmail({ from, to, cc: cc.length ? cc : undefined, replyTo: effReplyTo, subject, text: bodyOut });
       await query(`UPDATE crm_emails SET status='sent', provider_message_id=$2, from_email=$3, reply_to=$4, sent_at=now() WHERE id=$1`,
         [emailId, sent.id, from, effReplyTo]);
       await logActivity(null, tenantId(req), id, 'email_out', {
@@ -820,13 +844,15 @@ router.post('/records/bulk', async (req, res, next) => {
       const lim0 = await checkDailyLimit(tid, req.tenant?.plan);
       let remaining = lim0.remaining;
       let sent = 0, noEmail = 0, capped = 0, failed = 0;
+      // One signature lookup for the whole bulk batch (same sender) — A4-S3.
+      const bulkSig = await getUserSignature(actorUserId(req));
       for (const r0 of recs.rows) {
         const to = String((r0.entity_type === 'company' ? r0.company_email : r0.person_email) || '').trim();
         if (!to) { noEmail++; continue; }
         if (remaining <= 0) { capped++; continue; }
         const vars = buildMergeVars(r0);
         const subject = applyMerge(subjTpl, vars);
-        const bodyText = applyMerge(bodyTpl, vars);
+        const bodyText = appendSig(applyMerge(bodyTpl, vars), bulkSig);
         const insB = await query(
           `INSERT INTO crm_emails (tenant_id, record_id, direction, to_email, reply_to, subject, body_text, status, sent_by)
            VALUES ($1,$2,'out',$3,$4,$5,$6,'queued',$7) RETURNING id`,

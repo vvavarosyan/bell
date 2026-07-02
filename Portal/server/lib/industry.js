@@ -49,7 +49,7 @@ export const CANONICAL_INDUSTRIES = [
 // [canonical, keywords] — a keyword appearing in an industry LABEL maps it to the
 // canonical bucket. A single label can map to several canonicals (e.g. "Trading
 // & Contracting" → Trading + Construction). Most-specific entries first.
-const LABEL_MAP = [
+export const LABEL_MAP = [
   ['Oil & Gas', ['oil', 'gas', 'petroleum', 'petrochemical', ' lng', 'hydrocarbon', 'upstream', 'downstream', 'petrol station']],
   ['Energy & Utilities', ['electricity', 'power generation', 'utilities', 'water treatment', 'solar', 'renewable', 'district cooling', 'desalination', 'energy']],
   ['Telecommunications', ['telecom', 'communication', 'broadband', 'fiber', 'fibre', 'satellite', 'network services']],

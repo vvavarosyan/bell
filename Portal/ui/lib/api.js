@@ -145,6 +145,8 @@ export const api = {
 
   jobs:                   (q = {}) => request('/api/jobs?' + new URLSearchParams(q)),
   job:                    (id) => request('/api/jobs/' + id),
+  jobFilters:             () => request('/api/jobs/filters'),
+  industryGroups:         () => request('/api/companies/industry-groups'),
   updateJob:              (id, body) => request('/api/jobs/' + id, { method: 'PATCH', body: JSON.stringify(body) }),
 
   settings:               () => request('/api/settings'),

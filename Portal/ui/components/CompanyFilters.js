@@ -4,8 +4,9 @@
 // completeness / location / founded year / Bell score. The parent owns the
 // committed `value`; this edits a draft and commits on Apply.
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { html } from '../lib/html.js';
+import { api } from '../lib/api.js';
 
 const STATUS_OPTS = ['active', 'inactive', 'suspended', 'withdrawn', 'in_liquidation', 'frozen', 'deregistered', 'not_licensed', 'unknown'];
 const SOURCE_OPTS = ['QFC', 'QFZ', 'MOCI', 'QSTP', 'QSE', 'QCCI', 'MoPH', 'Tasmu', 'CRA', 'MadeInQatar', 'QFCRA'];
@@ -30,12 +31,22 @@ export function countActiveFilters(f) {
 const chip = (active, label, onClick) => html`
   <button type="button" class=${'filter-chip' + (active ? ' on' : '')} onClick=${onClick}>${label}</button>`;
 
-// Searchable multi-select used for the (long) industry list.
-function IndustryPicker({ options, selected, onToggle }) {
+// Searchable multi-select used for the (long) industry list. The search also
+// matches each canonical tag's derivation KEYWORDS (A3): typing "beauty
+// salons" finds "Beauty & Wellness", "clinic" finds "Healthcare", etc.
+function IndustryPicker({ options, selected, onToggle, synonyms = {} }) {
   const [open, setOpen] = useState(false);
   const [q, setQ] = useState('');
   const ql = q.trim().toLowerCase();
-  const filtered = ql ? options.filter((o) => o.industry.toLowerCase().includes(ql)) : options;
+  const hay = (o) => (o.industry + ' ' + (synonyms[o.industry] || []).join(' ')).toLowerCase();
+  const tokens = ql.split(/\s+/).filter(Boolean);
+  const filtered = ql
+    ? options.filter((o) => {
+        const h = hay(o);
+        // every query word must appear (with a naive plural fallback: "salons" → "salon")
+        return tokens.every((t) => h.includes(t) || (t.endsWith('s') && h.includes(t.slice(0, -1))));
+      })
+    : options;
   return html`
     <div class="bdi-ms">
       <button type="button" class="bdi-ms-trigger" onClick=${() => setOpen((o) => !o)}>
@@ -44,7 +55,7 @@ function IndustryPicker({ options, selected, onToggle }) {
       </button>
       ${open ? html`
         <div class="bdi-ms-panel">
-          <input class="bdi-ms-search" type="text" placeholder="Search industries…" value=${q} onChange=${(e) => setQ(e.target.value)} />
+          <input class="bdi-ms-search" type="text" placeholder="Search — try “beauty salons”, “clinic”, “ERP”…" value=${q} onChange=${(e) => setQ(e.target.value)} />
           <div class="bdi-ms-list">
             ${filtered.length === 0 ? html`<div class="muted small" style=${{ padding: '8px' }}>No match.</div>` : null}
             ${filtered.map((o) => {
@@ -64,8 +75,26 @@ function IndustryPicker({ options, selected, onToggle }) {
 
 export function CompanyFilters({ value, industries = [], onApply, onClose }) {
   const [d, setD] = useState(() => ({ ...EMPTY_FILTERS, ...(value || {}) }));
+  // Sector umbrella groups + tag synonyms (A3 findability) — fetched once,
+  // cached server-side, harmless if unavailable (section simply hides).
+  const [sectors, setSectors] = useState({ groups: [], synonyms: {} });
+  useEffect(() => {
+    let dead = false;
+    api.industryGroups().then((r) => { if (!dead) setSectors(r); }).catch(() => { /* hide sectors */ });
+    return () => { dead = true; };
+  }, []);
   const toggle = (key, v) => setD((s) => ({ ...s, [key]: s[key].includes(v) ? s[key].filter((x) => x !== v) : [...s[key], v] }));
   const set = (key, v) => setD((s) => ({ ...s, [key]: v }));
+  // A sector chip is ON when every one of its tags is selected. Toggling adds
+  // or removes the whole tag set — it drives the SAME industries filter.
+  const sectorOn = (g) => g.tags.every((t) => d.industries.includes(t));
+  const toggleSector = (g) => setD((s) => {
+    const on = g.tags.every((t) => s.industries.includes(t));
+    const industries = on
+      ? s.industries.filter((t) => !g.tags.includes(t))
+      : [...new Set([...s.industries, ...g.tags])];
+    return { ...s, industries };
+  });
   const num = (key, ph) => html`<input class="bdi-filter-input" type="number" placeholder=${ph} value=${d[key]} onChange=${(e) => set(key, e.target.value)} style=${{ width: '82px' }} />`;
   const sec = (label, body, full = false) => html`<div class="bdi-filter-sec" style=${full ? { gridColumn: '1 / -1' } : null}>
     <div class="bdi-filter-label">${label}</div>${body}</div>`;
@@ -80,7 +109,10 @@ export function CompanyFilters({ value, industries = [], onApply, onClose }) {
       </div>
       <div class="bdi-filter-body">
         <div class="bdi-filter-grid">
-          ${sec('Industry', html`<${IndustryPicker} options=${industries} selected=${d.industries} onToggle=${(v) => toggle('industries', v)} />`, true)}
+          ${sectors.groups.length ? sec('Sector', html`<div class="bdi-chiprow">
+            ${sectors.groups.map((g) => chip(sectorOn(g), `${g.label}${g.count ? ` · ${Number(g.count).toLocaleString()}` : ''}`, () => toggleSector(g)))}
+          </div>`, true) : null}
+          ${sec('Industry', html`<${IndustryPicker} options=${industries} selected=${d.industries} onToggle=${(v) => toggle('industries', v)} synonyms=${sectors.synonyms} />`, true)}
           ${sec('Status', html`<div class="bdi-chiprow">${STATUS_OPTS.map((s) => chip(d.statuses.includes(s), s, () => toggle('statuses', s)))}</div>`)}
           ${sec('Source', html`<div class="bdi-chiprow">${SOURCE_OPTS.map((s) => chip(d.sources.includes(s), s, () => toggle('sources', s)))}</div>`)}
           ${sec('Employee size', html`<div class="bdi-chiprow">${EMP_OPTS.map((s) => chip(d.empBuckets.includes(s), s, () => toggle('empBuckets', s)))}</div>`)}
