@@ -371,6 +371,17 @@ async function bootstrap() {
     // to 'standard' — landing the newly-paid customer in the full app.
     const zrFromStripe = new URLSearchParams(window.location.search).get('stripe') === 'success';
     if (zr.account_type === 'zero_risk' && !zrFromStripe) {
+      // 0risk.bell.qa is the OFFICIAL 0 Risk surface (Val 2026-07-02): a 0 Risk
+      // account that reaches the main app domain gets normalized onto it (same
+      // .bell.qa Clerk session, so they stay signed in). Exact-host match only —
+      // staging/local keep rendering in place.
+      if (location.hostname.toLowerCase() === 'app.bell.qa') {
+        const url = new URL(window.location.href);
+        url.hostname = '0risk.bell.qa';
+        url.searchParams.delete('zero-risk');   // clean the legacy join param
+        window.location.replace(url.toString());
+        return;
+      }
       createRoot(rootEl).render(createElement(ZeroRiskPortal, { user: me.user, status: zr }));
       return;
     }

@@ -338,7 +338,7 @@ function PersonaFact({ label, value }: { label: string; value: string }) {
 
 type TimelineBlock = {
   time:      string;
-  icon:      React.ComponentType<{ size?: number }>;
+  icon:      React.ComponentType<{ size?: number | string }>;
   title:     string;
   narrative: React.ReactNode;
   surface:   React.ReactNode;
@@ -721,7 +721,7 @@ function SurfaceCard({
 function SurfaceRow({
   icon: Icon, label, value, tint,
 }: {
-  icon:  React.ComponentType<{ size?: number }>;
+  icon:  React.ComponentType<{ size?: number | string }>;
   label: string;
   value: string;
   tint:  string;
@@ -1330,7 +1330,7 @@ function SalesComparison() {
 // ───────────────────────────────────────────────────────────────────────────
 
 type PlatformLink = {
-  icon:  React.ComponentType<{ size?: number }>;
+  icon:  React.ComponentType<{ size?: number | string }>;
   label: string;
   href:  string;
   body:  string;
@@ -1521,7 +1521,7 @@ function MidPageCta() {
 // ───────────────────────────────────────────────────────────────────────────
 
 type OtherFunctionCard = {
-  icon:    React.ComponentType<{ size?: number }>;
+  icon:    React.ComponentType<{ size?: number | string }>;
   team:    string;
   href:    string;
   tagline: string;

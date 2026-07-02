@@ -30,7 +30,7 @@ import {
 // ───────────────────────────────────────────────────────────────────────────
 
 type Replaces = {
-  icon: React.ComponentType<{ size?: number }>;
+  icon: React.ComponentType<{ size?: number | string }>;
   team: string;
   tagline: string;
   capabilities: string[];
@@ -181,7 +181,7 @@ function Headline() {
         Meet Bella
       </div>
       <h2 className="text-display-md md:text-display-lg text-gradient">
-        An AI partner for every<br/>revenue team you run.
+        An AI partner for every <br/>revenue team you run.
       </h2>
       <p className="mt-6 text-lg md:text-xl text-text-muted leading-relaxed">
         Bella is an autonomous agent with full access to Bell.qa&apos;s

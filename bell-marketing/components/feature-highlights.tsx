@@ -37,7 +37,7 @@ const TONE: Record<CardTone, { color: string; soft: string; chip: string }> = {
 };
 
 type Feature = {
-  icon: React.ComponentType<{ size?: number }>;
+  icon: React.ComponentType<{ size?: number | string }>;
   title: string;
   body:  string;
   metric: string;
