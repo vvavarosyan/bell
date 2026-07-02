@@ -346,6 +346,8 @@ export const api = {
   feedSources:            () => request('/api/feed/sources'),
   signals:                (q = {}) => request('/api/signals?' + new URLSearchParams(q)),
   signalStats:            () => request('/api/signals/stats'),
+  signalsMap:             () => request('/api/signals/map'),
+  companyMapNetwork:      (id) => request(`/api/companies/${id}/map-network`),
 
   // Credits
   creditBalance:          () => request('/api/credits'),

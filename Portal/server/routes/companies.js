@@ -457,6 +457,28 @@ router.get('/:id', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+// GET /api/companies/:id/map-network — this company's network edges for the
+// Map's animated arcs (Phase D): partners/clients/affiliates/group members
+// from Engine 3, with target coordinates where the target is a Bell company.
+router.get('/:id/map-network', async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) return res.status(400).json({ error: 'invalid_id' });
+    const r = await query(`
+      SELECT cr.id, cr.relation_type, cr.target_name, cr.target_company_id,
+             tc.latitude  AS t_lat,
+             tc.longitude AS t_lng
+        FROM company_relationships cr
+        LEFT JOIN companies tc
+          ON tc.id = cr.target_company_id AND COALESCE(tc.archived, false) = false
+       WHERE cr.source_company_id = $1
+         AND cr.relation_type IN ('partner', 'client', 'affiliate', 'parent', 'subsidiary')
+       ORDER BY (tc.latitude IS NOT NULL) DESC, cr.created_at DESC
+       LIMIT 40`, [id]);
+    res.json({ edges: r.rows });
+  } catch (err) { next(err); }
+});
+
 // POST /api/companies/:id/reveal — unlock company contact details (1 credit).
 router.post('/:id/reveal', async (req, res, next) => {
   try {
