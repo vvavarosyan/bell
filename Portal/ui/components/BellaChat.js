@@ -122,6 +122,11 @@ export function BellaChat({ onClose }) {
     } catch (err) {
       patchLast((m) => ({ ...m, streaming: false, error: err?.message || 'Connection lost.' }));
     } finally {
+      // Safety net: if the stream ended without a done/error event (proxy drop,
+      // server hiccup), never leave the bubble spinning on "…" forever.
+      patchLast((m) => m.streaming
+        ? { ...m, streaming: false, error: (m.content || m.error) ? m.error : "Bella didn't respond — please try again." }
+        : m);
       setBusy(false);
       streamRef.current = null;
       refreshConvs();
