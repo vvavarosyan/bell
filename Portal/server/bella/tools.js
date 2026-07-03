@@ -821,7 +821,7 @@ export const TOOLS = [
     approval: 'act',
     definition: {
       name: 'schedule_task',
-      description: 'Schedule Bella to do work later ("have this ready by tomorrow morning"). She runs it autonomously at the set time and notifies the user; results land in this conversation.',
+      description: 'Schedule Bella to do work later ("have this ready by tomorrow morning"). The run executes FULLY AUTONOMOUSLY at the set time — no approvals are asked then, because the user\'s approval of the schedule counts as approval for everything in it. So your proposal MUST disclose any emails/WhatsApp it will send and any credits it will spend. Results land in this conversation + a notification; the user can cancel queued tasks in Settings → Bella.',
       input_schema: {
         type: 'object',
         properties: {
@@ -832,7 +832,7 @@ export const TOOLS = [
         required: ['instruction'],
       },
     },
-    describe: (args) => `Schedule: "${String(args.instruction || '').slice(0, 100)}" at ${args.run_at || `+${args.delay_hours || '?'}h`}`,
+    describe: (args) => `Schedule: "${String(args.instruction || '').slice(0, 100)}" at ${args.run_at || `+${args.delay_hours || '?'}h`} — runs autonomously, no further approvals (approving this IS the approval; daily credit caps still apply)`,
     async execute(args, ctx) {
       const instruction = String(args.instruction || '').trim();
       if (!instruction) return { error: 'instruction required' };

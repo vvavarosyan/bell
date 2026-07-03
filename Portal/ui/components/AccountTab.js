@@ -87,16 +87,20 @@ export function AccountTab() {
   }, [section, icp]);
 
   // Bella section hooks — above the early return (Rules of Hooks).
-  const [bellaInfo, setBellaInfo] = useState(null);   // { usage, actions }
+  const [bellaInfo, setBellaInfo] = useState(null);   // { usage, actions, tasks }
   useEffect(() => {
     if (section !== 'bella' || bellaInfo !== null) return;
     (async () => {
       try {
-        const [usage, acts] = await Promise.all([api.bellaUsage(), api.bellaActions(20)]);
-        setBellaInfo({ usage, actions: acts.actions || [] });
-      } catch { setBellaInfo({ usage: null, actions: [] }); }
+        const [usage, acts, tasks] = await Promise.all([api.bellaUsage(), api.bellaActions(20), api.bellaTasks()]);
+        setBellaInfo({ usage, actions: acts.actions || [], tasks: tasks.tasks || [] });
+      } catch { setBellaInfo({ usage: null, actions: [], tasks: [] }); }
     })();
   }, [section, bellaInfo]);
+  const cancelBellaTask = async (id) => {
+    try { await api.bellaCancelTask(id); toast('Task cancelled'); setBellaInfo(null); /* refetch */ }
+    catch (e) { toast('Cancel failed: ' + (e.message || ''), 'error'); }
+  };
 
   if (!data) return html`<div class="sys-page"><div class="sys-body"><div class="empty">Loading…</div></div></div>`;
 
@@ -478,6 +482,25 @@ export function AccountTab() {
             : 'Loading…'}
           ${' '}Daily limits are workspace defaults for now — per-plan limits arrive with the Billing integration.
         </div>
+
+        <h2 style=${{ marginTop: '26px' }}>Scheduled tasks</h2>
+        <div class="sys-hint" style=${{ marginBottom: '10px' }}>
+          Approving a schedule is the approval — queued tasks run fully autonomously at their time.
+          Cancel anything here before it runs.
+        </div>
+        ${(bellaInfo?.tasks || []).length === 0
+          ? html`<div class="sys-hint">Nothing scheduled. Ask Bella e.g. "tomorrow at 8am, summarize new signals for me".</div>`
+          : html`<div style=${{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+              ${(bellaInfo.tasks).map(t => html`
+                <div key=${t.id} style=${{ display: 'flex', gap: '10px', fontSize: '12px', alignItems: 'baseline' }}>
+                  <span style=${{ color: 'var(--text-dim)', whiteSpace: 'nowrap' }}>${new Date(t.run_at).toLocaleString()}</span>
+                  <span style=${{ color: t.status === 'queued' ? 'var(--accent-bright)' : t.status === 'done' ? 'var(--green)' : t.status === 'failed' ? 'var(--red)' : 'var(--text-dim)', textTransform: 'uppercase', fontSize: '10px', fontWeight: 700, whiteSpace: 'nowrap' }}>${t.status}</span>
+                  <span style=${{ color: 'var(--text-muted)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }} title=${t.instruction}>${t.instruction}</span>
+                  ${t.status === 'queued' ? html`
+                    <button style=${{ background: 'transparent', border: '1px solid var(--border)', color: 'var(--text-muted)', borderRadius: '6px', padding: '2px 9px', fontSize: '11px', cursor: 'pointer' }}
+                      onClick=${() => cancelBellaTask(t.id)}>Cancel</button>` : null}
+                </div>`)}
+            </div>`}
 
         <h2 style=${{ marginTop: '26px' }}>Recent activity</h2>
         ${(bellaInfo?.actions || []).length === 0
