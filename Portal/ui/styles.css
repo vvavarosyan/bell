@@ -2014,3 +2014,113 @@ a.contact-icon.on { cursor: pointer; text-decoration: none; position: relative; 
 .bdi-ms-chip { display: inline-flex; align-items: center; gap: 6px; padding: 3px 9px; border-radius: 6px; background: var(--accent-fade, rgba(91, 140, 255, .15)); border: 1px solid rgba(91, 140, 255, .42); color: var(--text); font-size: 11px; }
 .bdi-ms-chip button { background: transparent; border: none; color: var(--text-dim); cursor: pointer; font-size: 12px; line-height: 1; padding: 0; }
 .bdi-ms-chip button:hover { color: var(--text); }
+
+/* ---------------------------------------------------------------------------
+   Bella (Phase G1) — header dock + drop-down chat panel.
+   The dock is absolutely centered in .page-header (which becomes the anchor);
+   the panel is fixed and sits above every drawer/overlay (max app z was 200).
+--------------------------------------------------------------------------- */
+.page-header { position: relative; }
+
+.bella-dock { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); display: flex; align-items: center; gap: 8px; z-index: 60; }
+.bella-orb {
+  width: 30px; height: 30px; border-radius: 50%; cursor: pointer; position: relative;
+  border: 1px solid rgba(91, 140, 255, .55);
+  background: radial-gradient(circle at 32% 30%, #8bb0ff 0%, #5b8cff 38%, #1c2b55 100%);
+  box-shadow: var(--accent-glow);
+  display: flex; align-items: center; justify-content: center;
+  transition: box-shadow .25s ease, transform .15s ease;
+}
+.bella-orb:hover { box-shadow: 0 0 18px rgba(91, 140, 255, .6); transform: scale(1.06); }
+.bella-orb.open { box-shadow: 0 0 20px rgba(91, 140, 255, .7); }
+.bella-orb-core {
+  width: 10px; height: 10px; border-radius: 50%; background: #eaf1ff;
+  box-shadow: 0 0 8px rgba(234, 241, 255, .9);
+  animation: bella-breathe 2.8s ease-in-out infinite;
+}
+@keyframes bella-breathe {
+  0%, 100% { transform: scale(1); opacity: .85; }
+  50%      { transform: scale(1.25); opacity: 1; }
+}
+.bella-orb-mini {
+  display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 7px;
+  background: radial-gradient(circle at 32% 30%, #8bb0ff 0%, #5b8cff 55%, #1c2b55 100%);
+  box-shadow: 0 0 6px rgba(91, 140, 255, .55); vertical-align: baseline;
+}
+.bella-dock-btn {
+  background: transparent; border: 1px solid var(--border); color: var(--text-muted);
+  border-radius: 999px; padding: 4px 12px; font: inherit; font-size: 11.5px; cursor: pointer;
+}
+.bella-dock-btn:hover { color: var(--text); border-color: var(--accent); }
+.bella-dock-btn.active { color: var(--text); border-color: var(--accent); background: var(--accent-fade); }
+
+.bella-panel {
+  position: fixed; top: 62px; left: 50%; transform: translateX(-50%);
+  width: min(480px, calc(100vw - 28px));
+  height: min(74vh, 660px);
+  display: flex; flex-direction: column;
+  background: var(--bg-elev); border: 1px solid var(--border); border-radius: 14px;
+  box-shadow: 0 22px 70px rgba(0, 0, 0, .6), var(--shadow-glow);
+  z-index: 300; overflow: hidden;
+}
+.bella-panel-head {
+  display: flex; align-items: center; gap: 6px;
+  padding: 10px 12px; border-bottom: 1px solid var(--border); background: var(--bg-elev-2);
+}
+.bella-panel-title { font-size: 13px; font-weight: 700; letter-spacing: .3px; display: flex; align-items: center; }
+.bella-panel-spacer { flex: 1; }
+.bella-head-btn {
+  background: transparent; border: 1px solid var(--border); color: var(--text-muted);
+  border-radius: 6px; padding: 3px 9px; font: inherit; font-size: 11px; cursor: pointer;
+}
+.bella-head-btn:hover { color: var(--text); border-color: var(--accent); }
+
+.bella-convlist { border-bottom: 1px solid var(--border); max-height: 200px; overflow: auto; background: var(--bg-elev-2); padding: 6px; }
+.bella-convlist-empty { font-size: 12px; color: var(--text-dim); padding: 8px 10px; }
+.bella-convitem { display: flex; align-items: center; gap: 8px; padding: 6px 10px; border-radius: 6px; cursor: pointer; font-size: 12.5px; color: var(--text-muted); }
+.bella-convitem:hover { background: rgba(255, 255, 255, .05); color: var(--text); }
+.bella-convitem.active { color: var(--text); background: var(--accent-fade); }
+.bella-convitem-title { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bella-convitem-del { background: transparent; border: none; color: var(--text-dim); cursor: pointer; font-size: 11px; padding: 2px; }
+.bella-convitem-del:hover { color: var(--red); }
+
+.bella-msgs { flex: 1; overflow-y: auto; padding: 14px; display: flex; flex-direction: column; gap: 12px; }
+.bella-msg { display: flex; flex-direction: column; gap: 6px; }
+.bella-msg.user { align-items: flex-end; }
+.bella-msg.assistant { align-items: flex-start; }
+.bella-bubble {
+  max-width: 88%; padding: 9px 13px; border-radius: 12px; font-size: 13px; line-height: 1.5;
+  white-space: pre-wrap; word-break: break-word;
+}
+.bella-msg.user .bella-bubble { background: var(--accent); color: #0b1020; border-bottom-right-radius: 4px; font-weight: 500; }
+.bella-msg.assistant .bella-bubble { background: var(--bg-elev-2); border: 1px solid var(--border); color: var(--text); border-bottom-left-radius: 4px; }
+.bella-thinking { color: var(--text-dim); animation: bella-breathe 1.4s ease-in-out infinite; }
+.bella-chip {
+  font-size: 11px; color: var(--text-dim); background: rgba(255, 255, 255, .04);
+  border: 1px solid var(--border); border-radius: 999px; padding: 2px 10px; max-width: 88%;
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.bella-chip.error { color: var(--red); border-color: rgba(248, 113, 113, .4); }
+
+.bella-empty { text-align: center; margin: auto 0; padding: 22px 14px; }
+.bella-empty-title { font-size: 16px; font-weight: 700; margin-bottom: 6px; }
+.bella-empty-sub { font-size: 12.5px; color: var(--text-muted); margin-bottom: 16px; line-height: 1.5; }
+.bella-suggestions { display: flex; flex-direction: column; gap: 7px; align-items: center; }
+.bella-suggestion {
+  background: var(--bg-elev-2); border: 1px solid var(--border); color: var(--text-muted);
+  border-radius: 999px; padding: 6px 14px; font: inherit; font-size: 12px; cursor: pointer;
+}
+.bella-suggestion:hover { color: var(--text); border-color: var(--accent); box-shadow: var(--shadow-glow); }
+
+.bella-inputrow { display: flex; gap: 8px; padding: 10px 12px; border-top: 1px solid var(--border); background: var(--bg-elev-2); }
+.bella-input {
+  flex: 1; resize: none; background: var(--bg); border: 1px solid var(--border); color: var(--text);
+  border-radius: 10px; padding: 9px 12px; font: inherit; font-size: 13px; outline: none; max-height: 120px;
+}
+.bella-input:focus { border-color: var(--accent); }
+.bella-send {
+  background: var(--accent); border: none; color: #0b1020; font-weight: 700; font-size: 12.5px;
+  border-radius: 10px; padding: 0 16px; cursor: pointer;
+}
+.bella-send:disabled { opacity: .45; cursor: default; }
+.bella-send:not(:disabled):hover { box-shadow: var(--accent-glow); }

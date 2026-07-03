@@ -40,6 +40,7 @@ import { HarvestHistoryTab } from './components/HarvestHistoryTab.js';
 import { EngineTab } from './components/EngineTab.js';
 import { ManualLookupTab } from './components/ManualLookupTab.js';
 import { NotificationBell } from './components/NotificationBell.js';
+import { BellaDock } from './components/BellaDock.js';
 import { OnboardingPanel } from './components/OnboardingPanel.js';
 import { AnnouncementsTab } from './components/AnnouncementsTab.js';
 import { EmailTemplatesTab } from './components/EmailTemplatesTab.js';
@@ -230,6 +231,7 @@ function App({ initialUser, initialTenant, mode }) {
           </div>` : null; })()}
         <div class="page-header">
           <div class="page-title">${LABELS[tab] || tab}</div>
+          <${BellaDock} />
           ${stats && mode?.mode !== 'user' ? html`
             <div class="page-stats-inline">
               <span><b>${stats.companies_total.toLocaleString()}</b> companies</span>
