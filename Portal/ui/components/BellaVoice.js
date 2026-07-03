@@ -66,6 +66,23 @@ export function BellaVoice({ onClose, onOpenChat }) {
     })();
   }, []);
 
+  // While voice is active, CHAT replies are spoken too (Val 2026-07-03: after
+  // clicking Approve she answered in text only). BellaChat announces its
+  // finished replies on this window event; we voice them when idle-listening.
+  useEffect(() => {
+    window.__bellaVoiceActive = true;
+    const onSay = (e) => {
+      const text = e?.detail?.text;
+      if (text && (stateRef.current === 'listening')) speak(String(text));
+    };
+    window.addEventListener('bdi:bella-say', onSay);
+    return () => {
+      window.__bellaVoiceActive = false;
+      window.removeEventListener('bdi:bella-say', onSay);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   const speak = async (text) => {
     const clean = text.replace(CHOICES_RX, '').trim();
     if (!clean) { setSt('listening'); return; }

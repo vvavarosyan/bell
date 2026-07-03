@@ -14,9 +14,22 @@
 import { getKey } from '../keychain.js';
 
 const STT_MODEL = process.env.BDI_BELLA_STT_MODEL || 'scribe_v2';
-const TTS_MODEL = process.env.BDI_BELLA_TTS_MODEL || 'eleven_flash_v2_5';
+// Turbo over Flash (Val 2026-07-03): Flash degraded into a slow, robotic
+// delivery on longer passages; Turbo keeps near-realtime latency with far
+// better prosody. Delivery is tuned for a brisk, professional voice.
+const TTS_MODEL = process.env.BDI_BELLA_TTS_MODEL || 'eleven_turbo_v2_5';
 const VOICE_ID  = process.env.BDI_BELLA_VOICE_ID  || 'hA4zGnmTwX2NQiTRMt7o'; // Val's chosen Bella voice (2026-07-03)
 const OUTPUT    = process.env.BDI_BELLA_TTS_FORMAT || 'mp3_44100_128';
+
+// Delivery tuning (all overridable without a deploy):
+//   stability ↓ = more expressive · style ↑ = more character · speed ↑ = brisker
+const VOICE_SETTINGS = {
+  stability:         Number(process.env.BDI_BELLA_TTS_STABILITY ?? 0.5),
+  similarity_boost:  Number(process.env.BDI_BELLA_TTS_SIMILARITY ?? 0.8),
+  style:             Number(process.env.BDI_BELLA_TTS_STYLE ?? 0.3),
+  use_speaker_boost: true,
+  speed:             Number(process.env.BDI_BELLA_TTS_SPEED ?? 1.08),
+};
 
 let cachedKey = null;
 let cachedKeyAt = 0;
@@ -65,15 +78,25 @@ export async function transcribe(buffer, mimetype) {
 export async function ttsStream(text, signal) {
   const key = await elevenKey();
   if (!key) throw new Error('elevenlabs_key_missing');
-  const res = await fetch(
-    `https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(VOICE_ID)}/stream?output_format=${encodeURIComponent(OUTPUT)}`,
-    {
-      method: 'POST',
-      signal,
-      headers: { 'xi-api-key': key, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ text: String(text).slice(0, 1500), model_id: TTS_MODEL }),
-    }
-  );
+  const url = `https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(VOICE_ID)}/stream?output_format=${encodeURIComponent(OUTPUT)}`;
+  const call = (withSettings) => fetch(url, {
+    method: 'POST',
+    signal,
+    headers: { 'xi-api-key': key, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      text: String(text).slice(0, 1500),
+      model_id: TTS_MODEL,
+      ...(withSettings ? { voice_settings: VOICE_SETTINGS } : {}),
+    }),
+  });
+  let res = await call(true);
+  // Insurance: if a model/plan rejects a voice_settings field (400), retry
+  // plain rather than failing the whole reply.
+  if (res.status === 400) {
+    const body = await res.text().catch(() => '');
+    console.warn('[bella] TTS 400 with voice_settings, retrying plain:', body.slice(0, 160));
+    res = await call(false);
+  }
   if (!res.ok) {
     const body = await res.text().catch(() => '');
     throw new Error('ElevenLabs TTS HTTP ' + res.status + ': ' + body.slice(0, 200));
