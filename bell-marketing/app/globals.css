@@ -205,3 +205,15 @@ body {
   .doc-prose code { @apply text-[13px] bg-bg-elev-2 border border-border rounded px-1.5 py-0.5 text-text; }
   .doc-prose hr { @apply border-border my-10; }
 }
+
+/* Bella's section highlight — applied briefly when she navigates a visitor
+   to an anchored section ([data-bella="…"]) and explains it. */
+.bella-hl {
+  animation: bella-hl-pulse 3.4s ease-out forwards;
+  border-radius: 12px;
+}
+@keyframes bella-hl-pulse {
+  0%   { box-shadow: 0 0 0 3px rgb(var(--accent) / 0.75), 0 0 44px rgb(var(--accent) / 0.35); }
+  70%  { box-shadow: 0 0 0 3px rgb(var(--accent) / 0.45), 0 0 28px rgb(var(--accent) / 0.18); }
+  100% { box-shadow: 0 0 0 0 rgb(var(--accent) / 0); }
+}

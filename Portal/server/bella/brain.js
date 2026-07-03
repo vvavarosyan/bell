@@ -29,32 +29,13 @@ const MAX_ROUNDS  = 6;        // model-call rounds per user turn (tool loop boun
 const HISTORY_MAX = 30;       // messages replayed from the conversation
 
 // ---------------------------------------------------------------------------
-// SSE parser for the Anthropic stream — pure + exported for unit tests.
-// Feed it raw chunk text; it emits {event, data} for every complete frame.
+// SSE parser lives in ./sse.js (zero-import module shared with the marketing
+// brain, which must never pull this file's db-reaching import chain).
+// Re-exported here so existing imports/tests keep working.
 // ---------------------------------------------------------------------------
 
-export function createSSEFeeder(onEvent) {
-  let buf = '';
-  return function feed(chunkText) {
-    buf += chunkText;
-    let idx;
-    while ((idx = buf.indexOf('\n\n')) !== -1) {
-      const frame = buf.slice(0, idx);
-      buf = buf.slice(idx + 2);
-      let event = 'message';
-      const dataLines = [];
-      for (const line of frame.split('\n')) {
-        if (line.startsWith('event:')) event = line.slice(6).trim();
-        else if (line.startsWith('data:')) dataLines.push(line.slice(5).trim());
-        // comment lines (":") and blanks are ignored per the SSE spec
-      }
-      if (!dataLines.length) continue;
-      let data = null;
-      try { data = JSON.parse(dataLines.join('\n')); } catch { continue; }
-      onEvent(event, data);
-    }
-  };
-}
+import { createSSEFeeder } from './sse.js';
+export { createSSEFeeder };
 
 // ---------------------------------------------------------------------------
 // One streaming model call. Returns the full assistant content blocks,

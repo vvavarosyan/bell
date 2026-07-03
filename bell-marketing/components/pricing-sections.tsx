@@ -225,7 +225,7 @@ const PLANS: Plan[] = [
 
 function PlanGrid() {
   return (
-    <section className="relative pb-20">
+    <section className="relative pb-20" data-bella="pricing-plans">
       <div className="max-w-screen-xl mx-auto px-6">
         <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
           {PLANS.map((p, i) => (
@@ -452,7 +452,7 @@ function CreditEconomy() {
   ];
 
   return (
-    <section className="relative py-20">
+    <section className="relative py-20" data-bella="pricing-credits">
       <div className="max-w-screen-xl mx-auto px-6">
         <div className="text-center max-w-2xl mx-auto mb-12">
           <div className="inline-flex items-center gap-2 px-3 py-1 mb-5 rounded-full border border-border bg-bg-elev-2 text-text text-[11px] font-semibold uppercase tracking-wider">

@@ -3,6 +3,7 @@ import { Nav }          from '@/components/nav';
 import { Footer }       from '@/components/footer';
 import { ScrollToTop }  from '@/components/scroll-to-top';
 import { SeoJsonLd }    from '@/components/seo-jsonld';
+import { BellaWidget }  from '@/components/bella-widget';
 import './globals.css';
 
 export const metadata: Metadata = {
@@ -59,6 +60,9 @@ export default function RootLayout({
           {children}
         </main>
         <Footer />
+        {/* Bella — the site guide (streams from the portal's public endpoint;
+            this service holds no AI key and no data). */}
+        <BellaWidget />
       </body>
     </html>
   );
