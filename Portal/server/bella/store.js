@@ -227,3 +227,117 @@ export async function getBellaPrefs(userId) {
     return {};
   }
 }
+
+// ---------------------------------------------------------------------------
+// Approvals (G2) — proposed actions await the user's explicit click.
+// ---------------------------------------------------------------------------
+
+/** Persist a proposed action; unlike logAction this MUST succeed (throws). */
+export async function proposeAction(tenantId, userId, conversationId, tool, args, summary) {
+  const r = await query(
+    `INSERT INTO bella_actions (tenant_id, user_id, conversation_id, tool, args, status, result_summary)
+     VALUES ($1, $2, $3, $4, $5, 'proposed', $6) RETURNING id`,
+    [tenantId, userId, conversationId, tool, JSON.stringify(args || {}), (summary || '').slice(0, 400)]
+  );
+  return r.rows[0].id;
+}
+
+export async function getOwnedAction(tenantId, userId, id) {
+  const r = await query(
+    `SELECT id, conversation_id, tool, args, status, result_summary, credits_cost
+       FROM bella_actions WHERE id = $1 AND tenant_id = $2 AND user_id = $3`,
+    [id, tenantId, userId]
+  );
+  return r.rows[0] || null;
+}
+
+export async function setActionStatus(id, status, resultSummary = null, creditsCost = null) {
+  await query(
+    `UPDATE bella_actions
+        SET status = $2,
+            result_summary = COALESCE($3, result_summary),
+            credits_cost   = COALESCE($4, credits_cost)
+      WHERE id = $1`,
+    [id, status, resultSummary ? String(resultSummary).slice(0, 400) : null, creditsCost]
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Daily Bella credit budget (Val's D5: 500/day default; per-plan later).
+// ---------------------------------------------------------------------------
+
+export async function checkCreditsBudget(tenantId, userId, estimate) {
+  const u = await getTodayUsage(tenantId, userId);
+  const spent = Number(u.credits_spent) || 0;
+  return { ok: spent + Math.max(0, Number(estimate) || 0) <= DAILY_CREDITS_CAP, spent, cap: DAILY_CREDITS_CAP };
+}
+
+export async function addCreditsSpent(tenantId, userId, n) {
+  const add = Math.max(0, Number(n) || 0);
+  if (!add) return;
+  await query(
+    `INSERT INTO bella_usage (tenant_id, user_id, day, credits_spent)
+     VALUES ($1, $2, CURRENT_DATE, $3)
+     ON CONFLICT (tenant_id, user_id, day)
+     DO UPDATE SET credits_spent = bella_usage.credits_spent + EXCLUDED.credits_spent`,
+    [tenantId, userId, add]
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Scheduled / overnight tasks (G2) — "have this ready by morning".
+// ---------------------------------------------------------------------------
+
+export async function createTask(tenantId, userId, conversationId, instruction, runAt) {
+  const r = await query(
+    `INSERT INTO bella_tasks (tenant_id, user_id, conversation_id, instruction, run_at)
+     VALUES ($1, $2, $3, $4, $5) RETURNING id, run_at`,
+    [tenantId, userId, conversationId, String(instruction).slice(0, 4000), runAt]
+  );
+  return r.rows[0];
+}
+
+export async function listTasks(tenantId, userId, limit = 20) {
+  const r = await query(
+    `SELECT id, instruction, run_at, status, result, created_at, updated_at
+       FROM bella_tasks
+      WHERE tenant_id = $1 AND user_id = $2
+      ORDER BY (status = 'queued') DESC, run_at DESC
+      LIMIT $3`,
+    [tenantId, userId, Math.min(Number(limit) || 20, 100)]
+  );
+  return r.rows;
+}
+
+export async function cancelTask(tenantId, userId, id) {
+  const r = await query(
+    `UPDATE bella_tasks SET status = 'cancelled', updated_at = now()
+      WHERE id = $1 AND tenant_id = $2 AND user_id = $3 AND status = 'queued'`,
+    [id, tenantId, userId]
+  );
+  return r.rowCount > 0;
+}
+
+/** Atomically claim due tasks (safe if two services ever tick at once). */
+export async function claimDueTasks(limit = 2) {
+  const r = await query(
+    `UPDATE bella_tasks SET status = 'running', updated_at = now()
+      WHERE id IN (
+        SELECT id FROM bella_tasks
+         WHERE status = 'queued' AND run_at <= now()
+         ORDER BY run_at
+         LIMIT $1
+         FOR UPDATE SKIP LOCKED
+      )
+      RETURNING id, tenant_id, user_id, conversation_id, instruction`,
+    [Math.max(1, Number(limit) || 2)]
+  );
+  return r.rows;
+}
+
+export async function completeTask(id, status, result) {
+  await query(
+    `UPDATE bella_tasks SET status = $2, result = $3, updated_at = now() WHERE id = $1`,
+    [id, status, result ? JSON.stringify(result) : null]
+  );
+}

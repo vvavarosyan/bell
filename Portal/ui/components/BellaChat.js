@@ -62,7 +62,8 @@ export function BellaChat({ onClose }) {
         role: m.role,
         content: m.content || '',
         tools: m.meta?.tools || [],
-      })).filter((m) => m.content || (m.tools && m.tools.length)));
+        approvals: (m.meta?.approvals || []).map((a) => ({ ...a, status: 'pending' })),
+      })).filter((m) => m.content || (m.tools && m.tools.length) || (m.approvals && m.approvals.length)));
     } catch { /* ignore */ }
   };
 
@@ -85,13 +86,34 @@ export function BellaChat({ onClose }) {
     return next;
   });
 
-  const send = async (textArg) => {
+  // Patch one approval card by action id, wherever its message sits.
+  const patchApproval = (actionId, fn) => setMsgs((list) => list.map((m) => {
+    if (!m.approvals || !m.approvals.some((a) => a.action_id === actionId)) return m;
+    return { ...m, approvals: m.approvals.map((a) => (a.action_id === actionId ? fn({ ...a }) : a)) };
+  }));
+
+  // Approve/Deny click → server executes/denies → hidden continuation turn
+  // lets Bella narrate the outcome (no user bubble for it).
+  const decide = async (actionId, verdict) => {
+    if (busy) return;
+    patchApproval(actionId, (a) => ({ ...a, status: 'busy' }));
+    try {
+      const r = verdict === 'approved' ? await api.bellaApprove(actionId) : await api.bellaDeny(actionId);
+      patchApproval(actionId, (a) => ({ ...a, status: verdict, note: r?.summary || null }));
+      send(`[[action:${actionId}:${verdict}]]`, { hidden: true });
+    } catch (err) {
+      patchApproval(actionId, (a) => ({ ...a, status: 'error', note: err?.message || 'failed' }));
+    }
+  };
+
+  const send = async (textArg, opts = {}) => {
     const text = String(textArg ?? input).trim();
     if (!text || busy) return;
     setInput('');
     setBusy(true);
+    // Hidden turns (approval continuations) show no user bubble.
     setMsgs((list) => [...list,
-      { role: 'user', content: text },
+      ...(opts.hidden ? [] : [{ role: 'user', content: text }]),
       { role: 'assistant', content: '', tools: [], streaming: true },
     ]);
 
@@ -113,6 +135,10 @@ export function BellaChat({ onClose }) {
             if (n?.section) { try { navigateTo(n.section); } catch { /* ignore */ } }
             patchLast((m) => ({ ...m, tools: [...(m.tools || []), { name: 'navigate', status: 'done', summary: '→ ' + (n?.section || '') }] }));
           },
+          onApproval: (a) => patchLast((m) => ({
+            ...m,
+            approvals: [...(m.approvals || []), { action_id: a.action_id, tool: a.tool, summary: a.summary, status: 'pending' }],
+          })),
           onError: (e) => patchLast((m) => ({ ...m, streaming: false, error: e?.message || 'Something went wrong.' })),
           onDone: () => patchLast((m) => ({ ...m, streaming: false })),
         }
@@ -173,6 +199,21 @@ export function BellaChat({ onClose }) {
                 ${TOOL_LABELS[t.name] || t.name}${t.summary ? ' — ' + t.summary : (t.status === 'running' ? '…' : '')}
               </div>`)}
             ${m.content ? html`<div class="bella-bubble">${m.content}</div>` : null}
+            ${(m.approvals || []).map((a) => html`
+              <div key=${a.action_id} class="bella-approval">
+                <div class="bella-approval-summary">${a.summary || a.tool}</div>
+                ${a.status === 'pending' ? html`
+                  <div class="bella-approval-btns">
+                    <button class="bella-approve" disabled=${busy} onClick=${() => decide(a.action_id, 'approved')}>Approve</button>
+                    <button class="bella-deny" disabled=${busy} onClick=${() => decide(a.action_id, 'denied')}>Deny</button>
+                  </div>` : html`
+                  <div class=${'bella-approval-state ' + a.status}>
+                    ${a.status === 'busy' ? 'Working…'
+                      : a.status === 'approved' ? ('✓ Approved' + (a.note ? ' — ' + a.note : ''))
+                      : a.status === 'denied' ? '✕ Denied'
+                      : ('Couldn’t process' + (a.note ? ' — ' + a.note : ''))}
+                  </div>`}
+              </div>`)}
             ${m.streaming && !m.content ? html`<div class="bella-bubble bella-thinking">…</div>` : null}
             ${m.error ? html`<div class="bella-chip error">${m.error}</div>` : null}
           </div>`)}
