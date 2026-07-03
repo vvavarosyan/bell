@@ -45,6 +45,7 @@ import signalsRouter           from './routes/signals.js';
 import whatsappRouter          from './routes/whatsapp.js';
 import whatsappWebhookRouter   from './routes/whatsapp_webhook.js';
 import bellaRouter             from './routes/bella.js';
+import publicBellaRouter       from './routes/public_bella.js';
 import { startBellaScheduler } from './bella/scheduler.js';
 import { startCrmScheduler } from './crm/sequences.js';
 import { startInboundPoller } from './crm/inbound_poller.js';
@@ -239,6 +240,9 @@ app.use('/api/admin/users',        ...adminOnly, adminUsersRouter);
 //   sync   → /ingest + /reset use the BDI_SYNC_TOKEN; push/status/rebuild are localOnly
 // PUBLIC, unauthenticated, CDN-cacheable — powers bell.qa's /news SEO pages.
 app.use('/api/public/news',        publicNewsRouter);
+// Marketing Bella — bell.qa's widget calls this cross-origin. Public,
+// rate-limited, and data-free by construction (no db in its import graph).
+app.use('/api/public/bella',       publicBellaRouter);
 // PUBLIC Meta WhatsApp webhook (GET verify + POST events). No auth by design.
 app.use('/api/whatsapp-webhook',   whatsappWebhookRouter);
 
