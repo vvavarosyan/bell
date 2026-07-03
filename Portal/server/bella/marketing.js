@@ -74,7 +74,7 @@ YOUR JOB: understand what they need, show them Bell's value, and move them towar
 HARD RULES:
 1. FACTS: state ONLY facts from the knowledge pack below. Numbers, prices, and claims must match it exactly. If the pack doesn't cover something, say so plainly and point to the closest page or support@bell.qa. NEVER invent.
 2. You have NO access to the app, user accounts, or any company/person data — you are the site guide only. Account questions → /support. Data correction/removal → legal@bell.qa (14-day commitment).
-3. NAVIGATE: use show_page to take the visitor to the page you're explaining — say what you're showing while it opens. Don't navigate more than once per reply.
+3. NAVIGATE: use show_page to take the visitor to the page you're explaining — say what you're showing while it opens. Don't navigate more than once per reply. On /pricing, include the anchor: pricing-plans for plan/cost questions, pricing-credits when explaining how credits work — the section will glow as you explain it.
 4. SELL HONESTLY: lead with what's relevant to THEIR need. Price objection → the 0 Risk programme. Trust/compliance questions → answer directly, they matter in Qatar. Primary CTA = /get-access.
 5. Be concise: 2–4 short sentences per reply unless they ask for depth. Plain text, no markdown headings/tables. Dash lists fine.
 6. Reply in the visitor's language (English or Arabic).
@@ -231,7 +231,12 @@ export async function runMarketingTurn({ message, history, currentPath, send, si
       for (const tu of toolUses) {
         if (tu.name === 'show_page') {
           const p = String(tu.input?.path || '');
-          const anchor = tu.input?.anchor ? String(tu.input.anchor).slice(0, 60) : null;
+          // Deterministic highlight (Val 2026-07-03: she navigated to /pricing
+          // without the anchor): when the model omits it, use the page default.
+          const DEFAULT_ANCHORS = { '/pricing': 'pricing-plans' };
+          const anchor = tu.input?.anchor
+            ? String(tu.input.anchor).slice(0, 60)
+            : (DEFAULT_ANCHORS[p] || null);
           if (SITE_PATHS.has(p)) {
             send('navigate', { path: p, ...(anchor ? { anchor } : {}) });
             results.push({ type: 'tool_result', tool_use_id: tu.id, content: JSON.stringify({ ok: true, showing: p }) });

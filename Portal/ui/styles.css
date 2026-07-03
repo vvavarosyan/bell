@@ -2144,6 +2144,56 @@ a.contact-icon.on { cursor: pointer; text-decoration: none; position: relative; 
 }
 .bella-choice:hover { border-color: var(--accent); box-shadow: var(--shadow-glow); background: var(--accent-fade); }
 
+/* ---- Bella voice (Phase G4): whole-portal edge glow + status pill ------- */
+.bella-voice-glow {
+  position: fixed; inset: 0; z-index: 290; pointer-events: none;
+  box-shadow: inset 0 0 0 0 rgba(91, 140, 255, 0);
+  transition: box-shadow .5s ease;
+}
+.bella-voice-glow.listening {
+  animation: bella-glow-breathe 2.6s ease-in-out infinite;
+}
+.bella-voice-glow.thinking {
+  animation: bella-glow-think 1.1s ease-in-out infinite;
+}
+.bella-voice-glow.speaking {
+  animation: bella-glow-speak 1.8s ease-in-out infinite;
+}
+@keyframes bella-glow-breathe {
+  0%, 100% { box-shadow: inset 0 0 42px 6px rgba(91, 140, 255, .22); }
+  50%      { box-shadow: inset 0 0 74px 12px rgba(91, 140, 255, .40); }
+}
+@keyframes bella-glow-think {
+  0%, 100% { box-shadow: inset 0 0 34px 5px rgba(91, 140, 255, .16); }
+  50%      { box-shadow: inset 0 0 52px 9px rgba(139, 176, 255, .30); }
+}
+@keyframes bella-glow-speak {
+  0%, 100% { box-shadow: inset 0 0 58px 9px rgba(91, 140, 255, .34); }
+  50%      { box-shadow: inset 0 0 88px 15px rgba(139, 176, 255, .5); }
+}
+.bella-voice-pill {
+  position: fixed; bottom: 26px; left: 50%; transform: translateX(-50%);
+  z-index: 300; display: flex; align-items: center; gap: 10px;
+  max-width: min(640px, calc(100vw - 32px));
+  padding: 10px 16px; border-radius: 999px; cursor: pointer;
+  background: var(--bg-elev); border: 1px solid rgba(91, 140, 255, .5);
+  box-shadow: 0 14px 44px rgba(0, 0, 0, .55), var(--shadow-glow);
+}
+.bella-voice-dot { width: 11px; height: 11px; border-radius: 50%; flex: none; background: var(--accent); }
+.bella-voice-dot.listening { animation: bella-breathe 1.6s ease-in-out infinite; box-shadow: 0 0 10px rgba(91, 140, 255, .8); }
+.bella-voice-dot.thinking { background: var(--amber); animation: bella-breathe .9s ease-in-out infinite; }
+.bella-voice-dot.speaking { background: var(--green); animation: bella-breathe 1.1s ease-in-out infinite; }
+.bella-voice-dot.error { background: var(--red); }
+.bella-voice-state { font-size: 12.5px; font-weight: 600; color: var(--text); white-space: nowrap; }
+.bella-voice-line { font-size: 12px; color: var(--text-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.bella-voice-btn {
+  flex: none; background: transparent; border: 1px solid var(--border); color: var(--text-muted);
+  border-radius: 999px; padding: 4px 12px; font: inherit; font-size: 11.5px; cursor: pointer;
+}
+.bella-voice-btn:hover { color: var(--text); border-color: var(--accent); }
+.bella-voice-btn.accent { border-color: rgba(91, 140, 255, .6); color: var(--accent-bright); background: var(--accent-fade); }
+.bella-voice-btn.stop:hover { color: var(--red); border-color: rgba(248, 113, 113, .5); }
+
 .bella-inputrow { display: flex; gap: 8px; padding: 10px 12px; border-top: 1px solid var(--border); background: var(--bg-elev-2); }
 .bella-input {
   flex: 1; resize: none; background: var(--bg); border: 1px solid var(--border); color: var(--text);
