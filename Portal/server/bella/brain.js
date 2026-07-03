@@ -237,7 +237,11 @@ export async function runBellaTurn({ ctx, conversationId, userText, clientContex
   // Per-turn context rides in the user message (NOT the system prompt — that
   // would bust the prompt cache).
   const section = clientContext?.section ? String(clientContext.section).slice(0, 40) : null;
-  const fullUserText = (section && !hidden ? `[user is currently on the "${section}" section]\n` : '') + effectiveText;
+  const voiceMode = clientContext?.voice === true;
+  const fullUserText =
+    (section && !hidden ? `[user is currently on the "${section}" section]\n` : '')
+    + (voiceMode && !hidden ? '[voice conversation — reply in 1–3 short speakable sentences, plain prose, no lists, no quick-reply choices]\n' : '')
+    + effectiveText;
   messages.push({ role: 'user', content: [{ type: 'text', text: fullUserText }] });
   await store.addMessage(convId, tenantId, userId, {
     role: 'user', content: hidden ? '' : userText, contentJson: [{ type: 'text', text: fullUserText }],

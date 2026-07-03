@@ -450,6 +450,30 @@ export const api = {
   bellaDeny:              (id) => request(`/api/bella/actions/${id}/deny`, { method: 'POST', body: '{}' }),
   bellaTasks:             () => request('/api/bella/tasks'),
   bellaCancelTask:        (id) => request(`/api/bella/tasks/${id}/cancel`, { method: 'POST', body: '{}' }),
+  bellaVoiceStatus:       () => request('/api/bella/voice/status'),
+  // Voice: raw audio up, JSON text back.
+  bellaTranscribe:        async (blob) => {
+    const auth = await authHeaders();
+    const r = await fetch(BASE + '/api/bella/voice/transcribe', {
+      method: 'POST', headers: { 'Content-Type': blob.type || 'audio/webm', ...auth }, body: blob,
+    });
+    const body = await r.json().catch(() => ({}));
+    if (!r.ok) throw new Error(body?.message || body?.error || ('HTTP ' + r.status));
+    return body;
+  },
+  // Voice: text in, playable object-URL out (audio/mpeg).
+  bellaTts:               async (text) => {
+    const auth = await authHeaders();
+    const r = await fetch(BASE + '/api/bella/voice/tts', {
+      method: 'POST', headers: { 'Content-Type': 'application/json', ...auth }, body: JSON.stringify({ text }),
+    });
+    if (!r.ok) {
+      let msg = 'HTTP ' + r.status;
+      try { const b = await r.json(); msg = b?.message || b?.error || msg; } catch { /* ignore */ }
+      throw new Error(msg);
+    }
+    return URL.createObjectURL(await r.blob());
+  },
 
   // Outreach sending identity (per-tenant): Bell subdomain + custom domains.
   outreachIdentities:     () => request('/api/outreach/identities'),

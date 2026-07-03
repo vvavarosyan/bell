@@ -13,6 +13,7 @@
 import express from 'express';
 import { runBellaTurn } from '../bella/brain.js';
 import { executeTool } from '../bella/tools.js';
+import { transcribe, ttsStream, voiceConfigured } from '../bella/voice.js';
 import * as store from '../bella/store.js';
 
 const router = express.Router();
@@ -157,6 +158,58 @@ router.post('/tasks/:id/cancel', async (req, res, next) => {
     if (!ok) return res.status(409).json({ error: 'not_cancellable' });
     res.json({ ok: true });
   } catch (err) { next(err); }
+});
+
+// ---------------------------------------------------------------------------
+// Voice (Phase G4). The turn itself goes through POST /chat like any other —
+// these two endpoints only convert audio↔text via ElevenLabs.
+// ---------------------------------------------------------------------------
+
+// GET /api/bella/voice/status — lets the UI say "not set up yet" honestly.
+router.get('/voice/status', async (req, res, next) => {
+  try { res.json({ configured: await voiceConfigured() }); } catch (err) { next(err); }
+});
+
+// POST /api/bella/voice/transcribe — raw audio body (one utterance) → text.
+// express.json only parses application/json, so raw audio reaches us intact.
+router.post('/voice/transcribe',
+  express.raw({ type: ['audio/*', 'video/*', 'application/octet-stream'], limit: '15mb' }),
+  async (req, res, next) => {
+    try {
+      if (!req.body || !req.body.length) return res.status(400).json({ error: 'no_audio' });
+      if (!(await voiceConfigured())) {
+        return res.status(503).json({ error: 'voice_not_configured', message: 'Voice isn\'t set up on this deployment yet (ElevenLabs key missing).' });
+      }
+      const out = await transcribe(req.body, req.headers['content-type']);
+      res.json(out);
+    } catch (err) {
+      console.error('[bella] transcribe failed:', err.message);
+      res.status(502).json({ error: 'transcribe_failed', message: 'Couldn\'t hear that — please try again.' });
+    }
+  });
+
+// POST /api/bella/voice/tts { text } → audio/mpeg stream (Bella speaks).
+router.post('/voice/tts', async (req, res) => {
+  const text = String(req.body?.text || '').trim();
+  if (!text) return res.status(400).json({ error: 'text_required' });
+  if (!(await voiceConfigured())) {
+    return res.status(503).json({ error: 'voice_not_configured', message: 'Voice isn\'t set up on this deployment yet (ElevenLabs key missing).' });
+  }
+  const abort = new AbortController();
+  res.on('close', () => { if (!res.writableEnded) abort.abort(); });
+  try {
+    const el = await ttsStream(text, abort.signal);
+    res.writeHead(200, { 'Content-Type': 'audio/mpeg', 'Cache-Control': 'no-store' });
+    for await (const chunk of el.body) {
+      if (res.writableEnded) break;
+      res.write(chunk);
+    }
+    res.end();
+  } catch (err) {
+    if (err?.name !== 'AbortError') console.error('[bella] tts failed:', err.message);
+    if (!res.headersSent) res.status(502).json({ error: 'tts_failed', message: 'Bella lost her voice for a moment — try again.' });
+    else { try { res.end(); } catch { /* ignore */ } }
+  }
 });
 
 // GET /api/bella/usage — today's turns/tokens + the caps (Settings section).
