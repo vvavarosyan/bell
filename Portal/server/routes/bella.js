@@ -38,7 +38,12 @@ router.post('/chat', async (req, res) => {
   const heartbeat = setInterval(() => { try { res.write(':hb\n\n'); } catch { /* ignore */ } }, 15_000);
 
   const abort = new AbortController();
-  req.on('close', () => abort.abort());
+  // Client-disconnect detection — measured, not assumed: on modern Node,
+  // req 'close' fires ~5ms in, as soon as the JSON body is consumed (message
+  // complete), NOT on disconnect — hooking it aborted every turn instantly
+  // (the "Bella didn't respond" bug, 2026-07-03). The reliable signal is the
+  // RESPONSE closing before WE ended it.
+  res.on('close', () => { if (!res.writableEnded) abort.abort(); });
 
   try {
     await runBellaTurn({

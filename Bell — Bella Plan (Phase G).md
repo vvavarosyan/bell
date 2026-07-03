@@ -35,7 +35,7 @@ A new `server/bella/` module: **brain** (Anthropic streaming + tool loop), **too
 
 **Speed (your "super fast" requirement).** Three levers: SSE token streaming (first words in ~1s), Anthropic **prompt caching** on the big system+tools prompt (~90% input-cost discount and faster turnaround on every turn after the first), and parallel tool calls. No queue, no polling.
 
-**Models + live pricing (checked 2026-07-03).** Haiku 4.5 = $1/$5 per MTok; current Sonnet-class = $3/$15 (intro $2/$10 through Aug 2026). Portal Bella needs the capable model (emails, multi-step ops) → Sonnet-class; Marketing Bella → Haiku. Exact model IDs pinned at kickoff with a `BDI_BELLA_MODEL` env override (same pattern as the news engine).
+**Models + live pricing (checked 2026-07-03).** Portal Bella runs **claude-sonnet-5** ($3/$15 per MTok; intro $2/$10 through Aug 2026) — Val's final call 2026-07-03; **Bella must never use Fable-5 or Opus-class models** (5–10× the cost). News rewriting stays on Haiku 4.5 ($1/$5) in news/enrich.js; Marketing Bella → Haiku 4.5. No silent model switching; `BDI_BELLA_MODEL` env override is the only escape hatch (no-deploy). ⚠️ 5-class models reject `temperature` (HTTP 400) — Bella never sends it. Prompt caching cuts the recurring system+tools input ~90%.
 
 **New tables (migration 072, all tenant-scoped day-one, prod-runtime, not mirrored):** `bella_conversations`, `bella_messages`, `bella_actions` (audit), `bella_tasks` (scheduled/overnight work), `bella_usage` (per-tenant per-day tokens + spend, enforces caps).
 
@@ -70,7 +70,7 @@ A new `server/bella/` module: **brain** (Anthropic streaming + tool loop), **too
 
 | What | ≈ Cost |
 |---|---|
-| Portal chat turn (Sonnet-class, cached) | $0.01–0.03 → heavy user ≈ $5–15/mo |
+| Portal chat turn (Sonnet 5, cached) | ≈$0.01–0.03 → heavy user ≈ $5–15/mo (per-plan caps contain it) |
 | Marketing chat turn (Haiku) | ~$0.002 — rate limits keep abuse bounded |
 | Voice | ≈$0.10/min managed (+LLM); 100 min ≈ $12–15 |
 | Bella-triggered reveals/sends | Existing credit system — user's credits, previewed first |
@@ -81,7 +81,7 @@ A new `server/bella/` module: **brain** (Anthropic streaming + tool loop), **too
 
 | # | Decision | My recommendation |
 |---|---|---|
-| D1 | Portal model | Sonnet-class (she writes emails + runs multi-step ops; Haiku would feel dumb here). Haiku stays the marketing brain. |
+| D1 | Portal model | ✅ FINAL (Val 2026-07-03): **claude-sonnet-5**; news = Haiku 4.5; **never Fable-5/Opus for Bella**. Haiku stays the marketing brain. |
 | D2 | Approval default | Ask-always for actions; reads free. Per-user no-approval toggle in Settings (your spec) with sends/deletes still confirming. |
 | D3 | Voice languages | English at G4 launch; Arabic fast-follow (ElevenLabs + Claude both handle AR — needs its own QA pass). |
 | D4 | Marketing Bella voice | Chat-only at G3; add voice after portal voice is proven (per-visitor minutes are the one cost you can't cap per-user). |

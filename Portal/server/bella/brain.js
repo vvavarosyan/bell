@@ -10,10 +10,13 @@
 // news/enrich.js — no SDK). Key via getKey('anthropic') → macOS Keychain
 // locally, BDI_KEY_ANTHROPIC env on Railway (already set on portal + admin).
 //
-// Model: Sonnet-class per Val's D1 (2026-07-03). BDI_BELLA_MODEL overrides
-// without a deploy — the news-engine lesson: a retired hardcoded model id
-// fails on every call, so keep the escape hatch and surface API errors
-// verbatim to the log.
+// Model: claude-sonnet-5 — Val's FINAL call (2026-07-03): Bella = Sonnet 5,
+// news rewriting = Haiku 4.5 (news/enrich.js, already so), and Bella must
+// NEVER use Fable-5 or Opus-class models (cost: Fable is ~5-10× Sonnet).
+// No silent fallbacks to other models, ever. BDI_BELLA_MODEL env var remains
+// the only override (no-deploy escape hatch; news-engine lesson: a retired
+// hardcoded model id fails on every call).
+// 5-class models REJECT `temperature` (HTTP 400) — never send it.
 
 import { getKey } from '../keychain.js';
 import { buildSystem } from './prompt.js';
@@ -59,9 +62,19 @@ export function createSSEFeeder(onEvent) {
 // ---------------------------------------------------------------------------
 
 async function streamModelResponse({ apiKey, system, messages, signal, onToken }) {
+  // Watchdog: a turn may NEVER hang silently (Val hit an endless "…" on
+  // 2026-07-03). Own controller chained to the client-disconnect signal +
+  // a hard 90s cap on the whole model call, streaming included.
+  const ctrl = new AbortController();
+  let timedOut = false;
+  const chain = () => ctrl.abort();
+  if (signal) { if (signal.aborted) ctrl.abort(); else signal.addEventListener('abort', chain, { once: true }); }
+  const watchdog = setTimeout(() => { timedOut = true; ctrl.abort(); }, 90_000);
+
+  try {
   const res = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
-    signal,
+    signal: ctrl.signal,
     headers: {
       'Content-Type': 'application/json',
       'x-api-key': apiKey,
@@ -132,6 +145,13 @@ async function streamModelResponse({ apiKey, system, messages, signal, onToken }
   if (streamError) throw streamError;
 
   return { blocks: blocks.filter(Boolean), stopReason, inputTokens, outputTokens };
+  } catch (err) {
+    if (timedOut) throw new Error('the model did not answer within 90 seconds — please try again');
+    throw err;
+  } finally {
+    clearTimeout(watchdog);
+    if (signal) signal.removeEventListener('abort', chain);
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -141,10 +161,18 @@ async function streamModelResponse({ apiKey, system, messages, signal, onToken }
 let cachedKey = null;
 let cachedKeyAt = 0;
 async function anthropicKey() {
-  if (cachedKey && Date.now() - cachedKeyAt < 5 * 60_000) return cachedKey;
-  cachedKey = await getKey('anthropic');
-  cachedKeyAt = Date.now();
-  return cachedKey;
+  if (cachedKey && Date.now() - cachedKeyAt < 5 * 60_000) return { key: cachedKey, timedOut: false };
+  // getKey shells out to the macOS Keychain locally, and that can BLOCK on a
+  // hidden permission prompt (the cause of the endless "…" Val hit on
+  // 2026-07-03). Race it against 5s so a stuck Keychain becomes a clear,
+  // actionable error instead of a silent hang. Nothing negative is cached.
+  let timer;
+  const timeout = new Promise((resolve) => { timer = setTimeout(() => resolve('__timeout__'), 5000); });
+  const got = await Promise.race([getKey('anthropic'), timeout]);
+  clearTimeout(timer);
+  if (got === '__timeout__') return { key: null, timedOut: true };
+  if (got) { cachedKey = got; cachedKeyAt = Date.now(); }
+  return { key: got || null, timedOut: false };
 }
 
 const textOf = (blocks) => blocks.filter((b) => b.type === 'text').map((b) => b.text).join('').trim();
@@ -162,9 +190,13 @@ export async function runBellaTurn({ ctx, conversationId, userText, clientContex
   const tenantId = ctx.tenant?.id;
   const userId   = ctx.user?.id ?? 0;
 
-  const apiKey = await anthropicKey();
+  const { key: apiKey, timedOut: keyTimedOut } = await anthropicKey();
   if (!apiKey) {
-    send('error', { message: "Bella isn't configured on this deployment yet (missing Anthropic key)." });
+    send('error', {
+      message: keyTimedOut
+        ? 'Your Mac\'s Keychain didn\'t release Bella\'s key — look for a Keychain permission prompt (click "Always Allow"), or re-run "Set Anthropic API Key.command", then try again.'
+        : "Bella isn't configured on this deployment yet (missing Anthropic key).",
+    });
     return;
   }
 
@@ -262,7 +294,7 @@ export async function runBellaTurn({ ctx, conversationId, userText, clientContex
 
     send('done', { conversation_id: convId, usage: { input_tokens: totalIn, output_tokens: totalOut }, turns_today: budget.turns });
   } catch (err) {
-    if (err?.name === 'AbortError') return;   // client left — nothing to report
+    if (err?.name === 'AbortError' && signal?.aborted) return;   // client left — nothing to report
     console.error('[bella] turn failed:', err.message);
     send('error', { message: 'Bella hit a problem: ' + String(err.message || err).slice(0, 200) });
   } finally {
