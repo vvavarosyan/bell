@@ -20,6 +20,7 @@ import { currentRoute, navigateTo } from '../lib/router.js';
 const SILENCE_MS = 900;      // pause that ends an utterance
 const MIN_SPEECH_MS = 350;   // shorter blips are ignored (coughs, clicks)
 const MAX_UTTER_MS = 25_000; // hard stop so a stuck mic can't record forever
+const BARGE_MS = 350;        // sustained speech needed to interrupt her (cough-proof)
 
 const CHOICES_RX = /\n?\s*\[choices:\s*([^\]]+)\]\s*$/i;
 
@@ -40,6 +41,7 @@ export function BellaVoice({ onClose, onOpenChat }) {
   const streamRef = useRef(null);
   const mediaRef = useRef(null);      // { stream, ctx, analyser, recorder }
   const audioRef = useRef(null);      // current playback element
+  const stopAudioRef = useRef(null);  // stops playback AND resolves speak()'s promise
   const aliveRef = useRef(true);
   const stateRef = useRef('starting');
   const setSt = (s) => { stateRef.current = s; setState(s); };
@@ -74,15 +76,19 @@ export function BellaVoice({ onClose, onOpenChat }) {
       await new Promise((resolve) => {
         const a = new Audio(url);
         audioRef.current = a;
+        // Interruption handle (tap OR sustained speech): pause + resolve so
+        // the turn flow never hangs on a cancelled playback.
+        stopAudioRef.current = () => { try { a.pause(); } catch { /* ignore */ } resolve(); };
         a.onended = resolve;
         a.onerror = resolve;
         a.play().catch(resolve);
       });
+      stopAudioRef.current = null;
       URL.revokeObjectURL(url);
     } catch (err) {
       toast('Bella\'s voice: ' + (err.message || 'failed'), 'error');
     }
-    if (aliveRef.current) { setLine(''); setSt('listening'); }
+    if (aliveRef.current && stateRef.current === 'speaking') { setLine(''); setSt('listening'); }
   };
 
   const runTurn = async (text) => {
@@ -155,6 +161,7 @@ export function BellaVoice({ onClose, onOpenChat }) {
       let chunks = [];
       let speechStart = 0;
       let lastSpeech = 0;
+      let bargeTentative = false;   // capturing during 'speaking', not yet committed
       let noiseFloor = 0.004;
       const t0 = performance.now();
 
@@ -167,6 +174,14 @@ export function BellaVoice({ onClose, onOpenChat }) {
           processUtterance(blob);
         };
         recorder.start();
+        mediaRef.current.recorder = recorder;
+      };
+      const discardRec = () => {
+        if (recorder) {
+          try { recorder.ondataavailable = null; recorder.onstop = null; if (recorder.state !== 'inactive') recorder.stop(); } catch { /* ignore */ }
+        }
+        recorder = null;
+        chunks = [];
       };
 
       mediaRef.current = { stream, ctx, analyser, recorder: null };
@@ -182,16 +197,16 @@ export function BellaVoice({ onClose, onOpenChat }) {
 
         // First 700ms: calibrate the room's noise floor.
         if (now - t0 < 700) { noiseFloor = Math.max(noiseFloor, rms * 1.4); raf = requestAnimationFrame(tick); return; }
-        const threshold = Math.max(0.012, noiseFloor * 2.2);
+        const listenTh = Math.max(0.012, noiseFloor * 2.2);
+        // Stricter while she speaks: echo cancellation removes most of her own
+        // voice from the mic, and this margin absorbs what's left.
+        const bargeTh = Math.max(0.02, noiseFloor * 3.5);
 
-        if (stateRef.current === 'listening') {
-          if (rms > threshold) {
+        const st = stateRef.current;
+        if (st === 'listening') {
+          if (rms > listenTh) {
             lastSpeech = now;
-            if (!speechStart) {
-              speechStart = now;
-              startRec();
-              mediaRef.current.recorder = recorder;
-            }
+            if (!speechStart) { speechStart = now; startRec(); }
           }
           if (speechStart) {
             const tooLong = now - speechStart > MAX_UTTER_MS;
@@ -199,16 +214,42 @@ export function BellaVoice({ onClose, onOpenChat }) {
             if (tooLong || silentEnough) {
               const hadSpeech = lastSpeech - speechStart >= MIN_SPEECH_MS;
               speechStart = 0;
-              try {
-                if (recorder && recorder.state !== 'inactive') {
-                  if (hadSpeech) recorder.stop();          // → onstop → processUtterance
-                  else { recorder.ondataavailable = null; recorder.onstop = null; recorder.stop(); }
-                }
-              } catch { /* ignore */ }
+              if (hadSpeech) { try { if (recorder && recorder.state !== 'inactive') recorder.stop(); } catch { /* ignore */ } }
+              else discardRec();
+            }
+          }
+        } else if (st === 'speaking') {
+          // Speak-to-interrupt (Val 2026-07-03, ChatGPT-style): first strong
+          // frame starts a TENTATIVE capture and ducks her volume; only
+          // sustained speech (BARGE_MS) commits the interrupt — a cough or a
+          // short blip gets discarded and she carries on at full volume.
+          if (rms > bargeTh) {
+            lastSpeech = now;
+            if (!speechStart) {
+              speechStart = now;
+              bargeTentative = true;
+              startRec();
+              if (audioRef.current) { try { audioRef.current.volume = 0.25; } catch { /* ignore */ } }
+            }
+          }
+          if (speechStart && bargeTentative) {
+            if (lastSpeech - speechStart >= BARGE_MS) {
+              // Real speech — she stops; the running capture becomes the utterance.
+              bargeTentative = false;
+              stopAudioRef.current?.();
+              setLine('');
+              setSt('listening');
+            } else if (now - lastSpeech > 450) {
+              // Just a blip — drop it, restore her voice.
+              speechStart = 0;
+              bargeTentative = false;
+              discardRec();
+              if (audioRef.current) { try { audioRef.current.volume = 1; } catch { /* ignore */ } }
             }
           }
         } else {
-          speechStart = 0;   // not listening — drop any partial capture state
+          // thinking / starting / error: no capture should be in flight
+          if (speechStart || bargeTentative) { speechStart = 0; bargeTentative = false; discardRec(); }
         }
         raf = requestAnimationFrame(tick);
       };
@@ -218,10 +259,11 @@ export function BellaVoice({ onClose, onOpenChat }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Tap the pill while she speaks = interrupt (barge-in without echo risk).
+  // Tap the pill while she speaks = interrupt (voice barge-in also works —
+  // just start talking; the VAD loop commits it after sustained speech).
   const interrupt = () => {
     if (stateRef.current === 'speaking') {
-      try { audioRef.current?.pause(); } catch { /* ignore */ }
+      stopAudioRef.current?.();
       setLine('');
       setSt('listening');
     }
@@ -231,7 +273,7 @@ export function BellaVoice({ onClose, onOpenChat }) {
     starting: 'Waking Bella up…',
     listening: 'Listening — just talk',
     thinking: 'Thinking…',
-    speaking: 'Speaking — tap to interrupt',
+    speaking: 'Speaking — talk or tap to interrupt',
     error: 'Voice unavailable',
   };
 

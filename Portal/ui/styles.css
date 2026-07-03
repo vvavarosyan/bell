@@ -2022,7 +2022,12 @@ a.contact-icon.on { cursor: pointer; text-decoration: none; position: relative; 
 --------------------------------------------------------------------------- */
 .page-header { position: relative; }
 
-.bella-dock { position: absolute; left: 50%; top: 50%; transform: translate(-50%, -50%); display: flex; align-items: center; gap: 8px; z-index: 60; }
+/* NB: no transform here — a transformed ancestor becomes the containing
+   block for position:fixed children, which pinned the voice pill/glow to the
+   header instead of the viewport (Val's bug 2026-07-03). Centering is done
+   with an inset flex strip; pointer-events pass through the empty areas. */
+.bella-dock { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; gap: 8px; z-index: 60; pointer-events: none; }
+.bella-dock > * { pointer-events: auto; }
 .bella-orb {
   width: 30px; height: 30px; border-radius: 50%; cursor: pointer; position: relative;
   border: 1px solid rgba(91, 140, 255, .55);
