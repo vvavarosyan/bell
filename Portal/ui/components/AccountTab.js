@@ -12,6 +12,7 @@ const SECTIONS = [
   { id: 'domain',        label: 'Sending domain' },
   { id: 'whatsapp',      label: 'WhatsApp' },
   { id: 'icp',           label: 'Company & ICP' },
+  { id: 'bella',         label: 'Bella' },
   { id: 'notifications', label: 'Notifications' },
   { id: 'preferences',   label: 'Preferences' },
   { id: 'security',      label: 'Account & Security' },
@@ -85,12 +86,25 @@ export function AccountTab() {
     })();
   }, [section, icp]);
 
+  // Bella section hooks — above the early return (Rules of Hooks).
+  const [bellaInfo, setBellaInfo] = useState(null);   // { usage, actions }
+  useEffect(() => {
+    if (section !== 'bella' || bellaInfo !== null) return;
+    (async () => {
+      try {
+        const [usage, acts] = await Promise.all([api.bellaUsage(), api.bellaActions(20)]);
+        setBellaInfo({ usage, actions: acts.actions || [] });
+      } catch { setBellaInfo({ usage: null, actions: [] }); }
+    })();
+  }, [section, bellaInfo]);
+
   if (!data) return html`<div class="sys-page"><div class="sys-body"><div class="empty">Loading…</div></div></div>`;
 
   const p = data.profile || {};
   const setProfile = (k, v) => setData(d => ({ ...d, profile: { ...d.profile, [k]: v } }));
   const setNotif   = (k, v) => setData(d => ({ ...d, notifications: { ...d.notifications, [k]: v } }));
   const setPref    = (k, v) => setData(d => ({ ...d, preferences: { ...d.preferences, [k]: v } }));
+  const setBella   = (k, v) => setData(d => ({ ...d, preferences: { ...d.preferences, bella: { ...(d.preferences?.bella || {}), [k]: v } } }));
 
   const save = async (patch, msg) => {
     setSaving(true);
@@ -431,6 +445,51 @@ export function AccountTab() {
             </select></div>
         </div>
         <div class="sys-actions"><button class="sys-btn" disabled=${saving} onClick=${() => save({ preferences: data.preferences }, 'Preferences saved')}>${saving ? 'Saving…' : 'Save preferences'}</button></div>
+      </div>`,
+
+    bella: html`
+      <div class="sys-section">
+        <h2>Bella</h2>
+        <div class="sys-hint" style=${{ marginBottom: '14px' }}>
+          Bella is your Bell assistant — the orb at the top of every page. Today she answers from your
+          workspace's data and navigates for you; her acting powers (reveals, CRM, email drafting,
+          sequences) arrive in her next upgrade and will follow the permission you set here.
+        </div>
+        <div class="sys-grid">
+          <div class="sys-field"><label>When Bella wants to act</label>
+            <select class="sys-select" value=${data.preferences?.bella?.approval_mode || 'ask'} onChange=${e => setBella('approval_mode', e.target.value)}>
+              <option value="ask">Always ask me first (recommended)</option>
+              <option value="auto">Act without asking — sends & deletions still confirm</option>
+            </select>
+            <span style=${{ fontSize: '11px', color: 'var(--text-dim)' }}>Reading data never needs approval. Credit spend is always shown before it happens.</span></div>
+          <div class="sys-field"><label>How she should communicate</label>
+            <textarea class="sys-input" rows="3" placeholder="e.g. Short and direct. No emojis. Address me by first name."
+              value=${data.preferences?.bella?.style || ''} onInput=${e => setBella('style', e.target.value)}></textarea></div>
+          <div class="sys-field"><label>How she should write emails</label>
+            <textarea class="sys-input" rows="3" placeholder="Tone, length, sign-off… used when Bella starts drafting outreach for you."
+              value=${data.preferences?.bella?.email_style || ''} onInput=${e => setBella('email_style', e.target.value)}></textarea></div>
+        </div>
+        <div class="sys-actions"><button class="sys-btn" disabled=${saving} onClick=${() => save({ preferences: data.preferences }, 'Bella preferences saved')}>${saving ? 'Saving…' : 'Save Bella preferences'}</button></div>
+
+        <h2 style=${{ marginTop: '26px' }}>Usage today</h2>
+        <div class="sys-hint">
+          ${bellaInfo?.usage
+            ? `${bellaInfo.usage.turns || 0} of ${bellaInfo.usage.turns_cap} chats used today.`
+            : 'Loading…'}
+          ${' '}Daily limits are workspace defaults for now — per-plan limits arrive with the Billing integration.
+        </div>
+
+        <h2 style=${{ marginTop: '26px' }}>Recent activity</h2>
+        ${(bellaInfo?.actions || []).length === 0
+          ? html`<div class="sys-hint">No Bella actions yet. Everything she does is recorded here.</div>`
+          : html`<div style=${{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+              ${(bellaInfo.actions).map(a => html`
+                <div key=${a.id} style=${{ display: 'flex', gap: '10px', fontSize: '12px', alignItems: 'baseline' }}>
+                  <span style=${{ color: 'var(--text-dim)', whiteSpace: 'nowrap' }}>${new Date(a.created_at).toLocaleString()}</span>
+                  <span style=${{ color: 'var(--accent-bright)' }}>${a.tool}</span>
+                  <span style=${{ color: 'var(--text-muted)' }}>${a.result_summary || a.status}</span>
+                </div>`)}
+            </div>`}
       </div>`,
 
     security: html`<${SecurityPanel} />`,

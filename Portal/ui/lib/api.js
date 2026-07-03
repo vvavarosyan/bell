@@ -81,6 +81,55 @@ async function downloadFile(path, fallbackName = 'export.csv') {
   return meta;
 }
 
+// Bella chat streams over SSE via POST (EventSource can't carry the auth
+// header or a body, so we parse the stream off fetch ourselves). Returns
+// { abort, done } — `done` resolves when the stream ends.
+async function bellaChatStream(body, handlers = {}) {
+  const auth = await authHeaders();
+  const controller = new AbortController();
+  const done = (async () => {
+    const r = await fetch(BASE + '/api/bella/chat', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...auth },
+      body: JSON.stringify(body),
+      signal: controller.signal,
+    });
+    if (!r.ok || !(r.headers.get('content-type') || '').includes('text/event-stream')) {
+      let msg = 'HTTP ' + r.status;
+      try { const b = await r.json(); msg = b?.message || b?.error || msg; } catch { /* ignore */ }
+      throw new Error(msg);
+    }
+    const dispatch = {
+      meta: handlers.onMeta, token: handlers.onToken, tool: handlers.onTool,
+      navigate: handlers.onNavigate, done: handlers.onDone, error: handlers.onError,
+    };
+    const reader = r.body.getReader();
+    const decoder = new TextDecoder();
+    let buf = '';
+    for (;;) {
+      const { done: end, value } = await reader.read();
+      if (end) break;
+      buf += decoder.decode(value, { stream: true });
+      let idx;
+      while ((idx = buf.indexOf('\n\n')) !== -1) {
+        const frame = buf.slice(0, idx);
+        buf = buf.slice(idx + 2);
+        let event = 'message';
+        const dataLines = [];
+        for (const line of frame.split('\n')) {
+          if (line.startsWith('event:')) event = line.slice(6).trim();
+          else if (line.startsWith('data:')) dataLines.push(line.slice(5).trim());
+        }
+        if (!dataLines.length) continue;
+        let payload = null;
+        try { payload = JSON.parse(dataLines.join('\n')); } catch { continue; }
+        try { dispatch[event]?.(payload); } catch (err) { console.error('[bella] handler error', err); }
+      }
+    }
+  })();
+  return { abort: () => controller.abort(), done };
+}
+
 export const api = {
   health:                 () => request('/api/health'),
   stats:                  () => request('/api/stats'),
@@ -388,6 +437,14 @@ export const api = {
   // Account (the signed-in user's own profile / notifications / preferences)
   getAccount:             () => request('/api/account'),
   updateAccount:          (patch) => request('/api/account', { method: 'PATCH', body: JSON.stringify(patch) }),
+
+  // Bella (Phase G1)
+  bellaChat:              (body, handlers) => bellaChatStream(body, handlers),
+  bellaConversations:     () => request('/api/bella/conversations'),
+  bellaMessages:          (id) => request(`/api/bella/conversations/${id}/messages`),
+  bellaDeleteConversation:(id) => request(`/api/bella/conversations/${id}`, { method: 'DELETE' }),
+  bellaActions:           (limit = 50) => request('/api/bella/actions?limit=' + limit),
+  bellaUsage:             () => request('/api/bella/usage'),
 
   // Outreach sending identity (per-tenant): Bell subdomain + custom domains.
   outreachIdentities:     () => request('/api/outreach/identities'),
