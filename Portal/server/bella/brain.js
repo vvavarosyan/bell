@@ -144,7 +144,15 @@ async function streamModelResponse({ apiKey, system, messages, signal, onToken }
   }
   if (streamError) throw streamError;
 
-  return { blocks: blocks.filter(Boolean), stopReason, inputTokens, outputTokens };
+  // The API rejects empty text blocks on the NEXT request ("text content
+  // blocks must be non-empty", hit live 2026-07-03): models often open a text
+  // block but stream zero characters into it before tool calls. Drop empties
+  // here so neither the tool loop nor the DB ever holds one.
+  const cleaned = blocks.filter((b) => b && !(b.type === 'text' && !String(b.text || '').trim()));
+  return {
+    blocks: cleaned.length ? cleaned : [{ type: 'text', text: '(no answer this round — please ask again)' }],
+    stopReason, inputTokens, outputTokens,
+  };
   } catch (err) {
     if (timedOut) throw new Error('the model did not answer within 90 seconds — please try again');
     throw err;

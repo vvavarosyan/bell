@@ -117,12 +117,25 @@ export async function loadModelMessages(conversationId, max = 30) {
   for (const row of r.rows) {
     let content = row.content_json;
     if (typeof content === 'string') { try { content = JSON.parse(content); } catch { content = null; } }
-    if (Array.isArray(content)) content = content.map(clipBlock);
-    out.push({ role: row.role, content: content || String(row.content || '') });
+    if (Array.isArray(content)) {
+      // Replay hygiene — the API rejects empty text blocks ("text content
+      // blocks must be non-empty", hit live 2026-07-03). Strip them (this
+      // also HEALS rows persisted before the fix); drop rows left empty.
+      // Pairing stays intact: only empty TEXT blocks are dropped, never
+      // tool_use/tool_result, and a row that becomes empty had no tool_use.
+      content = content.map(clipBlock)
+        .filter((b) => !(b && b.type === 'text' && !String(b.text || '').trim()));
+      if (!content.length) continue;
+    }
+    const finalContent = content || String(row.content || '');
+    if (!Array.isArray(finalContent) && !String(finalContent).trim()) continue;
+    out.push({ role: row.role, content: finalContent });
   }
-  // The API requires the first message to be a `user` turn; drop any leading
-  // assistant rows left behind by the window cut.
-  while (out.length && out[0].role !== 'user') out.shift();
+  // The API requires the history to OPEN with a plain user turn: drop leading
+  // assistant rows AND tool_result rows orphaned by the window cut.
+  const isOrphanToolResult = (m) =>
+    m.role === 'user' && Array.isArray(m.content) && m.content.some((b) => b && b.type === 'tool_result');
+  while (out.length && (out[0].role !== 'user' || isOrphanToolResult(out[0]))) out.shift();
   return out;
 }
 
