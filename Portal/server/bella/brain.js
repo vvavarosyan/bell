@@ -70,7 +70,8 @@ async function streamModelResponse({ apiKey, system, messages, signal, onToken }
     body: JSON.stringify({
       model: MODEL,
       max_tokens: MAX_TOKENS,
-      temperature: 0.4,
+      // NB: no `temperature` — it is deprecated/rejected on Sonnet-class 5
+      // models (Anthropic returns HTTP 400 if sent). Defaults are used.
       stream: true,
       system,
       tools: TOOL_DEFINITIONS,
