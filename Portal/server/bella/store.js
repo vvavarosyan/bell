@@ -251,6 +251,19 @@ export async function getOwnedAction(tenantId, userId, id) {
   return r.rows[0] || null;
 }
 
+/** Live statuses for a set of actions — lets reloaded approval cards show the truth. */
+export async function getActionStatuses(tenantId, userId, ids) {
+  if (!ids.length) return {};
+  const r = await query(
+    `SELECT id, status, result_summary FROM bella_actions
+      WHERE tenant_id = $1 AND user_id = $2 AND id = ANY($3::bigint[])`,
+    [tenantId, userId, ids]
+  );
+  const out = {};
+  for (const row of r.rows) out[row.id] = { status: row.status, note: row.result_summary || null };
+  return out;
+}
+
 export async function setActionStatus(id, status, resultSummary = null, creditsCost = null) {
   await query(
     `UPDATE bella_actions

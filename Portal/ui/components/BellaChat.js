@@ -25,8 +25,72 @@ const TOOL_LABELS = {
   get_data_stats: 'Reading data stats',
   get_credits: 'Checking credits',
   get_icp: 'Reading your ICP',
+  get_crm_records: 'Reading your CRM',
+  get_crm_record: 'Opening CRM record',
+  get_sequences: 'Reading sequences',
+  get_whatsapp_thread: 'Reading WhatsApp',
+  list_scheduled_tasks: 'Checking scheduled tasks',
+  reveal_companies: 'Revealing companies',
+  add_to_crm: 'Adding to CRM',
+  add_crm_note: 'Adding note',
+  update_crm_note: 'Editing note',
+  delete_crm_note: 'Deleting note',
+  add_crm_task: 'Creating task',
+  update_crm_task: 'Updating task',
+  delete_crm_task: 'Deleting task',
+  set_crm_status: 'Updating status',
+  create_deal: 'Creating deal',
+  update_deal: 'Updating deal',
+  delete_deal: 'Deleting deal',
+  send_email: 'Sending email',
+  create_sequence: 'Creating sequence',
+  enroll_in_sequence: 'Enrolling in sequence',
+  update_icp: 'Updating your ICP',
+  send_whatsapp: 'Sending WhatsApp',
+  schedule_task: 'Scheduling work',
+  cancel_scheduled_task: 'Cancelling task',
   navigate: 'Navigating',
 };
+
+// Which window events a completed Bella action should fire, so open tabs
+// (CRM list, credit pill) refresh live instead of waiting for a reload.
+const TOOL_EFFECTS = {
+  reveal_companies: ['bdi:crm-changed', 'bdi:credits-changed'],
+  add_to_crm: ['bdi:crm-changed'], add_crm_note: ['bdi:crm-changed'],
+  update_crm_note: ['bdi:crm-changed'], delete_crm_note: ['bdi:crm-changed'],
+  add_crm_task: ['bdi:crm-changed'], update_crm_task: ['bdi:crm-changed'],
+  delete_crm_task: ['bdi:crm-changed'], set_crm_status: ['bdi:crm-changed'],
+  create_deal: ['bdi:crm-changed'], update_deal: ['bdi:crm-changed'],
+  delete_deal: ['bdi:crm-changed'], send_email: ['bdi:crm-changed'],
+  enroll_in_sequence: ['bdi:crm-changed'], send_whatsapp: ['bdi:crm-changed'],
+};
+const fireEffects = (toolName) => (TOOL_EFFECTS[toolName] || []).forEach((ev) => {
+  try { window.dispatchEvent(new CustomEvent(ev)); } catch { /* ignore */ }
+});
+
+// "14:32" today, "Jul 3 · 14:32" otherwise.
+const fmtTime = (iso) => {
+  if (!iso) return '';
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return '';
+  const hm = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  return d.toDateString() === new Date().toDateString()
+    ? hm
+    : d.toLocaleDateString([], { month: 'short', day: 'numeric' }) + ' · ' + hm;
+};
+
+// Bella ends closed questions with "[choices: Yes | No]" (prompt rule 12) —
+// strip the line and surface the options as tap buttons.
+const CHOICES_RX = /\n?\s*\[choices:\s*([^\]]+)\]\s*$/i;
+const splitChoices = (text) => {
+  const m = CHOICES_RX.exec(text || '');
+  if (!m) return { text: text || '', choices: null };
+  const choices = m[1].split('|').map((s) => s.trim()).filter(Boolean).slice(0, 4);
+  return { text: (text || '').replace(CHOICES_RX, '').trimEnd(), choices: choices.length >= 2 ? choices : null };
+};
+
+// Server action status → card status (server knows the truth on reload).
+const APPROVAL_STATE = { proposed: 'pending', done: 'approved', denied: 'denied', error: 'error' };
 
 export function BellaChat({ onClose }) {
   const [convs, setConvs] = useState([]);
@@ -37,11 +101,63 @@ export function BellaChat({ onClose }) {
   const [showList, setShowList] = useState(false);
   const scrollRef = useRef(null);
   const streamRef = useRef(null);
+  const busyRef = useRef(false);
+  const convIdRef = useRef(null);  // avoids stale closures (new convs get their id mid-turn)
+  const lastIdRef = useRef(0);     // newest server message id we've applied
+  const syncSeqRef = useRef(0);
+  useEffect(() => { busyRef.current = busy; }, [busy]);
+  useEffect(() => { convIdRef.current = convId; }, [convId]);
 
   const refreshConvs = useCallback(async () => {
-    try { const r = await api.bellaConversations(); setConvs(r.conversations || []); } catch { /* ignore */ }
+    try { const r = await api.bellaConversations(); setConvs(r.conversations || []); return r.conversations || []; } catch { return []; }
   }, []);
-  useEffect(() => { refreshConvs(); }, [refreshConvs]);
+
+  const mapServerMessages = (rows) => (rows || []).map((m) => {
+    const parsed = m.role === 'assistant' ? splitChoices(m.content || '') : { text: m.content || '', choices: null };
+    return {
+      role: m.role,
+      content: parsed.text,
+      choices: parsed.choices,
+      at: m.created_at || null,
+      tools: m.meta?.tools || [],
+      approvals: (m.meta?.approvals || []).map((a) => ({
+        ...a, status: APPROVAL_STATE[a.status] || 'pending',
+      })),
+    };
+  }).filter((m) => m.content || (m.tools && m.tools.length) || (m.approvals && m.approvals.length));
+
+  const applyServer = (rows) => {
+    lastIdRef.current = Math.max(lastIdRef.current, ...((rows || []).map((m) => Number(m.id) || 0)), 0);
+    setMsgs(mapServerMessages(rows));
+  };
+
+  // Sync the open conversation from the server (idle only, newest-write-wins).
+  // Brings in scheduled-task results, cross-device turns, and live approval
+  // statuses without a page refresh (Val's comment #3).
+  const syncFromServer = useCallback(async (cid, { force = false } = {}) => {
+    if (!cid) return;
+    const seq = ++syncSeqRef.current;
+    try {
+      const r = await api.bellaMessages(cid);
+      if (seq !== syncSeqRef.current || busyRef.current) return;
+      const maxId = Math.max(...((r.messages || []).map((m) => Number(m.id) || 0)), 0);
+      if (force || maxId > lastIdRef.current) applyServer(r.messages);
+    } catch { /* ignore */ }
+  }, []);
+
+  // On open: load conversations and auto-open the latest one (Val's #4).
+  useEffect(() => {
+    (async () => {
+      const list = await refreshConvs();
+      if (list.length) openConversation(list[0].id);
+    })();
+  }, []);   // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Idle poll — picks up overnight/scheduled results while the panel is open.
+  useEffect(() => {
+    const t = setInterval(() => { if (!busyRef.current && convId) syncFromServer(convId); }, 15_000);
+    return () => clearInterval(t);
+  }, [convId, syncFromServer]);
 
   // Keep the view pinned to the newest message while streaming.
   useEffect(() => {
@@ -54,20 +170,16 @@ export function BellaChat({ onClose }) {
 
   const openConversation = async (id) => {
     setShowList(false);
-    if (busy) return;
+    if (busyRef.current) return;
     try {
       const r = await api.bellaMessages(id);
       setConvId(id);
-      setMsgs((r.messages || []).map((m) => ({
-        role: m.role,
-        content: m.content || '',
-        tools: m.meta?.tools || [],
-        approvals: (m.meta?.approvals || []).map((a) => ({ ...a, status: 'pending' })),
-      })).filter((m) => m.content || (m.tools && m.tools.length) || (m.approvals && m.approvals.length)));
+      lastIdRef.current = 0;
+      applyServer(r.messages);
     } catch { /* ignore */ }
   };
 
-  const newChat = () => { if (!busy) { setConvId(null); setMsgs([]); setShowList(false); } };
+  const newChat = () => { if (!busy) { setConvId(null); setMsgs([]); setShowList(false); lastIdRef.current = 0; } };
 
   const removeConversation = async (id, ev) => {
     ev.stopPropagation();
@@ -99,6 +211,11 @@ export function BellaChat({ onClose }) {
     patchApproval(actionId, (a) => ({ ...a, status: 'busy' }));
     try {
       const r = verdict === 'approved' ? await api.bellaApprove(actionId) : await api.bellaDeny(actionId);
+      if (verdict === 'approved') {
+        // Live-refresh open tabs for whatever this action touched.
+        const tool = msgs.flatMap((m) => m.approvals || []).find((a) => a.action_id === actionId)?.tool;
+        if (tool) fireEffects(tool);
+      }
       patchApproval(actionId, (a) => ({ ...a, status: verdict, note: r?.summary || null }));
       send(`[[action:${actionId}:${verdict}]]`, { hidden: true });
     } catch (err) {
@@ -111,10 +228,12 @@ export function BellaChat({ onClose }) {
     if (!text || busy) return;
     setInput('');
     setBusy(true);
+    busyRef.current = true;
+    const now = new Date().toISOString();
     // Hidden turns (approval continuations) show no user bubble.
     setMsgs((list) => [...list,
-      ...(opts.hidden ? [] : [{ role: 'user', content: text }]),
-      { role: 'assistant', content: '', tools: [], streaming: true },
+      ...(opts.hidden ? [] : [{ role: 'user', content: text, at: now }]),
+      { role: 'assistant', content: '', tools: [], streaming: true, at: now },
     ]);
 
     try {
@@ -123,14 +242,17 @@ export function BellaChat({ onClose }) {
         {
           onMeta: (m) => { if (m.conversation_id) setConvId(m.conversation_id); },
           onToken: (d) => patchLast((m) => ({ ...m, content: m.content + d.t })),
-          onTool: (t) => patchLast((m) => {
-            const tools = (m.tools || []).slice();
-            const i = tools.findIndex((x) => x.name === t.name && x.status === 'running');
-            if (t.status === 'running') tools.push({ name: t.name, status: 'running' });
-            else if (i >= 0) tools[i] = { name: t.name, status: t.status, summary: t.summary };
-            else tools.push({ name: t.name, status: t.status, summary: t.summary });
-            return { ...m, tools };
-          }),
+          onTool: (t) => {
+            if (t.status === 'done') fireEffects(t.name);   // live-refresh open tabs (Val's #2)
+            patchLast((m) => {
+              const tools = (m.tools || []).slice();
+              const i = tools.findIndex((x) => x.name === t.name && x.status === 'running');
+              if (t.status === 'running') tools.push({ name: t.name, status: 'running' });
+              else if (i >= 0) tools[i] = { name: t.name, status: t.status, summary: t.summary };
+              else tools.push({ name: t.name, status: t.status, summary: t.summary });
+              return { ...m, tools };
+            });
+          },
           onNavigate: (n) => {
             if (n?.section) { try { navigateTo(n.section); } catch { /* ignore */ } }
             patchLast((m) => ({ ...m, tools: [...(m.tools || []), { name: 'navigate', status: 'done', summary: '→ ' + (n?.section || '') }] }));
@@ -140,7 +262,10 @@ export function BellaChat({ onClose }) {
             approvals: [...(m.approvals || []), { action_id: a.action_id, tool: a.tool, summary: a.summary, status: 'pending' }],
           })),
           onError: (e) => patchLast((m) => ({ ...m, streaming: false, error: e?.message || 'Something went wrong.' })),
-          onDone: () => patchLast((m) => ({ ...m, streaming: false })),
+          onDone: () => patchLast((m) => {
+            const parsed = splitChoices(m.content);
+            return { ...m, streaming: false, content: parsed.text, choices: parsed.choices };
+          }),
         }
       );
       streamRef.current = stream;
@@ -154,8 +279,12 @@ export function BellaChat({ onClose }) {
         ? { ...m, streaming: false, error: (m.content || m.error) ? m.error : "Bella didn't respond — please try again." }
         : m);
       setBusy(false);
+      busyRef.current = false;
       streamRef.current = null;
       refreshConvs();
+      // Post-turn sync: normalizes local state to the server's (real ids,
+      // timestamps, live approval statuses) so later polls diff correctly.
+      setTimeout(() => { if (convIdRef.current && !busyRef.current) syncFromServer(convIdRef.current, { force: true }); }, 400);
     }
   };
 
@@ -179,6 +308,7 @@ export function BellaChat({ onClose }) {
           ${convs.map((c) => html`
             <div key=${c.id} class=${'bella-convitem' + (c.id === convId ? ' active' : '')} onClick=${() => openConversation(c.id)}>
               <span class="bella-convitem-title">${c.title || 'Conversation'}</span>
+              <span class="bella-convitem-time">${fmtTime(c.updated_at)}</span>
               <button class="bella-convitem-del" title="Delete" onClick=${(ev) => removeConversation(c.id, ev)}>✕</button>
             </div>`)}
         </div>` : null}
@@ -216,6 +346,11 @@ export function BellaChat({ onClose }) {
               </div>`)}
             ${m.streaming && !m.content ? html`<div class="bella-bubble bella-thinking">…</div>` : null}
             ${m.error ? html`<div class="bella-chip error">${m.error}</div>` : null}
+            ${m.at && !m.streaming ? html`<div class="bella-time">${fmtTime(m.at)}</div>` : null}
+            ${m.choices && i === msgs.length - 1 && !busy ? html`
+              <div class="bella-choices">
+                ${m.choices.map((c) => html`<button key=${c} class="bella-choice" onClick=${() => send(c)}>${c}</button>`)}
+              </div>` : null}
           </div>`)}
       </div>
 

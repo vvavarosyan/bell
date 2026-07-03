@@ -87,6 +87,13 @@ export function CrmTab() {
   }, [entityType, status, revealedOnly, q]);
 
   useEffect(() => { load(); }, [load]);
+  // Live refresh when Bella (or any other surface) changes CRM data — reveal,
+  // add-to-CRM, notes, tasks, deals — so the list updates without a reload.
+  useEffect(() => {
+    const onChange = () => load({ silent: true });
+    window.addEventListener('bdi:crm-changed', onChange);
+    return () => window.removeEventListener('bdi:crm-changed', onChange);
+  }, [load]);
   // Clear selection + reset the export batch whenever the visible set changes.
   useEffect(() => { setSelected(new Set()); setBatchIdx(0); }, [entityType, status, revealedOnly, q, view]);
 
