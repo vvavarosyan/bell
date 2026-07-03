@@ -704,6 +704,122 @@ export const TOOLS = [
   {
     approval: 'act',
     definition: {
+      name: 'update_crm_note',
+      description: "Edit a note's text (note ids come from get_crm_record).",
+      input_schema: {
+        type: 'object',
+        properties: { note_id: { type: 'integer' }, note: { type: 'string' } },
+        required: ['note_id', 'note'],
+      },
+    },
+    describe: (args) => `Edit note #${args.note_id}: "${String(args.note || '').slice(0, 80)}"`,
+    async execute(args, ctx) {
+      const { status, payload } = await internalCall(crmRouter, 'PATCH', `/notes/${Number(args.note_id)}`, ctx, { body: { body: String(args.note || '') } });
+      return asResult(status, payload, ['id', 'body', 'updated_at']);
+    },
+    summarize: (args, r) => r?.error ? 'failed' : `note #${args.note_id} edited`,
+  },
+
+  {
+    approval: 'always',
+    definition: {
+      name: 'delete_crm_note',
+      description: 'Delete a CRM note (note ids come from get_crm_record). Deletions ALWAYS get user approval.',
+      input_schema: { type: 'object', properties: { note_id: { type: 'integer' } }, required: ['note_id'] },
+    },
+    describe: (args) => `Delete CRM note #${args.note_id} (permanent)`,
+    async execute(args, ctx) {
+      const { status, payload } = await internalCall(crmRouter, 'DELETE', `/notes/${Number(args.note_id)}`, ctx, {});
+      return asResult(status, payload, ['ok']);
+    },
+    summarize: (args, r) => r?.error ? 'failed' : `note #${args.note_id} deleted`,
+  },
+
+  {
+    approval: 'act',
+    definition: {
+      name: 'update_crm_task',
+      description: 'Edit a CRM task: retitle, reschedule, or set status open | done | cancelled.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          task_id: { type: 'integer' }, title: { type: 'string' },
+          due_at: { type: 'string', description: 'ISO datetime or null to clear.' },
+          status: { type: 'string', description: 'open | done | cancelled' },
+        },
+        required: ['task_id'],
+      },
+    },
+    describe: (args) => `Update task #${args.task_id}${args.status ? ` → ${args.status}` : ''}${args.title ? ` ("${String(args.title).slice(0, 50)}")` : ''}`,
+    async execute(args, ctx) {
+      const body = {};
+      if (args.title !== undefined) body.title = args.title;
+      if (args.due_at !== undefined) body.due_at = args.due_at;
+      if (args.status !== undefined) body.status = args.status;
+      const { status, payload } = await internalCall(crmRouter, 'PATCH', `/tasks/${Number(args.task_id)}`, ctx, { body });
+      return asResult(status, payload, ['id', 'title', 'due_at', 'status']);
+    },
+    summarize: (args, r) => r?.error ? 'failed' : `task #${args.task_id} updated`,
+  },
+
+  {
+    approval: 'always',
+    definition: {
+      name: 'delete_crm_task',
+      description: 'Delete a CRM task. Deletions ALWAYS get user approval.',
+      input_schema: { type: 'object', properties: { task_id: { type: 'integer' } }, required: ['task_id'] },
+    },
+    describe: (args) => `Delete CRM task #${args.task_id} (permanent)`,
+    async execute(args, ctx) {
+      const { status, payload } = await internalCall(crmRouter, 'DELETE', `/tasks/${Number(args.task_id)}`, ctx, {});
+      return asResult(status, payload, ['ok']);
+    },
+    summarize: (args, r) => r?.error ? 'failed' : `task #${args.task_id} deleted`,
+  },
+
+  {
+    approval: 'act',
+    definition: {
+      name: 'update_deal',
+      description: 'Edit a deal: title, value, currency, expected close date.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          deal_id: { type: 'integer' }, title: { type: 'string' },
+          value_num: { type: 'number' }, currency: { type: 'string' },
+          expected_close: { type: 'string', description: 'ISO date or null to clear.' },
+        },
+        required: ['deal_id'],
+      },
+    },
+    describe: (args) => `Update deal #${args.deal_id}${args.title ? ` ("${String(args.title).slice(0, 50)}")` : ''}${args.value_num !== undefined ? ` value ${args.value_num}` : ''}`,
+    async execute(args, ctx) {
+      const body = {};
+      for (const k of ['title', 'value_num', 'currency', 'expected_close']) if (args[k] !== undefined) body[k] = args[k];
+      const { status, payload } = await internalCall(crmRouter, 'PATCH', `/deals/${Number(args.deal_id)}`, ctx, { body });
+      return asResult(status, payload, ['id', 'status', 'value_num']);
+    },
+    summarize: (args, r) => r?.error ? 'failed' : `deal #${args.deal_id} updated`,
+  },
+
+  {
+    approval: 'always',
+    definition: {
+      name: 'delete_deal',
+      description: 'Delete a deal. Deletions ALWAYS get user approval.',
+      input_schema: { type: 'object', properties: { deal_id: { type: 'integer' } }, required: ['deal_id'] },
+    },
+    describe: (args) => `Delete deal #${args.deal_id} (permanent)`,
+    async execute(args, ctx) {
+      const { status, payload } = await internalCall(crmRouter, 'DELETE', `/deals/${Number(args.deal_id)}`, ctx, {});
+      return asResult(status, payload, ['ok']);
+    },
+    summarize: (args, r) => r?.error ? 'failed' : `deal #${args.deal_id} deleted`,
+  },
+
+  {
+    approval: 'act',
+    definition: {
       name: 'schedule_task',
       description: 'Schedule Bella to do work later ("have this ready by tomorrow morning"). She runs it autonomously at the set time and notifies the user; results land in this conversation.',
       input_schema: {

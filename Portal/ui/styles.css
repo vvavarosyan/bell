@@ -2134,6 +2134,16 @@ a.contact-icon.on { cursor: pointer; text-decoration: none; position: relative; 
 .bella-approval-state.denied { color: var(--text-dim); }
 .bella-approval-state.error { color: var(--red); }
 
+.bella-time { font-size: 10px; color: var(--text-dim); margin-top: 2px; }
+.bella-msg.user .bella-time { text-align: right; }
+.bella-convitem-time { font-size: 10.5px; color: var(--text-dim); white-space: nowrap; }
+.bella-choices { display: flex; flex-wrap: wrap; gap: 7px; margin-top: 4px; }
+.bella-choice {
+  background: var(--bg-elev-2); border: 1px solid rgba(91, 140, 255, .45); color: var(--text);
+  border-radius: 999px; padding: 5px 14px; font: inherit; font-size: 12px; cursor: pointer;
+}
+.bella-choice:hover { border-color: var(--accent); box-shadow: var(--shadow-glow); background: var(--accent-fade); }
+
 .bella-inputrow { display: flex; gap: 8px; padding: 10px 12px; border-top: 1px solid var(--border); background: var(--bg-elev-2); }
 .bella-input {
   flex: 1; resize: none; background: var(--bg); border: 1px solid var(--border); color: var(--text);

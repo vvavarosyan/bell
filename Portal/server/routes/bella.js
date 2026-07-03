@@ -81,7 +81,18 @@ router.get('/conversations/:id/messages', async (req, res, next) => {
     if (!owned) return res.status(404).json({ error: 'not_found' });
     const rows = await store.listMessagesForUi(id);
     // Pure tool-result rows carry no display text — the UI has nothing to render.
-    res.json({ conversation: owned, messages: rows.filter((m) => m.content || m.meta) });
+    const messages = rows.filter((m) => m.content || m.meta);
+    // Attach LIVE approval statuses so reloaded cards reflect the truth
+    // (persisted meta only knows the proposal, not what happened after).
+    const actionIds = [];
+    for (const m of messages) for (const a of (m.meta?.approvals || [])) if (a.action_id) actionIds.push(Number(a.action_id));
+    if (actionIds.length) {
+      const statuses = await store.getActionStatuses(req.tenant.id, req.user?.id ?? 0, actionIds);
+      for (const m of messages) {
+        if (m.meta?.approvals) m.meta.approvals = m.meta.approvals.map((a) => ({ ...a, ...(statuses[a.action_id] || {}) }));
+      }
+    }
+    res.json({ conversation: owned, messages });
   } catch (err) { next(err); }
 });
 
