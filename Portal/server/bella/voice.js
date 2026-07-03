@@ -15,7 +15,7 @@ import { getKey } from '../keychain.js';
 
 const STT_MODEL = process.env.BDI_BELLA_STT_MODEL || 'scribe_v2';
 const TTS_MODEL = process.env.BDI_BELLA_TTS_MODEL || 'eleven_flash_v2_5';
-const VOICE_ID  = process.env.BDI_BELLA_VOICE_ID  || '21m00Tcm4TlvDq8ikWAM'; // "Rachel" — warm EN default
+const VOICE_ID  = process.env.BDI_BELLA_VOICE_ID  || 'hA4zGnmTwX2NQiTRMt7o'; // Val's chosen Bella voice (2026-07-03)
 const OUTPUT    = process.env.BDI_BELLA_TTS_FORMAT || 'mp3_44100_128';
 
 let cachedKey = null;
