@@ -193,8 +193,12 @@ const textOf = (blocks) => blocks.filter((b) => b.type === 'text').map((b) => b.
  *   clientContext — { section } — what the user is currently looking at
  *   send          — (event, data) → SSE write
  *   signal        — AbortSignal (client disconnect)
+ *   autonomous    — scheduled-task runs: approval gates are SKIPPED (Val's
+ *                   rule 2026-07-03: approving the schedule IS the approval;
+ *                   execution must never stall on a card). Credit caps and
+ *                   the audit trail still apply in full.
  */
-export async function runBellaTurn({ ctx, conversationId, userText, clientContext, send, signal }) {
+export async function runBellaTurn({ ctx, conversationId, userText, clientContext, send, signal, autonomous = false }) {
   const tenantId = ctx.tenant?.id;
   const userId   = ctx.user?.id ?? 0;
 
@@ -282,7 +286,8 @@ export async function runBellaTurn({ ctx, conversationId, userText, clientContex
 
         // Approval gate (Val's D2): 'always' tools gate in every mode;
         // 'act'/'spend' gate unless the user chose no-approval in Settings.
-        if (requiresApproval(tool, approvalMode)) {
+        // Autonomous (scheduled) runs skip gates — pre-approved at scheduling.
+        if (!autonomous && requiresApproval(tool, approvalMode)) {
           let summary;
           try { summary = tool.describe ? tool.describe(tu.input || {}) : 'Run ' + tu.name; } catch { summary = 'Run ' + tu.name; }
           const actionId = await store.proposeAction(tenantId, userId, convId, tu.name, tu.input || {}, summary);

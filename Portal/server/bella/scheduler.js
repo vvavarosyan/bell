@@ -6,8 +6,11 @@
 // identity. Results land in the task's conversation (visible in her chat
 // History) + an in-app notification.
 //
-// Approvals still apply overnight: gated tools become proposed actions —
-// the user finds the Approve cards in the conversation next morning.
+// Approvals do NOT re-fire at execution time (Val's rule 2026-07-03):
+// approving the schedule IS the approval — Bella discloses any sends/credit
+// spend in the scheduling proposal, then the run executes fully autonomously.
+// Backstops: daily credit caps still enforce, everything is audit-logged,
+// and the user can see + cancel queued tasks in Settings → Bella.
 //
 // Gating (same pattern as startCrmScheduler): BDI_BELLA_SCHEDULER=1 on
 // exactly ONE prod service (app.bell.qa) — never both app+admin, they share
@@ -60,10 +63,11 @@ async function runOne(task) {
     await runBellaTurn({
       ctx,
       conversationId: task.conversation_id || null,
-      userText: '[Scheduled task — execute it now, autonomously, and end with a short summary of what you did.]\n' + task.instruction,
+      userText: '[Scheduled task — the user pre-approved it when scheduling. Execute it now FULLY AUTONOMOUSLY (no approvals will be requested), then end with a short summary of what you did.]\n' + task.instruction,
       clientContext: {},
       send,
       signal: abort.signal,
+      autonomous: true,
     });
   } catch (err) {
     errorText = String(err.message || err).slice(0, 300);

@@ -449,6 +449,7 @@ export const api = {
   bellaApprove:           (id) => request(`/api/bella/actions/${id}/approve`, { method: 'POST', body: '{}' }),
   bellaDeny:              (id) => request(`/api/bella/actions/${id}/deny`, { method: 'POST', body: '{}' }),
   bellaTasks:             () => request('/api/bella/tasks'),
+  bellaCancelTask:        (id) => request(`/api/bella/tasks/${id}/cancel`, { method: 'POST', body: '{}' }),
 
   // Outreach sending identity (per-tenant): Bell subdomain + custom domains.
   outreachIdentities:     () => request('/api/outreach/identities'),
