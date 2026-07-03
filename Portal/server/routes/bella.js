@@ -12,6 +12,7 @@
 
 import express from 'express';
 import { runBellaTurn } from '../bella/brain.js';
+import { executeTool } from '../bella/tools.js';
 import * as store from '../bella/store.js';
 
 const router = express.Router();
@@ -98,6 +99,52 @@ router.get('/actions', async (req, res, next) => {
   try {
     const rows = await store.listActions(req.tenant.id, req.user?.id ?? 0, req.query.limit);
     res.json({ actions: rows });
+  } catch (err) { next(err); }
+});
+
+// POST /api/bella/actions/:id/approve — execute a proposed action (G2).
+// The click IS the authorization: the action runs under the clicking user's
+// own auth context, exactly like a chat-turn tool call would.
+router.post('/actions/:id/approve', async (req, res, next) => {
+  try {
+    const action = await store.getOwnedAction(req.tenant.id, req.user?.id ?? 0, Number(req.params.id));
+    if (!action) return res.status(404).json({ error: 'not_found' });
+    if (action.status !== 'proposed') return res.status(409).json({ error: 'not_pending', status: action.status });
+
+    let args = action.args;
+    if (typeof args === 'string') { try { args = JSON.parse(args); } catch { args = {}; } }
+    const ctx = { user: req.user, tenant: req.tenant, conversationId: action.conversation_id };
+    const { result, summary, isError } = await executeTool(action.tool, args, ctx);
+    const credits = Number(result?.charged) || 0;
+    await store.setActionStatus(action.id, isError ? 'error' : 'done', summary, credits);
+    res.json({ ok: !isError, status: isError ? 'error' : 'done', summary, result });
+  } catch (err) { next(err); }
+});
+
+// POST /api/bella/actions/:id/deny
+router.post('/actions/:id/deny', async (req, res, next) => {
+  try {
+    const action = await store.getOwnedAction(req.tenant.id, req.user?.id ?? 0, Number(req.params.id));
+    if (!action) return res.status(404).json({ error: 'not_found' });
+    if (action.status !== 'proposed') return res.status(409).json({ error: 'not_pending', status: action.status });
+    await store.setActionStatus(action.id, 'denied');
+    res.json({ ok: true, status: 'denied' });
+  } catch (err) { next(err); }
+});
+
+// GET /api/bella/tasks — the user's scheduled Bella tasks.
+router.get('/tasks', async (req, res, next) => {
+  try {
+    res.json({ tasks: await store.listTasks(req.tenant.id, req.user?.id ?? 0, req.query.limit) });
+  } catch (err) { next(err); }
+});
+
+// POST /api/bella/tasks/:id/cancel
+router.post('/tasks/:id/cancel', async (req, res, next) => {
+  try {
+    const ok = await store.cancelTask(req.tenant.id, req.user?.id ?? 0, Number(req.params.id));
+    if (!ok) return res.status(409).json({ error: 'not_cancellable' });
+    res.json({ ok: true });
   } catch (err) { next(err); }
 });
 

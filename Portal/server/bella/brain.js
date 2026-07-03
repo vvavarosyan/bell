@@ -20,7 +20,7 @@
 
 import { getKey } from '../keychain.js';
 import { buildSystem } from './prompt.js';
-import { TOOL_DEFINITIONS, getTool, executeTool } from './tools.js';
+import { TOOL_DEFINITIONS, getTool, executeTool, requiresApproval } from './tools.js';
 import * as store from './store.js';
 
 const MODEL       = process.env.BDI_BELLA_MODEL || 'claude-sonnet-5';
@@ -227,16 +227,35 @@ export async function runBellaTurn({ ctx, conversationId, userText, clientContex
   send('meta', { conversation_id: convId });
 
   const prefs = await store.getBellaPrefs(userId);
+  const approvalMode = prefs.approval_mode === 'auto' ? 'auto' : 'ask';
   const system = buildSystem(ctx.user, ctx.tenant, prefs);
   const messages = await store.loadModelMessages(convId, HISTORY_MAX);
+
+  // Approval continuations: after the Approve/Deny buttons the client sends
+  // "[[action:ID:approved|denied]]" — swap it for a framing note the model
+  // narrates from. Hidden: no user bubble is rendered (display content '').
+  let effectiveText = userText;
+  let hidden = false;
+  const actionMatch = /^\[\[action:(\d+):(approved|denied)\]\]$/.exec(userText.trim());
+  if (actionMatch) {
+    hidden = true;
+    const action = await store.getOwnedAction(tenantId, userId, Number(actionMatch[1]));
+    if (!action) {
+      effectiveText = '[System note: the referenced action no longer exists. Tell the user briefly.]';
+    } else if (actionMatch[2] === 'approved') {
+      effectiveText = `[System note: the user APPROVED your proposed ${action.tool} (action #${action.id}) and it has been executed. Result: ${action.result_summary || action.status}. Tell the user the outcome, then continue helping.]`;
+    } else {
+      effectiveText = `[System note: the user DENIED your proposed ${action.tool} (action #${action.id}). Acknowledge briefly; do not retry unless they ask.]`;
+    }
+  }
 
   // Per-turn context rides in the user message (NOT the system prompt — that
   // would bust the prompt cache).
   const section = clientContext?.section ? String(clientContext.section).slice(0, 40) : null;
-  const fullUserText = (section ? `[user is currently on the "${section}" section]\n` : '') + userText;
+  const fullUserText = (section && !hidden ? `[user is currently on the "${section}" section]\n` : '') + effectiveText;
   messages.push({ role: 'user', content: [{ type: 'text', text: fullUserText }] });
   await store.addMessage(convId, tenantId, userId, {
-    role: 'user', content: userText, contentJson: [{ type: 'text', text: fullUserText }],
+    role: 'user', content: hidden ? '' : userText, contentJson: [{ type: 'text', text: fullUserText }],
   });
 
   let totalIn = 0, totalOut = 0;
@@ -261,6 +280,23 @@ export async function runBellaTurn({ ctx, conversationId, userText, clientContex
       for (const tu of toolUses) {
         const tool = getTool(tu.name);
 
+        // Approval gate (Val's D2): 'always' tools gate in every mode;
+        // 'act'/'spend' gate unless the user chose no-approval in Settings.
+        if (requiresApproval(tool, approvalMode)) {
+          let summary;
+          try { summary = tool.describe ? tool.describe(tu.input || {}) : 'Run ' + tu.name; } catch { summary = 'Run ' + tu.name; }
+          const actionId = await store.proposeAction(tenantId, userId, convId, tu.name, tu.input || {}, summary);
+          send('approval', { action_id: actionId, tool: tu.name, summary });
+          meta.approvals = meta.approvals || [];
+          meta.approvals.push({ action_id: actionId, tool: tu.name, summary });
+          meta.tools.push({ name: tu.name, summary: 'awaiting your approval' });
+          results.push({
+            type: 'tool_result', tool_use_id: tu.id,
+            content: JSON.stringify({ status: 'approval_required', action_id: actionId, note: 'Proposed to the user — they must click Approve in the chat. Briefly state what you proposed and wait. Do NOT call this tool again for the same thing.' }),
+          });
+          continue;
+        }
+
         // Client-side effects (navigate) go straight to the browser.
         if (tool?.clientEffect === 'navigate') {
           send('navigate', { section: tu.input?.section });
@@ -269,17 +305,7 @@ export async function runBellaTurn({ ctx, conversationId, userText, clientContex
           send('tool', { name: tu.name, status: 'running' });
         }
 
-        // Approval gate (G2 wires real approvals; the hook lives here now so
-        // action tools land behind it by construction).
-        if (tool?.definition && tool.requires_approval) {
-          const summary = 'needs approval (arrives with the next Bella upgrade)';
-          results.push({ type: 'tool_result', tool_use_id: tu.id, content: JSON.stringify({ status: 'approval_required', note: summary }) });
-          meta.tools.push({ name: tu.name, summary });
-          await store.logAction(tenantId, userId, convId, tu.name, tu.input, 'proposed', summary);
-          continue;
-        }
-
-        const { result, summary, isError } = await executeTool(tu.name, tu.input, ctx);
+        const { result, summary, isError } = await executeTool(tu.name, tu.input, { ...ctx, conversationId: convId });
         results.push({ type: 'tool_result', tool_use_id: tu.id, content: JSON.stringify(result).slice(0, 12_000), ...(isError ? { is_error: true } : {}) });
         if (tool?.clientEffect !== 'navigate') {
           send('tool', { name: tu.name, status: isError ? 'error' : 'done', summary });

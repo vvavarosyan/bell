@@ -101,7 +101,8 @@ async function bellaChatStream(body, handlers = {}) {
     }
     const dispatch = {
       meta: handlers.onMeta, token: handlers.onToken, tool: handlers.onTool,
-      navigate: handlers.onNavigate, done: handlers.onDone, error: handlers.onError,
+      navigate: handlers.onNavigate, approval: handlers.onApproval,
+      done: handlers.onDone, error: handlers.onError,
     };
     const reader = r.body.getReader();
     const decoder = new TextDecoder();
@@ -445,6 +446,9 @@ export const api = {
   bellaDeleteConversation:(id) => request(`/api/bella/conversations/${id}`, { method: 'DELETE' }),
   bellaActions:           (limit = 50) => request('/api/bella/actions?limit=' + limit),
   bellaUsage:             () => request('/api/bella/usage'),
+  bellaApprove:           (id) => request(`/api/bella/actions/${id}/approve`, { method: 'POST', body: '{}' }),
+  bellaDeny:              (id) => request(`/api/bella/actions/${id}/deny`, { method: 'POST', body: '{}' }),
+  bellaTasks:             () => request('/api/bella/tasks'),
 
   // Outreach sending identity (per-tenant): Bell subdomain + custom domains.
   outreachIdentities:     () => request('/api/outreach/identities'),

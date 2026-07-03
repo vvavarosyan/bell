@@ -45,6 +45,7 @@ import signalsRouter           from './routes/signals.js';
 import whatsappRouter          from './routes/whatsapp.js';
 import whatsappWebhookRouter   from './routes/whatsapp_webhook.js';
 import bellaRouter             from './routes/bella.js';
+import { startBellaScheduler } from './bella/scheduler.js';
 import { startCrmScheduler } from './crm/sequences.js';
 import { startInboundPoller } from './crm/inbound_poller.js';
 import authRouter              from './routes/auth.js';
@@ -326,4 +327,8 @@ app.use((err, req, res, next) => {
   // CRM inbound reply reader (IMAP). Enabled only where BDI_CRM_IMAP_* are set
   // (one service). Reads the reply mailbox and threads replies into the CRM.
   startInboundPoller();
+
+  // Bella's scheduled/overnight task runner. Local engine: always on.
+  // Prod: BDI_BELLA_SCHEDULER=1 on exactly ONE service (app.bell.qa).
+  startBellaScheduler();
 })();
