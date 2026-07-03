@@ -49,7 +49,7 @@ router.post('/chat', async (req, res) => {
 
   try {
     await runBellaTurn({
-      ctx: { user: req.user, tenant: req.tenant },
+      ctx: { user: req.user, tenant: req.tenant, authHeader: req.headers.authorization || null },
       conversationId,
       userText: message,
       clientContext: req.body?.context || {},
@@ -125,7 +125,7 @@ router.post('/actions/:id/approve', async (req, res, next) => {
 
     let args = action.args;
     if (typeof args === 'string') { try { args = JSON.parse(args); } catch { args = {}; } }
-    const ctx = { user: req.user, tenant: req.tenant, conversationId: action.conversation_id };
+    const ctx = { user: req.user, tenant: req.tenant, conversationId: action.conversation_id, authHeader: req.headers.authorization || null };
     const { result, summary, isError } = await executeTool(action.tool, args, ctx);
     const credits = Number(result?.charged) || 0;
     await store.setActionStatus(action.id, isError ? 'error' : 'done', summary, credits);

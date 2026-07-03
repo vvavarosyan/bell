@@ -236,12 +236,13 @@ export function BellaChat({ onClose }) {
       { role: 'assistant', content: '', tools: [], streaming: true, at: now },
     ]);
 
+    let spokenText = '';   // final reply — voiced when Bella Voice is active
     try {
       const stream = await api.bellaChat(
         { conversation_id: convId, message: text, context: { section: currentRoute().tab } },
         {
           onMeta: (m) => { if (m.conversation_id) setConvId(m.conversation_id); },
-          onToken: (d) => patchLast((m) => ({ ...m, content: m.content + d.t })),
+          onToken: (d) => { spokenText += d.t || ''; patchLast((m) => ({ ...m, content: m.content + d.t })); },
           onTool: (t) => {
             if (t.status === 'done') fireEffects(t.name);   // live-refresh open tabs (Val's #2)
             patchLast((m) => {
@@ -282,6 +283,11 @@ export function BellaChat({ onClose }) {
       busyRef.current = false;
       streamRef.current = null;
       refreshConvs();
+      // Voice bridge: when Bella Voice is active, she SPEAKS chat replies too
+      // (incl. the narration after an Approve click).
+      if (typeof window !== 'undefined' && window.__bellaVoiceActive && spokenText.trim()) {
+        try { window.dispatchEvent(new CustomEvent('bdi:bella-say', { detail: { text: spokenText } })); } catch { /* ignore */ }
+      }
       // Post-turn sync: normalizes local state to the server's (real ids,
       // timestamps, live approval statuses) so later polls diff correctly.
       setTimeout(() => { if (convIdRef.current && !busyRef.current) syncFromServer(convIdRef.current, { force: true }); }, 400);

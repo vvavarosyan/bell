@@ -13,6 +13,7 @@
 // flag on each definition is the hook the brain already honors.
 
 import companiesRouter from '../routes/companies.js';
+import peopleRouter    from '../routes/people.js';
 import jobsRouter      from '../routes/jobs.js';
 import feedRouter      from '../routes/feed.js';
 import signalsRouter   from '../routes/signals.js';
@@ -21,6 +22,9 @@ import icpRouter       from '../routes/icp.js';
 import statsRouter     from '../routes/stats.js';
 import crmRouter       from '../routes/crm.js';
 import whatsappRouter  from '../routes/whatsapp.js';
+import accountRouter   from '../routes/account.js';
+import billingRouter   from '../routes/billing.js';
+import openDataRouter  from '../routes/open_data.js';
 import { SECTOR_GROUPS } from '../lib/industry_groups.js';
 import * as store from './store.js';
 
@@ -60,7 +64,9 @@ function internalCall(router, method, path, ctx, { query = {}, body = {} } = {})
       url,
       originalUrl: url,
       baseUrl: '',
-      headers: {},
+      // Some routers (billing) re-check auth per-route: forward the caller's
+      // own bearer token so those gates verify the SAME user.
+      headers: ctx.authHeader ? { authorization: ctx.authHeader } : {},
       query: Object.fromEntries(qs.entries()),
       params: {},
       body,
@@ -418,9 +424,197 @@ export const TOOLS = [
   },
 
   // ==========================================================================
+  // G2.3 — full-dashboard coverage (Val 2026-07-03: "absolutely everything").
+  // ==========================================================================
+  {
+    definition: {
+      name: 'search_people',
+      description: 'Search decision-makers/people: free text, employer name, or company_id. NOTE: customer accounts get counts only (Qatar PDPPL lockdown) — the result says locked:true; explain and pivot to companies. Admin accounts get full rows.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          q:          { type: 'string' },
+          company:    { type: 'string', description: 'Employer name filter.' },
+          company_id: { type: 'integer' },
+          limit:      { type: 'integer', description: '1–25 (default 10).' },
+        },
+      },
+    },
+    async execute(args, ctx) {
+      const { status, payload } = await internalCall(peopleRouter, 'GET', '/', ctx, {
+        query: { q: args.q, company: args.company, company_id: args.company_id, limit: Math.min(Math.max(Number(args.limit) || 10, 1), 25) },
+      });
+      const r = asResult(status, payload);
+      if (r.error) return r;
+      if (payload.locked) {
+        return { locked: true, total: payload.total ?? 0, note: 'Person-level details are restricted for customer accounts under Qatar PDPPL — counts only. Company-level intelligence is fully available.' };
+      }
+      return {
+        total: payload.total ?? 0,
+        people: (payload.rows || []).map((p) => pick(p, ['id', 'full_name', 'headline', 'title', 'seniority', 'company_name', 'city', 'email', 'phone', 'linkedin_url', 'is_revealed'])),
+      };
+    },
+    summarize: (args, r) => r?.locked ? `people locked (${r.total} exist)` : `${r?.total ?? 0} people${args.q ? ` for "${args.q}"` : ''}`,
+  },
+
+  {
+    definition: {
+      name: 'get_billing',
+      description: "The user's billing picture: subscription/plan status, usage, and recent invoices. Read-only.",
+      input_schema: { type: 'object', properties: {} },
+    },
+    async execute(_args, ctx) {
+      const [sub, usage, inv] = await Promise.all([
+        internalCall(billingRouter, 'GET', '/subscription', ctx, {}).catch((e) => ({ status: 500, payload: { error: e.message } })),
+        internalCall(billingRouter, 'GET', '/usage', ctx, {}).catch((e) => ({ status: 500, payload: { error: e.message } })),
+        internalCall(billingRouter, 'GET', '/invoices', ctx, {}).catch((e) => ({ status: 500, payload: { error: e.message } })),
+      ]);
+      const invoices = inv.payload?.rows || inv.payload?.invoices || (Array.isArray(inv.payload) ? inv.payload : []);
+      return {
+        subscription: asResult(sub.status, sub.payload),
+        usage: asResult(usage.status, usage.payload),
+        invoices: invoices.slice(0, 5).map((i) => pick(i, ['id', 'number', 'status', 'amount', 'amount_due', 'total', 'currency', 'created', 'date', 'hosted_invoice_url', 'url'])),
+      };
+    },
+    summarize: () => 'billing overview',
+  },
+
+  {
+    definition: {
+      name: 'list_email_templates',
+      description: "The workspace's saved email templates.",
+      input_schema: { type: 'object', properties: {} },
+    },
+    async execute(_args, ctx) {
+      const { status, payload } = await internalCall(crmRouter, 'GET', '/templates', ctx, {});
+      const r = asResult(status, payload);
+      if (r.error) return r;
+      const rows = payload.rows || payload.templates || (Array.isArray(payload) ? payload : []);
+      return { templates: rows.slice(0, 25).map((t) => pick(t, ['id', 'name', 'subject'])) };
+    },
+    summarize: (_a, r) => `${(r?.templates || []).length} templates`,
+  },
+
+  {
+    approval: 'act',
+    definition: {
+      name: 'create_email_template',
+      description: 'Save a reusable email template ({tokens} like {company} supported).',
+      input_schema: {
+        type: 'object',
+        properties: { name: { type: 'string' }, subject: { type: 'string' }, body: { type: 'string' } },
+        required: ['name', 'subject', 'body'],
+      },
+    },
+    describe: (args) => `Save email template "${String(args.name || '').slice(0, 50)}"`,
+    async execute(args, ctx) {
+      const { status, payload } = await internalCall(crmRouter, 'POST', '/templates', ctx, {
+        body: { name: String(args.name || ''), subject: args.subject || null, body: args.body || null },
+      });
+      return asResult(status, payload, ['id', 'name']);
+    },
+    summarize: (_a, r) => r?.error ? 'failed' : `template #${r?.id} saved`,
+  },
+
+  {
+    approval: 'act',
+    definition: {
+      name: 'update_account_prefs',
+      description: "Update the user's account preferences (timezone, default landing page: companies|market-feed|crm|map) and/or notification toggles.",
+      input_schema: {
+        type: 'object',
+        properties: {
+          preferences:   { type: 'object', description: 'e.g. {"default_landing":"crm","timezone":"Asia/Qatar"}' },
+          notifications: { type: 'object', description: 'boolean toggles, e.g. {"credit_low":true}' },
+        },
+      },
+    },
+    describe: (args) => `Update account settings: ${[...Object.keys(args.preferences || {}), ...Object.keys(args.notifications || {})].join(', ') || '(none)'}`,
+    async execute(args, ctx) {
+      const body = {};
+      if (args.preferences && typeof args.preferences === 'object') body.preferences = args.preferences;
+      if (args.notifications && typeof args.notifications === 'object') body.notifications = args.notifications;
+      if (!Object.keys(body).length) return { error: 'nothing to update' };
+      const { status, payload } = await internalCall(accountRouter, 'PATCH', '/', ctx, { body });
+      const r = asResult(status, payload);
+      return r.error ? r : { updated: Object.keys(body) };
+    },
+    summarize: (_a, r) => r?.error ? 'failed' : 'settings updated',
+  },
+
+  {
+    definition: {
+      name: 'search_datasets',
+      description: 'Search the Deep Data section (Qatar open-data datasets) by keyword.',
+      input_schema: {
+        type: 'object',
+        properties: { q: { type: 'string' }, limit: { type: 'integer', description: '1–20 (default 10).' } },
+      },
+    },
+    async execute(args, ctx) {
+      const { status, payload } = await internalCall(openDataRouter, 'GET', '/datasets', ctx, {
+        query: { q: args.q, limit: Math.min(Math.max(Number(args.limit) || 10, 1), 20) },
+      });
+      const r = asResult(status, payload);
+      if (r.error) return r;
+      return { total: payload.total ?? 0, datasets: (payload.rows || []).map((d) => pick(d, ['id', 'title', 'name', 'theme', 'publisher', 'records_count', 'updated_at'])) };
+    },
+    summarize: (args, r) => `${r?.total ?? 0} datasets${args.q ? ` for "${args.q}"` : ''}`,
+  },
+
+  {
+    definition: {
+      name: 'get_dataset_records',
+      description: 'Read rows from one Deep Data dataset (id from search_datasets), optional keyword filter.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          dataset_id: { type: 'integer' }, q: { type: 'string' },
+          limit: { type: 'integer', description: '1–10 (default 5 — rows can be wide).' },
+        },
+        required: ['dataset_id'],
+      },
+    },
+    async execute(args, ctx) {
+      const { status, payload } = await internalCall(openDataRouter, 'GET', `/datasets/${Number(args.dataset_id)}/records`, ctx, {
+        query: { q: args.q, limit: Math.min(Math.max(Number(args.limit) || 5, 1), 10) },
+      });
+      const r = asResult(status, payload);
+      if (r.error) return r;
+      return { total: payload.total ?? 0, records: (payload.rows || payload.records || []).slice(0, 10) };
+    },
+    summarize: (args, r) => `${r?.total ?? 0} records in dataset #${args.dataset_id}`,
+  },
+
+  // ==========================================================================
   // G2 — ACTIONS. approval: 'act' (ask-mode gated) · 'spend' (credits; ask-mode
   // gated + daily cap) · 'always' (external sends — gated in EVERY mode).
   // ==========================================================================
+  {
+    approval: 'spend',
+    definition: {
+      name: 'reveal_people',
+      description: 'Reveal people (unmask a person\'s verified contacts) — 1 credit each; already-revealed are free. Revealed people flow into the CRM. NOTE: person data is PDPPL-locked for customer accounts — this works for accounts with people access. Max 200.',
+      input_schema: {
+        type: 'object',
+        properties: { ids: { type: 'array', items: { type: 'integer' }, description: 'Person ids from search_people.' } },
+        required: ['ids'],
+      },
+    },
+    describe: (args) => `Reveal ${(args.ids || []).length} people — up to ${(args.ids || []).length} credits (only unrevealed are charged)`,
+    async execute(args, ctx) {
+      const ids = (args.ids || []).map(Number).filter(Number.isFinite).slice(0, 200);
+      if (!ids.length) return { error: 'ids[] required' };
+      const budget = await store.checkCreditsBudget(ctx.tenant.id, ctx.user?.id ?? 0, ids.length);
+      if (!budget.ok) return { error: `daily Bella credit cap would be exceeded (${budget.spent}/${budget.cap} spent today)` };
+      const { status, payload } = await internalCall(peopleRouter, 'POST', '/reveal-bulk', ctx, { body: { ids } });
+      const r = asResult(status, payload, ['requested', 'already', 'revealed', 'insufficient', 'charged', 'balance', 'unlimited']);
+      if (!r.error) await store.addCreditsSpent(ctx.tenant.id, ctx.user?.id ?? 0, Number(payload?.charged) || 0);
+      return r;
+    },
+    summarize: (_a, r) => r?.error ? 'failed' : (r?.unlimited ? `revealed ${r.revealed} (unlimited)` : `revealed ${r?.revealed ?? 0}, charged ${r?.charged ?? 0} credits`),
+  },
+
   {
     approval: 'spend',
     definition: {
