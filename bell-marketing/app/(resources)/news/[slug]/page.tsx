@@ -125,7 +125,7 @@ export default async function NewsArticlePage({ params }: Props) {
           {/* Source attribution */}
           <div className="mt-10 rounded-xl border border-border bg-bg-elev px-5 py-4 flex flex-wrap items-center justify-between gap-3">
             <span className="text-[13px] text-text-muted">
-              Summary written by Bell Data Intelligence{item.source_name ? ` · original reporting: ${item.source_name}` : ''}.
+              Written by Bell Data Intelligence{item.source_name ? ` · based on reporting by ${item.source_name}` : ''}.
             </span>
             {item.source_url && (
               <a href={item.source_url} target="_blank" rel="noopener noreferrer" className="text-[13px] text-accent-bright hover:underline whitespace-nowrap">
