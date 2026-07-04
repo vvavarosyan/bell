@@ -7,6 +7,7 @@ import {
   findSectionForRoute,
 } from '@/content/sitemap-data';
 import { getNewsSitemapEntries } from '@/lib/news';
+import { getResearchSitemapEntries } from '@/lib/research';
 
 const BASE = 'https://bell.qa';
 
@@ -75,5 +76,17 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     }));
   } catch { /* soft */ }
 
-  return [...staticEntries, ...collectionEntries, ...dynamicItemEntries, ...newsEntries];
+  // Live research report pages (Bell-authored) — same soft-fail pattern as
+  // news, so a freshly-published report enters the sitemap without a deploy.
+  let researchEntries: MetadataRoute.Sitemap = [];
+  try {
+    researchEntries = (await getResearchSitemapEntries()).map(e => ({
+      url:             e.url,
+      lastModified:    e.lastModified,
+      changeFrequency: 'weekly' as const,
+      priority:        0.7,
+    }));
+  } catch { /* soft */ }
+
+  return [...staticEntries, ...collectionEntries, ...dynamicItemEntries, ...newsEntries, ...researchEntries];
 }
