@@ -23,6 +23,7 @@ export type ResearchSection = { title?: string; body_markdown?: string };
 
 export type ResearchReport = ResearchListItem & {
   sections: ResearchSection[];
+  sources?: { url: string; label?: string | null }[];
 };
 
 /** Report type → display meta + the conversion page it should point to. */

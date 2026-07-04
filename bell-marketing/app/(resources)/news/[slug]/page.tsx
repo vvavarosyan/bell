@@ -63,10 +63,19 @@ export default async function NewsArticlePage({ params }: Props) {
     publisher: { '@id': 'https://bell.qa/#organization' },
     ...(item.source_url ? { isBasedOn: item.source_url } : {}),
   };
+  const breadcrumb = {
+    '@context': 'https://schema.org',
+    '@type': 'BreadcrumbList',
+    itemListElement: [
+      { '@type': 'ListItem', position: 1, name: 'Newsroom', item: 'https://bell.qa/news' },
+      { '@type': 'ListItem', position: 2, name: item.title, item: `https://bell.qa/news/${item.slug}` },
+    ],
+  };
 
   return (
     <div className="max-w-screen-lg mx-auto px-6 pt-24 pb-32">
       <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonld) }} />
+      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(breadcrumb) }} />
 
       {/* Breadcrumb */}
       <div className="text-[12px] text-text-dim mb-8">

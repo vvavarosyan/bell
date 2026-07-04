@@ -78,7 +78,10 @@ export async function releaseResearchToFeed(jobId) {
      WHERE id = $1
   `, [j.report_id, slug]);
 
-  // 2) Anonymized feed event — NO tenant identity. Full sections in payload.
+  // 2) Anonymized feed event — NO tenant identity. Full sections + the citation
+  //    sources (1-indexed) in payload so the in-app feed can link [1],[2],….
+  const srcRows = await query(
+    `SELECT url, label FROM research_sources WHERE job_id = $1 ORDER BY id`, [j.id]);
   const category = TYPE_CATEGORY[j.type] || 'corporate';
   const linked = j.target_company_id ? [Number(j.target_company_id)] : [];
   await query(`
@@ -99,6 +102,7 @@ export async function releaseResearchToFeed(jobId) {
       job_id: j.id, report_id: j.report_id, public_slug: slug,
       job_type: j.type, target_label: j.target_label,
       sections,                       // FULL report — public per Val's choice
+      sources: srcRows.rows,          // 1-indexed citation targets for [N] links
     }),
   ]);
 
