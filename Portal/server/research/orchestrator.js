@@ -72,6 +72,7 @@ export async function runJob(jobId) {
            error_detail = NULL,
            firecrawl_job_id = NULL,
            ready_at = NULL,
+           feed_released_at = NULL,
            source_count = 0,
            section_count = 0,
            citation_count = 0

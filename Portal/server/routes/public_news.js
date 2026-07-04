@@ -31,6 +31,7 @@ const shape = (r) => ({
   slug: `${r.id}-${slugify(r.title)}`,
   title: r.title,
   summary: r.summary,
+  body: r.body ?? null,
   category: r.category || 'other',
   sentiment: r.sentiment || 'neutral',
   importance: Number(r.importance_score) || 0,
@@ -72,7 +73,7 @@ router.get('/:id', async (req, res, next) => {
     const id = Number(req.params.id);
     if (!Number.isFinite(id) || id <= 0) return res.status(400).json({ error: 'bad_id' });
     const r = await query(
-      `SELECT id, title, summary, category, sentiment, importance_score, source_name, url, entities, published_at, created_at
+      `SELECT id, title, summary, body, category, sentiment, importance_score, source_name, url, entities, published_at, created_at
          FROM news_items
         WHERE id = $1 AND processed = true AND summary IS NOT NULL AND created_at >= $2`,
       [id, PUBLIC_SINCE],

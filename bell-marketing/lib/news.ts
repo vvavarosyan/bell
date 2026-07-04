@@ -13,6 +13,7 @@ export type NewsItem = {
   slug: string;
   title: string;
   summary: string;
+  body?: string | null;
   category: string;
   sentiment: 'positive' | 'negative' | 'neutral' | string;
   importance: number;

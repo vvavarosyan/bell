@@ -61,7 +61,6 @@ export async function releaseResearchToFeed(jobId) {
   const j = jr.rows[0];
 
   if (j.status !== 'ready') return { id: jobId, released: false, reason: 'not_ready' };
-  if (j.feed_optout)        return { id: jobId, released: false, reason: 'opted_out' };
   if (j.feed_released_at)   return { id: jobId, released: false, reason: 'already_released' };
   if (PRIVATE_RESEARCH_TYPES.has(String(j.type).toLowerCase()))
     return { id: jobId, released: false, reason: 'type_private' };
@@ -116,8 +115,9 @@ export async function releaseResearchToFeed(jobId) {
  * tick. When a window is configured (>0 days) the producer releases it later.
  */
 export async function maybeReleaseOnComplete(jobId) {
-  const days = await getExclusivityDays();
-  if (days > 0) return { id: jobId, released: false, reason: 'exclusivity_window' };
+  // Val 2026-07-04: research ALWAYS publishes immediately on completion — no
+  // exclusivity window, no keep-private. Person type still stays private via
+  // releaseResearchToFeed's type guard.
   return releaseResearchToFeed(jobId);
 }
 
@@ -126,20 +126,21 @@ export async function maybeReleaseOnComplete(jobId) {
  * and that hasn't opted out / already released. Runs on the always-on engine.
  */
 export async function emitResearchEvents() {
-  const days = await getExclusivityDays();
+  // Val 2026-07-04: publish EVERY ready report immediately — no exclusivity
+  // window, no opt-out. Person type stays private. This ALSO back-publishes any
+  // previously-completed reports that never released (LIMIT 200 to drain the
+  // backlog in one pass).
   const due = await query(`
     SELECT j.id
       FROM research_jobs j
       JOIN research_reports r ON r.job_id = j.id
      WHERE j.status = 'ready'
-       AND j.feed_optout = false
        AND j.feed_released_at IS NULL
-       AND NOT (lower(j.type) = ANY($2::text[]))
+       AND NOT (lower(j.type) = ANY($1::text[]))
        AND jsonb_array_length(COALESCE(r.sections, '[]'::jsonb)) > 0
-       AND j.ready_at <= now() - ($1 * interval '1 day')
      ORDER BY j.ready_at
-     LIMIT 50
-  `, [days, [...PRIVATE_RESEARCH_TYPES]]);
+     LIMIT 200
+  `, [[...PRIVATE_RESEARCH_TYPES]]);
 
   let released = 0;
   for (const row of due.rows) {

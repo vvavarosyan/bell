@@ -78,13 +78,14 @@ ${body ? `ARTICLE TEXT:\n${body}` : (rss || 'ARTICLE TEXT: (unavailable)')}`;
   const user =
 `For each numbered news item below, produce for a Qatar market-intelligence feed:
 - "summary": 2–3 factual sentences (40–70 words) written ONLY from the item's provided text. Neutral tone, no hype, no opinions. If the article text is unavailable or too thin, write ONE cautious sentence restating what the headline says — never invent numbers, names, or outcomes.
+- "body": a COMPLETE news article of 3–6 short paragraphs, REWRITTEN entirely in your own original words from the provided text — a fresh, factual, neutral write-up for Bell's readers. Do NOT copy or lightly reword sentences from the source; synthesize the facts into original prose. Attribute where natural ("according to <source>"). Never invent facts, numbers, names, or quotes. If the article text is unavailable or too thin, return an empty string "".
 - "category": one of ${CATEGORIES.join(', ')}.
 - "sentiment": positive|negative|neutral (business sentiment for Qatar's market).
 - "importance": 0..1 (market significance for Qatar).
 - "companies": ONLY explicitly named companies/organizations (no generic terms like "Qatar" or "the government").
 - "people": explicitly named individuals.
 Return JSON exactly:
-{"items":[{"i":<index>,"summary":"...","category":"...","sentiment":"...","importance":<0..1>,"companies":["..."],"people":["..."]}]}
+{"items":[{"i":<index>,"summary":"...","body":"...","category":"...","sentiment":"...","importance":<0..1>,"companies":["..."],"people":["..."]}]}
 
 ${list}`;
 
@@ -117,15 +118,16 @@ ${list}`;
     // Bell-written summary WINS over the raw RSS blurb (COALESCE keeps the old
     // text only when the model produced nothing for this item).
     const aiSummary = (typeof c.summary === 'string' && c.summary.trim()) ? c.summary.trim().slice(0, 700) : null;
+    const aiBody    = (typeof c.body === 'string' && c.body.trim()) ? c.body.trim().slice(0, 8000) : null;
     if (aiSummary) state.summarized++;
 
     await query(
       `UPDATE news_items
           SET processed = true, category = $2, sentiment = $3, sentiment_score = $4,
               importance_score = $5, entities = $6::jsonb, linked_company_ids = $7,
-              summary = COALESCE($8, summary), updated_at = now()
+              summary = COALESCE($8, summary), body = COALESCE($9, body), updated_at = now()
         WHERE id = $1`,
-      [row.id, category, sentiment, sentScore(sentiment), importance, entities, companyIds, aiSummary]
+      [row.id, category, sentiment, sentScore(sentiment), importance, entities, companyIds, aiSummary, aiBody]
     );
     await query(
       `UPDATE feed_events
@@ -154,7 +156,7 @@ async function callAnthropic(key, system, user) {
     },
     body: JSON.stringify({
       model: ANTHROPIC_MODEL,
-      max_tokens: 2500,
+      max_tokens: 8000,
       temperature: 0.2,
       system: system + ' Respond with ONLY the JSON object, no prose, no markdown fences.',
       messages: [{ role: 'user', content: user }],
