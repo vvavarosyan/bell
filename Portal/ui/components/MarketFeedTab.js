@@ -252,6 +252,8 @@ export function MarketFeedTab() {
             <div class="feed-bdi-stat"><b>${(stats.bdi_jobs_active || 0).toLocaleString()}</b><span>Open jobs</span></div>
             <div class="feed-bdi-stat"><b>${(stats.bdi_industries || 0).toLocaleString()}</b><span>Industries</span></div>
             <div class="feed-bdi-stat"><b>${(stats.items_today || 0).toLocaleString()}</b><span>News · 24h</span></div>
+            <div class="feed-bdi-stat"><b>${(stats.research_published || 0)}</b><span>Research published</span></div>
+            <div class="feed-bdi-stat"><b>${(stats.research_feed_events || 0)}</b><span>Research in feed</span></div>
           </div>
         ` : null}
         <div class="feed-aside-title">Trending companies</div>
