@@ -302,7 +302,7 @@ export const TOOLS = [
         type: 'object',
         properties: {
           window: { type: 'string', description: '24h | 3d | 7d | 14d (default 7d).' },
-          kind:   { type: 'string', description: 'hiring | newly_licensed | partnership | leadership | news_event' },
+          kind:   { type: 'string', description: 'hiring | expansion | newly_licensed | partnership | leadership | news_event' },
           scope:  { type: 'string', description: 'global (default) or icp.' },
           limit:  { type: 'integer', description: '1–20 (default 10).' },
         },
@@ -319,6 +319,24 @@ export const TOOLS = [
       };
     },
     summarize: (args, result) => `${(result?.signals || []).length} signals (${args.scope || 'global'})`,
+  },
+
+  {
+    definition: {
+      name: 'get_in_market_companies',
+      description: 'Companies showing the strongest BUYING INTENT right now — each scored 0-100 from its recent signals (scaling/expansion, hiring, new leadership, partnerships), weighted to the user\'s ICP. THE place to start outreach: surface these, then offer to reveal their contacts (reveal_companies) and draft outreach (send_email) — the signal→outreach loop.',
+      input_schema: { type: 'object', properties: { limit: { type: 'integer', description: '1-25 (default 10).' } } },
+    },
+    async execute(args, ctx) {
+      const { payload } = await internalCall(signalsRouter, 'GET', '/in-market', ctx, {
+        query: { limit: Math.min(Math.max(Number(args.limit) || 10, 1), 25) },
+      });
+      return {
+        icp_applied: payload?.icp_applied || false,
+        companies: (payload?.companies || []).map((c) => pick(c, ['company_id', 'company_name', 'industry', 'in_market_score', 'reasons', 'latest_signal'])),
+      };
+    },
+    summarize: (args, r) => `${(r?.companies || []).length} in-market companies`,
   },
 
   {

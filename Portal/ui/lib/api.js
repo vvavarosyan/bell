@@ -400,6 +400,7 @@ export const api = {
   signals:                (q = {}) => request('/api/signals?' + new URLSearchParams(q)),
   signalStats:            () => request('/api/signals/stats'),
   signalsMap:             () => request('/api/signals/map'),
+  signalsInMarket:        (q = {}) => request('/api/signals/in-market?' + new URLSearchParams(q)),
   companyMapNetwork:      (id) => request(`/api/companies/${id}/map-network`),
   // ---- WhatsApp (CRM) ----
   waConfig:               () => request('/api/whatsapp/config'),

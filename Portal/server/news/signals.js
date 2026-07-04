@@ -14,7 +14,7 @@ import { query } from '../db.js';
 const state = { last_run_at: null, last_error: null, inserted_last: 0, runs: 0 };
 export function getSignalsState() { return { ...state }; }
 
-const LOOKBACK_HOURS = { hiring: 48, newly_licensed: 72, partnership: 72, leadership: 72, news_event: 48 };
+const LOOKBACK_HOURS = { hiring: 48, newly_licensed: 72, partnership: 72, leadership: 72, news_event: 48, expansion: 336 };
 
 export async function generateSignals() {
   let inserted = 0;
@@ -24,6 +24,7 @@ export async function generateSignals() {
     inserted += await genPartnerships();
     inserted += await genLeadership();
     inserted += await genNewsEvents();
+    inserted += await genExpansion();
     state.last_error = null;
   } catch (err) {
     state.last_error = err.message;
@@ -153,6 +154,29 @@ async function genNewsEvents() {
   return r.rowCount || 0;
 }
 
+// expansion — hiring VELOCITY (Signals v2): a company that opened many roles in
+// the fortnight is scaling → the strongest buyer-intent signal Bell owns. One
+// per company per ISO week; distinct from the day-level `hiring` pulse.
+async function genExpansion() {
+  const r = await query(`
+    INSERT INTO signals (kind, subkind, company_id, company_name, title, body, source_kind, ref_table, ref_id,
+                         industry, employee_count, importance, occurred_at, dedup_key)
+    SELECT 'expansion', 'hiring_velocity', c.id, c.name,
+           c.name || ' is scaling — ' || count(j.id) || ' roles opened in two weeks',
+           'Rapid hiring' || COALESCE(' in ' || NULLIF(c.industry, ''), '') || ' — a strong growth + buying signal.',
+           'jobs', 'companies', c.id,
+           c.industry, c.employee_count,
+           LEAST(0.65 + count(j.id) * 0.04, 0.95),
+           max(j.created_at),
+           'expansion:' || c.id || ':' || to_char(now(), 'IYYY-"W"IW')
+      FROM jobs j JOIN companies c ON c.id = j.company_id
+     WHERE j.created_at > now() - interval '${LOOKBACK_HOURS.expansion} hours' AND j.is_active = true
+     GROUP BY c.id, c.name, c.industry, c.employee_count
+    HAVING count(j.id) >= 4
+    ON CONFLICT (dedup_key) DO NOTHING`);
+  return r.rowCount || 0;
+}
+
 // ── ICP scoring (pure — used by /api/signals scope=icp) ─────────────────────
 // icp = { target_industries: [], target_keywords: [], target_sizes: [] }
 // Returns { score: 0..1, reasons: [] } — score 0 means "not a match".
@@ -187,4 +211,52 @@ export function scoreSignalForIcp(signal, icp = {}) {
   if (bucket && sizes.includes(bucket)) { score += 0.15; reasons.push('size match: ' + bucket); }
 
   return { score: Math.min(1, Math.round(score * 100) / 100), reasons };
+}
+
+// ── In-market score (Signals v2, pure) ──────────────────────────────────────
+// Aggregates a company's RECENT signals into a 0–100 buying-intent score.
+// Weighted by signal kind, recency, and importance, with a bonus for showing
+// several DISTINCT kinds, then lifted when the company matches the tenant ICP.
+// Pure + unit-testable; the /api/signals/in-market route feeds it grouped rows.
+const INTENT_WEIGHT = {
+  expansion: 30,       // scaling fast — strongest owned intent
+  hiring: 22,          // actively hiring — budget + growth
+  leadership: 18,      // new decision-maker — a window to engage
+  partnership: 14,     // doing deals — active in market
+  newly_licensed: 12,  // just entered the market
+  news_event: 8,       // in the news — context
+};
+const KIND_LABEL = {
+  expansion: 'scaling fast', hiring: 'actively hiring', leadership: 'new leadership',
+  partnership: 'new partnerships', newly_licensed: 'newly licensed', news_event: 'in the news',
+};
+function recencyMult(occurredAt, now = Date.now()) {
+  const days = Math.max(0, (now - new Date(occurredAt).getTime()) / 86_400_000);
+  if (days <= 2) return 1;
+  if (days >= 14) return 0.3;
+  return 1 - ((days - 2) / 12) * 0.7;
+}
+
+export function computeInMarketScore(signals, icp = {}) {
+  if (!Array.isArray(signals) || !signals.length) return { score: 0, reasons: [], kinds: [] };
+  let raw = 0;
+  const kinds = new Set();
+  for (const s of signals) {
+    const w = INTENT_WEIGHT[s.kind] || 6;
+    const imp = Math.max(0.3, Math.min(1, Number(s.importance) || 0.5));
+    raw += w * recencyMult(s.occurred_at) * imp;
+    kinds.add(s.kind);
+  }
+  // Diversity bonus: several distinct signal types = hotter (cap at +36%).
+  raw *= 1 + Math.min(kinds.size - 1, 3) * 0.12;
+  // ICP alignment lift.
+  const reasons = [];
+  if ((icp.target_industries || []).length || (icp.target_keywords || []).length || (icp.target_sizes || []).length) {
+    let best = 0;
+    for (const s of signals) best = Math.max(best, scoreSignalForIcp(s, icp).score);
+    if (best > 0) { raw *= 1 + best * 0.5; reasons.push('matches your ICP'); }
+  }
+  const score = Math.max(0, Math.min(100, Math.round(raw)));
+  for (const k of kinds) if (KIND_LABEL[k]) reasons.push(KIND_LABEL[k]);
+  return { score, reasons: reasons.slice(0, 4), kinds: [...kinds] };
 }
