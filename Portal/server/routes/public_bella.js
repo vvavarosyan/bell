@@ -93,6 +93,7 @@ router.post('/chat', async (req, res) => {
       message,
       history: req.body?.history,
       currentPath: req.body?.context?.path,
+      voice: req.body?.context?.voice === true,
       send,
       signal: abort.signal,
     });

@@ -21,6 +21,16 @@ const TTS_MODEL = process.env.BDI_BELLA_TTS_MODEL || 'eleven_turbo_v2_5';
 const VOICE_ID  = process.env.BDI_BELLA_VOICE_ID  || 'hA4zGnmTwX2NQiTRMt7o'; // Val's chosen Bella voice (2026-07-03)
 const OUTPUT    = process.env.BDI_BELLA_TTS_FORMAT || 'mp3_44100_128';
 
+// Arabic replies get a dedicated voice when one is configured
+// (BDI_BELLA_VOICE_ID_AR); otherwise the multilingual turbo model still renders
+// Arabic on the default voice. Language is detected from the reply text itself,
+// so bilingual conversations switch voice per turn with no client plumbing.
+const VOICE_ID_AR = process.env.BDI_BELLA_VOICE_ID_AR || '';
+const ARABIC_RX = /[؀-ۿ]/;
+function pickVoice(text) {
+  return (VOICE_ID_AR && ARABIC_RX.test(String(text || ''))) ? VOICE_ID_AR : VOICE_ID;
+}
+
 // Delivery tuning (all overridable without a deploy):
 //   stability ↓ = more expressive · style ↑ = more character · speed ↑ = brisker
 const VOICE_SETTINGS = {
@@ -78,7 +88,7 @@ export async function transcribe(buffer, mimetype) {
 export async function ttsStream(text, signal) {
   const key = await elevenKey();
   if (!key) throw new Error('elevenlabs_key_missing');
-  const url = `https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(VOICE_ID)}/stream?output_format=${encodeURIComponent(OUTPUT)}`;
+  const url = `https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(pickVoice(text))}/stream?output_format=${encodeURIComponent(OUTPUT)}`;
   const call = (withSettings) => fetch(url, {
     method: 'POST',
     signal,
