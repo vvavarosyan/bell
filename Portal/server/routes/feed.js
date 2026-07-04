@@ -162,7 +162,10 @@ router.get('/stats', async (req, res, next) => {
         -- Phase B additions — more genuinely useful sidebar stats
         (SELECT count(*)::int FROM companies WHERE is_active = true AND created_at > now() - interval '7 days') AS bdi_new_companies_7d,
         (SELECT count(*)::int FROM jobs WHERE is_active = true AND (expires_at IS NULL OR expires_at > now())) AS bdi_jobs_active,
-        (SELECT count(DISTINCT industry)::int FROM companies WHERE industry IS NOT NULL AND industry <> '') AS bdi_industries
+        (SELECT count(DISTINCT industry)::int FROM companies WHERE industry IS NOT NULL AND industry <> '') AS bdi_industries,
+        -- Research feed diagnostic (Val 2026-07-04): published vs in-feed on THIS db.
+        (SELECT count(*)::int FROM research_reports WHERE is_published = true) AS research_published,
+        (SELECT count(*)::int FROM feed_events WHERE kind = 'research') AS research_feed_events
     `);
     const news = getNewsState();
     res.json({
