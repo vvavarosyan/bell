@@ -318,6 +318,14 @@ function NewsDetail({ event, onClose }) {
             <span>· ${new Date(published).toLocaleString()}</span>
           </div>
           ${fullSummary ? html`<p class="news-summary">${fullSummary}</p>` : html`<p class="muted small">No summary available — read the full story at the source.</p>`}
+          ${(() => {
+            const paras = String(event.detail?.body || '').split(/\n+/).map(s => s.trim()).filter(Boolean);
+            return paras.length ? html`
+              <div class="news-fullstory" style=${{ marginTop: '12px' }}>
+                <div class="news-section-label">The full story</div>
+                ${paras.map((p, i) => html`<p key=${i} style=${{ margin: '0 0 10px', lineHeight: 1.65, color: 'var(--text-muted)', fontSize: '14px' }}>${p}</p>`)}
+              </div>` : null;
+          })()}
           ${(event.companies && event.companies.length) ? html`
             <div class="news-section-label">Mentioned companies</div>
             <div class="feed-card-chips">

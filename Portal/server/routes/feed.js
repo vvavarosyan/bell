@@ -250,7 +250,7 @@ router.get('/:id(\\d+)', async (req, res, next) => {
     const ev = r.rows[0];
     if (ev.kind === 'news' && ev.ref_id) {
       const ni = await query(
-        `SELECT title, summary, author, published_at, image_url, url, source_name
+        `SELECT title, summary, body, author, published_at, image_url, url, source_name
            FROM news_items WHERE id = $1`,
         [ev.ref_id]
       );
