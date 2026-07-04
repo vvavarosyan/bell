@@ -40,6 +40,39 @@ router.get('/', async (req, res, next) => {
     const params = [];
 
     const kind = req.query.kind;
+
+    // Research tab: read PUBLISHED reports directly from research_reports — the
+    // deterministic source bell.qa/research uses — because the research
+    // feed_events path proved unreliable on prod. Research is corporate
+    // intelligence, so it only appears under the Corporate / All category chips.
+    if (kind === 'research' && !req.query.after_id && !req.query.cursor) {
+      const cat = req.query.category;
+      if (cat && CATEGORIES.includes(cat) && cat !== 'corporate') {
+        return res.json({ events: [], next_cursor: null });
+      }
+      const rr = await query(`
+        SELECT r.id AS report_id, r.job_id, r.title, r.summary, r.sections, r.public_slug, r.published_at,
+               j.type AS job_type, j.target_label
+          FROM research_reports r JOIN research_jobs j ON j.id = r.job_id
+         WHERE r.is_published = true AND lower(j.type) <> 'person'
+         ORDER BY r.published_at DESC NULLS LAST
+         LIMIT $1`, [limit]);
+      const rEvents = [];
+      for (const row of rr.rows) {
+        let sources = [];
+        try { const s = await query(`SELECT url, label FROM research_sources WHERE job_id = $1 ORDER BY id`, [row.job_id]); sources = s.rows; } catch { /* optional */ }
+        rEvents.push({
+          id: 'r' + row.report_id, kind: 'research', ref_table: 'research_reports', ref_id: Number(row.report_id),
+          title: row.title, summary: row.summary, url: '/research/' + (row.public_slug || ''),
+          image_url: null, category: 'corporate', source_name: 'Bell Research',
+          sentiment: null, importance: 0.7, entities: {}, linked_company_ids: [], companies: [],
+          payload: { sections: row.sections, sources, public_slug: row.public_slug, job_type: row.job_type, target_label: row.target_label },
+          occurred_at: row.published_at,
+        });
+      }
+      return res.json({ events: rEvents, next_cursor: null });
+    }
+
     if (kind && KINDS.includes(kind)) { params.push(kind); where.push(`kind = $${params.length}`); }
 
     const category = req.query.category;
