@@ -22,6 +22,23 @@ import { normalizeName } from '../ingest/normalize.js';
 const MODE = (process.env.BDI_MODE || 'local-admin').toLowerCase();
 const PROD_ORIGIN = MODE !== 'local-admin';
 
+// Run one entity/fact insert inside a SAVEPOINT so a single bad row (constraint
+// violation or odd agent data) rolls back JUST itself instead of poisoning the
+// whole report transaction — which otherwise surfaces as "current transaction
+// is aborted, commands ignored" and fails the entire research (Val 2026-07-04).
+async function withSavepoint(client, fn, fallback = null) {
+  await client.query('SAVEPOINT sp_ing');
+  try {
+    const r = await fn();
+    await client.query('RELEASE SAVEPOINT sp_ing');
+    return r;
+  } catch (e) {
+    try { await client.query('ROLLBACK TO SAVEPOINT sp_ing'); } catch { /* ignore */ }
+    console.warn('[research] ingest step rolled back:', e.message);
+    return fallback;
+  }
+}
+
 /**
  * Run the snowball ingestion for one job. Caller passes a pg client in a
  * transaction. Returns counts.
@@ -42,13 +59,13 @@ export async function ingestDerivedEntities(client, jobId, derived) {
   let createdPeople    = 0, enrichedPeople    = 0, skippedPeople    = 0;
 
   for (const c of companies) {
-    const result = await processCompany(client, jobId, c);
+    const result = await withSavepoint(client, () => processCompany(client, jobId, c), { action: 'skipped' });
     if      (result.action === 'created')   createdCompanies++;
     else if (result.action === 'enriched')  enrichedCompanies++;
     else                                    skippedCompanies++;
   }
   for (const p of people) {
-    const result = await processPerson(client, jobId, p, targetCompanyId);
+    const result = await withSavepoint(client, () => processPerson(client, jobId, p, targetCompanyId), { action: 'skipped' });
     if      (result.action === 'created')   createdPeople++;
     else if (result.action === 'enriched')  enrichedPeople++;
     else                                    skippedPeople++;
@@ -284,11 +301,11 @@ export async function ingestCompanyFacts(client, jobId, facts) {
       `SELECT 1 FROM company_financials WHERE company_id=$1 AND lower(metric)=lower($2) AND coalesce(period,'')=coalesce($3,'') LIMIT 1`,
       [companyId, metric, period]);
     if (exists.rows.length) continue;
-    await client.query(
+    if (await withSavepoint(client, () => client.query(
       `INSERT INTO company_financials (${idCol}company_id, metric, value_text, value_num, currency, period, source)
        VALUES (${idVal}$1,$2,$3,$4,$5,$6,$7)`,
       [companyId, metric, clean(f.value), parseNum(f.value), clean(f.currency), period, source]
-    ).then(() => fin++).catch((e) => console.warn('[research] financial insert:', e.message));
+    ))) fin++;
   }
 
   for (const s of (Array.isArray(facts.shareholders) ? facts.shareholders : [])) {
@@ -298,11 +315,11 @@ export async function ingestCompanyFacts(client, jobId, facts) {
       `SELECT 1 FROM company_shareholders WHERE company_id=$1 AND lower(holder_name)=lower($2) LIMIT 1`,
       [companyId, holder]);
     if (exists.rows.length) continue;
-    await client.query(
+    if (await withSavepoint(client, () => client.query(
       `INSERT INTO company_shareholders (${idCol}company_id, holder_name, holder_type, stake_pct, stake_text, source)
        VALUES (${idVal}$1,$2,$3,$4,$5,$6)`,
       [companyId, holder, clean(s.holder_type), parseNum(s.stake), clean(s.stake), source]
-    ).then(() => sh++).catch((e) => console.warn('[research] shareholder insert:', e.message));
+    ))) sh++;
   }
 
   // Target company name — needed to write the RECIPROCAL partnership row on a
@@ -353,13 +370,11 @@ async function upsertPartnership(client, o) {
     }
     return 0;
   }
-  try {
-    await client.query(
-      `INSERT INTO company_partnerships (${o.idCol}company_id, partner_name, partner_company_id, relationship, description, since, source)
-       VALUES (${o.idVal}$1,$2,$3,$4,$5,$6,$7)`,
-      [o.companyId, o.partnerName, o.partnerCompanyId || null, o.rel, o.description, o.since, o.source]);
-    return 1;
-  } catch (e) { console.warn('[research] partnership insert:', e.message); return 0; }
+  const ok = await withSavepoint(client, () => client.query(
+    `INSERT INTO company_partnerships (${o.idCol}company_id, partner_name, partner_company_id, relationship, description, since, source)
+     VALUES (${o.idVal}$1,$2,$3,$4,$5,$6,$7)`,
+    [o.companyId, o.partnerName, o.partnerCompanyId || null, o.rel, o.description, o.since, o.source]));
+  return ok ? 1 : 0;
 }
 
 // Best-effort numeric parse from a reported string ("QAR 1.2 billion" → 1.2e9,

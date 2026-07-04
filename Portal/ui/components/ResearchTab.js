@@ -466,7 +466,7 @@ function LiveAgentsPanel({ status, sourcesLen, started, eta }) {
   const phaseMsg = status === 'queued'
     ? 'Queued · agents about to deploy'
     : status === 'gathering'
-      ? 'Five agents are searching distinct corners of the Qatari information landscape in parallel.'
+      ? 'Five agents are working in parallel — scanning, extracting, and cross-checking the evidence.'
       : 'Sources gathered. Synthesizing into the structured, cited report.';
 
   // ETA overrun handling: only show the countdown while still credible
@@ -480,11 +480,11 @@ function LiveAgentsPanel({ status, sourcesLen, started, eta }) {
       : `~${Math.max(1, Math.round((eta - elapsed) / 60))} min left`;
 
   const AGENT_LANES = [
-    { id: 'filing',   label: 'Qatar registries',  detail: 'MOCI · QFC · QFZ · QSTP' },
-    { id: 'press',    label: 'Press archives',    detail: 'Gulf Times · Peninsula · Doha News · Reuters' },
-    { id: 'graph',    label: 'LinkedIn graph',    detail: 'Company page · leadership · alumni' },
-    { id: 'industry', label: 'Industry reports',  detail: 'Sector briefs · consulting publications' },
-    { id: 'web',      label: 'Open web sweep',    detail: 'Company sites · ministries · court records' },
+    { id: 'scan',      label: 'General scan',        detail: 'Discovery · entities · footprint' },
+    { id: 'financial', label: 'Financials',          detail: 'Revenue · funding · ownership' },
+    { id: 'people',    label: 'Leadership & people', detail: 'Executives · board · key roles' },
+    { id: 'network',   label: 'Relationships',       detail: 'Partners · subsidiaries · deals' },
+    { id: 'signals',   label: 'News & signals',      detail: 'Press · events · recent moves' },
   ];
 
   // Synthesize per-agent state from elapsed time + actual source count.
