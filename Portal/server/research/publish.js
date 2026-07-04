@@ -15,6 +15,16 @@
 
 import { query } from '../db.js';
 
+// Report types we never publish publicly (PDPPL / People-lockdown consistency).
+// Person research stays PRIVATE to the commissioner — Bell tells users it can't
+// expose individual decision-maker data, so it must not publish person dossiers
+// to the public feed / marketing site. Env-overridable: set
+// BDI_RESEARCH_PRIVATE_TYPES='' to publish everything, or add types to widen.
+const PRIVATE_RESEARCH_TYPES = new Set(
+  (process.env.BDI_RESEARCH_PRIVATE_TYPES ?? 'person')
+    .split(',').map((s) => s.trim().toLowerCase()).filter(Boolean),
+);
+
 const TYPE_CATEGORY = {
   company: 'corporate', person: 'corporate', sector: 'economic',
   theme: 'economic', region: 'economic', regulation: 'legal',
@@ -53,6 +63,8 @@ export async function releaseResearchToFeed(jobId) {
   if (j.status !== 'ready') return { id: jobId, released: false, reason: 'not_ready' };
   if (j.feed_optout)        return { id: jobId, released: false, reason: 'opted_out' };
   if (j.feed_released_at)   return { id: jobId, released: false, reason: 'already_released' };
+  if (PRIVATE_RESEARCH_TYPES.has(String(j.type).toLowerCase()))
+    return { id: jobId, released: false, reason: 'type_private' };
   const sections = Array.isArray(j.sections) ? j.sections : [];
   if (!sections.length)     return { id: jobId, released: false, reason: 'empty_report' };
 
@@ -110,11 +122,12 @@ export async function emitResearchEvents() {
      WHERE j.status = 'ready'
        AND j.feed_optout = false
        AND j.feed_released_at IS NULL
+       AND NOT (lower(j.type) = ANY($2::text[]))
        AND jsonb_array_length(COALESCE(r.sections, '[]'::jsonb)) > 0
        AND j.ready_at <= now() - ($1 * interval '1 day')
      ORDER BY j.ready_at
      LIMIT 50
-  `, [days]);
+  `, [days, [...PRIVATE_RESEARCH_TYPES]]);
 
   let released = 0;
   for (const row of due.rows) {

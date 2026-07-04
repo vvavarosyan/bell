@@ -8,21 +8,27 @@ import { html } from '../lib/html.js';
 import { api } from '../lib/api.js';
 import { toast } from '../lib/toast.js';
 
-const ORDER = ['company','person','sector','theme','region','regulation'];
+const ORDER = ['company','person','sector','other'];
 
 const BRIEF_TEMPLATES = {
-  company:    (t) => `Full operational picture of ${t} — ownership, leadership, financial trajectory, M&A signals.`,
-  person:     (t) => `Career arc, public footprint, and current sphere of influence for ${t}.`,
-  sector:     (t) => `The full Qatari ${t || 'sector'} — providers, ownership clusters, regulatory direction, M&A activity 2022 to present.`,
-  theme:      (t) => `${t || 'Theme'} — exposure, mitigation, peer responses.`,
-  region:     (t) => `${t || 'Region'} competitive map — players, funding flows, regulator stance.`,
-  regulation: ()  => `Live monitoring of QFC, QCB, QFMA, and MoCI regulatory output — any change affecting our advisory clients.`,
+  company: (t) => `Full operational picture of ${t} — ownership, leadership, financial trajectory, M&A signals.`,
+  person:  (t) => `Public professional profile of ${t || 'this person'} — career arc, current roles, board seats, affiliations, and sphere of influence.`,
+  sector:  (t) => `The Qatari ${t || 'sector'} sector — leading players, ownership clusters, regulatory direction, and M&A activity from 2022 to present.`,
+  other:   (t) => `${t || 'Describe exactly what you want researched'} — a thorough, cited answer.`,
+};
+
+// For the non-company types, what the free-text "Subject" field asks for.
+const SUBJECT_LABEL = {
+  person: { label: "Person's name",       placeholder: 'e.g. Aisha Al-Sulaiti' },
+  sector: { label: 'Sector',              placeholder: 'e.g. private healthcare, fintech, logistics' },
+  other:  { label: 'Subject (optional)',  placeholder: 'e.g. Qatar EV charging market in 2026' },
 };
 
 export function NewResearchModal({ onClose, onCreated }) {
   const [types,    setTypes]    = useState({});  // {company: {label,tint,implemented,...}}
   const [type,     setType]     = useState('company');
   const [target,   setTarget]   = useState(null); // {id, name, bin} for company
+  const [subject,  setSubject]  = useState('');    // free-text subject for person/sector/other
   const [brief,    setBrief]    = useState('');
   const [submitting, setSubmitting] = useState(false);
 
@@ -40,9 +46,9 @@ export function NewResearchModal({ onClose, onCreated }) {
   useEffect(() => {
     const tmpl = BRIEF_TEMPLATES[type];
     if (!tmpl) return;
-    const targetText = target?.name || '';
+    const targetText = type === 'company' ? (target?.name || '') : subject.trim();
     setBrief(tmpl(targetText));
-  }, [type, target]);
+  }, [type, target, subject]);
 
   // Esc to close
   useEffect(() => {
@@ -61,6 +67,7 @@ export function NewResearchModal({ onClose, onCreated }) {
     try {
       const body = { type, brief: brief.trim() };
       if (type === 'company' && target?.id) body.target_company_id = target.id;
+      if (type !== 'company' && subject.trim()) body.target_label = subject.trim();
       const r = await api.createResearchJob(body);
       toast('Research job created');
       onCreated && onCreated(r);
@@ -164,11 +171,29 @@ export function NewResearchModal({ onClose, onCreated }) {
             </div>
           </div>
 
-          <!-- target picker (company only for now) -->
+          <!-- target picker (company only) -->
           ${info?.requires_target === 'company' ? html`
             <div style=${{ marginBottom: '20px' }}>
               <Label>Target company</Label>
               <${CompanyPicker} value=${target} onChange=${setTarget} />
+            </div>
+          ` : null}
+
+          <!-- subject (free-text, person / sector / other) -->
+          ${info && info.requires_target !== 'company' && info.implemented ? html`
+            <div style=${{ marginBottom: '20px' }}>
+              <Label>${SUBJECT_LABEL[type]?.label || 'Subject'}</Label>
+              <input
+                type="text"
+                value=${subject}
+                onChange=${(e) => setSubject(e.target.value)}
+                placeholder=${SUBJECT_LABEL[type]?.placeholder || ''}
+                style=${{
+                  width: '100%', marginTop: '8px', padding: '10px 12px',
+                  background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border)',
+                  borderRadius: '8px', color: 'var(--text)', fontSize: '13px',
+                }}
+              />
             </div>
           ` : null}
 

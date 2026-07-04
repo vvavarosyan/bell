@@ -81,11 +81,108 @@ export function companyAnchors(job) {
   return [...new Set(urls)].slice(0, 5);
 }
 
+// ---------------------------------------------------------------------------
+// Person profile — PUBLIC professional footprint only (PDPPL-aware).
+// ---------------------------------------------------------------------------
+export function personPrompt(job) {
+  const name = job.target_person_name || job.target_label || 'the individual';
+  return `Deep research on ${name}, focused on their PUBLIC PROFESSIONAL profile in and around Qatar's economy. Produce a structured cited report conforming to the provided JSON schema.
+
+User's brief: "${job.brief}"
+
+Search the open web broadly — professional biographies, company leadership and "about" pages, LinkedIn, board and regulator announcements, press coverage, conference and event listings, interviews.
+
+The report should cover (merge/reorder/skip as evidence warrants — aim for 8-12 sections):
+- Executive summary (who they are, why they matter)
+- Current roles and titles
+- Career history and trajectory
+- Companies, boards, and organisations they are associated with
+- Notable public activities, deals, and initiatives
+- Areas of influence and networks
+- Public statements and positions (where reported)
+- Open questions for follow-up
+
+IMPORTANT — privacy: report ONLY public, professional information (roles, companies, public statements and activities). Do NOT collect or infer private or sensitive personal details (home address, family, health, religion, national ID, personal contact details, private life). If a claim isn't from a credible public source, omit it.
+
+Citations are mandatory. Use [1], [2], [3] inline in body_markdown — the bracketed number is the 1-based index in the top-level sources[] array. Do not write a paragraph without at least one citation. If evidence is thin, write "Limited public evidence" and say what is missing.
+
+Snowball — fill derived_companies and derived_people with the organisations and people connected to ${name} (employers, boards, ventures, close associates). Include entities from ANY country and set each company's "country". Do not invent.
+
+Write in clear analytical English. No speculation; if uncertain, say so.`;
+}
+export function personAnchors() { return []; }
+
+// ---------------------------------------------------------------------------
+// Sector landscape
+// ---------------------------------------------------------------------------
+export function sectorPrompt(job) {
+  const sector = job.target_label || 'the sector';
+  return `Deep research mapping the ${sector} sector in Qatar. Produce a structured cited report conforming to the provided JSON schema.
+
+User's brief: "${job.brief}"
+
+Independently search the open web AND Qatar's public registries. Map the sector end-to-end: who the players are, how ownership clusters, where regulation is heading, and what deals are happening.
+
+The report should cover (merge/reorder/skip as evidence warrants — aim for 8-12 sections):
+- Executive summary of the sector
+- Market structure and size (where signals exist)
+- Leading companies and their positioning
+- Ownership clusters and group affiliations
+- Regulatory bodies and direction
+- Recent M&A, partnerships, entrants, and exits
+- Demand drivers and headwinds
+- Outlook and signals to watch
+- Open questions for follow-up
+
+Useful places to look include (but are NOT limited to):
+- Qatar registries: MOCI businessmap, QFC public register, QFZ, QSTP, Qatar Chamber
+- Regulator and ministry publications relevant to the sector
+- Press: Gulf Times, The Peninsula, Doha News, Al-Sharq, Qatar Tribune, Reuters, Bloomberg, FT
+- Industry reports and association directories
+
+Citations are mandatory. Use [1], [2], [3] inline in body_markdown — the bracketed number is the 1-based index in the top-level sources[] array. Do not write a paragraph without at least one citation. If evidence is thin, write "Limited evidence" and explain what is missing.
+
+Snowball — this matters for a sector report: fill derived_companies with EVERY company you identify as operating in or serving this sector (with its "country" and a short "relation" like "leading provider", "new entrant", "regulator"), and derived_people with the executives and officials who shape it. Include entities from ANY country. Do not invent.
+
+Write in clear analytical English. No speculation; if uncertain, say so.`;
+}
+export function sectorAnchors() {
+  return [
+    'https://businessmap.moci.gov.qa',
+    'https://eservices.qfc.qa/QFCPublicRegister/PublicRegister.aspx',
+  ];
+}
+
+// ---------------------------------------------------------------------------
+// Other — open-ended research to the user's brief.
+// ---------------------------------------------------------------------------
+export function otherPrompt(job) {
+  const subject = job.target_label ? `"${job.target_label}"` : 'the topic described in the brief';
+  return `Research ${subject} thoroughly and produce a structured cited report conforming to the provided JSON schema. Wherever relevant, ground the analysis in Qatar's economy and companies.
+
+User's brief: "${job.brief}"
+
+Independently search the open web for authoritative, current sources. Organise the answer into clear sections (aim for 6-12) with a short executive summary. Cover the key facts, context, players, numbers, timeline, implications, and open questions the brief calls for.
+
+Citations are mandatory. Use [1], [2], [3] inline in body_markdown — the bracketed number is the 1-based index in the top-level sources[] array. Do not write a paragraph without at least one citation. If evidence is thin for a point, say so rather than guessing.
+
+Snowball — if you encounter specific companies or people relevant to Qatar's business graph, list them in derived_companies and derived_people (set each company's "country"). Leave them empty if none apply. Do not invent.
+
+Write in clear analytical English. No speculation; if uncertain, say so.`;
+}
+export function otherAnchors() { return []; }
+
 export const PROMPT_BUILDERS = {
   company: companyPrompt,
+  person:  personPrompt,
+  sector:  sectorPrompt,
+  other:   otherPrompt,
 };
 export const ANCHOR_BUILDERS = {
   company: companyAnchors,
+  person:  personAnchors,
+  sector:  sectorAnchors,
+  other:   otherAnchors,
 };
 
 export function buildPrompt(type, job) {
