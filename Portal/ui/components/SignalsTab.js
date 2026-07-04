@@ -53,7 +53,10 @@ export function SignalsTab() {
   const [loading, setLoading] = useState(true);
   const [icpMissing, setIcpMissing] = useState(false);
   const [selectedId, setSelectedId] = useState(null);
+  const [inMarket, setInMarket] = useState([]);
+  const [inMarketIcp, setInMarketIcp] = useState(false);
   const cardRefs = useRef({});
+  const scoreColor = (n) => (n >= 60 ? '#6fcf97' : n >= 35 ? '#f5c84c' : '#9ca5b9');
 
   const load = useCallback(async ({ silent = false } = {}) => {
     if (!silent) setLoading(true);
@@ -72,6 +75,17 @@ export function SignalsTab() {
     const t = setInterval(() => load({ silent: true }), 45_000);
     return () => clearInterval(t);
   }, [load]);
+
+  // In-market companies (Signals v2): strongest buying-intent, scored 0-100.
+  useEffect(() => {
+    let dead = false;
+    const loadIM = () => api.signalsInMarket({ limit: 6 })
+      .then((r) => { if (!dead) { setInMarket(r.companies || []); setInMarketIcp(!!r.icp_applied); } })
+      .catch(() => {});
+    loadIM();
+    const t = setInterval(loadIM, 60_000);
+    return () => { dead = true; clearInterval(t); };
+  }, []);
 
   const counts = useMemo(() => {
     const c = {};
@@ -182,6 +196,23 @@ export function SignalsTab() {
               ? `${rows.length} signals in the last ${WINDOWS.find(([k]) => k === windowKey)?.[1]} — click a blip to inspect`
               : 'The radar is warming up — signals appear as Bell detects market movement.'}
           </div>
+
+          ${inMarket.length ? html`
+            <div style=${{ marginTop: '14px', borderTop: '1px solid var(--border)', paddingTop: '12px' }}>
+              <div style=${{ fontSize: '10.5px', fontWeight: 700, letterSpacing: '.08em', textTransform: 'uppercase', color: 'var(--text)', marginBottom: '8px' }}>
+                In-market now${inMarketIcp ? ' · your ICP' : ''}
+              </div>
+              ${inMarket.map((c) => html`
+                <button key=${c.company_id} onClick=${() => navigateTo('companies', c.company_id)}
+                  style=${{ width: '100%', textAlign: 'left', background: 'transparent', border: 'none', borderRadius: '8px', padding: '5px 4px', cursor: 'pointer', display: 'flex', alignItems: 'center', gap: '9px' }}>
+                  <span style=${{ flexShrink: 0, width: '30px', height: '30px', borderRadius: '7px', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '11.5px', fontWeight: 700, color: scoreColor(c.in_market_score), background: scoreColor(c.in_market_score) + '22' }}>${c.in_market_score}</span>
+                  <span style=${{ minWidth: 0, flex: 1 }}>
+                    <span style=${{ display: 'block', fontSize: '12.5px', fontWeight: 600, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>${c.company_name}</span>
+                    <span class="muted small" style=${{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>${(c.reasons || []).slice(0, 2).join(' · ')}</span>
+                  </span>
+                </button>`)}
+              <div class="muted small" style=${{ marginTop: '6px', textAlign: 'center' }}>buying-intent · tap to open</div>
+            </div>` : null}
         </div>
 
         <!-- STREAM (left, primary) -->

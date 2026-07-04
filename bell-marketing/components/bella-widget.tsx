@@ -237,6 +237,27 @@ export function BellaWidget() {
 
   // ---- Voice ---------------------------------------------------------------
 
+  // Fallback voice: the browser's own speech synthesizer. Free, no key — so
+  // Bella ALWAYS speaks, even if ElevenLabs is unavailable (missing key on the
+  // API host, or the monthly voice quota is spent). Lower fidelity, but never
+  // silent — which is what Val needs.
+  const browserSpeak = (text: string) => new Promise<void>((resolve) => {
+    try {
+      const synth = window.speechSynthesis;
+      if (!synth || typeof SpeechSynthesisUtterance === 'undefined') return resolve();
+      synth.cancel();
+      const u = new SpeechSynthesisUtterance(text);
+      u.rate = 1.05;
+      const isAr = /[؀-ۿ]/.test(text);
+      const v = (synth.getVoices() || []).find((vc) => (isAr ? /^ar/i : /^en/i).test(vc.lang));
+      if (v) u.voice = v;
+      u.onend = () => resolve();
+      u.onerror = () => resolve();
+      stopAudioRef.current = () => { try { synth.cancel(); } catch { /* ignore */ } resolve(); };
+      synth.speak(u);
+    } catch { resolve(); }
+  });
+
   const speak = async (text: string) => {
     const clean = (text || '').replace(CHOICES_RX, '').trim();
     if (!clean || !voiceOnRef.current) { if (voiceOnRef.current) setVState('listening'); return; }
@@ -246,25 +267,27 @@ export function BellaWidget() {
       const r = await fetch(`${API}/api/public/bella/voice/tts`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text: clean.slice(0, 600) }),
-      });
-      if (!r.ok) {
-        if (r.status === 429 || r.status === 503) setVLine('Voice needs a short breather — keep chatting by text.');
-        setVState('listening');
-        return;
+      }).catch(() => null);
+      const blob = r && r.ok ? await r.blob().catch(() => null) : null;
+      if (blob && blob.size > 200) {
+        const url = URL.createObjectURL(blob);
+        await new Promise<void>((resolve) => {
+          const a = new Audio(url);
+          audioRef.current = a;
+          stopAudioRef.current = () => { try { a.pause(); } catch { /* ignore */ } resolve(); };
+          a.onended = () => resolve();
+          a.onerror = () => resolve();
+          a.play().catch(() => resolve());
+        });
+        audioRef.current = null;
+        stopAudioRef.current = null;
+        URL.revokeObjectURL(url);
+      } else {
+        // ElevenLabs unavailable (no key / quota / rate) → speak with the browser voice.
+        await browserSpeak(clean);
+        stopAudioRef.current = null;
       }
-      const blob = await r.blob();
-      const url = URL.createObjectURL(blob);
-      await new Promise<void>((resolve) => {
-        const a = new Audio(url);
-        audioRef.current = a;
-        stopAudioRef.current = () => { try { a.pause(); } catch { /* ignore */ } resolve(); };
-        a.onended = () => resolve();
-        a.onerror = () => resolve();
-        a.play().catch(() => resolve());
-      });
-      stopAudioRef.current = null;
-      URL.revokeObjectURL(url);
-    } catch { /* ignore */ }
+    } catch { try { await browserSpeak(clean); } catch { /* ignore */ } stopAudioRef.current = null; }
     if (aliveRef.current && voiceOnRef.current && vStateRef.current === 'speaking') { setVLine(''); setVState('listening'); }
   };
 

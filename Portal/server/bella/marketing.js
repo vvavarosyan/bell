@@ -18,6 +18,7 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import { getKey } from '../keychain.js';
 import { createSSEFeeder } from './sse.js';
+import { CORE_FACTS } from './knowledge/core.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -85,7 +86,7 @@ HARD RULES:
 function buildSystem() {
   return [
     { type: 'text', text: PERSONA, cache_control: { type: 'ephemeral' } },
-    { type: 'text', text: '=== KNOWLEDGE PACK (your only source of facts) ===\n\n' + PACK, cache_control: { type: 'ephemeral' } },
+    { type: 'text', text: '=== CORE FACTS ===\n' + CORE_FACTS + '\n\n=== KNOWLEDGE PACK (your only source of facts) ===\n\n' + PACK, cache_control: { type: 'ephemeral' } },
   ];
 }
 

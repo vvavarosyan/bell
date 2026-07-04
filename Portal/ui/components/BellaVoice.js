@@ -85,28 +85,52 @@ export function BellaVoice({ onClose, onOpenChat }) {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  // Fallback voice: the browser's own speech synth. Free, no key — so Bella
+  // ALWAYS speaks even if ElevenLabs is unavailable (missing key / spent quota).
+  const browserSpeak = (text) => new Promise((resolve) => {
+    try {
+      const synth = window.speechSynthesis;
+      if (!synth || typeof SpeechSynthesisUtterance === 'undefined') return resolve();
+      synth.cancel();
+      const u = new SpeechSynthesisUtterance(text);
+      u.rate = 1.05;
+      const isAr = /[؀-ۿ]/.test(text);
+      const v = (synth.getVoices() || []).find((vc) => (isAr ? /^ar/i : /^en/i).test(vc.lang));
+      if (v) u.voice = v;
+      u.onend = () => resolve();
+      u.onerror = () => resolve();
+      stopAudioRef.current = () => { try { synth.cancel(); } catch { /* ignore */ } resolve(); };
+      synth.speak(u);
+    } catch { resolve(); }
+  });
+
   const speak = async (text) => {
     const clean = text.replace(CHOICES_RX, '').trim();
     if (!clean) { setSt('listening'); return; }
     setSt('speaking');
     setLine(clean.slice(0, 120));
+    let url = null;
+    try { url = await api.bellaTts(clean); } catch { url = null; }   // ElevenLabs down → fall back
     try {
-      const url = await api.bellaTts(clean);
-      await new Promise((resolve) => {
-        const a = new Audio(url);
-        audioRef.current = a;
-        // Interruption handle (tap OR sustained speech): pause + resolve so
-        // the turn flow never hangs on a cancelled playback.
-        stopAudioRef.current = () => { try { a.pause(); } catch { /* ignore */ } resolve(); };
-        a.onended = resolve;
-        a.onerror = resolve;
-        a.play().catch(resolve);
-      });
-      stopAudioRef.current = null;
-      URL.revokeObjectURL(url);
-    } catch (err) {
-      toast('Bella\'s voice: ' + (err.message || 'failed'), 'error');
-    }
+      if (url) {
+        await new Promise((resolve) => {
+          const a = new Audio(url);
+          audioRef.current = a;
+          // Interruption handle (tap OR sustained speech): pause + resolve so
+          // the turn flow never hangs on a cancelled playback.
+          stopAudioRef.current = () => { try { a.pause(); } catch { /* ignore */ } resolve(); };
+          a.onended = resolve;
+          a.onerror = resolve;
+          a.play().catch(resolve);
+        });
+        audioRef.current = null;
+        stopAudioRef.current = null;
+        URL.revokeObjectURL(url);
+      } else {
+        await browserSpeak(clean);           // free browser voice — never silent
+        stopAudioRef.current = null;
+      }
+    } catch { try { await browserSpeak(clean); } catch { /* ignore */ } }
     if (aliveRef.current && stateRef.current === 'speaking') { setLine(''); setSt('listening'); }
   };
 
