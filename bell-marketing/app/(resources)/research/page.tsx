@@ -2,7 +2,7 @@ import type { Metadata } from 'next';
 import Link from 'next/link';
 import { getResearch, typeMeta, TYPE_META } from '@/lib/research';
 
-export const revalidate = 900;
+export const revalidate = 120;
 
 export const metadata: Metadata = {
   title: 'Research',

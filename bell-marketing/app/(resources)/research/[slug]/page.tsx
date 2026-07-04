@@ -3,7 +3,7 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { getResearchReport, typeMeta, type ResearchSection } from '@/lib/research';
 
-export const revalidate = 900;
+export const revalidate = 120;
 
 function fmtDate(iso: string | null) {
   if (!iso) return '';
