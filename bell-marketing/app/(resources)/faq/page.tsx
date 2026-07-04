@@ -16,7 +16,7 @@ const GROUPS: { label: string; items: QA[] }[] = [
     items: [
       {
         q: 'What is Bell.qa?',
-        a: 'Bell Data Intelligence is the intelligence layer for Qatar\'s economy: a living, searchable record of 130,000+ Qatari companies, 1.6M+ people in the graph, and 240,000+ named decision-makers — with signals, maps, a built-in CRM, and research tools on top. One market, covered end to end.',
+        a: 'Bell Data Intelligence is the intelligence layer for Qatar\'s economy: a living, searchable record of 191,000+ Qatari companies, 1.6M+ people in the graph, and all named decision-makers — with signals, maps, a built-in CRM, and research tools on top. One market, covered end to end.',
       },
       {
         q: 'Where does the data come from?',

@@ -18,7 +18,7 @@ const COLUMNS: Column[] = [
     hint: 'In active development',
     accent: 'text-green-400',
     items: [
-      { title: 'Coverage deepening', body: 'Pushing website, contact, and decision-maker coverage across all 130,000+ companies — every record verifiably richer, month over month.' },
+      { title: 'Coverage deepening', body: 'Pushing website, contact, and decision-maker coverage across all 191,000+ companies — every record verifiably richer, month over month.' },
       { title: '0 Risk programme', body: 'The revenue-share track for companies that need customers first: hand-prepared prospect lists, deal tracking, and pay-only-when-you-win.' },
       { title: 'Customer contributions', body: 'Import your own lists, add datapoints to any record, and let Bell\'s curation pipeline verify the best of it into the shared directory.' },
       { title: 'Notifications & alerts', body: 'In-app and email alerts for the moments that matter — approvals, deliveries, replies, and account events.' },

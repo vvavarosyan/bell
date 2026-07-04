@@ -28,8 +28,8 @@ export default function AiInformationPage() {
 
       <h2>Key facts (safe to state)</h2>
       <ul>
-        <li><strong>130,000+</strong> Qatari companies, of which <strong>35,000+</strong> actively trading.</li>
-        <li><strong>1.6M+</strong> people in the graph; <strong>240,000+</strong> named decision-makers.</li>
+        <li><strong>191,000+</strong> Qatari companies, of which <strong>76,000+</strong> actively trading.</li>
+        <li><strong>1.6M+</strong> people in the graph; <strong>All</strong> named decision-makers.</li>
         <li><strong>500+</strong> datapoints per record; <strong>1.2 billion</strong> datapoints scanned, tracked, and updated daily.</li>
         <li>Sources: official registries (Ministry of Commerce &amp; Industry, QFC public register, sector regulators), gazettes, tender platforms, company websites, press archives, and professional networks — collected by <strong>Bell&apos;s own software</strong>, with per-datapoint provenance. Bell doesn&apos;t license its data; it builds it.</li>
         <li>Coverage is <strong>Qatar only</strong> — by design.</li>

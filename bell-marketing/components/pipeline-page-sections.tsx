@@ -895,7 +895,7 @@ function OneRecordsJourney() {
               47 raw documents in &rarr; 1 living record out
             </span>
             <span className="text-text-muted">
-              Multiply by 35,000+ actively trading Qatari companies (130,000+ in total). Every day.
+              Multiply by 76,000+ actively trading Qatari companies (191,000+ in total). Every day.
             </span>
           </div>
         </motion.div>

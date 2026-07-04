@@ -563,7 +563,7 @@ function TheLivingAccountRecord() {
               Every fact above is cited &middot; click any line to see the underlying source
             </span>
             <span className="text-text-muted">
-              Multiply by 130,000+ accounts &mdash; that&apos;s the workspace.
+              Multiply by 191,000+ accounts &mdash; that&apos;s the workspace.
             </span>
           </div>
         </motion.div>
@@ -1016,7 +1016,7 @@ function RecordsThatUpdate() {
               Every row above is a source on the Bell.qa graph
             </span>
             <span className="text-text-muted">
-              Multiply by 130,000+ accounts updating in parallel.
+              Multiply by 191,000+ accounts updating in parallel.
             </span>
           </div>
         </motion.div>
@@ -1787,7 +1787,7 @@ const CRM_READERS = [
   {
     icon:  Settings,
     label: 'For the revenue-ops admin',
-    body:  "No data import. No deduplication backlog. No custom fields to bolt on. The 130,000+ Qatari companies are already in the database. Bella keeps them current. You configure scopes &mdash; not pipelines.",
+    body:  "No data import. No deduplication backlog. No custom fields to bolt on. The 191,000+ Qatari companies are already in the database. Bella keeps them current. You configure scopes &mdash; not pipelines.",
   },
   {
     icon:  Crown,

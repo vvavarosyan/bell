@@ -300,6 +300,14 @@ export async function runBellaTurn({ ctx, conversationId, userText, clientContex
         if (tool?.clientEffect !== 'navigate') {
           send('tool', { name: tu.name, status: isError ? 'error' : 'done', summary });
         }
+        // Rich UI actions (open a record / filter a grid / fill a field) so Bella
+        // can act on the app, not just describe it. Computed from input + result
+        // once the tool succeeds; the client applies it via ui/lib/bellaBus.js.
+        if (!isError && typeof tool?.uiAction === 'function') {
+          let act = null;
+          try { act = tool.uiAction(tu.input || {}, result); } catch { act = null; }
+          if (act) { send('ui_action', act); meta.ui_action = act; }
+        }
         meta.tools.push({ name: tu.name, summary });
         await store.logAction(tenantId, userId, convId, tu.name, tu.input, isError ? 'error' : 'done', summary);
       }

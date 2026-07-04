@@ -66,7 +66,7 @@ router.get('/', async (req, res, next) => {
           title: row.title, summary: row.summary, url: '/research/' + (row.public_slug || ''),
           image_url: null, category: 'corporate', source_name: 'Bell Research',
           sentiment: null, importance: 0.7, entities: {}, linked_company_ids: [], companies: [],
-          payload: { sections: row.sections, sources, public_slug: row.public_slug, job_type: row.job_type, target_label: row.target_label },
+          payload: { sections: row.sections, sources, job_id: row.job_id, public_slug: row.public_slug, job_type: row.job_type, target_label: row.target_label },
           occurred_at: row.published_at,
         });
       }
@@ -151,7 +151,7 @@ router.get('/', async (req, res, next) => {
             image_url: null, category: 'corporate', source_name: 'Bell Research',
             sentiment: null, importance: 0.7, entities: {}, linked_company_ids: [], companies: [],
             payload: {
-              sections: row.sections, sources,
+              sections: row.sections, sources, job_id: row.job_id,
               public_slug: row.public_slug, job_type: row.job_type, target_label: row.target_label,
             },
             occurred_at: row.published_at,
@@ -281,6 +281,18 @@ router.post('/sources', requireRole('platform_admin'), async (req, res, next) =>
       [name, url, kind, category_hint || null, poll_interval_seconds || null]
     );
     res.json({ source: r.rows[0] });
+  } catch (err) { next(err); }
+});
+
+// DELETE /api/feed/news/:id — platform admin removes a wrong news item and its
+// feed event (Val 2026-07-04). On admin.bell.qa this hits the prod DB directly.
+router.delete('/news/:id(\\d+)', requireRole('platform_admin'), async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    await query(`DELETE FROM feed_events WHERE ref_table = 'news_items' AND ref_id = $1`, [id]);
+    const r = await query(`DELETE FROM news_items WHERE id = $1`, [id]);
+    if (!r.rowCount) return res.status(404).json({ error: 'not_found' });
+    res.json({ deleted: id });
   } catch (err) { next(err); }
 });
 

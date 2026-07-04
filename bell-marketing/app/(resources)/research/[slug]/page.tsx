@@ -198,8 +198,8 @@ export default async function ResearchReportPage({ params }: { params: { slug: s
               <div className="rounded-2xl border border-accent/40 bg-bg-elev p-6">
                 <div className="text-sm font-semibold text-text">Run this on your own targets</div>
                 <p className="mt-2 text-xs text-text-muted leading-relaxed">
-                  Point the same research engine at any of 130,000+ Qatari companies or
-                  240,000+ decision-makers — dossiers, sectors, leadership maps.
+                  Point the same research engine at any of 191,000+ Qatari companies or
+                  all decision-makers — dossiers, sectors, leadership maps.
                 </p>
                 <Link href="/get-access"
                   className="mt-4 block rounded-lg bg-accent px-4 py-2.5 text-center text-sm font-bold text-[#0b1020] transition hover:shadow-[0_0_18px_rgb(var(--accent)/0.5)]">
@@ -213,9 +213,9 @@ export default async function ResearchReportPage({ params }: { params: { slug: s
               <div className="rounded-2xl border border-border bg-bg-elev p-6">
                 <div className="text-xs uppercase tracking-wider text-text-dim font-semibold">The graph behind this</div>
                 <div className="mt-3 space-y-2 text-sm text-text-muted">
-                  <div><span className="text-text font-semibold">130,000+</span> Qatari companies</div>
-                  <div><span className="text-text font-semibold">240,000+</span> decision-makers</div>
-                  <div><span className="text-text font-semibold">1.2B</span> datapoints daily</div>
+                  <div><span className="text-text font-semibold">191,000+</span> Qatari companies</div>
+                  <div><span className="text-text font-semibold">76,000+</span> actively trading</div>
+                  <div><span className="text-text font-semibold">All</span> decision-makers</div>
                 </div>
                 <Link href="/0-risk" className="mt-4 block text-xs font-semibold text-accent-bright hover:underline">
                   Can't pay yet? Start with 0 Risk →

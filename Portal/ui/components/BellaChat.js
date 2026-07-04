@@ -9,6 +9,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { html } from '../lib/html.js';
 import { api } from '../lib/api.js';
 import { currentRoute, navigateTo } from '../lib/router.js';
+import { emitBellaAction } from '../lib/bellaBus.js';
 
 const SUGGESTIONS = [
   'How many construction companies are in Qatar?',
@@ -19,8 +20,14 @@ const SUGGESTIONS = [
 const TOOL_LABELS = {
   search_companies: 'Searching companies',
   get_company: 'Opening company',
+  show_companies: 'Showing companies',
+  open_company: 'Opening company',
+  show_people: 'Showing people',
+  open_person: 'Opening person',
+  fill_field: 'Filling in',
   search_jobs: 'Searching jobs',
   get_market_feed: 'Reading the feed',
+  get_news: 'Reading the news',
   get_signals: 'Checking signals',
   get_data_stats: 'Reading data stats',
   get_credits: 'Checking credits',
@@ -257,6 +264,15 @@ export function BellaChat({ onClose }) {
           onNavigate: (n) => {
             if (n?.section) { try { navigateTo(n.section); } catch { /* ignore */ } }
             patchLast((m) => ({ ...m, tools: [...(m.tools || []), { name: 'navigate', status: 'done', summary: '→ ' + (n?.section || '') }] }));
+          },
+          onUiAction: (a) => {
+            try { emitBellaAction(a); } catch { /* ignore */ }
+            const label = a?.type === 'open_record' ? ('→ ' + (a.tab || 'record') + ' #' + a.id)
+              : a?.type === 'show_companies' ? 'showing companies'
+              : a?.type === 'show_people' ? 'showing people'
+              : a?.type === 'fill_field' ? ('filled “' + String(a.field || '').slice(0, 30) + '”')
+              : (a?.type || 'ui');
+            patchLast((m) => ({ ...m, tools: [...(m.tools || []), { name: 'ui', status: 'done', summary: label }] }));
           },
           onApproval: (a) => patchLast((m) => ({
             ...m,
