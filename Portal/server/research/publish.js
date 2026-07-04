@@ -150,9 +150,10 @@ export async function emitResearchEvents() {
      WHERE j.status = 'ready'
        AND NOT (lower(j.type) = ANY($1::text[]))
        AND jsonb_array_length(COALESCE(r.sections, '[]'::jsonb)) > 0
-       AND NOT EXISTS (
-         SELECT 1 FROM feed_events fe
-          WHERE fe.kind = 'research' AND fe.ref_table = 'research_reports' AND fe.ref_id = r.id)
+       AND (r.is_published = false
+            OR NOT EXISTS (
+              SELECT 1 FROM feed_events fe
+               WHERE fe.kind = 'research' AND fe.ref_table = 'research_reports' AND fe.ref_id = r.id))
      ORDER BY j.ready_at
      LIMIT 200
   `, [[...PRIVATE_RESEARCH_TYPES]]);
