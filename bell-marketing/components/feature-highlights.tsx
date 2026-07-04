@@ -49,7 +49,7 @@ const FEATURES: Feature[] = [
   {
     icon: Building2, title: 'Companies', tone: 'data',
     body:  'Every Qatari entity — across QFC, QFZ, MOCI, QSTP and more — unified into one canonical record.',
-    metric: '130,000+ records · 35,000+ active',
+    metric: '191,000+ companies · 76,000+ active',
   },
   {
     icon: Users2, title: 'Decision Makers', tone: 'data',

@@ -119,7 +119,19 @@ async function genLeadership() {
 
 // news_event — Bell-summarized news linked to companies (one per item+company,
 // first 3 linked companies to avoid fan-out).
+// Business-relevance filter (Val 2026-07-04): sports/celebrity news wrongly
+// matched to Qatar companies (a barber shop named after a football club, a news
+// agency's local branch) was polluting Signals. Only business-relevant news
+// above an importance floor becomes a signal — quality over volume.
+const NEWS_SIGNAL_EXCLUDE = ['sports', 'other'];
+const NEWS_SIGNAL_MIN_IMPORTANCE = 0.45;
+
 async function genNewsEvents() {
+  // Purge junk news signals that slipped in before this filter existed.
+  await query(`DELETE FROM signals
+                WHERE kind = 'news_event'
+                  AND (lower(coalesce(subkind,'')) = ANY($1::text[]) OR importance < $2)`,
+    [NEWS_SIGNAL_EXCLUDE, NEWS_SIGNAL_MIN_IMPORTANCE]);
   const r = await query(`
     INSERT INTO signals (kind, subkind, company_id, company_name, title, body, source_kind, ref_table, ref_id,
                          industry, employee_count, importance, occurred_at, dedup_key)
@@ -135,7 +147,9 @@ async function genNewsEvents() {
      WHERE n.processed = true AND n.summary IS NOT NULL
        AND n.created_at > now() - interval '${LOOKBACK_HOURS.news_event} hours'
        AND array_length(n.linked_company_ids, 1) > 0
-    ON CONFLICT (dedup_key) DO NOTHING`);
+       AND lower(coalesce(n.category,'')) <> ALL($1::text[])
+       AND COALESCE(n.importance_score, 0) >= $2
+    ON CONFLICT (dedup_key) DO NOTHING`, [NEWS_SIGNAL_EXCLUDE, NEWS_SIGNAL_MIN_IMPORTANCE]);
   return r.rowCount || 0;
 }
 

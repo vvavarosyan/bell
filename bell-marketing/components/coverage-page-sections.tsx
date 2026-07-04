@@ -133,8 +133,8 @@ function CoverageHero() {
 const ACTIVITY_FRAMES = [
   { label: 'Datapoints tracked daily', value: '1.2 B', sub: 'scanned &amp; updated, every day' },
   { label: 'Datapoints per record',    value: '500+',  sub: 'depth, on every entity'           },
-  { label: 'Qatari companies',         value: '130,000+', sub: '35,000+ actively trading'      },
-  { label: 'People in the graph',      value: '1.6M+',    sub: '240,000+ decision-makers'      },
+  { label: 'Qatari companies',         value: '191,000+', sub: '76,000+ actively trading'      },
+  { label: 'Decision-makers',          value: 'All',      sub: 'across Qatar’s economy'         },
   { label: 'Record types tracked',     value: '21',    sub: 'across 5 tiers'                   },
   { label: 'Live record types',        value: '6',     sub: 'refreshed continuously'           },
 ];
@@ -224,7 +224,7 @@ const TAXONOMY: TaxonomyTier[] = [
     tagline: 'Who exists.',
     tint:    'rgb(91 140 255)',
     records: [
-      { icon: Building2, name: 'Private companies',     count: '130,000+ (35,000+ active)', fields: ['Name & registrations', 'Sector & sub-sector', 'Employees & revenue band', 'Leadership & board', 'Ownership cap table'] },
+      { icon: Building2, name: 'Private companies',     count: '191,000+ (76,000+ active)', fields: ['Name & registrations', 'Sector & sub-sector', 'Employees & revenue band', 'Leadership & board', 'Ownership cap table'] },
       { icon: Landmark,  name: 'Government bodies',     count: '180+',    fields: ['Ministry / agency name', 'Mandate & jurisdiction', 'Leadership', 'Publication cadence'] },
       { icon: Crown,     name: 'Semi-government',       count: '90+',     fields: ['Name & parent', 'Sector', 'Ownership structure', 'Leadership'] },
       { icon: Layers,    name: 'Sectors',               count: '12',      fields: ['Taxonomy & sub-sectors', 'Primary regulator', 'Market size', 'Growth velocity'] },
@@ -658,7 +658,7 @@ function OneRecordFullyUnpacked() {
               verified, and refreshed continuously
             </span>
             <span className="text-text-muted">
-              Multiply by 35,000+ actively trading Qatari companies (130,000+ in total).
+              Multiply by 76,000+ actively trading Qatari companies (191,000+ in total).
             </span>
           </div>
         </motion.div>
@@ -1348,7 +1348,7 @@ const COVERAGE_READERS = [
   {
     icon:  BarChart3,
     label: 'For the data buyer',
-    body:  "130,000+ Qatari companies (35,000+ actively trading). 1.6M+ people in the graph, 240,000+ of them named decision-makers. 500+ datapoints on every record. 1.2 billion datapoints scanned and updated every day. Coverage you can defend in procurement.",
+    body:  "191,000+ Qatari companies (76,000+ actively trading). 1.6M+ people in the graph, 240,000+ of them named decision-makers. 500+ datapoints on every record. 1.2 billion datapoints scanned and updated every day. Coverage you can defend in procurement.",
   },
   {
     icon:  Handshake,
