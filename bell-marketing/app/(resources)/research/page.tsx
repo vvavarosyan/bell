@@ -114,8 +114,8 @@ export default async function ResearchIndex({ searchParams }: { searchParams?: {
               </h2>
               <p className="mt-2 text-sm text-text-muted leading-relaxed max-w-2xl">
                 These reports are produced by the same research engine every Bell.qa customer can
-                point at any Qatari company, sector, or leadership team — 130,000+ companies,
-                240,000+ decision-makers, every datapoint cited.
+                point at any Qatari company, sector, or leadership team — 191,000+ companies,
+                all decision-makers, every datapoint cited.
               </p>
             </div>
             <div className="mt-6 md:mt-0 flex flex-col sm:flex-row gap-3 shrink-0">

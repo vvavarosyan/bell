@@ -36,9 +36,9 @@ function Chip({ category }: { category: string }) {
 }
 
 const STATS = [
-  ['130,000+', 'Qatari companies'],
-  ['240,000+', 'decision-makers'],
-  ['1.2B', 'datapoints daily'],
+  ['191,000+', 'Qatari companies'],
+  ['76,000+', 'actively trading'],
+  ['All', 'decision-makers'],
 ] as const;
 
 export default async function NewsArticlePage({ params }: Props) {

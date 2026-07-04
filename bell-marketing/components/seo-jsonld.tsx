@@ -56,7 +56,7 @@ const APP = {
   operatingSystem: 'Web',
   url: 'https://app.bell.qa',
   description:
-    'Qatar business intelligence platform: 130,000+ Qatari companies, 1.6M+ people in the graph, 240,000+ named decision-makers, 500+ datapoints per record — with search, signals, maps, CRM, and research.',
+    'Qatar business intelligence platform: 191,000+ Qatari companies, 1.6M+ people in the graph, all named decision-makers, 500+ datapoints per record — with search, signals, maps, CRM, and research.',
   offers: {
     '@type': 'Offer',
     url: 'https://bell.qa/pricing',

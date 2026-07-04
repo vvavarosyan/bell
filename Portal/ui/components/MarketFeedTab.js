@@ -33,7 +33,8 @@ function timeAgo(iso) {
   return Math.floor(s / 86400) + 'd ago';
 }
 
-export function MarketFeedTab() {
+export function MarketFeedTab({ mode } = {}) {
+  const isAdmin = mode !== 'user';   // admin.bell.qa / local engine may delete wrong items
   const [events, setEvents]   = useState([]);
   const [cursor, setCursor]   = useState(null);
   const [loading, setLoading] = useState(true);
@@ -201,9 +202,24 @@ export function MarketFeedTab() {
                   setOpenedId(e.id);
                 }
               };
+              // Admin-only: delete a wrong news item / research report everywhere.
+              const onDelete = (isAdmin && (e.kind === 'news' || e.kind === 'research')) ? async () => {
+                const label = e.kind === 'research' ? 'research report' : 'news item';
+                if (!window.confirm(`Delete this ${label}? It will be removed from the feed and the public site.`)) return;
+                try {
+                  if (e.kind === 'research') {
+                    if (!e.payload?.job_id) throw new Error('missing job id');
+                    await api.deleteResearchJob(e.payload.job_id);
+                  } else {
+                    await api.deleteNewsItem(e.ref_id || e.id);
+                  }
+                  setEvents((list) => list.filter((x) => x.id !== e.id));
+                  toast('Deleted');
+                } catch (err) { toast('Delete failed: ' + err.message, 'error'); }
+              } : null;
               return e.kind === 'research'
-                ? html`<${ResearchFeedCard} key=${e.id} e=${e} onOpen=${onOpen} />`
-                : html`<${FeedCard} key=${e.id} e=${e} onOpen=${onOpen} />`;
+                ? html`<${ResearchFeedCard} key=${e.id} e=${e} onOpen=${onOpen} onDelete=${onDelete} />`
+                : html`<${FeedCard} key=${e.id} e=${e} onOpen=${onOpen} onDelete=${onDelete} />`;
             })}
           ${!loading && cursor ? html`
             <button class="feed-loadmore" onClick=${loadMore} disabled=${loadingMore}>
@@ -320,7 +336,7 @@ function cleanSource(name) {
   return String(name || '').split(/\s[—–-]\s/)[0].trim() || name;
 }
 
-function FeedCard({ e, onOpen }) {
+function FeedCard({ e, onOpen, onDelete }) {
   const cat = e.category || 'other';
   const catColor = CAT_COLOR[cat] || CAT_COLOR.other;
 
@@ -335,6 +351,8 @@ function FeedCard({ e, onOpen }) {
           <span class="spacer"></span>
           ${e.source_name ? html`<span class="muted small">${cleanSource(e.source_name)}</span>` : null}
           <span class="muted small">· ${timeAgo(e.occurred_at)}</span>
+          ${onDelete ? html`<button title="Delete (admin)" onClick=${(ev) => { ev.stopPropagation(); onDelete(); }}
+            style=${{ marginLeft: '6px', border: 'none', background: 'transparent', color: 'var(--text-dim)', cursor: 'pointer', fontSize: '13px', lineHeight: 1, padding: '0 2px' }}>✕</button>` : null}
         </div>
         <div class="feed-card-title">${e.title}</div>
         ${e.summary ? html`<div class="feed-card-summary">${e.summary}</div>` : null}
@@ -353,7 +371,7 @@ function FeedCard({ e, onOpen }) {
 
 // Distinct, branded card for a research report — deliberately unlike a news card.
 const RESEARCH_TINT = 'rgb(111 207 151)';
-function ResearchFeedCard({ e, onOpen }) {
+function ResearchFeedCard({ e, onOpen, onDelete }) {
   return html`
     <article onClick=${onOpen} style=${{
       cursor: 'pointer', position: 'relative',
@@ -377,6 +395,8 @@ function ResearchFeedCard({ e, onOpen }) {
           }}>Bell Research · Report</span>
           <span class="spacer" style=${{ flex: 1 }}></span>
           <span class="muted small">${timeAgo(e.occurred_at)}</span>
+          ${onDelete ? html`<button title="Delete (admin)" onClick=${(ev) => { ev.stopPropagation(); onDelete(); }}
+            style=${{ marginLeft: '6px', border: 'none', background: 'transparent', color: 'var(--text-dim)', cursor: 'pointer', fontSize: '13px', lineHeight: 1, padding: '0 2px' }}>✕</button>` : null}
         </div>
         <div style=${{ fontSize: '15px', fontWeight: 600, color: 'var(--text)', lineHeight: 1.35, marginBottom: '5px' }}>
           ${e.title}

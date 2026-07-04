@@ -9,9 +9,9 @@ export const metadata: Metadata = {
 };
 
 const STATS = [
-  { value: '130,000+', label: 'Qatari companies mapped' },
+  { value: '191,000+', label: 'Qatari companies mapped' },
   { value: '1.6M+',    label: 'people in the graph' },
-  { value: '240,000+', label: 'named decision-makers' },
+  { value: 'All', label: 'decision-makers mapped' },
   { value: '500+',     label: 'datapoints per record' },
 ];
 

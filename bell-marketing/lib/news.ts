@@ -73,7 +73,7 @@ export const CATEGORY_META: Record<string, { label: string; color: string }> = {
 
 /** Category → the most relevant Bell surface to convert readers into. */
 export const CATEGORY_CTA: Record<string, { label: string; href: string; blurb: string }> = {
-  economic:    { label: 'Explore the full Qatari economy',        href: '/data/coverage',                 blurb: '130,000+ companies, mapped and refreshed continuously.' },
+  economic:    { label: 'Explore the full Qatari economy',        href: '/data/coverage',                 blurb: '191,000+ companies, mapped and refreshed continuously.' },
   political:   { label: 'Track policy-driven market shifts',      href: '/data/live',                     blurb: 'Bell watches registries and rules change in near-real-time.' },
   corporate:   { label: 'Map partnerships, JVs and acquisitions', href: '/platform/business-development', blurb: 'The corporate network behind every headline.' },
   energy:      { label: 'Follow Qatar’s energy signals',     href: '/platform/signals-and-insights', blurb: 'Live signals across the sector that powers the Gulf.' },

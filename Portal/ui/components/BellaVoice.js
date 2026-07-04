@@ -16,11 +16,13 @@ import { html } from '../lib/html.js';
 import { api } from '../lib/api.js';
 import { toast } from '../lib/toast.js';
 import { currentRoute, navigateTo } from '../lib/router.js';
+import { emitBellaAction } from '../lib/bellaBus.js';
 
 const SILENCE_MS = 900;      // pause that ends an utterance
 const MIN_SPEECH_MS = 350;   // shorter blips are ignored (coughs, clicks)
 const MAX_UTTER_MS = 25_000; // hard stop so a stuck mic can't record forever
 const BARGE_MS = 350;        // sustained speech needed to interrupt her (cough-proof)
+const VOICE_IDLE_MS = 10_000; // auto-close voice after 10s of silence (saves money — Val 2026-07-04)
 
 const CHOICES_RX = /\n?\s*\[choices:\s*([^\]]+)\]\s*$/i;
 
@@ -120,6 +122,7 @@ export function BellaVoice({ onClose, onOpenChat }) {
           onMeta: (m) => { if (m.conversation_id) convIdRef.current = m.conversation_id; },
           onToken: (d) => { finalText += d.t || ''; },
           onNavigate: (n) => { if (n?.section) { try { navigateTo(n.section); } catch { /* ignore */ } } },
+          onUiAction: (a) => { try { emitBellaAction(a); } catch { /* ignore */ } },
           onApproval: () => setPendingApprovals((n) => n + 1),
           onError: (e) => { errored = e?.message || 'Something went wrong.'; },
         }
@@ -180,6 +183,7 @@ export function BellaVoice({ onClose, onOpenChat }) {
       let lastSpeech = 0;
       let bargeTentative = false;   // capturing during 'speaking', not yet committed
       let noiseFloor = 0.004;
+      let lastActivity = performance.now();   // for the idle auto-off
       const t0 = performance.now();
 
       const startRec = () => {
@@ -220,6 +224,13 @@ export function BellaVoice({ onClose, onOpenChat }) {
         const bargeTh = Math.max(0.02, noiseFloor * 3.5);
 
         const st = stateRef.current;
+
+        // Idle auto-off (Val 2026-07-04): 10s of silence while just listening
+        // closes voice to save money. Any speech, her own turn (thinking/
+        // speaking), or a mid-utterance resets the timer.
+        if (st !== 'listening' || rms > listenTh || speechStart) lastActivity = now;
+        if (st === 'listening' && !speechStart && now - lastActivity > VOICE_IDLE_MS) { onClose?.(); return; }
+
         if (st === 'listening') {
           if (rms > listenTh) {
             lastSpeech = now;

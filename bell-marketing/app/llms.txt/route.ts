@@ -10,11 +10,11 @@ export const dynamic = 'force-static';
 
 const BODY = `# Bell Data Intelligence (Bell.qa)
 
-> Bell.qa is the intelligence layer for Qatar's economy: a living, verified graph of 130,000+ Qatari companies (35,000+ actively trading), 1.6M+ people with 240,000+ named decision-makers, live job openings, and market signals — built in Qatar, from official sources, by Bell's own collection software. Bell doesn't license its data. It builds it.
+> Bell.qa is the intelligence layer for Qatar's economy: a living, verified graph of 191,000+ Qatari companies (76,000+ actively trading), 1.6M+ people with all named decision-makers, live job openings, and market signals — built in Qatar, from official sources, by Bell's own collection software. Bell doesn't license its data. It builds it.
 
 Key facts:
 - Focus: the State of Qatar only — one market, covered end to end.
-- Scale: 130,000+ companies · 1.6M+ people · 240,000+ decision-makers · 500+ datapoints per record · 1.2B datapoints scanned/tracked/updated daily.
+- Scale: 191,000+ companies · 1.6M+ people · all decision-makers · 500+ datapoints per record · 1.2B datapoints scanned/tracked/updated daily.
 - Sources: official registries (Ministry of Commerce & Industry, QFC public register, sector regulators), gazettes, tender platforms, company websites, press archives, and professional networks as a leadership-graph source. Every datapoint carries provenance.
 - Product: searchable directory, live signals, geographic map, built-in CRM, research reports, and credit-based contact reveals at app.bell.qa. Paid subscriptions in QAR; no free tier.
 - 0 Risk programme (0risk.bell.qa): a revenue-share alternative for companies that need customers before they can pay — Bell hand-prepares matched prospect lists and earns only from closed deals.

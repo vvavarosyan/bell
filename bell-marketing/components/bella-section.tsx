@@ -87,7 +87,7 @@ const COMPARISON_ROWS = [
   {
     capability: 'Knowledge of every Qatari company & decision-maker',
     traditional:'Bounded by each person\'s network and time to research',
-    bella:      'All 130,000+ Qatari companies and their decision-makers, surfaced instantly',
+    bella:      'All 191,000+ Qatari companies and their decision-makers, surfaced instantly',
   },
   {
     capability: 'Research depth per prospect',

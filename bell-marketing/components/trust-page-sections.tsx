@@ -1214,7 +1214,7 @@ const DATA_SIBLINGS: DataSibling[] = [
     label:   'Coverage',
     href:    '/data/coverage',
     tagline: 'What Bell sees.',
-    body:    'Every Qatari company (130,000+, 35,000+ actively trading), every named decision-maker (240,000+ of 1.6M+ people in the graph), every signal &mdash; 21 record types across five tiers.',
+    body:    'Every Qatari company (191,000+, 76,000+ actively trading), every named decision-maker (of 1.6M+ people in the graph), every signal &mdash; 21 record types across five tiers.',
   },
   {
     icon:    Workflow,

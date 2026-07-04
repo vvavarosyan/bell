@@ -13,6 +13,7 @@ import { html } from './lib/html.js';
 import { api } from './lib/api.js';
 import { Sidebar, NAV_IDS } from './components/Sidebar.js';
 import { currentRoute, navigateTo } from './lib/router.js';
+import { bellaFillField, stashPending, BELLA_ACTION_EVENT } from './lib/bellaBus.js';
 import { ComingSoon } from './components/ComingSoon.js';
 import { CompaniesTab, ArchivedCompaniesTab } from './components/CompaniesTab.js';
 import { PeopleTab }    from './components/PeopleTab.js';
@@ -170,6 +171,38 @@ function App({ initialUser, initialTenant, mode }) {
       window.removeEventListener('bdi:navigate', onNav);
       window.removeEventListener('popstate', onNav);
     };
+  }, []);
+
+  // Bella acts on the UI. Her server tools emit a ui_action over SSE; BellaChat
+  // / BellaVoice re-dispatch it here. We navigate, open a record, hand a grid a
+  // pending filter (the tab reads it on mount), or type into a visible field.
+  useEffect(() => {
+    const onAction = (e) => {
+      const a = e.detail;
+      if (!a || typeof a !== 'object') return;
+      try {
+        switch (a.type) {
+          case 'navigate':    navigateTo(a.tab || a.section, a.id); break;
+          case 'open_record': navigateTo(a.tab || 'companies', a.id); break;
+          // If we're not already on the grid, stash the filter so the tab picks
+          // it up on mount, then navigate. If we ARE on it, its live listener
+          // applies it — no stash (which would re-fire on a later visit).
+          case 'show_companies':
+            if (currentRoute().tab !== 'companies') { stashPending(a); navigateTo('companies'); }
+            break;
+          case 'show_people':
+            if (currentRoute().tab !== 'people') { stashPending(a); navigateTo('people'); }
+            break;
+          case 'fill_field':
+            // The target view may be mid-navigation — retry once after a beat.
+            if (!bellaFillField(a)) setTimeout(() => bellaFillField(a), 350);
+            break;
+          default: break;
+        }
+      } catch { /* never let a bad action crash the app */ }
+    };
+    window.addEventListener(BELLA_ACTION_EVENT, onAction);
+    return () => window.removeEventListener(BELLA_ACTION_EVENT, onAction);
   }, []);
 
   const [credits, setCredits] = useState(null);

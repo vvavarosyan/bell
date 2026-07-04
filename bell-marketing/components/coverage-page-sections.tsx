@@ -236,7 +236,7 @@ const TAXONOMY: TaxonomyTier[] = [
     tagline: 'Who runs them.',
     tint:    'rgb(111 207 151)',
     records: [
-      { icon: Users,     name: 'People',                count: '1.6M+ (240,000+ decision-makers)', fields: ['Name & role', 'Organization & tenure', 'Decision weight', 'Public profile', 'Contact paths'] },
+      { icon: Users,     name: 'People',                count: '1.6M+ (all decision-makers)', fields: ['Name & role', 'Organization & tenure', 'Decision weight', 'Public profile', 'Contact paths'] },
       { icon: Star,      name: 'Public figures',        count: '8,400+',   fields: ['Name & role', 'Public presence', 'Recent appearances', 'Network position'] },
       { icon: Network,   name: 'Networks & relationships', count: '1.4M edges', fields: ['Board overlaps', 'Alumni links', 'Co-investments', 'Family ties'] },
     ],
@@ -1348,7 +1348,7 @@ const COVERAGE_READERS = [
   {
     icon:  BarChart3,
     label: 'For the data buyer',
-    body:  "191,000+ Qatari companies (76,000+ actively trading). 1.6M+ people in the graph, 240,000+ of them named decision-makers. 500+ datapoints on every record. 1.2 billion datapoints scanned and updated every day. Coverage you can defend in procurement.",
+    body:  "191,000+ Qatari companies (76,000+ actively trading). 1.6M+ people in the graph, all of them named decision-makers. 500+ datapoints on every record. 1.2 billion datapoints scanned and updated every day. Coverage you can defend in procurement.",
   },
   {
     icon:  Handshake,

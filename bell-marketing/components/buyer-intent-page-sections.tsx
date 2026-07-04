@@ -748,7 +748,7 @@ function PersonalizedIntent() {
             </span>
             <span className="text-text-dim text-[11px]">&middot;</span>
             <span className="text-[10.5px] text-text-dim">
-              3 rules active &middot; evaluated on 130,000+ companies daily
+              3 rules active &middot; evaluated on 191,000+ companies daily
             </span>
             <div className="flex-1" />
             <span

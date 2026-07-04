@@ -116,8 +116,8 @@ export default async function NewsPage({ searchParams }: { searchParams?: { cate
         <div className="flex-1 min-w-[260px]">
           <div className="text-xl font-semibold text-text mb-2">The intelligence behind these headlines.</div>
           <p className="text-sm text-text-muted leading-relaxed max-w-xl">
-            Every story here touches companies Bell tracks in depth — 130,000+ Qatari companies,
-            240,000+ named decision-makers, 500+ datapoints per record, refreshed continuously.
+            Every story here touches companies Bell tracks in depth — 191,000+ Qatari companies,
+            all named decision-makers, 500+ datapoints per record, refreshed continuously.
           </p>
         </div>
         <div className="flex flex-wrap gap-3">

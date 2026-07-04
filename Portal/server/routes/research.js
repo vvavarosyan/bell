@@ -205,6 +205,9 @@ router.delete('/jobs/:id', async (req, res, next) => {
     const id = Number(req.params.id);
     if (!Number.isFinite(id)) return res.status(400).json({ error: 'invalid_id' });
     if (!(await ownsJob(req, id))) return res.status(404).json({ error: 'not_found' });
+    // Remove any feed events pointing at this job's reports so the Market Feed
+    // doesn't keep an orphan after the report rows cascade away.
+    await query(`DELETE FROM feed_events WHERE ref_table = 'research_reports' AND ref_id IN (SELECT id FROM research_reports WHERE job_id = $1)`, [id]);
     await query(`DELETE FROM research_jobs WHERE id = $1`, [id]);  // children cascade
     res.json({ deleted: id });
   } catch (err) { next(err); }

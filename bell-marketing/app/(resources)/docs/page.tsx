@@ -71,9 +71,9 @@ export default function DocsPage() {
         <div className="min-w-0 max-w-3xl doc-prose">
           <H2 id="overview">Overview</H2>
           <p>
-            Bell is a graph of the Qatari economy: <strong>130,000+ companies</strong>{' '}
-            (35,000+ actively trading), <strong>1.6M+ people</strong> with{' '}
-            <strong>240,000+ named decision-makers</strong>, live job openings, and
+            Bell is a graph of the Qatari economy: <strong>191,000+ companies</strong>{' '}
+            (76,000+ actively trading), <strong>1.6M+ people</strong> with{' '}
+            <strong>all named decision-makers</strong>, live job openings, and
             a continuous stream of market signals — up to{' '}
             <strong>500+ datapoints per record</strong>, refreshed continuously by
             Bell&apos;s own collection engines. Everything below runs on that graph.

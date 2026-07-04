@@ -25,6 +25,7 @@ import whatsappRouter  from '../routes/whatsapp.js';
 import accountRouter   from '../routes/account.js';
 import billingRouter   from '../routes/billing.js';
 import openDataRouter  from '../routes/open_data.js';
+import publicNewsRouter from '../routes/public_news.js';
 import { SECTOR_GROUPS } from '../lib/industry_groups.js';
 import * as store from './store.js';
 
@@ -258,6 +259,39 @@ export const TOOLS = [
       return { items: items.map((r) => pick(r, FEED_KEYS)) };
     },
     summarize: (args, result) => `${(result?.items || []).length} news items`,
+  },
+
+  {
+    definition: {
+      name: 'get_news',
+      description: 'Qatar business news the Bell newsroom has written up as full articles. List the latest (optionally by category or a free-text filter), or pass id to read one article in full (with its body). Categories: economic, political, corporate, energy, real_estate, tech, legal, sports, other.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          id:       { type: 'integer', description: 'Read one article in full (title + summary + body).' },
+          category: { type: 'string' },
+          q:        { type: 'string', description: 'Free-text filter over titles/summaries.' },
+          limit:    { type: 'integer', description: '1–15 (default 8).' },
+        },
+      },
+    },
+    async execute(args, ctx) {
+      if (args.id) {
+        const { payload } = await internalCall(publicNewsRouter, 'GET', '/' + Number(args.id), ctx, {});
+        const it = payload?.item || payload || {};
+        return pick(it, ['id', 'title', 'summary', 'body', 'category', 'source_name', 'url', 'published_at']);
+      }
+      const { payload } = await internalCall(publicNewsRouter, 'GET', '/', ctx, {
+        query: { category: args.category, limit: Math.min(Math.max(Number(args.limit) || 8, 1), 15) },
+      });
+      let items = payload?.items || payload?.rows || [];
+      if (args.q) {
+        const s = String(args.q).toLowerCase();
+        items = items.filter((n) => ((n.title || '') + ' ' + (n.summary || '')).toLowerCase().includes(s));
+      }
+      return { items: items.slice(0, 15).map((n) => pick(n, ['id', 'title', 'summary', 'category', 'source_name', 'url', 'published_at'])) };
+    },
+    summarize: (args, r) => (args.id ? 'opened article' : `${(r?.items || []).length} news articles`),
   },
 
   {
@@ -1054,6 +1088,147 @@ export const TOOLS = [
       return ok ? { cancelled: true } : { error: 'not found or not cancellable' };
     },
     summarize: (args, r) => r?.error ? 'failed' : `task #${args.task_id} cancelled`,
+  },
+
+  // ── Bella acts on the UI ────────────────────────────────────────────────
+  // These tools DRIVE the portal instead of only describing data: they open a
+  // record, filter a grid, or type into a field via a client-side ui_action
+  // (brain.js forwards it; ui/lib/bellaBus.js + the tabs apply it).
+  {
+    definition: {
+      name: 'show_companies',
+      description: 'OPEN the Companies view in the app, filtered so the user actually SEES the matching companies on screen. Use whenever the user wants to look at, browse, or filter companies ("show me construction companies in Doha", "pull up companies with a website", "list marketing agencies"). This drives the real UI. For a pure count or a fact you will simply state, use search_companies instead.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          q:           { type: 'string', description: 'Free-text search (name, category, keyword).' },
+          sector:      { type: 'string', description: 'One Bell sector group id: ' + SECTOR_GROUPS.map((g) => g.id).join(', ') },
+          industries:  { type: 'array', items: { type: 'string' }, description: 'Exact canonical industry tags, e.g. ["Healthcare"].' },
+          city:        { type: 'string' },
+          has_website: { type: 'boolean' },
+          status:      { type: 'string', description: 'Normalized status, e.g. "active".' },
+        },
+      },
+    },
+    async execute(args, ctx) {
+      const industries = Array.isArray(args.industries) && args.industries.length
+        ? args.industries.join(',') : sectorToIndustries(args.sector);
+      const { payload } = await internalCall(companiesRouter, 'GET', '/', ctx, {
+        query: {
+          q: args.q, industries, city: args.city, status: args.status,
+          has_website: args.has_website === true ? '1' : (args.has_website === false ? '0' : undefined),
+          limit: 6,
+        },
+      });
+      return {
+        total: payload?.total ?? 0,
+        showing_in_app: true,
+        companies: (payload?.rows || []).map((r) => pick(r, COMPANY_LIST_KEYS)),
+      };
+    },
+    summarize: (args, r) => `showing ${r?.total ?? 0} companies in the app`,
+    uiAction: (args) => {
+      const industries = Array.isArray(args.industries) && args.industries.length
+        ? args.industries
+        : (sectorToIndustries(args.sector) ? sectorToIndustries(args.sector).split(',') : []);
+      return {
+        type: 'show_companies',
+        q: args.q || '',
+        filters: {
+          industries,
+          statuses: args.status ? [String(args.status)] : [],
+          city: args.city || '',
+          website: args.has_website === true ? 'has' : (args.has_website === false ? 'none' : ''),
+        },
+      };
+    },
+  },
+
+  {
+    definition: {
+      name: 'open_company',
+      description: 'OPEN one company\'s full profile in the app so the user sees it. Accepts the company id (from search_companies/show_companies) or, if you only have the name, the name to resolve. Use for "open Ooredoo", "show me that company", "pull up its profile".',
+      input_schema: {
+        type: 'object',
+        properties: {
+          id:   { type: 'integer', description: 'Company id (preferred).' },
+          name: { type: 'string', description: 'Company name to resolve when you have no id.' },
+        },
+      },
+    },
+    async execute(args, ctx) {
+      let id = Number(args.id) || null;
+      if (!id && args.name) {
+        const { payload } = await internalCall(companiesRouter, 'GET', '/', ctx, { query: { q: args.name, limit: 1 } });
+        const top = (payload?.rows || [])[0];
+        if (top) id = top.id;
+      }
+      if (!id) return { error: 'no matching company — try search_companies first' };
+      const { payload } = await internalCall(companiesRouter, 'GET', '/' + id, ctx, {});
+      const out = pick(payload || {}, COMPANY_DETAIL_KEYS);
+      out._resolved_id = id;
+      return out;
+    },
+    summarize: (args, r) => r?.name ? `opened ${r.name}` : (r?._resolved_id ? `opened company #${r._resolved_id}` : 'no match'),
+    uiAction: (args, r) => (r && r._resolved_id ? { type: 'open_record', tab: 'companies', id: r._resolved_id } : null),
+  },
+
+  {
+    definition: {
+      name: 'show_people',
+      description: 'OPEN the People view filtered so the user sees the matching decision-makers on screen. Use for "show me people at Ooredoo", "find marketing managers". People contact details are restricted for customer accounts until revealed.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          q:       { type: 'string', description: 'Free-text (name, title, keyword).' },
+          company: { type: 'string', description: 'Employer name to filter by.' },
+        },
+      },
+    },
+    async execute(args, ctx) {
+      const { payload } = await internalCall(peopleRouter, 'GET', '/', ctx, {
+        query: { q: args.q, company: args.company, limit: 6 },
+      });
+      return { total: payload?.total ?? (payload?.rows || []).length, showing_in_app: true };
+    },
+    summarize: (args, r) => `showing ${r?.total ?? 0} people in the app`,
+    uiAction: (args) => ({ type: 'show_people', q: args.q || '', company: args.company || '' }),
+  },
+
+  {
+    definition: {
+      name: 'open_person',
+      description: 'OPEN one person\'s profile in the app by id (from show_people/search_people).',
+      input_schema: { type: 'object', properties: { id: { type: 'integer' } }, required: ['id'] },
+    },
+    async execute(args) {
+      const id = Number(args.id) || null;
+      if (!id) return { error: 'need a person id' };
+      return { ok: true, opened: id };
+    },
+    summarize: (args) => `opened person #${args.id}`,
+    uiAction: (args) => (Number(args.id) ? { type: 'open_record', tab: 'people', id: Number(args.id) } : null),
+  },
+
+  {
+    definition: {
+      name: 'fill_field',
+      description: 'TYPE a value into a form field the user is looking at, exactly as if they typed it — Settings, ICP profile, CRM, research, filters, anything on screen. Identify the field by its visible label or placeholder (e.g. "Company name", "Website", "note"). Only fills what is currently visible, so navigate/open the right view first. After filling, tell the user what you set and let them review and save — never claim it is saved.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          field: { type: 'string', description: 'The field\'s visible label or placeholder, e.g. "Company name".' },
+          value: { type: 'string', description: 'The text to put in it.' },
+        },
+        required: ['field', 'value'],
+      },
+    },
+    async execute(args) {
+      if (!args.field) return { error: 'need a field label' };
+      return { ok: true, field: String(args.field), value: String(args.value ?? '') };
+    },
+    summarize: (args) => `filled "${String(args.field || '').slice(0, 40)}"`,
+    uiAction: (args) => ({ type: 'fill_field', field: String(args.field || ''), value: String(args.value ?? '') }),
   },
 
   {

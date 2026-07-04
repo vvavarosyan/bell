@@ -101,7 +101,8 @@ async function bellaChatStream(body, handlers = {}) {
     }
     const dispatch = {
       meta: handlers.onMeta, token: handlers.onToken, tool: handlers.onTool,
-      navigate: handlers.onNavigate, approval: handlers.onApproval,
+      navigate: handlers.onNavigate, ui_action: handlers.onUiAction,
+      approval: handlers.onApproval,
       done: handlers.onDone, error: handlers.onError,
     };
     const reader = r.body.getReader();
@@ -395,6 +396,7 @@ export const api = {
   feedStats:              () => request('/api/feed/stats'),
   feedTrending:           () => request('/api/feed/trending'),
   feedSources:            () => request('/api/feed/sources'),
+  deleteNewsItem:         (id) => request('/api/feed/news/' + id, { method: 'DELETE' }),
   signals:                (q = {}) => request('/api/signals?' + new URLSearchParams(q)),
   signalStats:            () => request('/api/signals/stats'),
   signalsMap:             () => request('/api/signals/map'),

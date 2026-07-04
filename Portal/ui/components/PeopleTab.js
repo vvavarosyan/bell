@@ -4,6 +4,7 @@ import { html } from '../lib/html.js';
 import { api } from '../lib/api.js';
 import { toast } from '../lib/toast.js';
 import { currentRoute } from '../lib/router.js';
+import { BELLA_ACTION_EVENT, takePending } from '../lib/bellaBus.js';
 import { EditableCell } from './EditableCell.js';
 import { Pagination } from './Pagination.js';
 import { PersonDetail } from './PersonDetail.js';
@@ -83,6 +84,21 @@ export function PeopleTab({ mode = 'local-admin' } = {}) {
       window.removeEventListener('popstate', checkRoute);
     };
   }, [load]);
+
+  // Bella filters this grid (show_people): stashed just before navigation here,
+  // and fired live when we're already mounted.
+  useEffect(() => {
+    const apply = (a) => {
+      if (!a || a.type !== 'show_people') return;
+      setQ(a.q || '');
+      setCompany(a.company || '');
+      setOffset(0);
+    };
+    apply(takePending('show_people'));
+    const onAction = (e) => { if (e.detail && e.detail.type === 'show_people') apply(e.detail); };
+    window.addEventListener(BELLA_ACTION_EVENT, onAction);
+    return () => window.removeEventListener(BELLA_ACTION_EVENT, onAction);
+  }, []);
 
   const update = async (id, field, value) => {
     try {

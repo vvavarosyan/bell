@@ -3,6 +3,7 @@ import { html } from '../lib/html.js';
 import { api } from '../lib/api.js';
 import { toast } from '../lib/toast.js';
 import { currentRoute } from '../lib/router.js';
+import { BELLA_ACTION_EVENT, takePending } from '../lib/bellaBus.js';
 import { EditableCell } from './EditableCell.js';
 import { StageBar } from './StageBadge.js';
 import { Pagination } from './Pagination.js';
@@ -183,6 +184,23 @@ export function CompaniesTab({ archivedMode: initialArchived = false, mode = 'lo
       window.removeEventListener('bdi:navigate', checkRoute);
       window.removeEventListener('popstate', checkRoute);
     };
+  }, []);
+
+  // Bella filters this grid. She stashes a show_companies action just before
+  // navigating here (picked up on mount) and also fires it live when we're
+  // already mounted.
+  useEffect(() => {
+    const apply = (a) => {
+      if (!a || a.type !== 'show_companies') return;
+      setArchiveMode('active');
+      setQ(a.q || '');
+      setFilters({ ...EMPTY_FILTERS, ...(a.filters || {}) });
+      setOffset(0);
+    };
+    apply(takePending('show_companies'));
+    const onAction = (e) => { if (e.detail && e.detail.type === 'show_companies') apply(e.detail); };
+    window.addEventListener(BELLA_ACTION_EVENT, onAction);
+    return () => window.removeEventListener(BELLA_ACTION_EVENT, onAction);
   }, []);
 
   const update = async (id, field, value) => {

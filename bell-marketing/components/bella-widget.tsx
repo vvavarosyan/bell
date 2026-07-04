@@ -31,6 +31,7 @@ const SILENCE_MS = 900;       // pause that ends an utterance
 const MIN_SPEECH_MS = 350;    // shorter blips are ignored (coughs, clicks)
 const MAX_UTTER_MS = 25_000;  // hard stop so a stuck mic can't record forever
 const BARGE_MS = 350;         // sustained speech needed to interrupt her
+const VOICE_IDLE_MS = 10_000; // auto-close the mic after 10s of silence (saves money — Val 2026-07-04)
 
 type Msg = {
   role: 'user' | 'assistant';
@@ -325,6 +326,7 @@ export function BellaWidget() {
     let lastSpeech = 0;
     let bargeTentative = false;
     let noiseFloor = 0.004;
+    let lastActivity = performance.now();   // for the idle auto-off
     const t0 = performance.now();
 
     const startRec = () => {
@@ -358,6 +360,12 @@ export function BellaWidget() {
       const listenTh = Math.max(0.012, noiseFloor * 2.2);
       const bargeTh = Math.max(0.02, noiseFloor * 3.5);
       const st = vStateRef.current;
+
+      // Idle auto-off (Val 2026-07-04): if she's just listening with no speech
+      // for VOICE_IDLE_MS, close the mic to save money. Any speech, her own
+      // turn (thinking/speaking), or a mid-utterance resets the timer.
+      if (st !== 'listening' || rms > listenTh || speechStart) lastActivity = now;
+      if (st === 'listening' && !speechStart && now - lastActivity > VOICE_IDLE_MS) { stopVoice(); return; }
 
       if (st === 'listening') {
         if (rms > listenTh) { lastSpeech = now; if (!speechStart) { speechStart = now; startRec(); } }
