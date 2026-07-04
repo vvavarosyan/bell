@@ -196,7 +196,7 @@ async function streamOnce({ apiKey, messages, signal, onToken }) {
  *   send    — SSE writer
  *   signal  — abort (client gone)
  */
-export async function runMarketingTurn({ message, history, currentPath, send, signal }) {
+export async function runMarketingTurn({ message, history, currentPath, voice, send, signal }) {
   const apiKey = await anthropicKey();
   if (!apiKey) {
     send('error', { message: 'Bella is momentarily unavailable — please browse the site or email support@bell.qa.' });
@@ -206,7 +206,9 @@ export async function runMarketingTurn({ message, history, currentPath, send, si
   const messages = sanitizeHistory(history);
   const context = currentPath && typeof currentPath === 'string'
     ? `[visitor is on ${String(currentPath).slice(0, 60)}]\n` : '';
-  const text = context + message;
+  const voiceLine = voice
+    ? '[voice conversation — reply in 1–2 short, natural, speakable sentences; plain prose, no lists, no markdown, no [choices]]\n' : '';
+  const text = context + voiceLine + message;
   if (messages.length && messages[messages.length - 1].role === 'user') {
     messages[messages.length - 1].content += '\n' + text;
   } else {
