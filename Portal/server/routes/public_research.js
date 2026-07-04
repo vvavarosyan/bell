@@ -16,6 +16,16 @@ import { query } from '../db.js';
 const router = Router();
 const MAX_LIMIT = 50;
 
+// Defense-in-depth: never surface report types Bell keeps private (person —
+// PDPPL / People-lockdown). The publish pipeline already refuses to publish
+// them; this guarantees the public read excludes them even for any legacy row.
+// Types are env-validated to [a-z_] so inlining them in SQL is injection-safe.
+const PRIVATE_TYPES = (process.env.BDI_RESEARCH_PRIVATE_TYPES ?? 'person')
+  .split(',').map((s) => s.trim().toLowerCase()).filter((t) => /^[a-z_]+$/.test(t));
+const PRIVATE_SQL = PRIVATE_TYPES.length
+  ? `AND lower(j.type) <> ALL(ARRAY[${PRIVATE_TYPES.map((t) => `'${t}'`).join(',')}]::text[])`
+  : '';
+
 const SAFE_LIST = `
   SELECT r.id, r.title, r.summary, r.public_slug, r.published_at,
          jsonb_array_length(COALESCE(r.sections, '[]'::jsonb)) AS section_count,
@@ -23,6 +33,7 @@ const SAFE_LIST = `
     FROM research_reports r
     JOIN research_jobs j ON j.id = r.job_id
    WHERE r.is_published = true
+   ${PRIVATE_SQL}
 `;
 
 // GET /api/public/research?type=&limit=
@@ -52,6 +63,7 @@ router.get('/:slug', async (req, res, next) => {
         FROM research_reports r
         JOIN research_jobs j ON j.id = r.job_id
        WHERE r.is_published = true AND r.public_slug = $1
+       ${PRIVATE_SQL}
     `, [slug]);
     if (!r.rows.length) return res.status(404).json({ error: 'not_found' });
     const item = r.rows[0];

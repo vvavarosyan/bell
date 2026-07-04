@@ -136,9 +136,112 @@ export const companySchema = {
   },
 };
 
+// ---------------------------------------------------------------------------
+// Shared building blocks for the non-company report types (person / sector /
+// other). Same FLAT + FORGIVING rules as the company schema above so Spark
+// doesn't bail to data:null.
+// ---------------------------------------------------------------------------
+const SECTIONS_PROP = {
+  type: 'array',
+  description: 'Ordered report sections. Aim for 8-12 substantive, cited sections.',
+  items: {
+    type: 'object',
+    required: ['title', 'body_markdown'],
+    properties: {
+      title:         { type: 'string', description: 'Section heading.' },
+      body_markdown: { type: 'string', description: 'Markdown body. Cite sources inline as [1], [2], [3] using 1-based indexes from the top-level sources array.' },
+    },
+  },
+};
+
+const SOURCES_PROP = {
+  type: 'array',
+  description: 'Every distinct source used. Index = 1-based position in this array. Body markdown cites these as [1], [2], etc.',
+  items: {
+    type: 'object',
+    required: ['url'],
+    properties: {
+      url:     { type: 'string' },
+      label:   { type: 'string', description: 'Short name like "QFC public register entry" or "Gulf Times, 2024-09-12".' },
+      class:   { type: 'string', description: 'One of: filing, press, graph, industry, academic, court, web, other.' },
+      excerpt: { type: 'string', description: 'The specific fact or sentence cited from this source.' },
+    },
+  },
+};
+
+const DERIVED_COMPANIES_PROP = {
+  type: 'array',
+  description: 'Companies you discovered while researching. Include companies from ANY country; Bell classifies them by country. For each, set how it relates to the subject.',
+  items: {
+    type: 'object',
+    required: ['name'],
+    properties: {
+      name:            { type: 'string' },
+      country:         { type: 'string', description: 'Country the company is based in (e.g. Qatar, UAE, USA). Bell uses this to classify Qatar vs international.' },
+      website:         { type: 'string' },
+      linkedin_url:    { type: 'string' },
+      registration_no: { type: 'string' },
+      industry:        { type: 'string' },
+      city:            { type: 'string' },
+      relation:        { type: 'string', description: 'How they relate to the subject of the report.' },
+    },
+  },
+};
+
+const DERIVED_PEOPLE_PROP = {
+  type: 'array',
+  description: 'People discovered who are connected to the subject — executives, founders, board members, officials.',
+  items: {
+    type: 'object',
+    required: ['full_name'],
+    properties: {
+      full_name:    { type: 'string' },
+      title:        { type: 'string' },
+      company_name: { type: 'string', description: 'Which company they are/were at.' },
+      linkedin_url: { type: 'string' },
+      relation:     { type: 'string', description: 'How they relate to the subject.' },
+    },
+  },
+};
+
+function baseReportSchema(titleDesc, summaryDesc) {
+  return {
+    type: 'object',
+    required: ['title', 'sections', 'sources'],
+    properties: {
+      title:             { type: 'string', description: titleDesc },
+      summary:           { type: 'string', description: summaryDesc },
+      sections:          SECTIONS_PROP,
+      sources:           SOURCES_PROP,
+      derived_companies: DERIVED_COMPANIES_PROP,
+      derived_people:    DERIVED_PEOPLE_PROP,
+    },
+  };
+}
+
+// Person profile — PUBLIC professional footprint only.
+export const personSchema = baseReportSchema(
+  'Title of the report. Format: "<Full Name> — Professional Profile".',
+  'Executive summary of who they are and why they matter, 2-3 paragraphs.',
+);
+
+// Sector landscape — derived_companies is the key snowball output.
+export const sectorSchema = baseReportSchema(
+  'Title of the report. Format: "<Sector> in Qatar — Landscape".',
+  'Executive summary of the sector: size, structure, leaders, direction.',
+);
+
+// Other — open-ended research to the user's brief.
+export const otherSchema = baseReportSchema(
+  'A clear, specific title for the report based on the brief.',
+  'Executive summary answering the brief in 2-3 paragraphs.',
+);
+
 export const SCHEMAS = {
   company: companySchema,
-  // person / sector / theme / region / regulation — added in R3
+  person:  personSchema,
+  sector:  sectorSchema,
+  other:   otherSchema,
 };
 
 export function schemaFor(type) { return SCHEMAS[type] || null; }

@@ -145,7 +145,7 @@ router.post('/jobs', async (req, res, next) => {
 
     // Agent count per type — matches the marketing framing of how many
     // Bella deploys per job. Company deep-dive = 5 (heavy, multi-source).
-    const AGENT_COUNT = { company: 5, person: 2, sector: 5, theme: 4, region: 4, regulation: 1 };
+    const AGENT_COUNT = { company: 5, person: 2, sector: 5, other: 3 };
     const agentCount = AGENT_COUNT[body.type] || 1;
 
     const r = await query(`

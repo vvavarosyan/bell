@@ -1,8 +1,8 @@
-// Research type dispatch — the six job types from the marketing site.
+// Research type dispatch — the job types offered in the Research console.
 //
-// Phase R1 ships the metadata; only `company` is "implemented" (i.e. you can
-// create a job, but R2 will wire it to actually run). Other types are visible
-// in the UI as "soon" so admin sees the full menu.
+// Val 2026-07-04: the menu is Company (deep-dive), Person (profile),
+// Sector (landscape), and Other (research anything). Theme / Region /
+// Regulation were retired — "Other" covers any free-form research need.
 
 export const RESEARCH_TYPES = {
   company: {
@@ -21,55 +21,36 @@ export const RESEARCH_TYPES = {
     label:        'Person profile',
     short:        'Person',
     tint:         'rgb(111 207 151)',
-    description:  'Career arc, public footprint, and current sphere of influence.',
+    description:  'Public professional profile of an individual — career arc, roles, affiliations, and sphere of influence.',
+    // Free-form subject (a name typed into the brief). We do NOT force a
+    // target_person_id: customers can't browse People (lockdown), and the
+    // subject may be a public figure who isn't a Bell record.
     brief_template: (target) =>
-      `Career arc, public footprint, and current sphere of influence for ${target}.`,
-    requires_target: 'person',
-    implemented: false,
+      `Public professional profile of ${target} — career arc, current roles, board seats, affiliations, and sphere of influence.`,
+    requires_target: null,
+    implemented: true,
   },
   sector: {
     id:           'sector',
     label:        'Sector landscape',
     short:        'Sector',
     tint:         'rgb(255 196 99)',
-    description:  'A Qatari sector mapped end-to-end — providers, ownership clusters, regulatory direction, M&A.',
+    description:  'A Qatari sector mapped end-to-end — leading players, ownership clusters, regulatory direction, and M&A.',
     brief_template: (target) =>
-      `The full Qatari ${target} sector — providers, ownership clusters, regulatory direction, M&A activity 2022 to present.`,
+      `The Qatari ${target} sector — leading players, ownership clusters, regulatory direction, and M&A activity from 2022 to present.`,
     requires_target: null,
-    implemented: false,
+    implemented: true,
   },
-  theme: {
-    id:           'theme',
-    label:        'Thematic deep-dive',
-    short:        'Theme',
+  other: {
+    id:           'other',
+    label:        'Research anything',
+    short:        'Other',
     tint:         'rgb(196 154 255)',
-    description:  'A theme or macro question — exposure, mitigation, peer responses.',
+    description:  'Open-ended research on any question, market, event, or topic — a cited report built to your brief.',
     brief_template: (target) =>
-      `${target} — exposure, mitigation, peer responses.`,
+      `${target || 'Describe exactly what you want researched'} — a thorough, cited answer.`,
     requires_target: null,
-    implemented: false,
-  },
-  region: {
-    id:           'region',
-    label:        'Regional cluster',
-    short:        'Region',
-    tint:         'rgb(165 195 255)',
-    description:  'A regional competitive map — players, funding flows, regulator stance.',
-    brief_template: (target) =>
-      `${target} competitive map — players, funding flows, regulator stance.`,
-    requires_target: null,
-    implemented: false,
-  },
-  regulation: {
-    id:           'regulation',
-    label:        'Regulatory tracking',
-    short:        'Regulation',
-    tint:         'rgb(232 142 168)',
-    description:  'Standing monitor — any change in QFC / QCB / QFMA / MoCI output affecting clients.',
-    brief_template: () =>
-      `Live monitoring of QFC, QCB, QFMA, and MoCI regulatory output — any change affecting our advisory clients.`,
-    requires_target: null,
-    implemented: false,
+    implemented: true,
   },
 };
 

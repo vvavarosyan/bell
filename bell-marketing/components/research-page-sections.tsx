@@ -297,7 +297,7 @@ function PersonaStat({
 // ───────────────────────────────────────────────────────────────────────────
 
 type ResearchType =
-  | 'company' | 'person' | 'sector' | 'theme' | 'region' | 'regulation';
+  | 'company' | 'person' | 'sector' | 'other';
 
 type JobStatus = 'gathering' | 'synthesizing' | 'ready';
 
@@ -364,8 +364,8 @@ const RESEARCH_JOBS: ResearchJob[] = [
     eta:      'ETA 9 min',
   },
   {
-    type:     'theme',
-    typeLabel:'Thematic deep-dive',
+    type:     'other',
+    typeLabel:'Research anything',
     icon:     Lightbulb,
     tint:     'rgb(196 154 255)',
     prompt:   "How the EU CBAM mechanism will reshape Qatari energy exports through 2030 — exposure, mitigation, peer responses.",
@@ -379,8 +379,8 @@ const RESEARCH_JOBS: ResearchJob[] = [
     eta:      'ETA 11 min',
   },
   {
-    type:     'region',
-    typeLabel:'Regional cluster',
+    type:     'other',
+    typeLabel:'Research anything',
     icon:     Globe,
     tint:     'rgb(165 195 255)',
     prompt:   "GCC fintech competitive map — Bahrain, UAE, KSA, Qatar — players, funding flows, regulator stance.",
@@ -394,8 +394,8 @@ const RESEARCH_JOBS: ResearchJob[] = [
     eta:      'ETA 13 min',
   },
   {
-    type:     'regulation',
-    typeLabel:'Regulatory tracking',
+    type:     'other',
+    typeLabel:'Research anything',
     icon:     ShieldCheck,
     tint:     'rgb(232 142 168)',
     prompt:   "Live monitoring of QFC, QCB, QFMA regulatory output — any change affecting our advisory clients.",
@@ -1031,8 +1031,7 @@ const ENGAGEMENTS: Engagement[] = [
     gradient:  'linear-gradient(135deg, rgb(255 196 99) 0%, rgb(232 142 168) 100%)',
     mix: [
       { type:'sector', label:'Sector', count:1, tint:'rgb(255 196 99)' },
-      { type:'theme',  label:'Theme',  count:1, tint:'rgb(196 154 255)' },
-      { type:'region', label:'Region', count:1, tint:'rgb(165 195 255)' },
+      { type:'other',  label:'Other',  count:2, tint:'rgb(196 154 255)' },
     ],
   },
   {
@@ -1045,8 +1044,7 @@ const ENGAGEMENTS: Engagement[] = [
     status:    'active',
     gradient:  'linear-gradient(135deg, rgb(111 207 151) 0%, rgb(91 140 255) 100%)',
     mix: [
-      { type:'theme',      label:'Theme',      count:2, tint:'rgb(196 154 255)' },
-      { type:'regulation', label:'Regulatory', count:1, tint:'rgb(232 142 168)' },
+      { type:'other', label:'Other', count:3, tint:'rgb(196 154 255)' },
     ],
   },
   {
@@ -1059,7 +1057,7 @@ const ENGAGEMENTS: Engagement[] = [
     status:    'in-flight',
     gradient:  'linear-gradient(135deg, rgb(196 154 255) 0%, rgb(91 140 255) 100%)',
     mix: [
-      { type:'region', label:'Region', count:1, tint:'rgb(165 195 255)' },
+      { type:'other', label:'Other', count:1, tint:'rgb(165 195 255)' },
     ],
   },
 ];
