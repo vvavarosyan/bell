@@ -315,8 +315,11 @@ app.use((err, req, res, next) => {
 
   // Start the Research orchestrator's background poller. Picks up any
   // queued/in-flight research_jobs left over from previous boots and drives
-  // them through the Firecrawl Agent lifecycle.
-  startResearchPoller();
+  // them through the Firecrawl Agent lifecycle. Runs on local + the user portal
+  // only — NOT on admin.bell.qa, which shares the prod DB with the user portal
+  // (a second poller would double-process every job and can race a fresh
+  // submit, which is what failed Val's first research run).
+  if (MODE !== 'admin') startResearchPoller();
 
   // Start the Qatar Open Data scheduler. Runs a catalog sync ~4s after boot,
   // auto-seeds records if od_records is empty, refreshes catalog every 6h,

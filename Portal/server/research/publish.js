@@ -35,7 +35,7 @@ function slugify(s) {
     .replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60) || 'report';
 }
 
-async function getExclusivityDays() {
+export async function getExclusivityDays() {
   try {
     const r = await query(`SELECT value FROM settings WHERE key = 'research_feed_exclusivity_days'`);
     const v = r.rows.length ? Number(r.rows[0].value) : 0;
@@ -107,6 +107,18 @@ export async function releaseResearchToFeed(jobId) {
   await query(`UPDATE research_jobs SET feed_released_at = now() WHERE id = $1`, [jobId]);
 
   return { id: jobId, released: true, public_slug: slug };
+}
+
+/**
+ * Release-on-completion helper for the orchestrator: publish a just-ready
+ * report immediately when there is NO exclusivity window (the default 0), so it
+ * reaches the Market Feed + marketing site without waiting for the producer
+ * tick. When a window is configured (>0 days) the producer releases it later.
+ */
+export async function maybeReleaseOnComplete(jobId) {
+  const days = await getExclusivityDays();
+  if (days > 0) return { id: jobId, released: false, reason: 'exclusivity_window' };
+  return releaseResearchToFeed(jobId);
 }
 
 /**

@@ -103,10 +103,12 @@ export function BellaWidget() {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const stopAudioRef = useRef<(() => void) | null>(null);
   const rafRef = useRef<number | null>(null);
+  const busyRef = useRef(false);
 
   const setVState = (s: VState) => { vStateRef.current = s; setVStateRaw(s); };
 
   useEffect(() => { msgsRef.current = msgs; }, [msgs]);
+  useEffect(() => { busyRef.current = busy; }, [busy]);
   useEffect(() => { pathRef.current = pathname; }, [pathname]);
 
   // Restore the visit's conversation once on mount.
@@ -154,9 +156,9 @@ export function BellaWidget() {
   // text so a voice turn can TTS it. `voice` tags the turn for a speakable reply.
   const send = async (textArg?: string, voice = false): Promise<string> => {
     const text = String(textArg ?? input).trim();
-    if (!text || busy) return '';
+    if (!text || busyRef.current) return '';
     setInput('');
-    setBusy(true);
+    setBusy(true); busyRef.current = true;
     const now = new Date().toISOString();
     const history = msgsRef.current.filter((m) => !m.error).map(({ role, content }) => ({ role, content }));
     setMsgs((list) => [...list,
@@ -215,7 +217,7 @@ export function BellaWidget() {
       }
     } finally {
       patchLast((m) => (m.streaming ? { ...m, streaming: false, error: m.content ? undefined : 'Bella didn\'t respond — please try again.' } : m));
-      setBusy(false);
+      setBusy(false); busyRef.current = false;
       abortRef.current = null;
     }
     return finalText;
@@ -308,6 +310,7 @@ export function BellaWidget() {
     aliveRef.current = true;
     voiceOnRef.current = true;
     const ctx = new (window.AudioContext || (window as any).webkitAudioContext)();
+    try { if (ctx.state === 'suspended') await ctx.resume(); } catch { /* ignore */ }
     const src = ctx.createMediaStreamSource(stream);
     const analyser = ctx.createAnalyser();
     analyser.fftSize = 1024;
@@ -344,6 +347,7 @@ export function BellaWidget() {
 
     const tick = () => {
       if (!aliveRef.current) return;
+      if (ctx.state === 'suspended') ctx.resume().catch(() => {});
       analyser.getFloatTimeDomainData(buf);
       let sum = 0;
       for (let i = 0; i < buf.length; i++) sum += buf[i] * buf[i];

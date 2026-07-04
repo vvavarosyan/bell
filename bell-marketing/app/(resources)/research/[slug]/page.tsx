@@ -32,16 +32,41 @@ export async function generateMetadata({ params }: { params: { slug: string } })
 
 /**
  * Minimal, SAFE markdown renderer for agent-written report bodies: headings,
- * bullets, numbered lists, bold, paragraphs. Everything renders as React text
- * nodes (auto-escaped) — no raw HTML ever.
+ * bullets, numbered lists, bold, links, citations, paragraphs. Everything
+ * renders as React text nodes / anchors (auto-escaped) — no raw HTML ever.
  */
-function Bold({ text }: { text: string }) {
-  const parts = text.split(/\*\*([^*]+)\*\*/g);
-  return (
-    <>
-      {parts.map((p, i) => (i % 2 === 1 ? <strong key={i} className="text-text font-semibold">{p}</strong> : <span key={i}>{p}</span>))}
-    </>
-  );
+function Inline({ text }: { text: string }) {
+  const nodes: JSX.Element[] = [];
+  // [[1]](url) citation markers OR standard [text](url) links.
+  const rx = /\[\[(\d+)\]\]\(([^)\s]+)\)|\[([^\]]+)\]\(([^)\s]+)\)/g;
+  let last = 0, key = 0;
+  let m: RegExpExecArray | null;
+  const pushText = (s: string) => {
+    if (!s) return;
+    s.split(/\*\*([^*]+)\*\*/g).forEach((p, i) => {
+      if (!p) return;
+      nodes.push(i % 2 === 1
+        ? <strong key={`b${key++}`} className="text-text font-semibold">{p}</strong>
+        : <span key={`t${key++}`}>{p}</span>);
+    });
+  };
+  while ((m = rx.exec(text || '')) !== null) {
+    pushText((text || '').slice(last, m.index));
+    const isCite = m[1] !== undefined;
+    const label = isCite ? `[${m[1]}]` : m[3];
+    const href = isCite ? m[2] : m[4];
+    nodes.push(
+      <a key={`l${key++}`} href={href} target="_blank" rel="noopener noreferrer nofollow"
+        className={isCite
+          ? 'mx-0.5 align-super text-[11px] font-semibold text-accent-bright no-underline hover:underline'
+          : 'text-accent-bright underline decoration-accent/40 underline-offset-2 hover:decoration-accent'}>
+        {label}
+      </a>
+    );
+    last = m.index + m[0].length;
+  }
+  pushText((text || '').slice(last));
+  return <>{nodes}</>;
 }
 
 function Markdown({ text }: { text: string }) {
@@ -53,7 +78,7 @@ function Markdown({ text }: { text: string }) {
 
   const flushPara = () => {
     if (para.length) {
-      blocks.push(<p key={key++} className="text-[15px] leading-relaxed text-text-muted mb-4"><Bold text={para.join(' ')} /></p>);
+      blocks.push(<p key={key++} className="text-[15px] leading-relaxed text-text-muted mb-4"><Inline text={para.join(' ')} /></p>);
       para = [];
     }
   };
@@ -62,7 +87,7 @@ function Markdown({ text }: { text: string }) {
       const cls = 'pl-6 mb-4 space-y-2 ' + (list.ordered ? 'list-decimal' : 'list-disc');
       blocks.push(
         <ul key={key++} className={cls}>
-          {list.items.map((it, i) => <li key={i} className="text-[15px] leading-relaxed text-text-muted"><Bold text={it} /></li>)}
+          {list.items.map((it, i) => <li key={i} className="text-[15px] leading-relaxed text-text-muted"><Inline text={it} /></li>)}
         </ul>
       );
       list = null;
@@ -78,7 +103,7 @@ function Markdown({ text }: { text: string }) {
     if (!t) { flushPara(); flushList(); continue; }
     if (h) {
       flushPara(); flushList();
-      blocks.push(<h3 key={key++} className="text-lg font-semibold text-text mt-8 mb-3"><Bold text={h[2]} /></h3>);
+      blocks.push(<h3 key={key++} className="text-lg font-semibold text-text mt-8 mb-3"><Inline text={h[2]} /></h3>);
     } else if (bullet) {
       flushPara();
       if (!list || list.ordered) { flushList(); list = { ordered: false, items: [] }; }

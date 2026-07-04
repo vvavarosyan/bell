@@ -350,8 +350,9 @@ function JobDetailDrawer({ jobId, isAdmin, onClose }) {
               ? html`<${ReportViewer} report=${report} sources=${sources} />`
               : (job.status === 'ready' ? html`<${EmptyReportDebug} job=${job} report=${report} onRetry=${() => retryJob(job.id, load)} />` : null)}
 
-            <!-- Market Feed release (ready jobs only) -->
-            ${job.status === 'ready' ? html`<${FeedReleasePanel} job=${job} reload=${load} />` : null}
+            <!-- Market Feed release (ready jobs only) — ADMIN ONLY. Customers'
+                 research auto-publishes anonymized; they don't manage it. -->
+            ${isAdmin && job.status === 'ready' ? html`<${FeedReleasePanel} job=${job} reload=${load} />` : null}
 
             <!-- Snowball: what got fed back into Bell -->
             ${derived.length > 0 ? html`<${DerivedEntitiesPanel} derived=${derived} />` : null}

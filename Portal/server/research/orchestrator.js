@@ -18,6 +18,7 @@ import { buildPrompt, buildAnchorUrls } from './prompts.js';
 import { persistReport } from './parser.js';
 import { ingestDerivedEntities, ingestCompanyFacts } from './ingest.js';
 import { notifyTenant } from '../lib/notifications.js';
+import { maybeReleaseOnComplete } from './publish.js';
 
 // Soft estimate so the UI can show "ETA ~X min". Firecrawl Agent typically
 // completes in 2-5 minutes; we round to 4.
@@ -134,7 +135,7 @@ function userSafeResearchError(err) {
  */
 export async function advanceJob(jobId) {
   const r = await query(`
-    SELECT id, type, status, firecrawl_job_id
+    SELECT id, type, status, firecrawl_job_id, started_at
       FROM research_jobs
      WHERE id = $1
   `, [jobId]);
@@ -144,6 +145,15 @@ export async function advanceJob(jobId) {
     return { id: jobId, status: job.status, skipped: true };
   }
   if (!job.firecrawl_job_id) {
+    // runJob claims 'gathering' BEFORE its async agent() call returns the id.
+    // A poller tick (or a second deployment's poller on the shared prod DB) can
+    // land here mid-submit — don't fail a job that was just started; only fail
+    // one genuinely stuck without an id past the grace window. (This was the
+    // "first click failed, retry worked" bug Val hit.)
+    const startedMs = job.started_at ? Date.now() - new Date(job.started_at).getTime() : Infinity;
+    if (startedMs < 120_000) {
+      return { id: jobId, status: job.status, polled: false, reason: 'awaiting_submit' };
+    }
     await failJob(jobId, SAFE_FAIL, 'In gathering/synthesizing with no firecrawl_job_id');
     return { id: jobId, status: 'failed' };
   }
@@ -238,6 +248,11 @@ export async function advanceJob(jobId) {
         }).catch(() => {});
       }
     } catch (e) { console.error('[research] ready notification failed:', e.message); }
+    // Publish immediately when there's no exclusivity window (Val's "publish
+    // research immediately"), so it hits the Market Feed + marketing site
+    // without waiting for the 5-min producer. Person reports stay private
+    // (guarded in publish.js); idempotent + best-effort.
+    try { await maybeReleaseOnComplete(jobId); } catch (e) { console.error('[research] auto-release failed:', e.message); }
     return { id: jobId, status: 'ready', ...persisted };
   } catch (err) {
     await failJob(jobId, SAFE_FAIL, 'Parse/ingest failed: ' + err.message);
