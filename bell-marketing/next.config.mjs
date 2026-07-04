@@ -47,6 +47,25 @@ const nextConfig = {
       { source: '/our-data', destination: '/data/coverage', permanent: true },
     ];
   },
+  // Cache-Control for HTML DOCUMENTS only (Val 2026-07-04 — the real reason
+  // Bella's voice fix "never worked": Next's default for static pages is
+  // `s-maxage=31536000, stale-while-revalidate`, so Railway's edge served
+  // YEAR-OLD HTML after each deploy → the old JS bundle → the fix never ran).
+  // Force revalidation so a new deploy's content-hashed chunks are picked up
+  // immediately. The `accept: text/html` condition scopes this to page
+  // documents ONLY — hashed /_next/static assets keep their immutable cache,
+  // so this costs nothing on assets and just guarantees fresh HTML.
+  async headers() {
+    return [
+      {
+        source: '/:path*',
+        has: [{ type: 'header', key: 'accept', value: '.*text/html.*' }],
+        headers: [
+          { key: 'Cache-Control', value: 'public, max-age=0, must-revalidate' },
+        ],
+      },
+    ];
+  },
 };
 
 export default nextConfig;

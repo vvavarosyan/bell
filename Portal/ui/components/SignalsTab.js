@@ -14,13 +14,16 @@ import { api } from '../lib/api.js';
 import { navigateTo } from '../lib/router.js';
 
 const KIND_META = {
-  hiring:         { label: 'Hiring',         color: '#22c55e', sector: 0 },
-  newly_licensed: { label: 'Newly licensed', color: '#5b8cff', sector: 1 },
-  partnership:    { label: 'Partnerships',   color: '#14b8a6', sector: 2 },
-  leadership:     { label: 'Leadership',     color: '#a855f7', sector: 3 },
-  news_event:     { label: 'In the news',    color: '#f59e0b', sector: 4 },
+  tender:         { label: 'Tenders',        color: '#eab308', sector: 0 },
+  hiring:         { label: 'Hiring',         color: '#22c55e', sector: 1 },
+  expansion:      { label: 'Expansion',      color: '#f97316', sector: 2 },
+  newly_licensed: { label: 'Newly licensed', color: '#5b8cff', sector: 3 },
+  partnership:    { label: 'Partnerships',   color: '#14b8a6', sector: 4 },
+  leadership:     { label: 'Leadership',     color: '#a855f7', sector: 5 },
+  news_event:     { label: 'In the news',    color: '#94a3b8', sector: 6 },
 };
 const KINDS = Object.keys(KIND_META);
+const SECTOR_DEG = 360 / KINDS.length;   // radar sector width (adapts to kind count)
 const WINDOWS = [['24h', '24h'], ['3d', '3 days'], ['7d', '7 days'], ['14d', '14 days']];
 const WINDOW_MS = { '24h': 864e5, '3d': 3 * 864e5, '7d': 7 * 864e5, '14d': 14 * 864e5 };
 
@@ -38,8 +41,8 @@ const hash = (n) => { let x = Number(n) || 1; x = ((x >> 16) ^ x) * 0x45d9f3b; x
 
 function blipXY(sig, windowKey) {
   const meta = KIND_META[sig.kind] || KIND_META.news_event;
-  const sectorStart = meta.sector * 72;
-  const angle = (sectorStart + 8 + (hash(sig.id) % 56)) * Math.PI / 180;
+  const sectorStart = meta.sector * SECTOR_DEG;
+  const angle = (sectorStart + 8 + (hash(sig.id) % Math.max(8, SECTOR_DEG - 16))) * Math.PI / 180;
   const age = Math.min(1, Math.max(0, (Date.now() - new Date(sig.occurred_at).getTime()) / WINDOW_MS[windowKey]));
   const r = R_MIN + age * (R_MAX - R_MIN - 8);
   return { x: C + r * Math.cos(angle - Math.PI / 2), y: C + r * Math.sin(angle - Math.PI / 2) };
@@ -151,11 +154,11 @@ export function SignalsTab() {
             ${[0.25, 0.5, 0.75].map((f) => html`<circle key=${f} cx=${C} cy=${C} r=${R_MIN + f * (R_MAX - R_MIN)} fill="none" stroke="var(--border, #323a54)" stroke-opacity="0.55" stroke-dasharray="3 5" />`)}
             <circle cx=${C} cy=${C} r=${R_MIN} fill="none" stroke="var(--border, #323a54)" stroke-opacity="0.7" />
             ${KINDS.map((k) => {
-              const a = (KIND_META[k].sector * 72 - 90) * Math.PI / 180;
+              const a = (KIND_META[k].sector * SECTOR_DEG - 90) * Math.PI / 180;
               return html`<line key=${k} x1=${C + R_MIN * Math.cos(a)} y1=${C + R_MIN * Math.sin(a)} x2=${C + R_MAX * Math.cos(a)} y2=${C + R_MAX * Math.sin(a)} stroke="var(--border, #323a54)" stroke-opacity="0.4" />`;
             })}
             ${KINDS.map((k) => {
-              const mid = (KIND_META[k].sector * 72 + 36 - 90) * Math.PI / 180;
+              const mid = (KIND_META[k].sector * SECTOR_DEG + SECTOR_DEG / 2 - 90) * Math.PI / 180;
               const lr = R_MAX + 14;
               return html`<text key=${'lbl' + k} x=${C + lr * Math.cos(mid)} y=${C + lr * Math.sin(mid) + 3}
                 text-anchor="middle" font-size="9" fill=${KIND_META[k].color} opacity="0.9">${KIND_META[k].label.toUpperCase()}</text>`;
@@ -175,7 +178,7 @@ export function SignalsTab() {
               // Val 2026-07-04: a blip lights up as the rotating sweep crosses its
               // angle, then fades — reappearing on the next rotation. The sweep is
               // 7s/rev and starts at +x, so the cross time = (angle/360)*7s.
-              const thetaDeg = meta.sector * 72 + 8 + (hash(s.id) % 56);
+              const thetaDeg = meta.sector * SECTOR_DEG + 8 + (hash(s.id) % Math.max(8, SECTOR_DEG - 16));
               const begin = ((thetaDeg / 360) * 7).toFixed(2) + 's';
               return html`
                 <g key=${s.id} onClick=${() => pick(s.id)} style=${{ cursor: 'pointer' }}>

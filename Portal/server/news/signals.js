@@ -14,7 +14,7 @@ import { query } from '../db.js';
 const state = { last_run_at: null, last_error: null, inserted_last: 0, runs: 0 };
 export function getSignalsState() { return { ...state }; }
 
-const LOOKBACK_HOURS = { hiring: 48, newly_licensed: 72, partnership: 72, leadership: 72, news_event: 48, expansion: 336 };
+const LOOKBACK_HOURS = { hiring: 48, newly_licensed: 72, partnership: 72, leadership: 72, news_event: 48, expansion: 336, tender: 720 };
 
 export async function generateSignals() {
   let inserted = 0;
@@ -25,6 +25,7 @@ export async function generateSignals() {
     inserted += await genLeadership();
     inserted += await genNewsEvents();
     inserted += await genExpansion();
+    inserted += await genTenderSignals();
     state.last_error = null;
   } catch (err) {
     state.last_error = err.message;
@@ -177,6 +178,31 @@ async function genExpansion() {
   return r.rowCount || 0;
 }
 
+// tender — an AWARD linked to a Bell company is the strongest owned buyer-intent
+// / active-vendor signal there is. Importance scales with contract value. Feeds
+// tenders come from server/tenders/ingest.js (Monaqasat/Ashghal/QatarEnergy/…).
+async function genTenderSignals() {
+  const r = await query(`
+    INSERT INTO signals (kind, subkind, company_id, company_name, title, body, source_kind, ref_table, ref_id,
+                         industry, employee_count, importance, occurred_at, dedup_key)
+    SELECT 'tender', t.status, c.id, c.name,
+           CASE WHEN t.status = 'awarded' THEN c.name || ' won a tender — ' || t.title
+                ELSE 'Tender activity — ' || t.title END,
+           NULLIF(concat_ws(' · ', t.buyer,
+             CASE WHEN t.value_amount IS NOT NULL THEN round(t.value_amount)::text || ' ' || COALESCE(t.currency, 'QAR') END), ''),
+           'tenders', 'tenders', t.id,
+           c.industry, c.employee_count,
+           LEAST(0.75 + COALESCE(LEAST(t.value_amount, 50000000), 0) / 50000000.0 * 0.2, 0.97),
+           COALESCE(t.awarded_at, t.published_at, t.created_at),
+           'tender:' || t.id
+      FROM tenders t JOIN companies c ON c.id = t.award_company_id
+     WHERE t.award_company_id IS NOT NULL
+       AND t.status <> 'cancelled'
+       AND COALESCE(t.awarded_at, t.published_at, t.created_at) > now() - interval '${LOOKBACK_HOURS.tender} hours'
+    ON CONFLICT (dedup_key) DO NOTHING`);
+  return r.rowCount || 0;
+}
+
 // ── ICP scoring (pure — used by /api/signals scope=icp) ─────────────────────
 // icp = { target_industries: [], target_keywords: [], target_sizes: [] }
 // Returns { score: 0..1, reasons: [] } — score 0 means "not a match".
@@ -219,7 +245,8 @@ export function scoreSignalForIcp(signal, icp = {}) {
 // several DISTINCT kinds, then lifted when the company matches the tenant ICP.
 // Pure + unit-testable; the /api/signals/in-market route feeds it grouped rows.
 const INTENT_WEIGHT = {
-  expansion: 30,       // scaling fast — strongest owned intent
+  tender: 34,          // won/active on a public tender — the strongest owned intent
+  expansion: 30,       // scaling fast
   hiring: 22,          // actively hiring — budget + growth
   leadership: 18,      // new decision-maker — a window to engage
   partnership: 14,     // doing deals — active in market
@@ -227,7 +254,7 @@ const INTENT_WEIGHT = {
   news_event: 8,       // in the news — context
 };
 const KIND_LABEL = {
-  expansion: 'scaling fast', hiring: 'actively hiring', leadership: 'new leadership',
+  tender: 'winning tenders', expansion: 'scaling fast', hiring: 'actively hiring', leadership: 'new leadership',
   partnership: 'new partnerships', newly_licensed: 'newly licensed', news_event: 'in the news',
 };
 function recencyMult(occurredAt, now = Date.now()) {

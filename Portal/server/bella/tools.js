@@ -17,6 +17,7 @@ import peopleRouter    from '../routes/people.js';
 import jobsRouter      from '../routes/jobs.js';
 import feedRouter      from '../routes/feed.js';
 import signalsRouter   from '../routes/signals.js';
+import tendersRouter   from '../routes/tenders.js';
 import creditsRouter   from '../routes/credits.js';
 import icpRouter       from '../routes/icp.js';
 import statsRouter     from '../routes/stats.js';
@@ -302,7 +303,7 @@ export const TOOLS = [
         type: 'object',
         properties: {
           window: { type: 'string', description: '24h | 3d | 7d | 14d (default 7d).' },
-          kind:   { type: 'string', description: 'hiring | expansion | newly_licensed | partnership | leadership | news_event' },
+          kind:   { type: 'string', description: 'tender | hiring | expansion | newly_licensed | partnership | leadership | news_event' },
           scope:  { type: 'string', description: 'global (default) or icp.' },
           limit:  { type: 'integer', description: '1–20 (default 10).' },
         },
@@ -337,6 +338,27 @@ export const TOOLS = [
       };
     },
     summarize: (args, r) => `${(r?.companies || []).length} in-market companies`,
+  },
+
+  {
+    definition: {
+      name: 'get_tenders',
+      description: 'Recent Qatar public tenders and awards (Monaqasat, Ashghal, QatarEnergy, Kahramaa, QSE). An AWARD to a company is a strong buyer-intent / active-vendor signal you can act on. Filter by status (open | awarded).',
+      input_schema: {
+        type: 'object',
+        properties: {
+          status: { type: 'string', description: 'open | awarded' },
+          limit:  { type: 'integer', description: '1-25 (default 10).' },
+        },
+      },
+    },
+    async execute(args, ctx) {
+      const { payload } = await internalCall(tendersRouter, 'GET', '/', ctx, {
+        query: { status: args.status, limit: Math.min(Math.max(Number(args.limit) || 10, 1), 25) },
+      });
+      return { tenders: (payload?.rows || []).map((r) => pick(r, ['id', 'title', 'buyer', 'status', 'award_company_name', 'award_company_id', 'value_amount', 'currency', 'published_at', 'awarded_at', 'url'])) };
+    },
+    summarize: (args, r) => `${(r?.tenders || []).length} tenders${args.status ? ' (' + args.status + ')' : ''}`,
   },
 
   {
