@@ -199,15 +199,14 @@ async function processPerson(client, jobId, p, targetCompanyId = null) {
   p.role_at_target = clean(p.relation) || clean(p.role_at_target);
 
   const linkedinUrl = clean(p.linkedin_url);
-  // people.linkedin_url is UNIQUE NOT NULL — without it we cannot insert.
-  if (!linkedinUrl) {
-    return audit(client, jobId, 'person', null, 'skipped',
-      { full_name: fullName, title: clean(p.title), company_name: clean(p.company_name) },
-      'no linkedin_url; cannot ingest (schema requires it)');
-  }
 
-  // Match by linkedin_url (the canonical key)
-  const existing = await client.query(`SELECT id, extra_fields FROM people WHERE linkedin_url = $1`, [linkedinUrl]);
+  // Val 2026-07-04: add discovered people even WITHOUT a LinkedIn URL (migration
+  // 032 made people.linkedin_url nullable; enrichment fills the profile later).
+  // Match by linkedin_url when we have one, otherwise by normalized name among
+  // the no-linkedin cohort so re-runs don't duplicate the same person.
+  const existing = linkedinUrl
+    ? await client.query(`SELECT id, extra_fields FROM people WHERE linkedin_url = $1`, [linkedinUrl])
+    : await client.query(`SELECT id, extra_fields FROM people WHERE linkedin_url IS NULL AND lower(full_name) = lower($1) LIMIT 1`, [fullName]);
   if (existing.rows.length) {
     const row = existing.rows[0];
     const newExtras = {
@@ -239,7 +238,7 @@ async function processPerson(client, jobId, p, targetCompanyId = null) {
     `, [
       fullName,
       clean(p.title),
-      linkedinUrl,
+      linkedinUrl || null,
       JSON.stringify({
         seed_source: 'research',
         seed_job_id: jobId,
