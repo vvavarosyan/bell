@@ -61,7 +61,9 @@ export async function releaseResearchToFeed(jobId) {
   const j = jr.rows[0];
 
   if (j.status !== 'ready') return { id: jobId, released: false, reason: 'not_ready' };
-  if (j.feed_released_at)   return { id: jobId, released: false, reason: 'already_released' };
+  // No "already_released" short-circuit: every write below is idempotent (the
+  // feed INSERT is ON CONFLICT DO NOTHING), so re-running SELF-HEALS a report
+  // that is published but somehow lost its feed row (Val 2026-07-04).
   if (PRIVATE_RESEARCH_TYPES.has(String(j.type).toLowerCase()))
     return { id: jobId, released: false, reason: 'type_private' };
   const sections = Array.isArray(j.sections) ? j.sections : [];
@@ -146,9 +148,11 @@ export async function emitResearchEvents() {
       FROM research_jobs j
       JOIN research_reports r ON r.job_id = j.id
      WHERE j.status = 'ready'
-       AND j.feed_released_at IS NULL
        AND NOT (lower(j.type) = ANY($1::text[]))
        AND jsonb_array_length(COALESCE(r.sections, '[]'::jsonb)) > 0
+       AND NOT EXISTS (
+         SELECT 1 FROM feed_events fe
+          WHERE fe.kind = 'research' AND fe.ref_table = 'research_reports' AND fe.ref_id = r.id)
      ORDER BY j.ready_at
      LIMIT 200
   `, [[...PRIVATE_RESEARCH_TYPES]]);
