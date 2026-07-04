@@ -265,6 +265,31 @@ export function BellaWidget() {
     } catch { resolve(); }
   });
 
+  // Play a TTS clip via the Web Audio API. THIS is the real marketing-voice fix
+  // (Val 2026-07-04, confirmed live on bell.qa): the site's <audio> element never
+  // loads a blob/data URL — readyState stays 0, so `new Audio(url).play()` hangs
+  // forever and Bella is silent. AudioContext decode+playback is unaffected and
+  // works here (proven), so we decode the mp3 and play it through a BufferSource.
+  const playViaWebAudio = (arrayBuffer: ArrayBuffer) => new Promise<void>((resolve, reject) => {
+    (async () => {
+      try {
+        const AC = (window as any).AudioContext || (window as any).webkitAudioContext;
+        if (!AC) return reject(new Error('no AudioContext'));
+        const ctx = new AC();
+        try { if (ctx.state === 'suspended') await ctx.resume(); } catch { /* ignore */ }
+        const decoded = await ctx.decodeAudioData(arrayBuffer.slice(0));
+        const src = ctx.createBufferSource();
+        src.buffer = decoded;
+        src.connect(ctx.destination);
+        let done = false;
+        const finish = () => { if (done) return; done = true; try { ctx.close(); } catch { /* ignore */ } resolve(); };
+        src.onended = finish;
+        stopAudioRef.current = () => { try { src.stop(); } catch { /* ignore */ } finish(); };
+        src.start(0);
+      } catch (e) { reject(e); }
+    })();
+  });
+
   const speak = async (text: string) => {
     const clean = (text || '').replace(CHOICES_RX, '').trim();
     if (!clean || !voiceOnRef.current) { if (voiceOnRef.current) setVState('listening'); return; }
@@ -280,25 +305,16 @@ export function BellaWidget() {
           method: 'POST', headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ text: clean.slice(0, 600) }),
         }).catch(() => null);
-        const blob = r && r.ok ? await r.blob().catch(() => null) : null;
-        if (blob && blob.size > 200) {
-          const url = URL.createObjectURL(blob);
-          await new Promise<void>((resolve) => {
-            const a = new Audio(url);
-            audioRef.current = a;
-            stopAudioRef.current = () => { try { a.pause(); } catch { /* ignore */ } resolve(); };
-            a.onended = () => resolve();
-            a.onerror = () => resolve();
-            a.play().catch(() => resolve());
-          });
-          audioRef.current = null;
-          stopAudioRef.current = null;
-          URL.revokeObjectURL(url);
+        const arr = r && r.ok ? await r.arrayBuffer().catch(() => null) : null;
+        if (arr && arr.byteLength > 200) {
+          // Web Audio playback (NOT <audio> — see playViaWebAudio). If it fails
+          // for any reason, drop to the browser voice so she's never silent.
+          await playViaWebAudio(arr).catch(async () => { await browserSpeak(clean); });
         } else {
-          // ElevenLabs unavailable (no key / quota / rate) → speak with the browser voice.
+          // ElevenLabs unavailable (no key / quota / rate) → browser voice.
           await browserSpeak(clean);
-          stopAudioRef.current = null;
         }
+        stopAudioRef.current = null;
       } catch { try { await browserSpeak(clean); } catch { /* ignore */ } stopAudioRef.current = null; }
     }
     if (aliveRef.current && voiceOnRef.current && vStateRef.current === 'speaking') { setVLine(''); setVState('listening'); }
