@@ -30,6 +30,7 @@ const TOOL_LABELS = {
   get_news: 'Reading the news',
   get_signals: 'Checking signals',
   get_in_market_companies: 'Finding in-market companies',
+  get_tenders: 'Checking tenders',
   get_data_stats: 'Reading data stats',
   get_credits: 'Checking credits',
   get_icp: 'Reading your ICP',

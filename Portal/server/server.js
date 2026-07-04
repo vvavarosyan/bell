@@ -42,6 +42,7 @@ import { startScheduler as startOpenDataScheduler } from './sources/qatar_open_d
 import { startNewsEngine, getNewsState } from './news/engine.js';
 import publicNewsRouter        from './routes/public_news.js';
 import signalsRouter           from './routes/signals.js';
+import tendersRouter           from './routes/tenders.js';
 import whatsappRouter          from './routes/whatsapp.js';
 import whatsappWebhookRouter   from './routes/whatsapp_webhook.js';
 import bellaRouter             from './routes/bella.js';
@@ -177,6 +178,7 @@ app.use('/api/research',   ...feature, researchRouter);
 app.use('/api/open-data',  ...feature, openDataRouter);
 app.use('/api/feed',       ...feature, feedRouter);
 app.use('/api/signals',    ...feature, signalsRouter);
+app.use('/api/tenders',    ...feature, tendersRouter);
 app.use('/api/whatsapp',   ...feature, whatsappRouter);
 app.use('/api/bella',      ...feature, bellaRouter);
 app.use('/api/crm',        ...feature, crmRouter);

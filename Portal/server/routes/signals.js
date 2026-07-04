@@ -9,7 +9,7 @@ import { scoreSignalForIcp, computeInMarketScore } from '../news/signals.js';
 
 const router = Router();
 
-const KINDS = new Set(['hiring', 'newly_licensed', 'partnership', 'leadership', 'news_event', 'expansion']);
+const KINDS = new Set(['hiring', 'newly_licensed', 'partnership', 'leadership', 'news_event', 'expansion', 'tender']);
 const WINDOWS = { '24h': '24 hours', '3d': '3 days', '7d': '7 days', '14d': '14 days' };
 
 // GET /api/signals?window=7d&kind=&scope=global|icp&limit=120
