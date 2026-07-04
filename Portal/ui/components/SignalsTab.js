@@ -124,8 +124,8 @@ export function SignalsTab() {
 
       <div style=${{ display: 'flex', gap: '20px', alignItems: 'flex-start', flexWrap: 'wrap' }}>
 
-        <!-- RADAR -->
-        <div style=${{ flex: '0 1 460px', minWidth: '320px', border: '1px solid var(--border)', borderRadius: '14px', background: 'var(--bg-elev)', padding: '16px' }}>
+        <!-- RADAR (right sidebar, compact) -->
+        <div style=${{ order: 2, flex: '0 0 300px', minWidth: '250px', position: 'sticky', top: '4px', border: '1px solid var(--border)', borderRadius: '14px', background: 'var(--bg-elev)', padding: '14px' }}>
           <svg viewBox=${`0 0 ${S} ${S}`} style=${{ width: '100%', height: 'auto', display: 'block' }} role="img" aria-label="Signals radar">
             <defs>
               <linearGradient id="bdiSweep" x1="0" y1="0" x2="1" y2="0">
@@ -158,11 +158,17 @@ export function SignalsTab() {
               const { x, y } = blipXY(s, windowKey);
               const meta = KIND_META[s.kind] || KIND_META.news_event;
               const sel = selectedId === s.id;
+              // Val 2026-07-04: a blip lights up as the rotating sweep crosses its
+              // angle, then fades — reappearing on the next rotation. The sweep is
+              // 7s/rev and starts at +x, so the cross time = (angle/360)*7s.
+              const thetaDeg = meta.sector * 72 + 8 + (hash(s.id) % 56);
+              const begin = ((thetaDeg / 360) * 7).toFixed(2) + 's';
               return html`
                 <g key=${s.id} onClick=${() => pick(s.id)} style=${{ cursor: 'pointer' }}>
                   ${sel ? html`<circle cx=${x} cy=${y} r="9" fill="none" stroke=${meta.color} stroke-width="1.4" />` : null}
-                  <circle cx=${x} cy=${y} r="4" fill=${meta.color}>
-                    <animate attributeName="opacity" values="1;0.35;1" dur=${(2 + (hash(s.id) % 20) / 10) + 's'} repeatCount="indefinite" />
+                  <circle cx=${x} cy=${y} r="4" fill=${meta.color} opacity="0">
+                    <animate attributeName="opacity" begin=${begin} dur="7s" values="1;0.9;0.12;0" keyTimes="0;0.12;0.55;1" repeatCount="indefinite" />
+                    <animate attributeName="r" begin=${begin} dur="7s" values="6.5;4;3.5;3.5" keyTimes="0;0.12;0.55;1" repeatCount="indefinite" />
                   </circle>
                 </g>`;
             })}
@@ -178,8 +184,8 @@ export function SignalsTab() {
           </div>
         </div>
 
-        <!-- STREAM -->
-        <div style=${{ flex: '1 1 380px', minWidth: '320px' }}>
+        <!-- STREAM (left, primary) -->
+        <div style=${{ order: 1, flex: '1 1 380px', minWidth: '300px' }}>
           ${loading ? html`<div class="empty">Loading signals…</div>` :
             rows.length === 0 ? html`<div class="empty">${scope === 'icp' ? 'No signals match your ICP in this window yet — widen the window or adjust your profile.' : 'No signals in this window yet.'}</div>` :
             rows.map((s) => {

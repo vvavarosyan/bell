@@ -35,10 +35,12 @@ export async function generateMetadata({ params }: { params: { slug: string } })
  * bullets, numbered lists, bold, links, citations, paragraphs. Everything
  * renders as React text nodes / anchors (auto-escaped) — no raw HTML ever.
  */
-function Inline({ text }: { text: string }) {
+type Src = { url: string; label?: string | null };
+
+function Inline({ text, sources }: { text: string; sources?: Src[] }) {
   const nodes: JSX.Element[] = [];
-  // [[1]](url) citation markers OR standard [text](url) links.
-  const rx = /\[\[(\d+)\]\]\(([^)\s]+)\)|\[([^\]]+)\]\(([^)\s]+)\)/g;
+  // [[n]](url) citation · [text](url) link · bare [n] → sources[n-1].url
+  const rx = /\[\[(\d+)\]\]\(([^)\s]+)\)|\[([^\]]+)\]\(([^)\s]+)\)|\[(\d{1,3})\](?!\()/g;
   let last = 0, key = 0;
   let m: RegExpExecArray | null;
   const pushText = (s: string) => {
@@ -50,26 +52,32 @@ function Inline({ text }: { text: string }) {
         : <span key={`t${key++}`}>{p}</span>);
     });
   };
+  const cite = (label: string, href: string) => nodes.push(
+    <a key={`c${key++}`} href={href} target="_blank" rel="noopener noreferrer nofollow"
+      className="mx-0.5 align-super text-[11px] font-semibold text-accent-bright no-underline hover:underline">{label}</a>
+  );
   while ((m = rx.exec(text || '')) !== null) {
     pushText((text || '').slice(last, m.index));
-    const isCite = m[1] !== undefined;
-    const label = isCite ? `[${m[1]}]` : m[3];
-    const href = isCite ? m[2] : m[4];
-    nodes.push(
-      <a key={`l${key++}`} href={href} target="_blank" rel="noopener noreferrer nofollow"
-        className={isCite
-          ? 'mx-0.5 align-super text-[11px] font-semibold text-accent-bright no-underline hover:underline'
-          : 'text-accent-bright underline decoration-accent/40 underline-offset-2 hover:decoration-accent'}>
-        {label}
-      </a>
-    );
+    if (m[1] !== undefined) {
+      cite(`[${m[1]}]`, m[2]);                               // [[n]](url)
+    } else if (m[3] !== undefined) {
+      nodes.push(                                            // [text](url)
+        <a key={`l${key++}`} href={m[4]} target="_blank" rel="noopener noreferrer nofollow"
+          className="text-accent-bright underline decoration-accent/40 underline-offset-2 hover:decoration-accent">{m[3]}</a>
+      );
+    } else {                                                 // bare [n] → sources[n-1]
+      const n = Number(m[5]);
+      const src = sources && sources[n - 1];
+      if (src && src.url) cite(`[${n}]`, src.url);
+      else pushText(`[${n}]`);
+    }
     last = m.index + m[0].length;
   }
   pushText((text || '').slice(last));
   return <>{nodes}</>;
 }
 
-function Markdown({ text }: { text: string }) {
+function Markdown({ text, sources }: { text: string; sources?: Src[] }) {
   const blocks: JSX.Element[] = [];
   const lines = String(text || '').split('\n');
   let list: { ordered: boolean; items: string[] } | null = null;
@@ -78,7 +86,7 @@ function Markdown({ text }: { text: string }) {
 
   const flushPara = () => {
     if (para.length) {
-      blocks.push(<p key={key++} className="text-[15px] leading-relaxed text-text-muted mb-4"><Inline text={para.join(' ')} /></p>);
+      blocks.push(<p key={key++} className="text-[15px] leading-relaxed text-text-muted mb-4"><Inline text={para.join(' ')} sources={sources} /></p>);
       para = [];
     }
   };
@@ -87,7 +95,7 @@ function Markdown({ text }: { text: string }) {
       const cls = 'pl-6 mb-4 space-y-2 ' + (list.ordered ? 'list-decimal' : 'list-disc');
       blocks.push(
         <ul key={key++} className={cls}>
-          {list.items.map((it, i) => <li key={i} className="text-[15px] leading-relaxed text-text-muted"><Inline text={it} /></li>)}
+          {list.items.map((it, i) => <li key={i} className="text-[15px] leading-relaxed text-text-muted"><Inline text={it} sources={sources} /></li>)}
         </ul>
       );
       list = null;
@@ -103,7 +111,7 @@ function Markdown({ text }: { text: string }) {
     if (!t) { flushPara(); flushList(); continue; }
     if (h) {
       flushPara(); flushList();
-      blocks.push(<h3 key={key++} className="text-lg font-semibold text-text mt-8 mb-3"><Inline text={h[2]} /></h3>);
+      blocks.push(<h3 key={key++} className="text-lg font-semibold text-text mt-8 mb-3"><Inline text={h[2]} sources={sources} /></h3>);
     } else if (bullet) {
       flushPara();
       if (!list || list.ordered) { flushList(); list = { ordered: false, items: [] }; }
@@ -135,13 +143,22 @@ export default async function ResearchReportPage({ params }: { params: { slug: s
     description: item.summary || undefined,
     datePublished: item.published_at || undefined,
     author: { '@type': 'Organization', name: 'Bell Data Intelligence', url: 'https://bell.qa' },
-    publisher: { '@type': 'Organization', name: 'Bell Data Intelligence', url: 'https://bell.qa' },
+    publisher: { '@id': 'https://bell.qa/#organization' },
     mainEntityOfPage: `https://bell.qa/research/${item.public_slug}`,
+  };
+  const breadcrumb = {
+    '@context': 'https://schema.org',
+    '@type': 'BreadcrumbList',
+    itemListElement: [
+      { '@type': 'ListItem', position: 1, name: 'Research', item: 'https://bell.qa/research' },
+      { '@type': 'ListItem', position: 2, name: item.title, item: `https://bell.qa/research/${item.public_slug}` },
+    ],
   };
 
   return (
     <div className="relative">
       <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(jsonLd) }} />
+      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(breadcrumb) }} />
 
       <section className="relative pt-28 pb-10">
         <div className="max-w-screen-xl mx-auto px-6">
@@ -166,7 +183,7 @@ export default async function ResearchReportPage({ params }: { params: { slug: s
             {sections.map((s, i) => (
               <div key={i} className="mb-2">
                 {s.title && <h2 className="text-xl md:text-2xl font-semibold text-text mt-10 mb-4">{s.title}</h2>}
-                <Markdown text={s.body_markdown || ''} />
+                <Markdown text={s.body_markdown || ''} sources={item.sources} />
               </div>
             ))}
             <div className="mt-12 rounded-xl border border-border bg-bg-elev p-5 text-xs text-text-dim leading-relaxed">

@@ -59,7 +59,7 @@ router.get('/:slug', async (req, res, next) => {
     const slug = String(req.params.slug || '').slice(0, 120);
     const r = await query(`
       SELECT r.id, r.title, r.summary, r.sections, r.public_slug, r.published_at,
-             j.type, j.target_label
+             j.id AS job_id, j.type, j.target_label
         FROM research_reports r
         JOIN research_jobs j ON j.id = r.job_id
        WHERE r.is_published = true AND r.public_slug = $1
@@ -67,6 +67,12 @@ router.get('/:slug', async (req, res, next) => {
     `, [slug]);
     if (!r.rows.length) return res.status(404).json({ error: 'not_found' });
     const item = r.rows[0];
+    // Citation sources — 1-indexed to match [1],[2],[3] markers in the body,
+    // so the marketing renderer can turn each number into a real link.
+    const src = await query(
+      `SELECT url, label FROM research_sources WHERE job_id = $1 ORDER BY id`, [item.job_id]);
+    item.sources = src.rows;
+    delete item.job_id;
     const rel = await query(
       `${SAFE_LIST} AND j.type = $1 AND r.public_slug <> $2 ORDER BY r.published_at DESC NULLS LAST LIMIT 4`,
       [item.type, slug]
