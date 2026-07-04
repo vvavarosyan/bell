@@ -10,6 +10,7 @@
 
 import express from 'express';
 import { runMarketingTurn } from '../bella/marketing.js';
+import { transcribe, ttsStream, voiceConfigured } from '../bella/voice.js';
 
 const router = express.Router();
 
@@ -103,6 +104,86 @@ router.post('/chat', async (req, res) => {
     clearInterval(heartbeat);
     try { res.end(); } catch { /* ignore */ }
   }
+});
+
+// ---------------------------------------------------------------------------
+// Voice for the marketing widget (Val 2026-07-03, revising his earlier D4).
+// Visitors are anonymous, ElevenLabs minutes cost real money, and a public
+// TTS endpoint is a free-audio magnet — so the voice buckets are much
+// tighter than chat: burst 3, one per 15s, 60/day per IP, text ≤ 600 chars.
+// ---------------------------------------------------------------------------
+
+const voiceBuckets = new Map();
+const V_REFILL_MS = 15_000;
+const V_BURST = 3;
+const V_DAILY = 60;
+
+setInterval(() => {
+  const cutoff = Date.now() - 6 * 3600_000;
+  for (const [ip, b] of voiceBuckets) if (b.last < cutoff) voiceBuckets.delete(ip);
+}, 3600_000).unref?.();
+
+export function checkVoiceRate(ip, now = Date.now()) {
+  const day = new Date(now).toISOString().slice(0, 10);
+  let b = voiceBuckets.get(ip);
+  if (!b) { b = { tokens: V_BURST, last: now, day, dayCount: 0 }; voiceBuckets.set(ip, b); }
+  if (b.day !== day) { b.day = day; b.dayCount = 0; }
+  b.tokens = Math.min(V_BURST, b.tokens + (now - b.last) / V_REFILL_MS);
+  b.last = now;
+  if (b.dayCount >= V_DAILY) return { ok: false, reason: 'daily' };
+  if (b.tokens < 1) return { ok: false, reason: 'rate' };
+  b.tokens -= 1;
+  b.dayCount += 1;
+  return { ok: true };
+}
+
+const voiceUnavailable = (res) =>
+  res.status(503).json({ error: 'voice_not_configured', message: 'Voice isn\'t available right now — chat works!' });
+const voiceLimited = (res) =>
+  res.status(429).json({ error: 'rate_limited', message: 'Voice needs a short breather — keep chatting by text meanwhile.' });
+
+// POST /api/public/bella/voice/transcribe — raw audio → text.
+router.post('/voice/transcribe',
+  express.raw({ type: ['audio/*', 'video/*', 'application/octet-stream'], limit: '10mb' }),
+  async (req, res) => {
+    if (!req.body || !req.body.length) return res.status(400).json({ error: 'no_audio' });
+    if (!checkVoiceRate(clientIp(req)).ok) return voiceLimited(res);
+    if (!(await voiceConfigured())) return voiceUnavailable(res);
+    try {
+      res.json(await transcribe(req.body, req.headers['content-type']));
+    } catch (err) {
+      console.error('[bella-mkt] transcribe failed:', err.message);
+      res.status(502).json({ error: 'transcribe_failed', message: 'Couldn\'t hear that — try again.' });
+    }
+  });
+
+// POST /api/public/bella/voice/tts { text ≤600 } → audio/mpeg.
+router.post('/voice/tts', async (req, res) => {
+  const text = String(req.body?.text || '').trim();
+  if (!text) return res.status(400).json({ error: 'text_required' });
+  if (text.length > 600) return res.status(400).json({ error: 'too_long' });
+  if (!checkVoiceRate(clientIp(req)).ok) return voiceLimited(res);
+  if (!(await voiceConfigured())) return voiceUnavailable(res);
+  const abort = new AbortController();
+  res.on('close', () => { if (!res.writableEnded) abort.abort(); });
+  try {
+    const el = await ttsStream(text, abort.signal);
+    res.writeHead(200, { 'Content-Type': 'audio/mpeg', 'Cache-Control': 'no-store' });
+    for await (const chunk of el.body) {
+      if (res.writableEnded) break;
+      res.write(chunk);
+    }
+    res.end();
+  } catch (err) {
+    if (err?.name !== 'AbortError') console.error('[bella-mkt] tts failed:', err.message);
+    if (!res.headersSent) res.status(502).json({ error: 'tts_failed' });
+    else { try { res.end(); } catch { /* ignore */ } }
+  }
+});
+
+// GET /api/public/bella/voice/status
+router.get('/voice/status', async (_req, res) => {
+  res.json({ configured: await voiceConfigured() });
 });
 
 export default router;

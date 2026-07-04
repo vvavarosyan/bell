@@ -306,7 +306,7 @@ export const FOOTER_NAV: { label: string; links: NavLeaf[]; wide?: boolean }[] =
     links: [
       { label: 'Blog',     href: '/blog',     comingSoon: true },
       { label: 'News',     href: '/news' },
-      { label: 'Research', href: '/research', comingSoon: true },
+      { label: 'Research', href: '/research' },
     ],
   },
   {
