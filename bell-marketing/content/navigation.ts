@@ -193,6 +193,12 @@ export const PRIMARY_NAV: NavItem[] = [
             icon:  'newspaper',
             description: 'Qatar business news, summarized daily by Bell.',
           },
+          {
+            label: 'Research',
+            href:  '/research',
+            icon:  'microscope',
+            description: 'Original research on Qatar\'s economy, published by Bell.',
+          },
         ],
       },
       {
@@ -215,6 +221,12 @@ export const PRIMARY_NAV: NavItem[] = [
             href:  '/support',
             icon:  'life-buoy',
             description: 'Get help from the team.',
+          },
+          {
+            label: 'Contact',
+            href:  '/contact',
+            icon:  'inbox',
+            description: 'Reach the Bell.qa team.',
           },
         ],
       },
