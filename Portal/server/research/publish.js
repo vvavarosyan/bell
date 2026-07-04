@@ -67,21 +67,17 @@ export async function releaseResearchToFeed(jobId) {
   const sections = Array.isArray(j.sections) ? j.sections : [];
   if (!sections.length)     return { id: jobId, released: false, reason: 'empty_report' };
 
-  // 1) Publish the report (full report becomes public).
   const slug = j.public_slug || (slugify(j.title) + '-' + j.report_id);
-  await query(`
-    UPDATE research_reports
-       SET is_published = true,
-           public_slug  = COALESCE(public_slug, $2),
-           published_at = COALESCE(published_at, now()),
-           updated_at   = now()
-     WHERE id = $1
-  `, [j.report_id, slug]);
 
-  // 2) Anonymized feed event — NO tenant identity. Full sections + the citation
-  //    sources (1-indexed) in payload so the in-app feed can link [1],[2],….
-  const srcRows = await query(
-    `SELECT url, label FROM research_sources WHERE job_id = $1 ORDER BY id`, [j.id]);
+  // 1) Anonymized feed event FIRST — NO tenant identity. Full sections + the
+  //    citation sources (1-indexed) in payload so the in-app feed can link
+  //    [1],[2],…. Done BEFORE is_published so the two public surfaces (Market
+  //    Feed + bell.qa/research) can never diverge: if this write fails,
+  //    is_published stays false and the producer retries the whole release.
+  //    (Val 2026-07-04: reports were on marketing but missing from the feed.)
+  let srcRows = { rows: [] };
+  try { srcRows = await query(`SELECT url, label FROM research_sources WHERE job_id = $1 ORDER BY id`, [j.id]); }
+  catch (e) { console.error('[research-feed] sources lookup failed (non-fatal):', e.message); }
   const category = TYPE_CATEGORY[j.type] || 'corporate';
   const linked = j.target_company_id ? [Number(j.target_company_id)] : [];
   await query(`
@@ -105,6 +101,17 @@ export async function releaseResearchToFeed(jobId) {
       sources: srcRows.rows,          // 1-indexed citation targets for [N] links
     }),
   ]);
+
+  // 2) Publish the report to bell.qa/research (marketing surface) — AFTER the
+  //    feed event, so the feed and the marketing page stay in lock-step.
+  await query(`
+    UPDATE research_reports
+       SET is_published = true,
+           public_slug  = COALESCE(public_slug, $2),
+           published_at = COALESCE(published_at, now()),
+           updated_at   = now()
+     WHERE id = $1
+  `, [j.report_id, slug]);
 
   // 3) Stamp release so it never double-fires.
   await query(`UPDATE research_jobs SET feed_released_at = now() WHERE id = $1`, [jobId]);

@@ -171,7 +171,7 @@ export default async function ResearchReportPage({ params }: { params: { slug: s
           </div>
           <h1 className="mt-4 text-display-md text-text max-w-4xl">{item.title}</h1>
           {item.summary && (
-            <p className="mt-4 max-w-3xl text-base text-text-muted leading-relaxed">{item.summary}</p>
+            <p className="mt-4 max-w-3xl text-base text-text-muted leading-relaxed"><Inline text={item.summary} sources={item.sources} /></p>
           )}
         </div>
       </section>

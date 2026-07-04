@@ -455,7 +455,7 @@ function ResearchReport({ event, onClose }) {
               background: 'rgba(111,207,151,0.07)',
               borderLeft: '3px solid ' + RESEARCH_TINT, borderRadius: '8px',
               fontSize: '14px', color: 'var(--text)', lineHeight: 1.6,
-            }}>${event.summary}</div>
+            }}>${renderResearchInline(event.summary || '', event.payload?.sources)}</div>
           ` : null}
 
           ${sections.length ? sections.map((sec, i) => html`
