@@ -87,6 +87,57 @@ router.get('/', async (req, res, next) => {
       ? `${new Date(last.occurred_at).toISOString()}__${last.id}`
       : null;
 
+    // Safety net (Val 2026-07-04): a PUBLISHED research report must appear in the
+    // feed even if its feed_events row failed to write. On the FIRST page, pull
+    // published reports straight from research_reports and merge any that aren't
+    // already present (deduped by report id). Computed AFTER next_cursor so it
+    // never disturbs keyset pagination.
+    if ((!kind || kind === 'research') && !afterId && !req.query.cursor) {
+      try {
+        const priv = (process.env.BDI_RESEARCH_PRIVATE_TYPES ?? 'person')
+          .split(',').map((s) => s.trim().toLowerCase()).filter(Boolean);
+        const have = new Set(events.filter((e) => e.kind === 'research').map((e) => Number(e.ref_id)));
+        const rr = await query(`
+          SELECT r.id AS report_id, r.title, r.summary, r.sections, r.public_slug, r.published_at,
+                 j.id AS job_id, j.type AS job_type, j.target_label, j.target_company_id
+            FROM research_reports r
+            JOIN research_jobs j ON j.id = r.job_id
+           WHERE r.is_published = true
+             AND NOT (lower(j.type) = ANY($1::text[]))
+           ORDER BY r.published_at DESC NULLS LAST
+           LIMIT 25
+        `, [priv]);
+        const missing = rr.rows.filter((row) => !have.has(Number(row.report_id)));
+        if (missing.length) {
+          const jobIds = missing.map((m) => Number(m.job_id));
+          const srcRes = await query(
+            `SELECT job_id, url, label FROM research_sources WHERE job_id = ANY($1::bigint[]) ORDER BY id`, [jobIds]);
+          const srcByJob = new Map();
+          for (const s of srcRes.rows) {
+            const k = Number(s.job_id);
+            if (!srcByJob.has(k)) srcByJob.set(k, []);
+            srcByJob.get(k).push({ url: s.url, label: s.label });
+          }
+          const synth = missing.map((row) => ({
+            id: 'r' + row.report_id,
+            kind: 'research', ref_table: 'research_reports', ref_id: Number(row.report_id),
+            title: row.title, summary: row.summary, url: '/research/' + (row.public_slug || ''),
+            image_url: null, category: 'corporate', source_name: 'Bell Research',
+            sentiment: null, importance: 0.7, entities: {},
+            linked_company_ids: row.target_company_id ? [Number(row.target_company_id)] : [],
+            payload: {
+              sections: row.sections, sources: srcByJob.get(Number(row.job_id)) || [],
+              public_slug: row.public_slug, job_type: row.job_type, target_label: row.target_label,
+            },
+            occurred_at: row.published_at,
+          }));
+          await attachCompanies(synth);
+          events.push(...synth);
+          events.sort((a, b) => new Date(b.occurred_at || 0) - new Date(a.occurred_at || 0));
+        }
+      } catch (e) { console.error('[feed] research safety-net failed:', e.message); }
+    }
+
     res.json({ events, next_cursor });
   } catch (err) { next(err); }
 });
