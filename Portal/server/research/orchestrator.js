@@ -42,20 +42,6 @@ export async function runJob(jobId) {
     return { id: jobId, status: job.status, skipped: true, reason: 'not_retriable' };
   }
 
-  // Daily run cap (Val 2026-07-03: Firecrawl gives 5 free agent runs/day —
-  // stay on the free tier by default). Jobs beyond the cap stay QUEUED and
-  // fire automatically after midnight; BDI_RESEARCH_DAILY_RUNS overrides.
-  const DAILY_RUNS = Number(process.env.BDI_RESEARCH_DAILY_RUNS || 5);
-  if (DAILY_RUNS > 0) {
-    const fired = await query(
-      `SELECT count(*)::int AS n FROM research_jobs WHERE started_at >= CURRENT_DATE`
-    );
-    if ((fired.rows[0]?.n || 0) >= DAILY_RUNS) {
-      console.log(`[research] daily agent-run cap reached (${DAILY_RUNS}) — job ${jobId} stays queued`);
-      return { id: jobId, status: job.status, skipped: true, reason: 'daily_cap', cap: DAILY_RUNS };
-    }
-  }
-
   const schema = schemaFor(job.type);
   if (!schema) {
     await failJob(jobId, SAFE_UNAVAIL, `No schema for research type '${job.type}'`);
