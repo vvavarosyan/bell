@@ -350,9 +350,9 @@ function JobDetailDrawer({ jobId, isAdmin, onClose }) {
               ? html`<${ReportViewer} report=${report} sources=${sources} />`
               : (job.status === 'ready' ? html`<${EmptyReportDebug} job=${job} report=${report} onRetry=${() => retryJob(job.id, load)} />` : null)}
 
-            <!-- Publish status (ready jobs). Research auto-publishes for
-                 everyone — anonymized — to Market Feed + bell.qa/research. -->
-            ${job.status === 'ready' ? html`<${FeedReleasePanel} job=${job} />` : null}
+            <!-- Publish status (ready jobs). Admin/local only — users don't need
+                 to see the internal "live in the Market Feed…" note (Val 2026-07-04). -->
+            ${job.status === 'ready' && isAdmin ? html`<${FeedReleasePanel} job=${job} />` : null}
 
             <!-- Snowball: what got fed back into Bell -->
             ${derived.length > 0 ? html`<${DerivedEntitiesPanel} derived=${derived} />` : null}

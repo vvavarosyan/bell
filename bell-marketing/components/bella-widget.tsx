@@ -105,6 +105,8 @@ export function BellaWidget() {
   const stopAudioRef = useRef<(() => void) | null>(null);
   const rafRef = useRef<number | null>(null);
   const busyRef = useRef(false);
+  const recognitionRef = useRef<any>(null);   // browser SpeechRecognition (keyless STT fallback)
+  const browserVoiceRef = useRef(false);       // true while running the keyless browser voice loop
 
   const setVState = (s: VState) => { vStateRef.current = s; setVStateRaw(s); };
 
@@ -232,6 +234,11 @@ export function BellaWidget() {
     if (voice && aliveRef.current) {
       if (reply) await speak(reply);
       else if (vStateRef.current !== 'listening') setVState('listening');
+      // Keyless browser voice: resume listening after her turn.
+      if (browserVoiceRef.current && aliveRef.current && voiceOnRef.current) {
+        setVState('listening');
+        try { recognitionRef.current?.start(); } catch { /* already running */ }
+      }
     }
   };
 
@@ -263,31 +270,37 @@ export function BellaWidget() {
     if (!clean || !voiceOnRef.current) { if (voiceOnRef.current) setVState('listening'); return; }
     setVState('speaking');
     setVLine(clean.slice(0, 120));
-    try {
-      const r = await fetch(`${API}/api/public/bella/voice/tts`, {
-        method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: clean.slice(0, 600) }),
-      }).catch(() => null);
-      const blob = r && r.ok ? await r.blob().catch(() => null) : null;
-      if (blob && blob.size > 200) {
-        const url = URL.createObjectURL(blob);
-        await new Promise<void>((resolve) => {
-          const a = new Audio(url);
-          audioRef.current = a;
-          stopAudioRef.current = () => { try { a.pause(); } catch { /* ignore */ } resolve(); };
-          a.onended = () => resolve();
-          a.onerror = () => resolve();
-          a.play().catch(() => resolve());
-        });
-        audioRef.current = null;
-        stopAudioRef.current = null;
-        URL.revokeObjectURL(url);
-      } else {
-        // ElevenLabs unavailable (no key / quota / rate) → speak with the browser voice.
-        await browserSpeak(clean);
-        stopAudioRef.current = null;
-      }
-    } catch { try { await browserSpeak(clean); } catch { /* ignore */ } stopAudioRef.current = null; }
+    if (browserVoiceRef.current) {
+      // Keyless mode: pause recognition (so she doesn't hear herself), then speak.
+      try { recognitionRef.current?.stop(); } catch { /* ignore */ }
+      await browserSpeak(clean);
+    } else {
+      try {
+        const r = await fetch(`${API}/api/public/bella/voice/tts`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text: clean.slice(0, 600) }),
+        }).catch(() => null);
+        const blob = r && r.ok ? await r.blob().catch(() => null) : null;
+        if (blob && blob.size > 200) {
+          const url = URL.createObjectURL(blob);
+          await new Promise<void>((resolve) => {
+            const a = new Audio(url);
+            audioRef.current = a;
+            stopAudioRef.current = () => { try { a.pause(); } catch { /* ignore */ } resolve(); };
+            a.onended = () => resolve();
+            a.onerror = () => resolve();
+            a.play().catch(() => resolve());
+          });
+          audioRef.current = null;
+          stopAudioRef.current = null;
+          URL.revokeObjectURL(url);
+        } else {
+          // ElevenLabs unavailable (no key / quota / rate) → speak with the browser voice.
+          await browserSpeak(clean);
+          stopAudioRef.current = null;
+        }
+      } catch { try { await browserSpeak(clean); } catch { /* ignore */ } stopAudioRef.current = null; }
+    }
     if (aliveRef.current && voiceOnRef.current && vStateRef.current === 'speaking') { setVLine(''); setVState('listening'); }
   };
 
@@ -313,12 +326,51 @@ export function BellaWidget() {
     }
   };
 
+  // Keyless browser voice loop (Web Speech API) — the fallback when ElevenLabs
+  // is unavailable on the API host. Recognition → respond() → browserSpeak().
+  // Lower fidelity, but never silent and needs no server key.
+  const startBrowserVoice = () => {
+    const SR = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    if (!SR || typeof window.speechSynthesis === 'undefined') {
+      setVState('error'); setVLine('This browser can\'t do voice — chat works!'); return;
+    }
+    browserVoiceRef.current = true;
+    aliveRef.current = true;
+    voiceOnRef.current = true;
+    let rec: any;
+    try { rec = new SR(); } catch { setVState('error'); setVLine('Voice couldn\'t start — chat works!'); return; }
+    rec.lang = 'en-US';
+    rec.continuous = true;
+    rec.interimResults = false;
+    recognitionRef.current = rec;
+    setVState('listening'); setVLine('Listening — just talk');
+    rec.onresult = (e: any) => {
+      const last = e.results?.[e.results.length - 1];
+      const t = String(last?.[0]?.transcript || '').trim();
+      if (t && vStateRef.current === 'listening') { try { rec.stop(); } catch { /* ignore */ } respond(t); }
+    };
+    rec.onerror = () => { /* transient — onend resumes */ };
+    rec.onend = () => {
+      if (aliveRef.current && browserVoiceRef.current && vStateRef.current === 'listening') {
+        try { rec.start(); } catch { /* already running */ }
+      }
+    };
+    try { rec.start(); } catch { /* ignore */ }
+  };
+
   const startVoice = async () => {
-    // Preflight: honest fallback if the deployment has no ElevenLabs key.
+    // Prime the browser speech engine inside this user gesture so playback is
+    // unlocked later (some browsers block speech that isn't gesture-rooted).
+    try { window.speechSynthesis?.getVoices(); window.speechSynthesis?.cancel(); } catch { /* ignore */ }
+
+    // If ElevenLabs isn't configured on the API host, don't go silent — run the
+    // keyless browser voice loop so Bella still listens AND speaks.
+    let elevenOk = true;
     try {
       const s = await fetch(`${API}/api/public/bella/voice/status`).then((r) => r.json()).catch(() => null);
-      if (!s?.configured) { setVState('error'); setVLine('Voice isn\'t available right now — chat works!'); return; }
-    } catch { /* proceed; the mic step will report if truly broken */ }
+      elevenOk = !!s?.configured;
+    } catch { elevenOk = true; /* status unreachable — try the real pipeline */ }
+    if (!elevenOk) { startBrowserVoice(); return; }
 
     const mime = pickMime();
     if (mime === null || !navigator.mediaDevices?.getUserMedia) {
@@ -426,6 +478,10 @@ export function BellaWidget() {
   function stopVoice() {
     aliveRef.current = false;
     voiceOnRef.current = false;
+    browserVoiceRef.current = false;
+    try { recognitionRef.current?.stop(); } catch { /* ignore */ }
+    recognitionRef.current = null;
+    try { window.speechSynthesis?.cancel(); } catch { /* ignore */ }
     if (rafRef.current) { cancelAnimationFrame(rafRef.current); rafRef.current = null; }
     try { audioRef.current?.pause(); } catch { /* ignore */ }
     stopAudioRef.current = null;
