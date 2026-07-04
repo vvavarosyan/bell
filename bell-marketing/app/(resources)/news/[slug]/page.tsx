@@ -3,7 +3,7 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { getNewsItem, idFromSlug, CATEGORY_META, CATEGORY_CTA, fmtDate, timeAgo, type NewsItem } from '@/lib/news';
 
-export const revalidate = 900;
+export const revalidate = 300;
 
 type Props = { params: { slug: string } };
 
@@ -48,6 +48,7 @@ export default async function NewsArticlePage({ params }: Props) {
   const { item, related } = data;
   const cta = CATEGORY_CTA[item.category] || CATEGORY_CTA.other;
   const companies = (item.entities?.companies || []).slice(0, 8);
+  const bodyParas = (item.body || '').split(/\n+/).map((p) => p.trim()).filter(Boolean);
 
   const jsonld = {
     '@context': 'https://schema.org',
@@ -87,6 +88,15 @@ export default async function NewsArticlePage({ params }: Props) {
             Bell summary
           </div>
           <p className="text-lg text-text-muted leading-relaxed">{item.summary}</p>
+
+          {bodyParas.length > 0 && (
+            <div className="mt-8">
+              <div className="text-[11px] uppercase tracking-wider text-text-dim font-semibold mb-3">The full story</div>
+              <div className="space-y-4 text-[15px] text-text-muted leading-relaxed">
+                {bodyParas.map((para, i) => <p key={i}>{para}</p>)}
+              </div>
+            </div>
+          )}
 
           {companies.length > 0 && (
             <div className="mt-8">
