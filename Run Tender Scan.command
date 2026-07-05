@@ -9,7 +9,12 @@
 #
 # Needs the Crawl4AI engine running (it renders the government site). If nothing
 # comes back, run "Install Crawl4AI Engine.command" or
-# "Restart Crawl4AI Engine.command" first. Takes ~1–2 minutes.
+# "Restart Crawl4AI Engine.command" first.
+#
+# It reads EVERY page and opens EACH tender for full detail (subject, ministry,
+# dates, bond, doc value, activities, contact…), so it takes several minutes —
+# please leave the window open. It prints a sample of what it captured, then
+# publishes to the live site.
 
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"
 SERVER_DIR="$SCRIPT_DIR/Portal/server"
