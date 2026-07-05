@@ -275,16 +275,30 @@ export function BellaWidget() {
   const playViaWebAudio = (arrayBuffer: ArrayBuffer) => new Promise<void>((resolve, reject) => {
     (async () => {
       try {
-        const AC = (window as any).AudioContext || (window as any).webkitAudioContext;
-        if (!AC) return reject(new Error('no AudioContext'));
-        const ctx = new AC();
+        // Reuse the mic's AudioContext while voice is running — it was created on
+        // the user's click (a real gesture) and is already 'running', so playback
+        // is never blocked by autoplay policy. A fresh context created here (many
+        // seconds after the gesture) can stay suspended → silent AND onended never
+        // fires → the promise hangs → she goes mute and the mic loop freezes so it
+        // can't hear the next question. That was the bug (Val 2026-07-04).
+        let ctx: any = (mediaRef.current && mediaRef.current.ctx) || null;
+        let ownCtx = false;
+        if (!ctx) {
+          const AC = (window as any).AudioContext || (window as any).webkitAudioContext;
+          if (!AC) return reject(new Error('no AudioContext'));
+          ctx = new AC(); ownCtx = true;
+        }
         try { if (ctx.state === 'suspended') await ctx.resume(); } catch { /* ignore */ }
         const decoded = await ctx.decodeAudioData(arrayBuffer.slice(0));
         const src = ctx.createBufferSource();
         src.buffer = decoded;
         src.connect(ctx.destination);
         let done = false;
-        const finish = () => { if (done) return; done = true; try { ctx.close(); } catch { /* ignore */ } resolve(); };
+        let timer: any;
+        const finish = () => { if (done) return; done = true; try { clearTimeout(timer); } catch {} if (ownCtx) { try { ctx.close(); } catch {} } resolve(); };
+        // Safety net: resolve when the clip ends OR shortly after its duration, so
+        // a stuck/suspended context can never hang the turn.
+        timer = setTimeout(finish, Math.ceil((decoded.duration || 3) * 1000) + 1500);
         src.onended = finish;
         stopAudioRef.current = () => { try { src.stop(); } catch { /* ignore */ } finish(); };
         src.start(0);
