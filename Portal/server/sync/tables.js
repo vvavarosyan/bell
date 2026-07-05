@@ -71,6 +71,11 @@ export const MIRROR_TABLES = [
   { name: 'company_financials',   watermark: 'updated_at' },
   { name: 'company_shareholders', watermark: 'updated_at' },
   { name: 'company_partnerships', watermark: 'updated_at' },
+  // Qatar public tenders (scraped locally via "Run Tender Scan.command"). Mirror
+  // them to prod so Bella + the in-market score can use them; prod regenerates
+  // the 'tender' signals from these rows. award_company_id is a soft ref (no FK),
+  // so ordering doesn't matter.
+  { name: 'tenders',              watermark: 'updated_at' },
 ];
 
 export const MIRROR_TABLE_NAMES = new Set(MIRROR_TABLES.map((t) => t.name));
