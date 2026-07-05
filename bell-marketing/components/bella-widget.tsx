@@ -227,15 +227,17 @@ export function BellaWidget() {
   };
 
   // User-initiated send: while voice is active, the reply is also spoken.
+  // "voice active" = the ref OR the visible state (they can briefly desync; if
+  // the UI shows voice on, she must speak — that's the whole point).
   const respond = async (textArg?: string) => {
-    const voice = voiceOnRef.current;
+    const voice = voiceOnRef.current || vStateRef.current !== 'idle';
     if (voice) setVState('thinking');
     const reply = await send(textArg, voice);
-    if (voice && aliveRef.current) {
+    if (voice) {
       if (reply) await speak(reply);
       else if (vStateRef.current !== 'listening') setVState('listening');
       // Keyless browser voice: resume listening after her turn.
-      if (browserVoiceRef.current && aliveRef.current && voiceOnRef.current) {
+      if (browserVoiceRef.current && voiceOnRef.current) {
         setVState('listening');
         try { recognitionRef.current?.start(); } catch { /* already running */ }
       }
@@ -292,7 +294,10 @@ export function BellaWidget() {
 
   const speak = async (text: string) => {
     const clean = (text || '').replace(CHOICES_RX, '').trim();
-    if (!clean || !voiceOnRef.current) { if (voiceOnRef.current) setVState('listening'); return; }
+    // Only bail on empty text. Do NOT gate on voiceOnRef — respond() already
+    // decided to speak, and the ref can desync from the visible voice state;
+    // gating here is what silently swallowed the voice (Val 2026-07-04).
+    if (!clean) { setVState('listening'); return; }
     setVState('speaking');
     setVLine(clean.slice(0, 120));
     if (browserVoiceRef.current) {
@@ -317,7 +322,7 @@ export function BellaWidget() {
         stopAudioRef.current = null;
       } catch { try { await browserSpeak(clean); } catch { /* ignore */ } stopAudioRef.current = null; }
     }
-    if (aliveRef.current && voiceOnRef.current && vStateRef.current === 'speaking') { setVLine(''); setVState('listening'); }
+    if (vStateRef.current === 'speaking') { setVLine(''); setVState('listening'); }
   };
 
   const processUtterance = async (blob: Blob) => {
@@ -455,8 +460,8 @@ export function BellaWidget() {
       // Idle auto-off (Val 2026-07-04): if she's just listening with no speech
       // for VOICE_IDLE_MS, close the mic to save money. Any speech, her own
       // turn (thinking/speaking), or a mid-utterance resets the timer.
-      if (st !== 'listening' || rms > listenTh || speechStart) lastActivity = now;
-      if (st === 'listening' && !speechStart && now - lastActivity > VOICE_IDLE_MS) { stopVoice(); return; }
+      if (st !== 'listening' || rms > listenTh || speechStart || busyRef.current) lastActivity = now;
+      if (st === 'listening' && !speechStart && !busyRef.current && now - lastActivity > VOICE_IDLE_MS) { stopVoice(); return; }
 
       if (st === 'listening') {
         if (rms > listenTh) { lastSpeech = now; if (!speechStart) { speechStart = now; startRec(); } }
