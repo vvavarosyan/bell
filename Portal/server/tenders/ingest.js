@@ -48,10 +48,17 @@ export async function ingestTenders(rows = []) {
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,COALESCE($9,'QAR'),$10,$11,$12,$13,$14)
          ON CONFLICT (source, source_ref) DO UPDATE SET
            title = EXCLUDED.title, buyer = EXCLUDED.buyer, category = EXCLUDED.category,
-           status = EXCLUDED.status, award_company_name = EXCLUDED.award_company_name,
-           value_amount = EXCLUDED.value_amount, url = EXCLUDED.url,
-           deadline_at = EXCLUDED.deadline_at, awarded_at = EXCLUDED.awarded_at,
-           raw = COALESCE(EXCLUDED.raw, tenders.raw), updated_at = now()
+           status = EXCLUDED.status,
+           award_company_name = COALESCE(EXCLUDED.award_company_name, tenders.award_company_name),
+           value_amount = COALESCE(EXCLUDED.value_amount, tenders.value_amount),
+           url = EXCLUDED.url,
+           deadline_at = COALESCE(EXCLUDED.deadline_at, tenders.deadline_at),
+           awarded_at = COALESCE(EXCLUDED.awarded_at, tenders.awarded_at),
+           -- MERGE raw (existing keys preserved) so a later card-only re-ingest
+           -- never wipes detail the enricher already captured (activities,
+           -- contact_email, contract_months). Idempotent + resumable-safe.
+           raw = COALESCE(tenders.raw, '{}'::jsonb) || COALESCE(EXCLUDED.raw, '{}'::jsonb),
+           updated_at = now()
          RETURNING (xmax = 0) AS is_insert`,
         [source.toLowerCase(), clean(r?.source_ref, 120), title, clean(r?.buyer, 200),
          clean(r?.category, 80), status, clean(r?.award_company_name, 200), num(r?.value_amount),

@@ -31,6 +31,7 @@ import { DeepDataTab }   from './components/DeepDataTab.js';
 import { SyncTab }       from './components/SyncTab.js';
 import { MarketFeedTab } from './components/MarketFeedTab.js';
 import { SignalsTab } from './components/SignalsTab.js';
+import { TendersTab } from './components/TendersTab.js';
 import { CrmTab }        from './components/CrmTab.js';
 import { BillingTab }    from './components/BillingTab.js';
 import { AccountTab }    from './components/AccountTab.js';
@@ -69,6 +70,7 @@ class ViewErrorBoundary extends Component {
 const VIEWS = {
   'market-feed': { Component: MarketFeedTab },
   'signals':     { Component: SignalsTab },
+  'tenders':     { Component: TendersTab },
   'crm':         { Component: CrmTab },
   'companies':   { Component: CompaniesTab },
   'people':      { Component: PeopleTab },
@@ -105,6 +107,7 @@ const LABELS = {
   'billing': 'Billing', 'account': 'Settings',
   'market-feed': 'Market Feed',
   'signals': 'Signals',
+  'tenders': 'Tenders',
   'map': 'Map',
   'dedup-queue': 'Dedup Queue',
   'recent-jobs': 'Recent Jobs',

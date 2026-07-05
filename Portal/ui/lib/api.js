@@ -401,6 +401,12 @@ export const api = {
   signalStats:            () => request('/api/signals/stats'),
   signalsMap:             () => request('/api/signals/map'),
   signalsInMarket:        (q = {}) => request('/api/signals/in-market?' + new URLSearchParams(q)),
+  // ---- Tenders (Qatar public procurement) ----
+  tenders:                (q = {}) => request('/api/tenders?' + new URLSearchParams(q)),
+  tenderStats:            () => request('/api/tenders/stats'),
+  tenderFacets:           () => request('/api/tenders/facets'),
+  tenderSyncStatus:       () => request('/api/tenders/sync-status'),
+  tenderItem:             (id) => request('/api/tenders/' + id),
   companyMapNetwork:      (id) => request(`/api/companies/${id}/map-network`),
   // ---- WhatsApp (CRM) ----
   waConfig:               () => request('/api/whatsapp/config'),

@@ -58,6 +58,7 @@ export function SignalsTab() {
   const [selectedId, setSelectedId] = useState(null);
   const [inMarket, setInMarket] = useState([]);
   const [inMarketIcp, setInMarketIcp] = useState(false);
+  const [openTenders, setOpenTenders] = useState([]);
   const cardRefs = useRef({});
   const scoreColor = (n) => (n >= 60 ? '#6fcf97' : n >= 35 ? '#f5c84c' : '#9ca5b9');
 
@@ -87,6 +88,19 @@ export function SignalsTab() {
       .catch(() => {});
     loadIM();
     const t = setInterval(loadIM, 60_000);
+    return () => { dead = true; clearInterval(t); };
+  }, []);
+
+  // Live Qatar tenders — the open, biddable set, straight from the tenders table
+  // (also its own full section under "Tenders"). Shown here so Signals surfaces
+  // active procurement demand alongside the radar.
+  useEffect(() => {
+    let dead = false;
+    const loadT = () => api.tenders({ status: 'open', limit: 6 })
+      .then((r) => { if (!dead) setOpenTenders(r.rows || []); })
+      .catch(() => {});
+    loadT();
+    const t = setInterval(loadT, 120_000);
     return () => { dead = true; clearInterval(t); };
   }, []);
 
@@ -215,6 +229,20 @@ export function SignalsTab() {
                   </span>
                 </button>`)}
               <div class="muted small" style=${{ marginTop: '6px', textAlign: 'center' }}>buying-intent · tap to open</div>
+            </div>` : null}
+
+          ${openTenders.length ? html`
+            <div style=${{ marginTop: '14px', borderTop: '1px solid var(--border)', paddingTop: '12px' }}>
+              <div style=${{ fontSize: '10.5px', fontWeight: 700, letterSpacing: '.08em', textTransform: 'uppercase', color: '#eab308', marginBottom: '8px' }}>
+                Live Qatar tenders
+              </div>
+              ${openTenders.map((t) => html`
+                <button key=${t.id} onClick=${() => navigateTo('tenders')}
+                  style=${{ width: '100%', textAlign: 'left', background: 'transparent', border: 'none', borderRadius: '8px', padding: '5px 4px', cursor: 'pointer', display: 'block' }}>
+                  <span style=${{ display: 'block', fontSize: '12px', fontWeight: 600, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>${t.title}</span>
+                  <span class="muted small" style=${{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>${t.buyer || '—'}${t.deadline_at ? ' · closes ' + new Date(t.deadline_at).toLocaleDateString() : ''}</span>
+                </button>`)}
+              <button onClick=${() => navigateTo('tenders')} style=${{ marginTop: '6px', width: '100%', textAlign: 'center', background: 'transparent', border: 'none', color: 'var(--accent-bright, #a5c3ff)', fontSize: '11.5px', cursor: 'pointer' }}>All tenders →</button>
             </div>` : null}
         </div>
 
