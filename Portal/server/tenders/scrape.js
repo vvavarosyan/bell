@@ -17,14 +17,17 @@ const SCRAPERS = {
 
 export function tenderSources() { return Object.keys(SCRAPERS); }
 
-export async function runTenderScan({ sources, pages, details } = {}) {
+export async function runTenderScan({ sources, pages, openPages, awardedPages, details, concurrency } = {}) {
   const keys = (Array.isArray(sources) && sources.length ? sources : Object.keys(SCRAPERS)).filter((k) => SCRAPERS[k]);
   const result = { ran: keys, sources: {}, sample: null, total: { scraped: 0, inserted: 0, updated: 0, linked: 0 } };
   for (const k of keys) {
     try {
       const opts = {};
       if (pages !== undefined) opts.pages = pages;
+      if (openPages !== undefined) opts.openPages = openPages;
+      if (awardedPages !== undefined) opts.awardedPages = awardedPages;
       if (details !== undefined) opts.details = details;
+      if (concurrency !== undefined) opts.concurrency = concurrency;
       const rows = await SCRAPERS[k](opts);
       // Keep a small sample so the operator can eyeball what was captured.
       if (!result.sample && rows.length) result.sample = rows.slice(0, 2);

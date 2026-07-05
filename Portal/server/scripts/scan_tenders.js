@@ -7,42 +7,17 @@
 
 import { runTenderScan, tenderSources } from '../tenders/scrape.js';
 import { closeRenderer } from '../enrichment/local/render.js';
-import { query } from '../db.js';
-import { getKey } from '../keychain.js';
-
-// Mirror the local tenders straight to production (app.bell.qa) using the same
-// sync token the data sync uses — so Bella + the Signals in-market score see
-// them without a separate Sync-tab step. Safe to run every scan (small table).
-async function pushTendersToProd() {
-  const token = await getKey('sync-token');
-  if (!token) return { skipped: 'no sync token yet (set it once in the portal Sync tab)' };
-  const s = await query(`SELECT value FROM settings WHERE key = 'sync_target_url'`).catch(() => ({ rows: [] }));
-  const base = String((s.rows[0] && s.rows[0].value) || process.env.BDI_SYNC_TARGET_URL || 'https://app.bell.qa').replace(/\/+$/, '');
-  const rows = (await query(`SELECT * FROM tenders ORDER BY id`)).rows;
-  if (!rows.length) return { pushed: 0 };
-  let pushed = 0;
-  for (let i = 0; i < rows.length; i += 500) {
-    const chunk = rows.slice(i, i + 500);
-    const res = await fetch(base + '/api/sync/ingest', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
-      body: JSON.stringify({ table: 'tenders', mode: 'full', rows: chunk }),
-    });
-    if (!res.ok) { const t = await res.text().catch(() => ''); return { error: 'prod HTTP ' + res.status + ' ' + t.slice(0, 140) }; }
-    const b = await res.json().catch(() => ({}));
-    pushed += b.upserted || 0;
-  }
-  return { pushed, target: base };
-}
+import { pushTendersToProd } from '../tenders/push_prod.js';
 
 (async () => {
   console.log('Bell — Tender Scan');
   console.log('Sources: ' + tenderSources().join(', '));
-  const pages = process.env.BELL_TENDER_PAGES ? Number(process.env.BELL_TENDER_PAGES) : undefined;   // undefined → every page
-  console.log('Pages per source: ' + (pages || 'all') + ' · detail pages: ' + (process.env.BELL_TENDER_DETAILS === '0' ? 'off (card fields only)' : 'on (full detail)'));
-  console.log('(Walking every page and opening each tender for full detail — this can take a few minutes. Please leave the window open.)\n');
+  const awardedPages = process.env.BELL_TENDER_AWARDED_PAGES ? Number(process.env.BELL_TENDER_AWARDED_PAGES) : 15;
+  const details = process.env.BELL_TENDER_DETAILS !== '0';
+  console.log('Scope: every OPEN tender + the ' + awardedPages + ' most-recent AWARDED pages · detail: ' + (details ? 'on (full)' : 'off (cards only)'));
+  console.log('(Recurring/fresh scan — a few minutes. For the FULL awarded history, run "Backfill Full Tender Archive.command".)\n');
   try {
-    const out = await runTenderScan({ pages });
+    const out = await runTenderScan({ openPages: 60, awardedPages, details });
     console.log('Result:');
     for (const [src, r] of Object.entries(out.sources)) {
       if (r.error) console.log('  ' + src + ': ERROR — ' + r.error);

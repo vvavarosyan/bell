@@ -14,6 +14,7 @@ import { query } from '../db.js';
 import { requireAuth, requireRole } from '../lib/auth.js';
 import { applyBatch, applyReset, applyDeletions, collectResearchPull } from '../sync/ingest.js';
 import { runPush, getSyncStatus } from '../sync/push.js';
+import { MIRROR_TABLE_NAMES } from '../sync/tables.js';
 
 const MODE = (process.env.BDI_MODE || 'local-admin').toLowerCase();
 const SYNC_TOKEN = process.env.BDI_SYNC_TOKEN || null;
@@ -94,6 +95,23 @@ router.post('/research-candidates-drain', requireSyncToken, async (req, res, nex
 router.post('/reset', requireSyncToken, async (req, res, next) => {
   try {
     res.json(await applyReset());
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Row count of a mirror table (PRODUCTION). Lets the local engine confirm a
+// push landed — e.g. the Tenders tab's "synced?" indicator compares this to the
+// local count. Token-auth, machine-to-machine. Table name is validated against
+// the mirror whitelist before interpolation (never trust request input in SQL).
+router.get('/count', requireSyncToken, async (req, res, next) => {
+  try {
+    const table = String(req.query.table || '');
+    if (!MIRROR_TABLE_NAMES.has(table)) {
+      return res.status(400).json({ error: 'bad_request', reason: 'unknown_table' });
+    }
+    const r = await query(`SELECT count(*)::int AS n FROM ${table}`);
+    res.json({ table, count: r.rows[0].n });
   } catch (err) {
     next(err);
   }

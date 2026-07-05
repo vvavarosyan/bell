@@ -12,19 +12,38 @@
 // publish/award date, closing date, tender bond, documents value, and the
 // per-tender DETAIL URL. With details on (default), we then open each detail
 // page and add: the ACTIVITIES list (industry codes → company matching), the
-// exact closing date, contract duration, the buyer's tender ref, contact email,
-// and — on awarded tenders — a best-effort winning company name.
+// exact closing date, contract duration, the buyer's tender ref, and contact
+// email. NOTE: Monaqasat does NOT publish the winning supplier on awarded
+// tenders (verified 2026-07-05) — there is no winner field to scrape here.
 
 import { crawl4aiRender } from '../enrichment/local/crawl4ai.js';
 import { renderPage, rendererAvailable } from '../enrichment/local/render.js';
 
-const BASE = 'https://monaqasat.mof.gov.qa';
+export const BASE = 'https://monaqasat.mof.gov.qa';
 const LABELS = 'Publish date|Award date|Closing date|Requested Sector Type|Tender Bond|Documents value|Ministry|Type|Report|Attached';
-const MAX_PAGES = Math.min(Math.max(Number(process.env.BELL_TENDER_MAX_PAGES) || 25, 1), 60);
+const MAX_PAGES = Math.min(Math.max(Number(process.env.BELL_TENDER_MAX_PAGES) || 25, 1), 1500);
 const WITH_DETAILS = process.env.BELL_TENDER_DETAILS !== '0';   // default ON
+const DEFAULT_CONCURRENCY = Math.min(Math.max(Number(process.env.BELL_TENDER_CONCURRENCY) || 6, 1), 12);
+
+// Small promise pool — run `worker` over `items`, at most `concurrency` at a
+// time. Opening tender detail pages in parallel (politely) instead of one at a
+// time is the whole speed lever for the ~23k-page archive backfill.
+export async function mapPool(items, worker, concurrency = DEFAULT_CONCURRENCY) {
+  let i = 0, active = 0;
+  return new Promise((resolve) => {
+    const pump = () => {
+      if (i >= items.length && active === 0) return resolve();
+      while (active < concurrency && i < items.length) {
+        const item = items[i++]; active++;
+        Promise.resolve(worker(item)).catch(() => {}).finally(() => { active--; pump(); });
+      }
+    };
+    pump();
+  });
+}
 
 // ── rendering ───────────────────────────────────────────────────────────────
-async function render(url, timeoutMs = 40_000) {
+export async function render(url, timeoutMs = 40_000) {
   const c = await crawl4aiRender(url, { timeoutMs, waitFor: 1400 }).catch(() => null);
   if (c && c.html && c.html.length > 600) return { html: c.html, text: c.text || htmlToText(c.html) };
   if (await rendererAvailable().catch(() => false)) {
@@ -113,12 +132,14 @@ export function parseListing(page, status) {
 }
 
 // ── detail-page enrichment ───────────────────────────────────────────────────
-/** Open a tender's detail page and enrich the row in place. */
-export async function enrichDetail(row) {
-  if (!row || !row.raw || !row.raw.detail_id) return;
-  const page = await render(`${BASE}/TendersOnlineServices/TenderDetails/${row.raw.detail_id}`, 15_000);
-  if (!page || !page.text) return;
-  const t = page.text;
+/**
+ * Parse a rendered detail page's text into a row IN PLACE — pure, no network.
+ * Shared by the inline scrape path and the resumable DB backfill
+ * (server/tenders/enrich.js), so both extract identical fields.
+ */
+export function parseDetailInto(row, text) {
+  const t = String(text || '');
+  if (!row.raw) row.raw = {};
 
   // activities list: "<5-6 digit code> <Name>" pairs, before the conditions.
   const activities = [...t.matchAll(/\b(\d{5,6})\b\s+([A-Za-z][^0-9]{4,80}?)(?=\s+\d{5,6}\s|\s+Special Conditions|\s+General Conditions|\s+Name\s+Value)/g)]
@@ -136,26 +157,34 @@ export async function enrichDetail(row) {
 
   const email = (t.match(/Email\s*([a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,})/i) || [])[1];
   if (email) row.raw.contact_email = email;
+  return row;
+}
 
-  // Awarded tenders: attempt the winning supplier (best-effort — verify against
-  // real output; label varies). Never overwrite an already-known company.
-  if (row.status === 'awarded' && !row.award_company_name) {
-    const win = pick(t, /(?:Awarded (?:to|Company|Supplier)|Winning (?:Company|Bidder)|Successful Bidder|Contractor)\s*[:\-]?\s*([A-Z][A-Za-z0-9 .,&()'\-]{3,90}?)(?=\s{2}|\s+(?:Ministry|Tender|Award|Value|Activities|Special)|$)/i);
-    if (win) row.award_company_name = win.trim().slice(0, 200);
-  }
+/** Open a tender's detail page (network) and enrich the row in place. */
+export async function enrichDetail(row) {
+  if (!row || !row.raw || !row.raw.detail_id) return;
+  const page = await render(`${BASE}/TendersOnlineServices/TenderDetails/${row.raw.detail_id}`, 15_000);
+  if (!page || !page.text) return;
+  parseDetailInto(row, page.text);
 }
 
 // ── orchestration ────────────────────────────────────────────────────────────
-/** Walk every page of awarded + published tenders. Returns rows for ingest. */
-export async function scrapeMonaqasat({ pages = MAX_PAGES, details = WITH_DETAILS } = {}) {
+/**
+ * Walk awarded + open lists and return rows for ingest. `awardedPages` /
+ * `openPages` cap each list independently: the recurring scan keeps awarded
+ * small for freshness, while the archive backfill passes a large awardedPages
+ * to sweep all ~1,169 pages. `pages` is a back-compat fallback for both. With
+ * `details` on, detail pages are opened through the concurrency pool.
+ */
+export async function scrapeMonaqasat({ openPages, awardedPages, pages, details = WITH_DETAILS, concurrency = DEFAULT_CONCURRENCY } = {}) {
   const all = [];
   const seen = new Set();
   const sets = [
-    ['awarded', '/TendersOnlineServices/AwardedTenders/'],
-    ['open', '/TendersOnlineServices/AvailableMinistriesTenders/'],
+    ['awarded', '/TendersOnlineServices/AwardedTenders/', awardedPages ?? pages ?? MAX_PAGES],
+    ['open', '/TendersOnlineServices/AvailableMinistriesTenders/', openPages ?? pages ?? MAX_PAGES],
   ];
-  for (const [status, path] of sets) {
-    for (let p = 1; p <= pages; p++) {
+  for (const [status, path, cap] of sets) {
+    for (let p = 1; p <= cap; p++) {
       const page = await render(`${BASE}${path}${p}`);
       const rows = parseListing(page, status).filter((r) => {
         const k = `${status}:${r.source_ref}`;
@@ -167,8 +196,8 @@ export async function scrapeMonaqasat({ pages = MAX_PAGES, details = WITH_DETAIL
       all.push(...rows);
     }
   }
-  if (details) {
-    for (const row of all) { try { await enrichDetail(row); } catch { /* skip one bad detail */ } }
+  if (details && all.length) {
+    await mapPool(all, (row) => enrichDetail(row), concurrency);
   }
   return all;
 }
