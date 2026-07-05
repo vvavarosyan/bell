@@ -11,6 +11,7 @@ import { Router } from 'express';
 import { query } from '../db.js';
 import { requireRole } from '../lib/auth.js';
 import { ingestTenders } from '../tenders/ingest.js';
+import { runTenderScan } from '../tenders/scrape.js';
 
 const router = Router();
 
@@ -50,6 +51,18 @@ router.post('/ingest', requireRole('platform_admin'), async (req, res, next) => 
     const rows = Array.isArray(req.body?.tenders) ? req.body.tenders : [];
     if (!rows.length) return res.status(400).json({ error: 'bad_request', reason: 'tenders[] required' });
     const out = await ingestTenders(rows);
+    res.json(out);
+  } catch (err) { next(err); }
+});
+
+// POST /api/tenders/scan — LOCAL engine only: render + parse the live tender
+// sources (Monaqasat…) and ingest. Needs the local browser renderer, so on
+// prod it simply returns 0 scraped. Triggered by "Run Tender Scan.command".
+router.post('/scan', requireRole('platform_admin'), async (req, res, next) => {
+  try {
+    const sources = Array.isArray(req.body?.sources) ? req.body.sources : undefined;
+    const pages = Math.min(Math.max(Number(req.body?.pages) || 2, 1), 10);
+    const out = await runTenderScan({ sources, pages });
     res.json(out);
   } catch (err) { next(err); }
 });
