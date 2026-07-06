@@ -17,7 +17,7 @@ import { pushTendersToProd } from '../tenders/push_prod.js';
   console.log('Scope: every OPEN tender + the ' + awardedPages + ' most-recent AWARDED pages · detail: ' + (details ? 'on (full)' : 'off (cards only)'));
   console.log('(Recurring/fresh scan — a few minutes. For the FULL awarded history, run "Backfill Full Tender Archive.command".)\n');
   try {
-    const out = await runTenderScan({ openPages: 60, awardedPages, details });
+    const out = await runTenderScan({ sources: ['monaqasat'], openPages: 60, awardedPages, details });
     console.log('Result:');
     for (const [src, r] of Object.entries(out.sources)) {
       if (r.error) console.log('  ' + src + ': ERROR — ' + r.error);

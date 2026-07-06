@@ -8,10 +8,11 @@
 
 import { ingestTenders } from './ingest.js';
 import { scrapeMonaqasat } from './scrape_monaqasat.js';
+import { scrapeAshghal } from './scrape_ashghal.js';
 
 const SCRAPERS = {
   monaqasat: scrapeMonaqasat,
-  // ashghal:     scrapeAshghal,      // next
+  ashghal: scrapeAshghal,
   // qatarenergy: scrapeQatarEnergy,  // next
 };
 

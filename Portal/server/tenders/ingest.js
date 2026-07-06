@@ -10,7 +10,7 @@
 import { query } from '../db.js';
 
 const SOURCES = new Set(['monaqasat', 'ashghal', 'qatarenergy', 'kahramaa', 'qse', 'manual']);
-const STATUSES = new Set(['open', 'awarded', 'cancelled']);
+const STATUSES = new Set(['open', 'awarded', 'cancelled', 'closed']);
 
 function clean(v, max = 500) {
   if (v === undefined || v === null) return null;

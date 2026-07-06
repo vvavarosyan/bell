@@ -16,6 +16,7 @@ const PAGE = 30;
 const STATUS_META = {
   open:      { label: 'Open',      color: '#22c55e' },
   awarded:   { label: 'Awarded',   color: '#5b8cff' },
+  closed:    { label: 'Closed',    color: '#eab308' },
   cancelled: { label: 'Cancelled', color: '#9ca5b9' },
 };
 const SOURCE_LABEL = { monaqasat: 'Monaqasat', ashghal: 'Ashghal', qatarenergy: 'QatarEnergy', kahramaa: 'Kahramaa', qse: 'QSE', manual: 'Manual' };
