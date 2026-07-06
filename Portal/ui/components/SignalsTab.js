@@ -12,6 +12,7 @@ import { useState, useEffect, useCallback, useRef, useMemo } from 'react';
 import { html } from '../lib/html.js';
 import { api } from '../lib/api.js';
 import { navigateTo } from '../lib/router.js';
+import { TendersTab } from './TendersTab.js';
 
 const KIND_META = {
   tender:         { label: 'Tenders',        color: '#eab308', sector: 0 },
@@ -91,12 +92,11 @@ export function SignalsTab() {
     return () => { dead = true; clearInterval(t); };
   }, []);
 
-  // Live Qatar tenders — the open, biddable set, straight from the tenders table
-  // (also its own full section under "Tenders"). Shown here so Signals surfaces
-  // active procurement demand alongside the radar.
+  // Recent tenders (open + newly awarded) — folded into the radar/stream under
+  // "All types" and browsable in full under the Tenders tab.
   useEffect(() => {
     let dead = false;
-    const loadT = () => api.tenders({ status: 'open', limit: 6 })
+    const loadT = () => api.tenders({ limit: 40 })
       .then((r) => { if (!dead) setOpenTenders(r.rows || []); })
       .catch(() => {});
     loadT();
@@ -104,11 +104,42 @@ export function SignalsTab() {
     return () => { dead = true; clearInterval(t); };
   }, []);
 
+  const inWindow = (iso) => (Date.now() - new Date(iso).getTime()) <= WINDOW_MS[windowKey];
+
+  // Live tenders as radar signals — so procurement demand shows in "All types"
+  // and under the Tenders tab. Numeric id offset keeps them collision-free with
+  // real signal ids; they carry no ICP score (the Tenders tab is the full browser).
+  const tenderSignals = useMemo(() => (openTenders || []).map((t) => ({
+    id: 900000000 + Number(t.id),
+    kind: 'tender',
+    subkind: t.status,
+    title: (t.status === 'awarded' && t.award_company_name) ? `${t.award_company_name} won — ${t.title}` : t.title,
+    body: [t.buyer, t.deadline_at ? 'closes ' + new Date(t.deadline_at).toLocaleDateString() : null].filter(Boolean).join(' · '),
+    company_id: t.award_company_id || null,
+    company_name: t.award_company_name || null,
+    occurred_at: t.awarded_at || t.published_at || t.created_at,
+    importance: 0.7,
+    _tender: true,
+  })), [openTenders]);
+
   const counts = useMemo(() => {
     const c = {};
     for (const r of rows) c[r.kind] = (c[r.kind] || 0) + 1;
+    const tw = tenderSignals.filter((s) => inWindow(s.occurred_at)).length;
+    if (tw) c.tender = (c.tender || 0) + tw;
     return c;
-  }, [rows]);
+  }, [rows, tenderSignals, windowKey]);
+
+  // What the radar + stream render. A specific kind → server rows for that kind;
+  // the Tenders tab (kind='tender') is the embedded browser, handled separately;
+  // "All types" on the global view folds live tenders into the stream.
+  const displayRows = useMemo(() => {
+    if (kind === 'tender') return [];
+    if (kind) return rows;
+    if (scope !== 'global') return rows;
+    const t = tenderSignals.filter((s) => inWindow(s.occurred_at));
+    return [...rows, ...t].sort((a, b) => new Date(b.occurred_at) - new Date(a.occurred_at));
+  }, [rows, tenderSignals, kind, scope, windowKey]);
 
   const pick = (id) => {
     setSelectedId(id);
@@ -132,13 +163,14 @@ export function SignalsTab() {
         <h2 style=${{ margin: 0, fontSize: '17px' }}>Signals</h2>
         <span class="muted small">market movement, detected by Bell</span>
         <span class="spacer" style=${{ flex: 1 }}></span>
+        ${kind !== 'tender' ? html`
         <div style=${{ display: 'flex', gap: '6px' }}>
           ${chip(scope === 'global', 'Global', () => setScope('global'))}
           ${chip(scope === 'icp', 'For you', () => setScope('icp'))}
         </div>
         <div style=${{ display: 'flex', gap: '6px' }}>
           ${WINDOWS.map(([k, label]) => chip(windowKey === k, label, () => setWindowKey(k)))}
-        </div>
+        </div>` : null}
       </div>
 
       <div style=${{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '16px' }}>
@@ -153,6 +185,7 @@ export function SignalsTab() {
           and Bell scores every signal against it.
         </div>` : null}
 
+      ${kind === 'tender' ? html`<${TendersTab} embedded=${true} />` : html`
       <div style=${{ display: 'flex', gap: '20px', alignItems: 'flex-start', flexWrap: 'wrap' }}>
 
         <!-- RADAR (right sidebar, compact) -->
@@ -185,7 +218,7 @@ export function SignalsTab() {
             </g>
 
             <!-- blips -->
-            ${rows.map((s) => {
+            ${displayRows.map((s) => {
               const { x, y } = blipXY(s, windowKey);
               const meta = KIND_META[s.kind] || KIND_META.news_event;
               const sel = selectedId === s.id;
@@ -209,8 +242,8 @@ export function SignalsTab() {
             <text x=${C + R_MAX - 4} y=${C + 12} text-anchor="end" font-size="8" fill="var(--text-dim, #9ca5b9)">${WINDOWS.find(([k]) => k === windowKey)?.[1]} ago</text>
           </svg>
           <div class="muted small" style=${{ marginTop: '8px', textAlign: 'center' }}>
-            ${loading ? 'Sweeping the market…' : rows.length
-              ? `${rows.length} signals in the last ${WINDOWS.find(([k]) => k === windowKey)?.[1]} — click a blip to inspect`
+            ${loading ? 'Sweeping the market…' : displayRows.length
+              ? `${displayRows.length} signals in the last ${WINDOWS.find(([k]) => k === windowKey)?.[1]} — click a blip to inspect`
               : 'The radar is warming up — signals appear as Bell detects market movement.'}
           </div>
 
@@ -230,27 +263,13 @@ export function SignalsTab() {
                 </button>`)}
               <div class="muted small" style=${{ marginTop: '6px', textAlign: 'center' }}>buying-intent · tap to open</div>
             </div>` : null}
-
-          ${openTenders.length ? html`
-            <div style=${{ marginTop: '14px', borderTop: '1px solid var(--border)', paddingTop: '12px' }}>
-              <div style=${{ fontSize: '10.5px', fontWeight: 700, letterSpacing: '.08em', textTransform: 'uppercase', color: '#eab308', marginBottom: '8px' }}>
-                Live Qatar tenders
-              </div>
-              ${openTenders.map((t) => html`
-                <button key=${t.id} onClick=${() => navigateTo('tenders')}
-                  style=${{ width: '100%', textAlign: 'left', background: 'transparent', border: 'none', borderRadius: '8px', padding: '5px 4px', cursor: 'pointer', display: 'block' }}>
-                  <span style=${{ display: 'block', fontSize: '12px', fontWeight: 600, color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>${t.title}</span>
-                  <span class="muted small" style=${{ display: 'block', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>${t.buyer || '—'}${t.deadline_at ? ' · closes ' + new Date(t.deadline_at).toLocaleDateString() : ''}</span>
-                </button>`)}
-              <button onClick=${() => navigateTo('tenders')} style=${{ marginTop: '6px', width: '100%', textAlign: 'center', background: 'transparent', border: 'none', color: 'var(--accent-bright, #a5c3ff)', fontSize: '11.5px', cursor: 'pointer' }}>All tenders →</button>
-            </div>` : null}
         </div>
 
         <!-- STREAM (left, primary) -->
         <div style=${{ order: 1, flex: '1 1 380px', minWidth: '300px' }}>
           ${loading ? html`<div class="empty">Loading signals…</div>` :
-            rows.length === 0 ? html`<div class="empty">${scope === 'icp' ? 'No signals match your ICP in this window yet — widen the window or adjust your profile.' : 'No signals in this window yet.'}</div>` :
-            rows.map((s) => {
+            displayRows.length === 0 ? html`<div class="empty">${scope === 'icp' ? 'No signals match your ICP in this window yet — widen the window or adjust your profile.' : 'No signals in this window yet.'}</div>` :
+            displayRows.map((s) => {
               const meta = KIND_META[s.kind] || KIND_META.news_event;
               const sel = selectedId === s.id;
               return html`
@@ -276,10 +295,14 @@ export function SignalsTab() {
                       <button onClick=${(e) => { e.stopPropagation(); navigateTo('companies', s.company_id); }}
                         style=${{ background: 'transparent', border: 'none', padding: 0, color: 'var(--accent-bright, #a5c3ff)', fontSize: '12px', fontWeight: 600, cursor: 'pointer' }}>
                         ${s.company_name || 'Open company'} →</button>` : null}
+                    ${s._tender ? html`
+                      <button onClick=${(e) => { e.stopPropagation(); setKind('tender'); }}
+                        style=${{ background: 'transparent', border: 'none', padding: 0, color: 'var(--accent-bright, #a5c3ff)', fontSize: '12px', fontWeight: 600, cursor: 'pointer' }}>
+                        Open in Tenders →</button>` : null}
                   </div>
                 </div>`;
             })}
         </div>
-      </div>
+      </div>`}
     </div></div>`;
 }

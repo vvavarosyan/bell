@@ -29,7 +29,7 @@ function StatusBadge({ status }) {
   return html`<span style=${{ fontSize: '10.5px', fontWeight: 700, letterSpacing: '.04em', textTransform: 'uppercase', color: m.color, background: m.color + '1f', border: '1px solid ' + m.color + '55', borderRadius: '999px', padding: '2px 9px', whiteSpace: 'nowrap' }}>${m.label}</span>`;
 }
 
-export function TendersTab() {
+export function TendersTab({ embedded = false } = {}) {
   const [filters, setFilters] = useState({ status: '', source: '', buyer: '', year: '', q: '' });
   const [qInput, setQInput] = useState('');
   const [offset, setOffset] = useState(0);
@@ -105,12 +105,12 @@ export function TendersTab() {
     </button>`;
   })();
 
-  return html`
-    <div class="page-fill"><div class="page-scroll">
+  const body = html`
+    <div>
 
       <div style=${{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap', padding: '4px 0 12px' }}>
-        <h2 style=${{ margin: 0, fontSize: '17px' }}>Tenders</h2>
-        <span class="muted small">Qatar public procurement · Bell tracks it continuously</span>
+        ${embedded ? null : html`<h2 style=${{ margin: 0, fontSize: '17px' }}>Tenders</h2>
+        <span class="muted small">Qatar public procurement · Bell tracks it continuously</span>`}
         <span style=${{ flex: 1 }}></span>
         ${syncChip}
       </div>
@@ -226,5 +226,9 @@ export function TendersTab() {
           })()}
         </div>` : null}
 
-    </div></div>`;
+    </div>`;
+
+  return embedded
+    ? body
+    : html`<div class="page-fill"><div class="page-scroll">${body}</div></div>`;
 }

@@ -18,7 +18,6 @@ export const NAV_SECTIONS = [
     items: [
       { id: 'market-feed',           label: 'Market Feed',          icon: 'feed',       placeholder: false, visibility: 'all' },
       { id: 'signals',               label: 'Signals',              icon: 'insights', placeholder: false, visibility: 'all' },
-      { id: 'tenders',               label: 'Tenders',              icon: 'tender',   placeholder: false, visibility: 'all' },
       { id: 'map',                   label: 'Map',                  icon: 'map',        placeholder: false, visibility: 'all' },
     ],
   },
