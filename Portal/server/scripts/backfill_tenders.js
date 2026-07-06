@@ -47,6 +47,11 @@ function fmtDur(sec) {
     }
     const ing = await ingestTenders(rows);
     console.log(`  ${rows.length} cards · ${ing.inserted} new · ${ing.updated} updated · ${fmtDur((Date.now() - t1) / 1000)}`);
+    // Publish the full CARD set now, so the complete count lands on prod fast —
+    // even before the long detail pass finishes (and survives an interruption).
+    const p1 = await pushTendersToProd();
+    if (p1.pushed != null) console.log(`  ✓ Published ${p1.pushed.toLocaleString()} tenders live (cards) — detail fills in next.`);
+    else if (p1.skipped) console.log('  ⚠ ' + p1.skipped);
 
     // ── Step 2: full detail, in parallel, resumable ──────────────────────────
     const pending = await pendingDetailCount('monaqasat');

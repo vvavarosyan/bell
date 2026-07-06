@@ -44,27 +44,39 @@ export async function enrichPendingTenders({ source = 'monaqasat', concurrency, 
   const rows = r.rows;
   let enriched = 0, failed = 0, done = 0;
 
+  // Retry a write a couple of times — the 16h backfill on 2026-07-05 hit a few
+  // "connection terminated" timeouts under sustained load; a short backoff
+  // recovers them instead of losing the row's detail.
+  const q = async (sql, ps) => {
+    for (let i = 0; ; i++) {
+      try { return await query(sql, ps); }
+      catch (e) { if (i >= 2) throw e; await new Promise((res) => setTimeout(res, 800)); }
+    }
+  };
+
   await mapPool(rows, async (row) => {
     const detailId = row.raw && row.raw.detail_id;
     try {
       if (!detailId) { failed++; return; }
       const page = await render(`${BASE}/TendersOnlineServices/TenderDetails/${detailId}`, 15_000);
-      if (!page || !page.text) { failed++; return; }
+      if (!page || !page.text) { failed++; return; }   // render failed → stays pending, retried next run
       const work = { raw: { ...(row.raw || {}) }, deadline_at: row.deadline_at };
       parseDetailInto(work, page.text);
       if (work.raw.activities) {
-        await query(
+        await q(
           `UPDATE tenders SET raw = $2::jsonb, deadline_at = COALESCE($3, deadline_at), updated_at = now() WHERE id = $1`,
           [row.id, JSON.stringify(work.raw).slice(0, 20000), work.deadline_at],
         );
         enriched++;
+      } else if (page.text.length > 1500 && /Tender number/i.test(page.text)) {
+        // The page TRULY rendered (has the tender header + real length) but this
+        // tender genuinely lists no activity codes — older tenders use a leaner
+        // detail format. Stamp [] so we don't keep re-fetching it.
+        await q(`UPDATE tenders SET raw = jsonb_set(raw, '{activities}', '[]'::jsonb), updated_at = now() WHERE id = $1`, [row.id]);
+        failed++;
       } else {
-        // No activities on the page (some tenders genuinely list none). Stamp an
-        // empty array so we don't keep re-fetching it every run.
-        await query(
-          `UPDATE tenders SET raw = jsonb_set(raw, '{activities}', '[]'::jsonb), updated_at = now() WHERE id = $1`,
-          [row.id],
-        );
+        // Suspiciously thin page → likely a partial render. Leave it PENDING so a
+        // re-run retries it, rather than marking it permanently empty.
         failed++;
       }
     } catch {

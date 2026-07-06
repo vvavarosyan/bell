@@ -24,6 +24,7 @@ const LABELS = 'Publish date|Award date|Closing date|Requested Sector Type|Tende
 const MAX_PAGES = Math.min(Math.max(Number(process.env.BELL_TENDER_MAX_PAGES) || 25, 1), 1500);
 const WITH_DETAILS = process.env.BELL_TENDER_DETAILS !== '0';   // default ON
 const DEFAULT_CONCURRENCY = Math.min(Math.max(Number(process.env.BELL_TENDER_CONCURRENCY) || 6, 1), 12);
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // Small promise pool — run `worker` over `items`, at most `concurrency` at a
 // time. Opening tender detail pages in parallel (politely) instead of one at a
@@ -70,22 +71,40 @@ function parseDate(s) {
 }
 const pick = (s, rx) => { const m = String(s || '').match(rx); return m ? m[1].trim() : null; };
 const num = (s) => { if (!s) return null; const n = Number(String(s).replace(/[^0-9.]/g, '')); return Number.isFinite(n) ? n : null; };
+const normTitle = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 120);
 
 // ── listing parse ────────────────────────────────────────────────────────────
 /** Parse one listing page's {html,text} into tender rows (card-level fields). */
 export function parseListing(page, status) {
   const rows = [];
   if (!page || !page.text) return rows;
-  // detail ids in order of first appearance (each card links to its detail
-  // several times — dedup preserving order gives one id per card, in order).
-  const ids = [];
-  for (const m of String(page.html || '').matchAll(/TenderDetails\/(\d+)/g)) {
-    if (!ids.includes(m[1])) ids.push(m[1]);
+  // Pair each card to its OWN detail page by TITLE — never by index. Each card
+  // links to its detail as <a href=".../TenderDetails/{id}">{title}</a>, so the
+  // anchor's text IS the card title. The old index-pairing silently drifted and
+  // attached the WRONG detail page to a tender (found live 2026-07-06: card
+  // #976/2026 opened #961/2026). We extract every {id,title} anchor and match a
+  // card to the anchor with the same title, consuming matches so duplicate
+  // titles still pair in order. No confident match → detail_id null (leave it
+  // unlinked rather than attach the wrong tender's details).
+  const anchors = [];
+  for (const m of String(page.html || '').matchAll(/<a\b[^>]*?TenderDetails\/(\d+)[^>]*>([\s\S]*?)<\/a>/gi)) {
+    const title = htmlToText(m[2]).trim();
+    if (title.length >= 5 && !/^(report|purchase|view|details?|attach\w*|download)$/i.test(title)) {
+      anchors.push({ id: m[1], norm: normTitle(title), used: false });
+    }
   }
+  const matchDetailId = (title) => {
+    const nt = normTitle(title);
+    if (nt.length < 5) return null;
+    let a = anchors.find((x) => !x.used && x.norm === nt);
+    if (!a) a = anchors.find((x) => !x.used && (x.norm.startsWith(nt) || nt.startsWith(x.norm)) && Math.min(x.norm.length, nt.length) >= 10);
+    if (a) { a.used = true; return a.id; }
+    return null;
+  };
+
   // cards start with a tender number NNNN/YYYY; lookbehind avoids splitting
   // inside a number ("2580"→"80/2026") or a date ("02/07/2026"→"07/2026").
   const cards = page.text.split(/(?=(?<![\d\/])\d{2,6}\/20\d{2}\b)/);
-  let ci = 0;
   for (const card of cards) {
     const numM = card.match(/^\s*(\d{2,6}\/20\d{2})\b/);
     if (!numM) continue;
@@ -93,7 +112,7 @@ export function parseListing(page, status) {
     const rest = card.slice(numM[0].length);
     const title = (rest.split(new RegExp(LABELS))[0] || '').trim();
     if (!title || title.length < 6) continue;
-    const detailId = ids[ci] || null; ci++;
+    const detailId = matchDetailId(title);
 
     const pubStr   = pick(card, /Publish date\s*([\d/]+)/i);
     const awdStr   = pick(card, /Award date\s*([\d/]+)/i);
@@ -150,7 +169,7 @@ export function parseDetailInto(row, text) {
   if (closing) { const d = parseDate(closing); if (d) row.deadline_at = d; }
 
   const contract = pick(t, /Contract Duration\s*(\d+)/i);
-  if (contract) row.raw.contract_months = Number(contract) || null;
+  if (contract) row.raw.contract_days = Number(contract) || null;   // Monaqasat states duration in DAYS (e.g. 730 = ~2yr), not months
 
   const entityRef = pick(t, /Entity'?s tender number\s+([A-Za-z0-9\/\-]+)/i);
   if (entityRef) row.raw.entity_ref = entityRef;
@@ -184,16 +203,26 @@ export async function scrapeMonaqasat({ openPages, awardedPages, pages, details 
     ['open', '/TendersOnlineServices/AvailableMinistriesTenders/', openPages ?? pages ?? MAX_PAGES],
   ];
   for (const [status, path, cap] of sets) {
+    let miss = 0;   // consecutive pages that yielded nothing (a render blip OR the true end)
     for (let p = 1; p <= cap; p++) {
-      const page = await render(`${BASE}${path}${p}`);
-      const rows = parseListing(page, status).filter((r) => {
+      let page = await render(`${BASE}${path}${p}`);
+      if (!page || !page.text) { await sleep(1200); page = await render(`${BASE}${path}${p}`); }   // retry a blip once
+      const parsed = page ? parseListing(page, status) : [];
+      if (parsed.length === 0) {
+        // A failed/partial render OR a genuinely empty page past the end. Do NOT
+        // end the whole walk on a SINGLE blip — that truncated the awarded
+        // archive at ~page 646 of 1,170 on 2026-07-05. Only stop after several
+        // empties in a row (a real end, or the site clamping past the last page).
+        if (++miss >= 4) break;
+        continue;
+      }
+      miss = 0;
+      for (const r of parsed) {
         const k = `${status}:${r.source_ref}`;
-        if (seen.has(k)) return false;
+        if (seen.has(k)) continue;
         seen.add(k);
-        return true;
-      });
-      if (!rows.length) break;   // past the last page (or render failed)
-      all.push(...rows);
+        all.push(r);
+      }
     }
   }
   if (details && all.length) {

@@ -204,7 +204,7 @@ export function TendersTab({ embedded = false } = {}) {
               ${line('Closing date', detail.deadline_at ? fmtDate(detail.deadline_at) : null)}
               ${line('Tender bond', fmtVal(raw.tender_bond, 'QAR'))}
               ${line('Documents value', fmtVal(raw.documents_value, 'QAR'))}
-              ${line('Contract duration', raw.contract_months ? raw.contract_months + ' months' : null)}
+              ${line('Contract duration', raw.contract_days ? raw.contract_days + ' days' : null)}
               ${line('Procurement contact', raw.contact_email ? html`<a href=${'mailto:' + raw.contact_email} style=${{ color: 'var(--accent-bright, #a5c3ff)' }}>${raw.contact_email}</a>` : null)}
               ${detail.award_company_name ? line('Awarded to', detail.award_company_id
                 ? html`<button onClick=${() => navigateTo('companies', detail.award_company_id)} style=${{ background: 'transparent', border: 'none', padding: 0, color: 'var(--accent-bright, #a5c3ff)', fontSize: '12.5px', fontWeight: 600, cursor: 'pointer' }}>${detail.award_company_name} →</button>`
