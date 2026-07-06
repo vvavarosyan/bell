@@ -23,8 +23,12 @@ import { query } from '../db.js';
   console.log('Bell — Repair Tender Links (Monaqasat)');
   console.log('Re-pairs every tender to its CORRECT detail page (by title) + clears stale detail.\n');
   try {
-    console.log('Step 1/3 — re-scanning all cards with the corrected pairing…');
-    const rows = await scrapeMonaqasat({ openPages: 60, awardedPages: 1200, details: false });
+    console.log('Step 1/3 — re-scanning all cards with the corrected pairing (walks every page — a few minutes)…');
+    const rows = await scrapeMonaqasat({
+      openPages: 60, awardedPages: 1200, details: false,
+      onProgress: ({ status, page, cards }) => process.stdout.write(`\r  ${status} list · page ${page} · ${cards.toLocaleString()} tenders so far          `),
+    });
+    process.stdout.write('\n');
     if (!rows.length) {
       console.log('\n⚠ Nothing scraped. Is the Crawl4AI engine running?');
       console.log('  Run "Install Crawl4AI Engine.command" or "Restart Crawl4AI Engine.command", then try again.');

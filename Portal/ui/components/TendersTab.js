@@ -197,6 +197,7 @@ export function TendersTab({ embedded = false } = {}) {
             return html`
               <div style=${{ fontSize: '15px', fontWeight: 700, color: 'var(--text)', lineHeight: 1.35, marginBottom: '12px' }}>${detail.title}</div>
               ${detail.source_ref ? html`<div class="muted small" style=${{ marginBottom: '12px' }}>Reference #${detail.source_ref}${raw.entity_ref ? ' · buyer ref ' + raw.entity_ref : ''}</div>` : null}
+              ${raw.description ? html`<div style=${{ fontSize: '12.5px', lineHeight: 1.55, color: 'var(--text)', margin: '0 0 14px', paddingBottom: '12px', borderBottom: '1px solid var(--border)' }}>${raw.description}</div>` : null}
               ${line('Buyer', detail.buyer)}
               ${line('Type', raw.type)}
               ${line('Sector', raw.sector)}

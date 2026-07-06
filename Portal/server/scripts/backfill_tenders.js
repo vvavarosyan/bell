@@ -38,7 +38,11 @@ function fmtDur(sec) {
     // ── Step 1: cards for every page (details OFF here — fast) ────────────────
     console.log('Step 1/3 — collecting tender cards from every page…');
     const t1 = Date.now();
-    const rows = await scrapeMonaqasat({ openPages: 60, awardedPages: 1200, details: false });
+    const rows = await scrapeMonaqasat({
+      openPages: 60, awardedPages: 1200, details: false,
+      onProgress: ({ status, page, cards }) => process.stdout.write(`\r  ${status} list · page ${page} · ${cards.toLocaleString()} tenders so far          `),
+    });
+    process.stdout.write('\n');
     if (!rows.length) {
       console.log('\n⚠ Nothing scraped. Is the Crawl4AI engine running?');
       console.log('  Run "Install Crawl4AI Engine.command" or "Restart Crawl4AI Engine.command", then try again.');

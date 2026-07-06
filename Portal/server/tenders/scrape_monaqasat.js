@@ -98,6 +98,10 @@ export function parseListing(page, status) {
     if (nt.length < 5) return null;
     let a = anchors.find((x) => !x.used && x.norm === nt);
     if (!a) a = anchors.find((x) => !x.used && (x.norm.startsWith(nt) || nt.startsWith(x.norm)) && Math.min(x.norm.length, nt.length) >= 10);
+    // Some cards carry a STATUS PREFIX before the title (e.g. "Tender is
+    // violation due to delay <title>"), so the card text CONTAINS the full
+    // anchor title. Verified: lifts an awarded page from 12/14 → 14/14.
+    if (!a) a = anchors.find((x) => !x.used && x.norm.length >= 12 && nt.includes(x.norm));
     if (a) { a.used = true; return a.id; }
     return null;
   };
@@ -176,6 +180,13 @@ export function parseDetailInto(row, text) {
 
   const email = (t.match(/Email\s*([a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,})/i) || [])[1];
   if (email) row.raw.contact_email = email;
+
+  // Brief Description — the rich free-text scope of work. In the newer detail
+  // layout it's the first value cell after the "Evaluation Basis" header, ending
+  // where the Targeted Tenderer Type value begins (Companies/Contractors/…).
+  const desc = pick(t, /Evaluation Basis\s+([\s\S]{20,2500}?)\s+(?:Companies|Contractors|Individuals|Suppliers\s*\/\s*Service Providers|Both|All)\b/i);
+  if (desc && desc.trim().length > 15) row.raw.description = desc.trim().slice(0, 2000);
+
   return row;
 }
 
@@ -195,7 +206,7 @@ export async function enrichDetail(row) {
  * to sweep all ~1,169 pages. `pages` is a back-compat fallback for both. With
  * `details` on, detail pages are opened through the concurrency pool.
  */
-export async function scrapeMonaqasat({ openPages, awardedPages, pages, details = WITH_DETAILS, concurrency = DEFAULT_CONCURRENCY } = {}) {
+export async function scrapeMonaqasat({ openPages, awardedPages, pages, details = WITH_DETAILS, concurrency = DEFAULT_CONCURRENCY, onProgress = null } = {}) {
   const all = [];
   const seen = new Set();
   const sets = [
@@ -223,6 +234,7 @@ export async function scrapeMonaqasat({ openPages, awardedPages, pages, details 
         seen.add(k);
         all.push(r);
       }
+      if (onProgress) onProgress({ status, page: p, cards: all.length });
     }
   }
   if (details && all.length) {
