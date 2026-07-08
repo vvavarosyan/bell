@@ -33,7 +33,7 @@ function StatusBadge({ status }) {
 }
 
 export function TendersTab({ embedded = false } = {}) {
-  const [filters, setFilters] = useState({ status: '', source: '', buyer: '', year: '', q: '' });
+  const [filters, setFilters] = useState({ status: 'open', source: '', buyer: '', year: '', q: '' });
   const [qInput, setQInput] = useState('');
   const [offset, setOffset] = useState(0);
   const [rows, setRows] = useState([]);
@@ -120,9 +120,9 @@ export function TendersTab({ embedded = false } = {}) {
 
       <!-- filters -->
       <div style=${{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center', marginBottom: '10px' }}>
-        ${chip(filters.status === '', `All${allCount ? ' · ' + allCount.toLocaleString() : ''}`, () => setFilter({ status: '' }))}
         ${chip(filters.status === 'open', `Open${statusCount('open') ? ' · ' + statusCount('open').toLocaleString() : ''}`, () => setFilter({ status: 'open' }), STATUS_META.open.color)}
         ${chip(filters.status === 'awarded', `Awarded${statusCount('awarded') ? ' · ' + statusCount('awarded').toLocaleString() : ''}`, () => setFilter({ status: 'awarded' }), STATUS_META.awarded.color)}
+        ${chip(filters.status === '', `All${allCount ? ' · ' + allCount.toLocaleString() : ''}`, () => setFilter({ status: '' }))}
         <span style=${{ flex: 1 }}></span>
         <input value=${qInput} onInput=${(e) => setQInput(e.target.value)} placeholder="Search title, buyer, ref…"
           style=${{ ...selectStyle, maxWidth: '230px', minWidth: '160px' }} />
