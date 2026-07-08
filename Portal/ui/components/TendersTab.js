@@ -14,10 +14,12 @@ import { navigateTo } from '../lib/router.js';
 
 const PAGE = 30;
 const STATUS_META = {
-  open:      { label: 'Open',      color: '#22c55e' },
-  awarded:   { label: 'Awarded',   color: '#5b8cff' },
-  closed:    { label: 'Closed',    color: '#eab308' },
-  cancelled: { label: 'Cancelled', color: '#9ca5b9' },
+  open:       { label: 'Open',       color: '#22c55e' },
+  awarded:    { label: 'Awarded',    color: '#5b8cff' },
+  closed:     { label: 'Closed',     color: '#eab308' },
+  archived:   { label: 'Archived',   color: '#94a3b8' },
+  prospected: { label: 'Prospected', color: '#a855f7' },
+  cancelled:  { label: 'Cancelled',  color: '#9ca5b9' },
 };
 const SOURCE_LABEL = { monaqasat: 'Monaqasat', ashghal: 'Ashghal', qatarenergy: 'QatarEnergy', kahramaa: 'Kahramaa', qse: 'QSE', manual: 'Manual' };
 
@@ -125,12 +127,13 @@ export function TendersTab({ embedded = false } = {}) {
         <input value=${qInput} onInput=${(e) => setQInput(e.target.value)} placeholder="Search title, buyer, ref…"
           style=${{ ...selectStyle, maxWidth: '230px', minWidth: '160px' }} />
       </div>
+      ${(facets.sources || []).length > 1 ? html`
+      <div style=${{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center', marginBottom: '10px' }}>
+        <span class="muted small" style=${{ marginRight: '2px' }}>Source</span>
+        ${chip(filters.source === '', 'All', () => setFilter({ source: '' }))}
+        ${facets.sources.map((s) => chip(filters.source === s.source, `${srcLabel(s.source)} · ${(s.n || 0).toLocaleString()}`, () => setFilter({ source: s.source }), '#5b8cff'))}
+      </div>` : null}
       <div style=${{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center', marginBottom: '16px' }}>
-        ${(facets.sources || []).length > 1 ? html`
-          <select value=${filters.source} onChange=${(e) => setFilter({ source: e.target.value })} style=${selectStyle}>
-            <option value="">All sources</option>
-            ${facets.sources.map((s) => html`<option key=${s.source} value=${s.source}>${srcLabel(s.source)} (${s.n})</option>`)}
-          </select>` : null}
         <select value=${filters.buyer} onChange=${(e) => setFilter({ buyer: e.target.value })} style=${selectStyle}>
           <option value="">All buyers</option>
           ${(facets.buyers || []).map((b) => html`<option key=${b.buyer} value=${b.buyer}>${b.buyer.length > 34 ? b.buyer.slice(0, 33) + '…' : b.buyer} (${b.n})</option>`)}

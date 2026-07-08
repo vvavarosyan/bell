@@ -148,6 +148,50 @@ async function renderPagePlaywright(url, { timeoutMs = 22_000, settleMs = 1500 }
   }
 }
 
+/**
+ * Drive an INTERACTIVE page with the shared headless browser. Hands a fresh,
+ * asset-blocked Playwright `page` to `fn` and returns whatever `fn` resolves to
+ * (or null if Playwright isn't installed / launch failed). Unlike renderPage
+ * (a one-shot render), this lets a caller click through a postback-driven site —
+ * e.g. Ashghal's Awarded Tenders, where selecting each tender triggers a full
+ * ASP.NET postback reload. The page + context are always cleaned up, and the
+ * call is concurrency-capped like renderPage so a parallel sweep can't spawn
+ * unbounded Chromium tabs. Crawl4AI can't do multi-step postback sessions, so
+ * this deliberately uses local Playwright directly.
+ */
+export async function withPlaywrightPage(fn, { timeoutMs = 45_000, blockAssets = true } = {}) {
+  const pw = loadPlaywright();
+  if (!pw || _launchFailed) return null;
+  let context, page;
+  await acquirePage();
+  try {
+    const browser = await getBrowser();
+    context = await browser.newContext({
+      userAgent: UA,
+      viewport: { width: 1280, height: 900 },
+      ignoreHTTPSErrors: true,
+      locale: 'en-US',
+    });
+    page = await context.newPage();
+    if (blockAssets) {
+      // Skip heavy assets — we only need the rendered DOM, not pixels.
+      await page.route('**/*', (route) => {
+        const t = route.request().resourceType();
+        if (t === 'image' || t === 'media' || t === 'font') return route.abort();
+        return route.continue();
+      });
+    }
+    page.setDefaultTimeout(timeoutMs);
+    return await fn(page);
+  } catch (err) {
+    return { __error: (err?.message || 'interactive_render_error').slice(0, 160) };
+  } finally {
+    try { await page?.close(); } catch {}
+    try { await context?.close(); } catch {}
+    releasePage();
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Web search (for the Website Finder, Stage 8)
 // ---------------------------------------------------------------------------

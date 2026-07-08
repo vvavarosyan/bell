@@ -14,13 +14,13 @@
 //
 // Needs the local Crawl4AI engine running the whole time.
 
-import { scrapeMonaqasat } from '../tenders/scrape_monaqasat.js';
+import { scrapeMonaqasat, ramSafeConcurrency } from '../tenders/scrape_monaqasat.js';
 import { ingestTenders } from '../tenders/ingest.js';
 import { enrichPendingTenders, pendingDetailCount } from '../tenders/enrich.js';
 import { pushTendersToProd } from '../tenders/push_prod.js';
 import { closeRenderer } from '../enrichment/local/render.js';
 
-const CONCURRENCY = Math.min(Math.max(Number(process.env.BELL_TENDER_CONCURRENCY) || 6, 1), 12);
+const CONCURRENCY = ramSafeConcurrency(process.env.BELL_TENDER_CONCURRENCY);
 
 function fmtDur(sec) {
   sec = Math.max(0, Math.round(sec));

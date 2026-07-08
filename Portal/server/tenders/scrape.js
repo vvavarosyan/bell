@@ -9,11 +9,12 @@
 import { ingestTenders } from './ingest.js';
 import { scrapeMonaqasat } from './scrape_monaqasat.js';
 import { scrapeAshghal } from './scrape_ashghal.js';
+import { scrapeQatarEnergy } from './scrape_qatarenergy.js';
 
 const SCRAPERS = {
   monaqasat: scrapeMonaqasat,
   ashghal: scrapeAshghal,
-  // qatarenergy: scrapeQatarEnergy,  // next
+  qatarenergy: scrapeQatarEnergy,
 };
 
 export function tenderSources() { return Object.keys(SCRAPERS); }

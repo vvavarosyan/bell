@@ -16,6 +16,7 @@
 // email. NOTE: Monaqasat does NOT publish the winning supplier on awarded
 // tenders (verified 2026-07-05) — there is no winner field to scrape here.
 
+import os from 'os';
 import { crawl4aiRender } from '../enrichment/local/crawl4ai.js';
 import { renderPage, rendererAvailable } from '../enrichment/local/render.js';
 
@@ -23,7 +24,24 @@ export const BASE = 'https://monaqasat.mof.gov.qa';
 const LABELS = 'Publish date|Award date|Closing date|Requested Sector Type|Tender Bond|Documents value|Ministry|Type|Report|Attached';
 const MAX_PAGES = Math.min(Math.max(Number(process.env.BELL_TENDER_MAX_PAGES) || 25, 1), 1500);
 const WITH_DETAILS = process.env.BELL_TENDER_DETAILS !== '0';   // default ON
-const DEFAULT_CONCURRENCY = Math.min(Math.max(Number(process.env.BELL_TENDER_CONCURRENCY) || 6, 1), 12);
+// Peak memory during a scan/enrich is dominated by the headless browser, so an
+// 8GB Mac gets overwhelmed at high concurrency (Chromium + Node + Postgres +
+// the OS). Scale the default — and CAP any override — by installed RAM so a
+// low-RAM machine stays responsive instead of swapping to death. (8GB → 2.)
+function ramConcurrencyCap() {
+  // Use binary GiB: an "8GB" Mac reports 8 GiB = 8.59 decimal GB, which would slip
+  // past a decimal-8.5 threshold and wrongly get tier-4. totalmem/1024^3 = true GiB.
+  const gib = os.totalmem() / (1024 ** 3);
+  if (gib <= 8.5) return 2;
+  if (gib <= 16.5) return 4;
+  return 8;
+}
+export function ramSafeConcurrency(requested) {
+  const cap = ramConcurrencyCap();
+  const r = Number(requested);
+  return Math.min(Math.max(Number.isFinite(r) && r > 0 ? r : cap, 1), cap);
+}
+const DEFAULT_CONCURRENCY = ramSafeConcurrency(process.env.BELL_TENDER_CONCURRENCY);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 // Small promise pool — run `worker` over `items`, at most `concurrency` at a
@@ -164,10 +182,24 @@ export function parseDetailInto(row, text) {
   const t = String(text || '');
   if (!row.raw) row.raw = {};
 
-  // activities list: "<5-6 digit code> <Name>" pairs, before the conditions.
-  const activities = [...t.matchAll(/\b(\d{5,6})\b\s+([A-Za-z][^0-9]{4,80}?)(?=\s+\d{5,6}\s|\s+Special Conditions|\s+General Conditions|\s+Name\s+Value)/g)]
-    .map((m) => ({ code: m[1], name: m[2].trim() })).slice(0, 25);
+  // activities list: "<5-6 digit code> <name>" pairs inside the activities block
+  // (the "Activity name/code" header → the next section, e.g. Special Conditions).
+  // ⚠️ The OLD regex capped the name at {4,80} chars and required each activity to
+  // be followed by another code — so any activity whose name exceeded 80 chars was
+  // silently dropped, and tenders whose names were ALL long captured ZERO codes and
+  // got wrongly stamped "no activities" (the "0 detailed" symptom). Fixed 2026-07-08,
+  // verified live: isolate the block, then take every code + its full name up to the
+  // next code or the block end (no length cap, no trailing-code requirement).
+  const actBlock = t.match(/Activit(?:y|ies)\s*(?:name|code)?\s*([\s\S]*?)(?=\s+(?:Special Conditions|General Conditions|Name\s+Value|Evaluation Basis|Targeted Tenderer|Contract Duration|Conditions)\b|$)/i);
+  const activities = actBlock
+    ? [...actBlock[1].matchAll(/\b(\d{5,6})\b\s+([^\d]{3,}?)(?=\s+\d{5,6}\b|$)/g)]
+        .map((m) => ({ code: m[1], name: m[2].trim().replace(/\s+/g, ' ').slice(0, 160) }))
+        .filter((a) => a.name.length >= 3).slice(0, 40)
+    : [];
   if (activities.length) row.raw.activities = activities;
+  // Parser version — lets the enricher re-do rows captured by the old (buggy)
+  // activities regex. Bump this whenever the detail parser changes materially.
+  row.raw.detail_v = 2;
 
   const closing = pick(t, /Closing Date[\s\S]{0,60}?(\d{1,2}\/\d{1,2}\/20\d{2})/i);
   if (closing) { const d = parseDate(closing); if (d) row.deadline_at = d; }

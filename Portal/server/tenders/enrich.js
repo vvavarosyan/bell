@@ -14,7 +14,8 @@ import { render, BASE, mapPool, parseDetailInto } from './scrape_monaqasat.js';
 export async function pendingDetailCount(source = 'monaqasat') {
   const r = await query(
     `SELECT count(*)::int AS n FROM tenders
-      WHERE source = $1 AND jsonb_exists(raw, 'detail_id') AND NOT jsonb_exists(raw, 'activities')`,
+      WHERE source = $1 AND jsonb_exists(raw, 'detail_id')
+        AND (NOT jsonb_exists(raw, 'activities') OR COALESCE(NULLIF(raw->>'detail_v', '')::int, 1) < 2)`,
     [source],
   );
   return r.rows[0].n;
@@ -36,7 +37,8 @@ export async function enrichPendingTenders({ source = 'monaqasat', concurrency, 
   const r = await query(
     `SELECT id, status, raw, deadline_at
        FROM tenders
-      WHERE source = $1 AND jsonb_exists(raw, 'detail_id') AND NOT jsonb_exists(raw, 'activities')
+      WHERE source = $1 AND jsonb_exists(raw, 'detail_id')
+        AND (NOT jsonb_exists(raw, 'activities') OR COALESCE(NULLIF(raw->>'detail_v', '')::int, 1) < 2)
       ORDER BY COALESCE(awarded_at, published_at, created_at) DESC NULLS LAST
       ${limSql}`,
     params,
@@ -72,7 +74,7 @@ export async function enrichPendingTenders({ source = 'monaqasat', concurrency, 
         // The page TRULY rendered (has the tender header + real length) but this
         // tender genuinely lists no activity codes — older tenders use a leaner
         // detail format. Stamp [] so we don't keep re-fetching it.
-        await q(`UPDATE tenders SET raw = jsonb_set(raw, '{activities}', '[]'::jsonb), updated_at = now() WHERE id = $1`, [row.id]);
+        await q(`UPDATE tenders SET raw = jsonb_set(jsonb_set(raw, '{activities}', '[]'::jsonb), '{detail_v}', '2'::jsonb), updated_at = now() WHERE id = $1`, [row.id]);
         failed++;
       } else {
         // Suspiciously thin page → likely a partial render. Leave it PENDING so a
