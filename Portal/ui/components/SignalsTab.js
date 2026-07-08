@@ -60,6 +60,7 @@ export function SignalsTab() {
   const [inMarket, setInMarket] = useState([]);
   const [inMarketIcp, setInMarketIcp] = useState(false);
   const [openTenders, setOpenTenders] = useState([]);
+  const [tenderTotal, setTenderTotal] = useState(0);   // true total tenders Bell tracks (for the Tenders chip)
   const cardRefs = useRef({});
   const scoreColor = (n) => (n >= 60 ? '#6fcf97' : n >= 35 ? '#f5c84c' : '#9ca5b9');
 
@@ -97,7 +98,7 @@ export function SignalsTab() {
   useEffect(() => {
     let dead = false;
     const loadT = () => api.tenders({ limit: 40 })
-      .then((r) => { if (!dead) setOpenTenders(r.rows || []); })
+      .then((r) => { if (!dead) { setOpenTenders(r.rows || []); setTenderTotal(r.total || 0); } })
       .catch(() => {});
     loadT();
     const t = setInterval(loadT, 120_000);
@@ -125,10 +126,11 @@ export function SignalsTab() {
   const counts = useMemo(() => {
     const c = {};
     for (const r of rows) c[r.kind] = (c[r.kind] || 0) + 1;
-    const tw = tenderSignals.filter((s) => inWindow(s.occurred_at)).length;
-    if (tw) c.tender = (c.tender || 0) + tw;
+    // Tenders is a full browser (25k+), not a windowed signal bucket — show the
+    // true total Bell tracks rather than a window-filtered pseudo-count.
+    if (tenderTotal) c.tender = tenderTotal;
     return c;
-  }, [rows, tenderSignals, windowKey]);
+  }, [rows, tenderTotal]);
 
   // What the radar + stream render. A specific kind → server rows for that kind;
   // the Tenders tab (kind='tender') is the embedded browser, handled separately;

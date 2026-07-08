@@ -73,12 +73,13 @@ Bell Data Intelligence (**bell.qa**) is a Qatar business‑intelligence platform
 - 🔄 **Monaqasat detail enrichment IN PROGRESS + parser just fixed (2026‑07‑08).** Cards live (21,120). A real bug was found + fixed: the activity‑codes parser silently dropped any activity whose name exceeded 80 chars (tenders with all‑long names captured 0 → the "0 detailed" symptom). Fixed + versioned (`detail_v=2`) so **re‑running Enrich re‑checks every tender once (newest first) to correct activities — pending jumps back ~21K by design, now memory‑safe.** New **Check Tender Detail.command** reports enrichment health. Older pre‑2024 tenders genuinely have no activity codes. *(→ tenders_pipeline, low_ram_tuning)*
 - 🟡 **Tenders UI** — `TendersTab.js` (embeddable) lives INSIDE the Signals section (a "Tenders" chip + folded into "All types"), NOT a sidebar item. Backed by enhanced `/api/tenders` + prod `/api/sync/count`. Built 2026‑07‑05, **UNDEPLOYED**. *(→ tenders_pipeline)*
 - ✅/🟡 **Ashghal stage 1** — its own open tenders (~35) live via `scrape_ashghal.js` + Run Ashghal Scan.command.
-- 🟡 **Ashghal STAGE 2 — BUILT this session (2026‑07‑06), UNDEPLOYED, every parser verified on live data:**
+- ✅ **Ashghal STAGE 2 — BUILT + DEPLOYED + scanned 2026‑07‑08** (scan: 2,782 new, 28 winners linked). Every parser verified live:
   - **Awarded winner/bidder tables** (the prize Monaqasat hides) — `scrape_ashghal_awarded.js` drives DisplayofAwarding.aspx postbacks with Playwright (`withPlaywrightPage` in render.js), parses winner + all bidders + Accepted/Winner price + ICV% + rank; winner→`linkTenderCompanies`. Needs the Harvester Browser installed.
   - **Full closed/archived lists** — corrected a wrong assumption: they page by plain GET **`?PageIndex=N`** (not `__doPostBack`). e‑Tenders + General × Open/Closed/Archived ≈ 2,900 tenders.
   - **Per‑tender detail** — `enrich_ashghal.js` (resumable): Bond / Document Fees / Category / description via `?...&TenderID=<int>`.
   - **Prospected** upcoming projects (`?Quarter=1..4`), new `prospected` status. New `archived`/`prospected` status badges in the UI. Pre‑Qual/EOI skipped (empty). *(full detail → tenders_pipeline)*
-- 🟡 **QatarEnergy (source #3) BUILT 2026‑07‑08 (UNDEPLOYED).** Easiest source — qatarenergy.qa exposes an ASMX JSON API (anonymous), so `scrape_qatarenergy.js` is a plain fetch (no browser/Crawl4AI). 1,236 tenders (open + upcoming + awarded contracts/POs/agreements); **~1,199 awarded records include the winning contractor + price → 100% winner→company linkage**. Wired + `Run QatarEnergy Scan.command`. *(→ tenders_pipeline)*
+- ✅ **QatarEnergy (source #3) BUILT + DEPLOYED + scanned 2026‑07‑08** (scan: 1,236 tenders, **261 winners linked**). Easiest source — qatarenergy.qa exposes an ASMX JSON API (anonymous), so `scrape_qatarenergy.js` is a plain fetch (no browser/Crawl4AI). Open + upcoming + awarded contracts/POs/agreements; ~1,199 awarded records carry the winning contractor + price. `Run QatarEnergy Scan.command`. *(→ tenders_pipeline)*
+- ✅ **All 3 tender sources LIVE (25,138 tenders on prod).** Tender UI lives in Signals with prominent **source chips** (Monaqasat / Ashghal / QatarEnergy + counts) + status chips + winner/bidder + activity‑code drawers.
 - ⬜ **Tender PENDING queue:** (1) **activity‑code matching** — match tender activity codes to companies in that line of business → live buyer‑intent signals (needs Monaqasat enrichment finished + confirm companies store matchable activity codes); (2) **auto‑scan scheduler** — macOS LaunchAgent "Install Tender Auto‑Scan.command" (PARKED until Tenders+Signals feel 100%); (3) later: competition tracking (Firecrawl monitor → signal). All three tender sources (Monaqasat, Ashghal, QatarEnergy) are now built; **tender source filter = prominent chips** in TendersTab. *(→ tenders_pipeline, vision_signals)*
 - ⬜ Signals vision — global + personalized signals/predictions/buyer‑intent from tenant ICP. Mostly unbuilt. *(→ vision_signals)*
 
@@ -122,12 +123,12 @@ Read `product_vision_roadmap` first for planning; round‑2 deltas in `vision_wa
 
 ## 5. Immediate open items (as of 2026‑07‑08)
 
-1. 🔄 **Finish Monaqasat detail enrichment** — Val running Enrich (resumable, now memory‑safe). Restart Crawl4AI Engine → re‑run Enrich until pending≈0.
-2. ⬜ **Deploy the tender UI batch** — TendersTab‑in‑Signals + Ashghal stage 1 + **Ashghal stage 2** + contract_days/description drawer + new status badges. Commit: `Ashghal stage 2: awarded winners + closed/archived pagination + detail + prospected`.
-3. ⬜ **Run the full Ashghal scan** — needs Crawl4AI + Harvester Browser; local, then push.
-4. ⬜ **Activity‑code matching** → live buyer‑intent signals (task #72).
-5. ⬜ **Auto‑scan scheduler** (parked until Tenders+Signals feel 100%).
-6. Multiple **BUILT‑UNDEPLOYED** batches awaiting a deploy: Bella G4.2/G2.3 + super‑upgrade, 3 new sources, 0 Risk Phase 1, notifications foundation, data‑quality UI, Market Feed rename.
+1. ✅ **Tender batch DEPLOYED (staging + prod) + all scans run 2026‑07‑08** — Ashghal stage 2, Monaqasat activities parser fix + `detail_v` versioning, RAM tuning, QatarEnergy source, source chips. **25,138 tenders live** (Monaqasat 21,045 + Ashghal 2,857 + QatarEnergy 1,236); 289 winner→company links (Ashghal 28 + QatarEnergy 261).
+   - ⚠️ **Follow‑up Tenders UI polish BUILT 2026‑07‑08 (Val feedback) — UNDEPLOYED, needs one more Push+Prod:** default view = **Open** (+ chips reordered Open/Awarded/All); **"detail pending"** hint scoped to Monaqasat only (was wrongly showing on all Ashghal/QatarEnergy — their data is complete); **Signals "Tenders · N" chip** now shows the true total (was a confusing window pseudo‑count of 32).
+2. 🔄 **Finish Monaqasat activity re‑enrich** — Val running **Enrich Tender Details.command** overnight (resumable, memory‑safe, marks `detail_v=2`, newest‑first). Watch with **Check Tender Detail.command**; done when `v2 ≈ detail‑id count`.
+3. ⬜ **Activity‑code matching** → live buyer‑intent signals (task #72; needs the overnight enrich finished + confirm companies store matchable activity codes).
+4. ⬜ **Auto‑scan scheduler** (task #73, parked until Tenders+Signals feel 100%; QatarEnergy needs no engine, Ashghal/Monaqasat need Crawl4AI).
+5. Multiple **BUILT‑UNDEPLOYED** batches still awaiting a deploy: Bella G4.2/G2.3 + super‑upgrade, 3 new sources, 0 Risk Phase 1, notifications foundation, data‑quality UI, Market Feed rename.
 
 ## 6. Where the detail lives (memory map)
 - **Tenders:** `tenders_pipeline`, `vision_signals`, `low_ram_tuning`

@@ -27,7 +27,7 @@ const LIST_COLS = `
   id, source, source_ref, title, buyer, category, status,
   award_company_name, award_company_id, value_amount, currency, url,
   published_at, deadline_at, awarded_at,
-  jsonb_exists(raw, 'activities') AS has_detail`;
+  (source <> 'monaqasat' OR jsonb_exists(raw, 'activities')) AS has_detail`;
 
 router.get('/', async (req, res, next) => {
   try {
