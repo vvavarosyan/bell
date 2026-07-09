@@ -15,12 +15,17 @@ const SRC = 'monaqasat';
   try {
     const n = async (sql) => (await query(sql, [SRC])).rows[0].n;
 
+    // A REAL detail id is a non-empty string. `jsonb_exists` is true even when
+    // the value is JSON null (the parser's honest "no link found") — that bug
+    // kept 1,774 tenders looping as "pending" forever. Fixed 2026-07-09.
+    const HAS_ID = `jsonb_typeof(raw->'detail_id')='string' AND btrim(raw->>'detail_id')<>''`;
     const total       = await n(`SELECT count(*)::int n FROM tenders WHERE source=$1`);
-    const withId      = await n(`SELECT count(*)::int n FROM tenders WHERE source=$1 AND jsonb_exists(raw,'detail_id')`);
+    const withId      = await n(`SELECT count(*)::int n FROM tenders WHERE source=$1 AND ${HAS_ID}`);
+    const unlinked    = await n(`SELECT count(*)::int n FROM tenders WHERE source=$1 AND NOT (${HAS_ID})`);
     const withActs    = await n(`SELECT count(*)::int n FROM tenders WHERE source=$1 AND jsonb_typeof(raw->'activities')='array' AND jsonb_array_length(raw->'activities')>0`);
     const emptyActs   = await n(`SELECT count(*)::int n FROM tenders WHERE source=$1 AND raw->'activities' = '[]'::jsonb`);
     const v2          = await n(`SELECT count(*)::int n FROM tenders WHERE source=$1 AND COALESCE(NULLIF(raw->>'detail_v','')::int,1) >= 2`);
-    const pending     = await n(`SELECT count(*)::int n FROM tenders WHERE source=$1 AND jsonb_exists(raw,'detail_id') AND (NOT jsonb_exists(raw,'activities') OR COALESCE(NULLIF(raw->>'detail_v','')::int,1) < 2)`);
+    const pending     = await n(`SELECT count(*)::int n FROM tenders WHERE source=$1 AND ${HAS_ID} AND (NOT jsonb_exists(raw,'activities') OR COALESCE(NULLIF(raw->>'detail_v','')::int,1) < 2)`);
     const withEmail   = await n(`SELECT count(*)::int n FROM tenders WHERE source=$1 AND raw ? 'contact_email'`);
     const withContract= await n(`SELECT count(*)::int n FROM tenders WHERE source=$1 AND raw ? 'contract_days'`);
     const withDesc    = await n(`SELECT count(*)::int n FROM tenders WHERE source=$1 AND raw ? 'description'`);
@@ -28,6 +33,7 @@ const SRC = 'monaqasat';
     const pad = (x) => String(x.toLocaleString()).padStart(8);
     console.log('Total Monaqasat tenders:         ' + pad(total));
     console.log('  with a detail page id:         ' + pad(withId));
+    console.log('  no detail link on the card:    ' + pad(unlinked) + '   (old awarded cards; nothing to fetch — not "pending")');
     console.log('  WITH activity codes:           ' + pad(withActs));
     console.log('  checked, genuinely none ([]):  ' + pad(emptyActs));
     console.log('  fixed by new parser (v2):      ' + pad(v2));

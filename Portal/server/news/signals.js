@@ -218,7 +218,7 @@ async function genTenderOpportunities() {
   let n = 0;
   for (const s of sigs) {
     const ins = await query(OPPORTUNITY_INSERT_SQL,
-      [s.title, s.body, s.ref_id, s.industry, s.importance, s.occurred_at, s.dedup_key]);
+      [s.title, s.body, s.ref_id, s.industry, s.industries, s.importance, s.occurred_at, s.dedup_key]);
     n += ins.rowCount || 0;
   }
   return n;
@@ -246,9 +246,18 @@ export function scoreSignalForIcp(signal, icp = {}) {
   const kws  = (icp.target_keywords  || []).map((s) => String(s).toLowerCase().trim()).filter(Boolean);
   const sizes = (icp.target_sizes || []).map((s) => String(s).trim()).filter(Boolean);
 
-  const sigInd = String(signal.industry || '').toLowerCase();
-  if (sigInd && inds.some((t) => sigInd.includes(t) || t.includes(sigInd))) {
-    score += 0.6; reasons.push('industry match: ' + signal.industry);
+  // Match against EVERY industry the signal fits (migration 077), not just the
+  // primary: a tender for medical consumables fits Healthcare AND Pharmaceuticals
+  // AND Retail, and a pharma trader should see it. Falls back to the single
+  // `industry` denorm for signal kinds that don't populate the array.
+  const sigInds = (Array.isArray(signal.industries) && signal.industries.length
+    ? signal.industries : [signal.industry])
+    .map((s) => String(s || '').toLowerCase()).filter(Boolean);
+  const hit = sigInds.find((si) => inds.some((t) => si.includes(t) || t.includes(si)));
+  if (hit) {
+    const label = (Array.isArray(signal.industries) && signal.industries.length ? signal.industries : [signal.industry])
+      .find((s) => String(s || '').toLowerCase() === hit) || signal.industry;
+    score += 0.6; reasons.push('industry match: ' + label);
   }
   const hay = (String(signal.title || '') + ' ' + String(signal.body || '')).toLowerCase();
   const kw = kws.find((k) => k.length >= 3 && hay.includes(k));

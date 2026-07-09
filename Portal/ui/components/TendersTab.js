@@ -33,13 +33,15 @@ function StatusBadge({ status }) {
 }
 
 export function TendersTab({ embedded = false } = {}) {
-  const [filters, setFilters] = useState({ status: 'open', source: '', buyer: '', year: '', q: '' });
+  const [filters, setFilters] = useState({ status: 'open', source: '', buyer: '', year: '', q: '', industry: '' });
+  const [scope, setScope] = useState('global');          // global | icp ("For you")
+  const [icpMissing, setIcpMissing] = useState(false);
   const [qInput, setQInput] = useState('');
   const [offset, setOffset] = useState(0);
   const [rows, setRows] = useState([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
-  const [facets, setFacets] = useState({ sources: [], buyers: [], years: [], statuses: [] });
+  const [facets, setFacets] = useState({ sources: [], buyers: [], years: [], statuses: [], industries: [] });
   const [selected, setSelected] = useState(null);
   const [detail, setDetail] = useState(null);
   const [detailLoading, setDetailLoading] = useState(false);
@@ -50,12 +52,13 @@ export function TendersTab({ embedded = false } = {}) {
     setLoading(true);
     try {
       const q = { limit: PAGE, offset };
-      for (const k of ['status', 'source', 'buyer', 'year', 'q']) if (filters[k]) q[k] = filters[k];
+      for (const k of ['status', 'source', 'buyer', 'year', 'q', 'industry']) if (filters[k]) q[k] = filters[k];
+      if (scope === 'icp') q.icp = '1';
       const r = await api.tenders(q);
-      setRows(r.rows || []); setTotal(r.total || 0);
+      setRows(r.rows || []); setTotal(r.total || 0); setIcpMissing(!!r.icp_missing);
     } catch { setRows([]); setTotal(0); }
     finally { setLoading(false); }
-  }, [filters, offset]);
+  }, [filters, offset, scope]);
   useEffect(() => { load(); }, [load]);
 
   useEffect(() => { api.tenderFacets().then(setFacets).catch(() => {}); }, []);
@@ -115,8 +118,21 @@ export function TendersTab({ embedded = false } = {}) {
         ${embedded ? null : html`<h2 style=${{ margin: 0, fontSize: '17px' }}>Tenders</h2>
         <span class="muted small">Qatar public procurement · Bell tracks it continuously</span>`}
         <span style=${{ flex: 1 }}></span>
+        <!-- Same Global / For-you toggle the other Signals tabs have (Val 2026-07-09).
+             "For you" keeps only tenders whose line of business overlaps your ICP. -->
+        <div style=${{ display: 'flex', gap: '6px' }}>
+          ${chip(scope === 'global', 'Global', () => { setOffset(0); setScope('global'); })}
+          ${chip(scope === 'icp', 'For you', () => { setOffset(0); setScope('icp'); })}
+        </div>
         ${syncChip}
       </div>
+
+      ${scope === 'icp' && icpMissing ? html`
+        <div style=${{ border: '1px solid var(--yellow, #f5c84c)', background: 'rgba(245,200,76,.08)', borderRadius: '10px', padding: '12px 16px', marginBottom: '14px', fontSize: '13px', color: 'var(--text)' }}>
+          “For you” needs your ideal-customer profile. Set your target industries once in
+          <button onClick=${() => navigateTo('account')} style=${{ background: 'transparent', border: 'none', color: 'var(--accent-bright, #a5c3ff)', cursor: 'pointer', fontSize: '13px', padding: '0 4px', textDecoration: 'underline' }}>Settings → Company & ICP</button>
+          and Bell will show only the tenders in your line of business.
+        </div>` : null}
 
       <!-- filters -->
       <div style=${{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center', marginBottom: '10px' }}>
@@ -138,17 +154,21 @@ export function TendersTab({ embedded = false } = {}) {
           <option value="">All buyers</option>
           ${(facets.buyers || []).map((b) => html`<option key=${b.buyer} value=${b.buyer}>${b.buyer.length > 34 ? b.buyer.slice(0, 33) + '…' : b.buyer} (${b.n})</option>`)}
         </select>
+        <select value=${filters.industry} onChange=${(e) => setFilter({ industry: e.target.value })} style=${selectStyle}>
+          <option value="">All industries</option>
+          ${(facets.industries || []).map((i) => html`<option key=${i.industry} value=${i.industry}>${i.industry} (${(i.n || 0).toLocaleString()})</option>`)}
+        </select>
         <select value=${filters.year} onChange=${(e) => setFilter({ year: e.target.value })} style=${selectStyle}>
           <option value="">All years</option>
           ${(facets.years || []).map((y) => html`<option key=${y} value=${y}>${y}</option>`)}
         </select>
-        ${(filters.source || filters.buyer || filters.year || filters.q) ? html`
-          <button onClick=${() => { setQInput(''); setFilter({ source: '', buyer: '', year: '', q: '' }); }}
+        ${(filters.source || filters.buyer || filters.year || filters.q || filters.industry) ? html`
+          <button onClick=${() => { setQInput(''); setFilter({ source: '', buyer: '', year: '', q: '', industry: '' }); }}
             style=${{ background: 'transparent', border: 'none', color: 'var(--accent-bright, #a5c3ff)', fontSize: '12px', cursor: 'pointer' }}>Clear</button>` : null}
       </div>
 
       <div class="muted small" style=${{ marginBottom: '10px' }}>
-        ${loading ? 'Loading…' : `${total.toLocaleString()} tender${total === 1 ? '' : 's'}${filters.status || filters.source || filters.buyer || filters.year || filters.q ? ' match your filters' : ''}`}
+        ${loading ? 'Loading…' : `${total.toLocaleString()} tender${total === 1 ? '' : 's'}${scope === 'icp' ? ' in your line of business' : ''}${filters.status || filters.source || filters.buyer || filters.year || filters.q || filters.industry ? ' match your filters' : ''}`}
       </div>
 
       <!-- list -->
@@ -165,7 +185,19 @@ export function TendersTab({ embedded = false } = {}) {
               <${StatusBadge} status=${t.status} />
             </div>
             <div style=${{ fontSize: '13.5px', fontWeight: 600, color: 'var(--text)', lineHeight: 1.4 }}>${t.title}</div>
-            <div class="muted small" style=${{ marginTop: '5px', display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
+            <!-- Line(s) of business (migration 078). The primary is highlighted;
+                 the rest tell the user who else this tender fits. -->
+            ${(t.industries || []).length ? html`
+              <div style=${{ display: 'flex', gap: '5px', flexWrap: 'wrap', marginTop: '7px' }}>
+                ${t.industries.map((ind, i) => html`<span key=${ind} style=${{
+                  fontSize: '10.5px', fontWeight: 600, borderRadius: '999px', padding: '2px 9px', whiteSpace: 'nowrap',
+                  color: i === 0 ? '#a5c3ff' : 'var(--text-muted)',
+                  background: i === 0 ? 'rgba(91,140,255,.14)' : 'var(--bg-elev-2, rgba(255,255,255,0.04))',
+                  border: '1px solid ' + (i === 0 ? 'rgba(91,140,255,.5)' : 'var(--border)'),
+                }}>${ind}</span>`)}
+              </div>` : html`
+              <div style=${{ marginTop: '7px' }}><span class="muted" style=${{ fontSize: '10.5px', opacity: .65 }}>industry not stated</span></div>`}
+            <div class="muted small" style=${{ marginTop: '7px', display: 'flex', gap: '12px', flexWrap: 'wrap' }}>
               ${t.buyer ? html`<span>🏛 ${t.buyer}</span>` : null}
               <span>${t.status === 'awarded' ? 'Awarded' : 'Published'} ${fmtDate(t.awarded_at || t.published_at)}</span>
               ${t.status === 'open' && t.deadline_at ? html`<span>Closes ${fmtDate(t.deadline_at)}</span>` : null}

@@ -49,7 +49,30 @@ async function beat(state, s = {}) {
       [STARTED_AT, state, s.round_no || 0, s.found_total || 0, s.harvested_total || 0, s.mapped_total || 0, s.email_total || 0, s.facts_total || 0, s.tech_total || 0,
        s.find_left ?? null, s.harvest_left ?? null, s.map_left ?? null, s.email_left ?? null, s.facts_left ?? null, s.tech_left ?? null, process.pid]
     );
-  } catch { /* heartbeat is best-effort — never let it stop the engine */ }
+  } catch (err) {
+    // The heartbeat must never stop the engine — but a SILENT failure is worse:
+    // the dashboard then reads "Stopped (no recent heartbeat)" while the engine
+    // is actually sweeping. Two guards (added 2026-07-09):
+    //   1. Fall back to the pre-076 column set, so a daemon started before the
+    //      migration applied still reports in.
+    //   2. Log the reason once, so the log explains any dashboard weirdness.
+    try {
+      await query(
+        `INSERT INTO engine_heartbeat
+           (id, started_at, updated_at, state, round_no, found_total, harvested_total, mapped_total, email_total, facts_total, find_left, harvest_left, map_left, email_left, facts_left, pid)
+         VALUES (1, $1, now(), $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+         ON CONFLICT (id) DO UPDATE SET
+           started_at = EXCLUDED.started_at, updated_at = now(), state = EXCLUDED.state, round_no = EXCLUDED.round_no,
+           found_total = EXCLUDED.found_total, harvested_total = EXCLUDED.harvested_total, mapped_total = EXCLUDED.mapped_total, email_total = EXCLUDED.email_total, facts_total = EXCLUDED.facts_total,
+           find_left = EXCLUDED.find_left, harvest_left = EXCLUDED.harvest_left, map_left = EXCLUDED.map_left, email_left = EXCLUDED.email_left, facts_left = EXCLUDED.facts_left, pid = EXCLUDED.pid`,
+        [STARTED_AT, state, s.round_no || 0, s.found_total || 0, s.harvested_total || 0, s.mapped_total || 0, s.email_total || 0, s.facts_total || 0,
+         s.find_left ?? null, s.harvest_left ?? null, s.map_left ?? null, s.email_left ?? null, s.facts_left ?? null, process.pid]
+      );
+      if (!beat._warned) { beat._warned = true; log(`⚠ heartbeat: using pre-076 columns (${err.message}). Restart the local Portal to apply migration 076.`); }
+    } catch (err2) {
+      if (!beat._warned2) { beat._warned2 = true; log(`⚠ heartbeat write failed: ${err2.message}`); }
+    }
+  }
 }
 
 (async () => {

@@ -26,7 +26,7 @@ router.get('/', async (req, res, next) => {
     params.push(limit);
     const r = await query(
       `SELECT id, kind, subkind, company_id, company_name, title, body, source_kind,
-              ref_table, ref_id, industry, employee_count, importance, occurred_at
+              ref_table, ref_id, industry, industries, employee_count, importance, occurred_at
          FROM signals
         WHERE occurred_at > now() - interval '${windowSql}' ${kindSql}
         ORDER BY occurred_at DESC
@@ -78,7 +78,7 @@ router.get('/in-market', async (req, res, next) => {
   try {
     const limit = Math.min(Math.max(Number(req.query.limit) || 20, 1), 50);
     const sigR = await query(
-      `SELECT id, kind, subkind, company_id, company_name, title, body, industry, employee_count, importance, occurred_at
+      `SELECT id, kind, subkind, company_id, company_name, title, body, industry, industries, employee_count, importance, occurred_at
          FROM signals
         WHERE occurred_at > now() - interval '14 days' AND company_id IS NOT NULL
         ORDER BY occurred_at DESC
