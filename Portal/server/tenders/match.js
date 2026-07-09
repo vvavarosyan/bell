@@ -115,6 +115,7 @@ export const NAME_KEYWORDS = [
   ['information technology', [T.IT]], ['software', [T.IT]], ['computer', [T.IT]],
   ['cyber', [T.IT]], [' ict', [T.IT, T.TELECOM]], ['data cent', [T.IT]], ['digital', [T.IT]],
   ['telecom', [T.TELECOM]], ['fiber', [T.TELECOM]], ['fibre', [T.TELECOM]], ['communication', [T.TELECOM]],
+  ['telephony', [T.TELECOM]], ['voip', [T.TELECOM]], ['pabx', [T.TELECOM]],   // real Monaqasat title: "Hosted IP-Telephony Services"
   ['construction', [T.CONSTRUCTION]], ['contracting', [T.CONSTRUCTION]],
   ['civil works', [T.CONSTRUCTION]], ['road', [T.CONSTRUCTION]], ['bridge', [T.CONSTRUCTION]],
   ['infrastructure', [T.CONSTRUCTION]], ['demolition', [T.CONSTRUCTION]], ['excavation', [T.CONSTRUCTION]],
@@ -209,13 +210,26 @@ export function tagsForActivity(a = {}) {
   return { tags: byName, via: byName.length ? 'name' : null };
 }
 
-// Whole tender → { tags (≤4), primary, via:{class,division,name,category} counts }.
-// Inputs: activities (raw.activities), category column, raw.sector (Monaqasat card).
+// Whole tender → { tags (≤4), primary, via:{class,division,name,category,title} }.
+// Inputs: activities (raw.activities), category column, raw.sector (Monaqasat
+// card), and — only as a LAST RESORT — the tender title.
+//
+// TITLE FALLBACK (Val 2026-07-09): most archived tenders carry no activity codes,
+// and the "category"/"sector" strings at each source turn out to be bidder-TYPE
+// labels ("Suppliers", "Contractors", "Service Providers") or tender-TYPE codes
+// (GTC/STC/ITC/Limited) — never an industry, so they're correctly refused. That
+// left ~24 of 176 OPEN tenders with no industry at all (incl. every QatarEnergy
+// open, whose TENDER_CATEGORY is literally "-"). Their TITLES, though, are
+// explicit ("LTA Drilling Services", "Hosted IP-Telephony"). So: if codes and
+// category yield nothing, match the title through the same curated keyword table.
+// It fires ONLY when nothing better exists, is recorded as via:'title' so the
+// Preview report shows exactly how many signals rest on it, and still yields
+// NOTHING when the title says nothing — we never guess.
 export function tenderIndustries(t = {}) {
   const raw = t.raw || {};
   const acts = Array.isArray(raw.activities) ? raw.activities : [];
   const counts = new Map();   // tag → weight (activity hits count double vs category)
-  const via = { class: 0, division: 0, name: 0, category: 0 };
+  const via = { class: 0, division: 0, name: 0, category: 0, title: 0 };
   const bump = (tag, w) => counts.set(tag, (counts.get(tag) || 0) + w);
 
   for (const a of acts) {
@@ -229,6 +243,14 @@ export function tenderIndustries(t = {}) {
     const mapped = CATEGORY_MAP[key] ?? tagsForText(key);
     if (mapped.length) via.category++;
     mapped.forEach((tag, i) => bump(tag, i === 0 ? 1 : 0.5));
+  }
+
+  if (!counts.size && t.title) {              // last resort only
+    const byTitle = tagsForText(t.title);
+    if (byTitle.length) {
+      via.title++;
+      byTitle.forEach((tag, i) => bump(tag, i === 0 ? 1 : 0.5));
+    }
   }
 
   const ranked = [...counts.entries()].sort((x, y) => y[1] - x[1]).map(([tag]) => tag);
@@ -251,11 +273,13 @@ export const OPEN_TENDER_SELECT_SQL = `
    ORDER BY COALESCE(published_at, created_at) DESC
    LIMIT 1500`;
 
+// `industries` (migration 077) carries EVERY industry the tender fits, primary
+// first, so a tenant whose ICP targets any of them matches — not just the primary.
 export const OPPORTUNITY_INSERT_SQL = `
   INSERT INTO signals (kind, subkind, company_id, company_name, title, body, source_kind, ref_table, ref_id,
-                       industry, employee_count, importance, occurred_at, dedup_key)
+                       industry, industries, employee_count, importance, occurred_at, dedup_key)
   VALUES ('tender', 'opportunity', NULL, NULL, $1, $2, 'tenders', 'tenders', $3,
-          $4, NULL, $5, $6, $7)
+          $4, $5::text[], NULL, $6, $7, $8)
   ON CONFLICT (dedup_key) DO NOTHING`;
 
 const clip = (s, n) => { s = String(s || '').replace(/\s+/g, ' ').trim(); return s.length > n ? s.slice(0, n - 1) + '…' : s; };
@@ -287,6 +311,7 @@ export function buildTenderOpportunitySignals(rows = [], now = Date.now()) {
       body,
       ref_id: t.id,
       industry: m.primary,
+      industries: m.tags,          // ALL fitting industries → multi-industry ICP match
       importance: Math.round(importance * 100) / 100,
       occurred_at: t.published_at || t.created_at,
       dedup_key: 'tenderopp:' + t.id,

@@ -437,13 +437,18 @@ export async function runHarvestSweep({ limit = 100, triggeredBy = null, jobLog 
   // Phase 6 — fingerprint what the company's website RUNS (CMS / commerce /
   // analytics / chat / payments — Engine 6, Stage 12). Independent of harvest
   // state: any company with a website qualifies. 100% local, $0.
+  // Fail-soft: if migration 076 hasn't applied yet (daemon started before the
+  // Portal restart), skip Engine 6 rather than killing the whole sweep round.
   const techRows = await query(
     `SELECT id FROM companies
       WHERE COALESCE(archived, false) = false AND is_active IS NOT false
         AND website IS NOT NULL AND btrim(website) <> ''
         AND stage12_at IS NULL
       ORDER BY bell_score ASC, id ASC
-      LIMIT $1`, [cap]);
+      LIMIT $1`, [cap]).catch((e) => {
+    jobLog?.(`  Phase 6 — skipped (schema not ready: ${e.message}). Restart the local Portal to apply migration 076.`);
+    return { rows: [] };
+  });
   const techIds = techRows.rows.map(r => r.id);
   let techScan = { done: 0, no_data: 0, failed: 0, tech: 0 };
   if (techIds.length) {
@@ -461,7 +466,8 @@ export async function runHarvestSweep({ limit = 100, triggeredBy = null, jobLog 
        (SELECT count(*) FROM companies WHERE COALESCE(archived,false)=false AND is_active IS NOT false AND website IS NOT NULL AND btrim(website)<>'' AND stage9_at IS NULL) AS map_left,
        (SELECT count(*) FROM companies WHERE COALESCE(archived,false)=false AND is_active IS NOT false AND website IS NOT NULL AND btrim(website)<>'' AND stage7_at IS NOT NULL AND stage10_at IS NULL) AS email_left,
        (SELECT count(*) FROM companies WHERE COALESCE(archived,false)=false AND is_active IS NOT false AND website IS NOT NULL AND btrim(website)<>'' AND stage7_at IS NOT NULL AND stage11_at IS NULL) AS facts_left,
-       (SELECT count(*) FROM companies WHERE COALESCE(archived,false)=false AND is_active IS NOT false AND website IS NOT NULL AND btrim(website)<>'' AND stage12_at IS NULL) AS tech_left`);
+       (SELECT count(*) FROM companies WHERE COALESCE(archived,false)=false AND is_active IS NOT false AND website IS NOT NULL AND btrim(website)<>'' AND stage12_at IS NULL) AS tech_left`)
+    .catch(() => ({ rows: [{}] }));   // pre-076 schema → frontier unknown, sweep still completes
   const { find_left, harvest_left, map_left, email_left, facts_left, tech_left } = remain.rows[0] || {};
   jobLog?.(`▸▸▸ Sweep complete. Found ${find?.done || 0} site(s); harvested ${harvest?.done || 0}; mapped ${mapped?.done || 0}; emailed ${email?.emails || 0}; facts ${companyFacts?.facts || 0}; tech ${techScan?.tech || 0}. Remaining — find: ${find_left}, harvest: ${harvest_left}, map: ${map_left}, email: ${email_left}, facts: ${facts_left}, tech: ${tech_left}.`);
 

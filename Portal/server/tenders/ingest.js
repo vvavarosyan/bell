@@ -8,6 +8,7 @@
 // in-market score. See server/news/signals.js genTenderSignals.
 
 import { query } from '../db.js';
+import { tenderIndustries } from './match.js';
 
 const SOURCES = new Set(['monaqasat', 'ashghal', 'qatarenergy', 'kahramaa', 'qse', 'manual']);
 const STATUSES = new Set(['open', 'awarded', 'cancelled', 'closed', 'archived', 'prospected']);
@@ -40,12 +41,18 @@ export async function ingestTenders(rows = []) {
     const title = clean(r?.title, 400);
     if (!source || !SOURCES.has(source.toLowerCase()) || !title) continue;
     const status = STATUSES.has(String(r?.status || '').toLowerCase()) ? String(r.status).toLowerCase() : 'open';
+    // Seed the industry match from whatever the card carries (activities are
+    // usually absent at this point). ON CONFLICT keeps any RICHER set already
+    // stored — the enricher recomputes once activity codes land, and
+    // "Backfill Tender Industries.command" is the authoritative recompute.
+    const m = tenderIndustries({ title, category: clean(r?.category, 80), raw: r?.raw || {} });
     try {
       const res = await query(
         `INSERT INTO tenders (source, source_ref, title, buyer, category, status,
                               award_company_name, value_amount, currency, url,
-                              published_at, deadline_at, awarded_at, raw)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,COALESCE($9,'QAR'),$10,$11,$12,$13,$14)
+                              published_at, deadline_at, awarded_at, raw,
+                              industries, primary_industry)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,COALESCE($9,'QAR'),$10,$11,$12,$13,$14,$15::text[],$16)
          ON CONFLICT (source, source_ref) DO UPDATE SET
            title = EXCLUDED.title, buyer = EXCLUDED.buyer, category = EXCLUDED.category,
            status = EXCLUDED.status,
@@ -58,12 +65,18 @@ export async function ingestTenders(rows = []) {
            -- never wipes detail the enricher already captured (activities,
            -- contact_email, contract_months). Idempotent + resumable-safe.
            raw = COALESCE(tenders.raw, '{}'::jsonb) || COALESCE(EXCLUDED.raw, '{}'::jsonb),
+           -- Same preserve-the-richer rule for the industry match: a card-only
+           -- re-ingest (title/category only) must never clobber an activity-code
+           -- derived match.
+           industries = COALESCE(tenders.industries, EXCLUDED.industries),
+           primary_industry = COALESCE(tenders.primary_industry, EXCLUDED.primary_industry),
            updated_at = now()
          RETURNING (xmax = 0) AS is_insert`,
         [source.toLowerCase(), clean(r?.source_ref, 120), title, clean(r?.buyer, 200),
          clean(r?.category, 80), status, clean(r?.award_company_name, 200), num(r?.value_amount),
          clean(r?.currency, 8), clean(r?.url, 600), ts(r?.published_at), ts(r?.deadline_at),
-         ts(r?.awarded_at), r?.raw ? JSON.stringify(r.raw).slice(0, 20000) : null]
+         ts(r?.awarded_at), r?.raw ? JSON.stringify(r.raw).slice(0, 20000) : null,
+         m.tags.length ? m.tags : null, m.primary]
       );
       if (res.rows[0] && res.rows[0].is_insert) inserted++; else updated++;
     } catch (err) {

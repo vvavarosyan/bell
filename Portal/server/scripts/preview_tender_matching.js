@@ -37,7 +37,7 @@ const pct = (a, b) => (b ? Math.round((a / b) * 100) : 0) + '%';
           OR COALESCE(NULLIF(category,''), NULLIF(raw->>'sector','')) IS NOT NULL`)).rows;
 
     const perSrc = {};        // source → {n, matched}
-    const via = { class: 0, division: 0, name: 0, category: 0 };
+    const via = { class: 0, division: 0, name: 0, category: 0, title: 0 };
     const unmatchedActs = new Map();   // "code name" → count
     const unmatchedCats = new Map();
     const industryDist = new Map();
@@ -73,7 +73,7 @@ const pct = (a, b) => (b ? Math.round((a / b) * 100) : 0) + '%';
     for (const [src, s] of Object.entries(perSrc)) {
       console.log(`  ${src.padEnd(12)} ${pad(s.matched)} / ${pad(s.n)}  (${pct(s.matched, s.n)})`);
     }
-    console.log(`  matched via — class ${via.class.toLocaleString()} · division ${via.division.toLocaleString()} · name ${via.name.toLocaleString()} · category ${via.category.toLocaleString()}`);
+    console.log(`  matched via — class ${via.class.toLocaleString()} · division ${via.division.toLocaleString()} · name ${via.name.toLocaleString()} · category ${via.category.toLocaleString()} · title ${via.title.toLocaleString()} (last-resort)`);
     console.log(`  5-digit activity codes seen: ${fiveDigit.toLocaleString()}${fiveDigit ? '  (ISIC class+check — division-mapped like 6-digit; proven on the 2026-07-09 corpus)' : ''}`);
     for (const s of fiveDigitSamples) console.log('     · ' + s);
 

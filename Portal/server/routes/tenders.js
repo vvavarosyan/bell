@@ -27,7 +27,16 @@ const LIST_COLS = `
   id, source, source_ref, title, buyer, category, status,
   award_company_name, award_company_id, value_amount, currency, url,
   published_at, deadline_at, awarded_at,
+  industries, primary_industry,
   (source <> 'monaqasat' OR jsonb_exists(raw, 'activities')) AS has_detail`;
+
+// The tenant's ICP target industries, or [] when the profile is unset.
+async function icpIndustries(req) {
+  if (!req.tenant?.id) return [];
+  const r = await query(`SELECT target_industries FROM tenant_profile WHERE tenant_id = $1`, [req.tenant.id])
+    .catch(() => ({ rows: [] }));
+  return (r.rows[0]?.target_industries || []).filter(Boolean);
+}
 
 router.get('/', async (req, res, next) => {
   try {
@@ -35,6 +44,18 @@ router.get('/', async (req, res, next) => {
     const offset = Math.max(Number(req.query.offset) || 0, 0);
     const params = [];
     const conds = [];
+
+    // "For you" — only tenders whose line(s) of business overlap this tenant's
+    // ICP industries. Array overlap on the indexed industries[] column, so it's
+    // the same vocabulary the ICP picker writes (canonical industry tags).
+    if (req.query.icp === '1') {
+      const icp = await icpIndustries(req);
+      if (!icp.length) return res.json({ rows: [], total: 0, limit, offset, icp_missing: true });
+      params.push(icp); conds.push(`industries && $${params.length}::text[]`);
+    }
+    if (req.query.industry) {
+      params.push([String(req.query.industry)]); conds.push(`industries && $${params.length}::text[]`);
+    }
     if (req.query.status) { params.push(String(req.query.status).toLowerCase()); conds.push(`status = $${params.length}`); }
     if (req.query.source) { params.push(String(req.query.source).toLowerCase()); conds.push(`source = $${params.length}`); }
     if (req.query.buyer)  { params.push(String(req.query.buyer)); conds.push(`buyer = $${params.length}`); }
@@ -77,17 +98,23 @@ router.get('/stats', async (_req, res, next) => {
 // Distinct values for the filter dropdowns. Buyers capped to the busiest 40.
 router.get('/facets', async (_req, res, next) => {
   try {
-    const [sources, buyers, years, statuses] = await Promise.all([
+    const [sources, buyers, years, statuses, industries] = await Promise.all([
       query(`SELECT source, count(*)::int AS n FROM tenders GROUP BY source ORDER BY n DESC`),
       query(`SELECT buyer, count(*)::int AS n FROM tenders WHERE buyer IS NOT NULL AND buyer <> '' GROUP BY buyer ORDER BY n DESC LIMIT 40`),
       query(`SELECT DISTINCT EXTRACT(YEAR FROM COALESCE(awarded_at, published_at, created_at))::int AS y FROM tenders ORDER BY y DESC`),
       query(`SELECT status, count(*)::int AS n FROM tenders GROUP BY status ORDER BY n DESC`),
+      // Industry facet (migration 078) — unnest so a tender counts under each of
+      // its lines of business. Fails soft before the migration applies.
+      query(`SELECT i AS industry, count(*)::int AS n
+               FROM tenders, unnest(industries) AS i
+              GROUP BY i ORDER BY n DESC LIMIT 30`).catch(() => ({ rows: [] })),
     ]);
     res.json({
       sources: sources.rows,
       buyers: buyers.rows,
       years: years.rows.map((r) => r.y).filter(Boolean),
       statuses: statuses.rows,
+      industries: industries.rows,
     });
   } catch (err) { next(err); }
 });

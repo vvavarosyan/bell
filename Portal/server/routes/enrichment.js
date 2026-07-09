@@ -118,7 +118,19 @@ router.post('/engine/rescan', async (req, res, next) => {
       tech:    { set: 'stage12_at=NULL', where: `${active} AND ${hasSite}`, prio: 'stage12_at ASC NULLS FIRST', label: 'tech-stack scan' },
       all:     { set: 'stage7_at=NULL, stage8_at=NULL, stage9_at=NULL, stage10_at=NULL, stage11_at=NULL, stage12_at=NULL', where: active, prio: 'updated_at ASC', label: 'all engines' },
     };
-    const sc = SCOPES[scope] || SCOPES.all;
+    // ⚠ NEVER silently fall back to 'all'. A newer UI talking to an older server
+    // (a scope it doesn't know yet, e.g. 'tech' before migration 076 shipped)
+    // would otherwise re-queue EVERY engine for EVERY company — including
+    // Engine 1, the only PAID one (Firecrawl search ~2 credits per website-less
+    // company). Unknown scope = refuse, loudly. (Val hit this 2026-07-09.)
+    const sc = SCOPES[scope];
+    if (!sc) {
+      return res.status(400).json({
+        error: 'unknown_scope', scope,
+        known: Object.keys(SCOPES),
+        hint: 'Your Portal may be running older code than the page you have open — restart the local Portal and hard-refresh.',
+      });
+    }
     const sql = limit
       ? `UPDATE companies SET ${sc.set} WHERE id IN (SELECT id FROM companies WHERE ${sc.where} ORDER BY ${sc.prio} LIMIT ${limit})`
       : `UPDATE companies SET ${sc.set} WHERE ${sc.where}`;
