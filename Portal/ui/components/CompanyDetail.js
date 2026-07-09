@@ -343,7 +343,7 @@ export function CompanyDetail({ companyId, onMutated, onDeleted, canHardDelete =
   const extra = c.extra_fields || {};
   const sources = data.sources || [];
   const needsReveal = isUser && c.revealed_by_tenant === false;
-  const intelCount = (data.financials?.length || 0) + (data.shareholders?.length || 0) + (data.partnerships?.length || 0);
+  const intelCount = (data.financials?.length || 0) + (data.shareholders?.length || 0) + (data.partnerships?.length || 0) + (data.tech?.length || 0);
   // Users don't see the raw "Sources" section in Legal — only the regulatory
   // groups that actually have data — so the tab count should match that.
   const legalTabCount = isUser
@@ -483,7 +483,7 @@ export function CompanyDetail({ companyId, onMutated, onDeleted, canHardDelete =
         ${tab === 'people'  ? (data.people_locked
           ? html`<${PeopleLockedBanner} count=${data.people_count ?? 0} compact=${true} />`
           : html`<${PeopleView}  people=${data.people} isUser=${isUser} onReveal=${revealPerson} />`) : null}
-        ${tab === 'intel'   ? html`<${IntelTab} financials=${data.financials || []} shareholders=${data.shareholders || []} partnerships=${data.partnerships || []} />` : null}
+        ${tab === 'intel'   ? html`<${IntelTab} financials=${data.financials || []} shareholders=${data.shareholders || []} partnerships=${data.partnerships || []} tech=${data.tech || []} />` : null}
         ${isLocalEngine && tab === 'sources' ? html`<${SourcesActivityTab} company=${c} extra=${extra} contacts=${data.contacts || []} people=${data.people || []} financials=${data.financials || []} shareholders=${data.shareholders || []} rejects=${data.rejects || []} />` : null}
         ${tab === 'legal'   ? html`<${LegalTab}    sources=${sources} extra=${extra} isUser=${isUser} />` : null}
       </div>
@@ -884,9 +884,10 @@ function PeopleView({ people, isUser = false, onReveal }) {
   `;
 }
 
-// Rich research data — financials, ownership, partnerships gathered by research.
-function IntelTab({ financials, shareholders, partnerships }) {
-  const empty = !financials.length && !shareholders.length && !partnerships.length;
+// Rich research data — financials, ownership, partnerships gathered by research,
+// plus Engine 6 technographics (what the company's website runs).
+function IntelTab({ financials, shareholders, partnerships, tech = [] }) {
+  const empty = !financials.length && !shareholders.length && !partnerships.length && !tech.length;
   if (empty) {
     return html`<div class="overview"><div class="muted small" style=${{ padding: '16px' }}>
       No research intelligence yet. Run a company deep-dive research job and its findings — financials, ownership, and partnerships — will appear here.
@@ -931,6 +932,17 @@ function IntelTab({ financials, shareholders, partnerships }) {
           ${p.description ? html`<div class="muted small" style=${{ marginTop: '3px' }}>${p.description}</div>` : null}
         </div>`)}
       </div>
+    ` : null}
+
+    ${tech.length ? html`
+      ${sectionHead('Website technology', tech.length)}
+      <div style=${{ display: 'flex', flexWrap: 'wrap', gap: '6px', padding: '4px 0 2px' }}>
+        ${tech.map(t => html`<span key=${t.id} title=${'Detected on the company website — ' + String(t.evidence || '')} style=${{
+          border: '1px solid var(--border)', borderRadius: '999px', padding: '3px 10px',
+          fontSize: '11.5px', color: 'var(--text)', background: 'var(--bg-elev-2, rgba(255,255,255,0.04))',
+        }}>${t.tech}<span class="muted" style=${{ fontSize: '9.5px', marginLeft: '5px', textTransform: 'uppercase', letterSpacing: '0.05em' }}>${t.category || ''}</span></span>`)}
+      </div>
+      <div class="muted" style=${{ fontSize: '10.5px', marginTop: '6px' }}>Detected by Bell's local engine from the company's own website.</div>
     ` : null}
   </div>`;
 }

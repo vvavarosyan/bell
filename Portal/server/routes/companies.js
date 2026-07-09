@@ -393,7 +393,7 @@ router.get('/:id', async (req, res, next) => {
       // matchers above (e.g. a future sibling route added without checking).
       return res.status(400).json({ error: 'invalid_id', got: req.params.id });
     }
-    const [company, sources, people, contacts, financials, shareholders, partnerships, rejects] = await Promise.all([
+    const [company, sources, people, contacts, financials, shareholders, partnerships, rejects, tech] = await Promise.all([
       query('SELECT * FROM companies WHERE id = $1', [id]),
       query(`
         SELECT id, source, source_record_id, source_url, raw_payload,
@@ -420,6 +420,10 @@ router.get('/:id', async (req, res, next) => {
       query(`SELECT id, partner_name, partner_company_id, relationship, description, since, confidence, source
                FROM company_partnerships WHERE company_id = $1 ORDER BY partner_name`, [id]),
       listRejects(id),
+      // Engine 6 technographics — what the company's website runs. Table may
+      // not exist before migration 076 applies, so fail soft.
+      query(`SELECT id, tech, category, confidence, evidence, detected_at, updated_at
+               FROM company_tech WHERE company_id = $1 ORDER BY category, tech`, [id]).catch(() => ({ rows: [] })),
     ]);
     if (!company.rows.length) return res.status(404).json({ error: 'not_found' });
     const row = company.rows[0];
@@ -453,6 +457,7 @@ router.get('/:id', async (req, res, next) => {
       shareholders: shareholders.rows,
       partnerships: partnerships.rows,
       rejects:      rejects,
+      tech:         tech.rows,
     });
   } catch (err) { next(err); }
 });

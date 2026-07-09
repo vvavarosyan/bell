@@ -26,7 +26,7 @@ router.get('/', async (req, res, next) => {
     params.push(limit);
     const r = await query(
       `SELECT id, kind, subkind, company_id, company_name, title, body, source_kind,
-              industry, employee_count, importance, occurred_at
+              ref_table, ref_id, industry, employee_count, importance, occurred_at
          FROM signals
         WHERE occurred_at > now() - interval '${windowSql}' ${kindSql}
         ORDER BY occurred_at DESC

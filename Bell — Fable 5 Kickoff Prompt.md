@@ -27,7 +27,7 @@ We're continuing **Bell Data Intelligence** (bell.qa) — my Qatar business‑in
 - **PDPPL** (Qatar data‑protection law) is the legal linchpin for anything touching personal data / outreach.
 
 **Where we are right now (quick orientation — the state doc has the full picture):**
-- **Tenders:** Monaqasat ~21K live; detail enrichment in progress (resumable, now memory‑safe). **Ashghal stage 2 is BUILT but UNDEPLOYED** (awarded winners + closed/archived pagination + per‑tender detail + prospected). Pending: deploy the tender UI batch, run the full Ashghal scan, activity‑code→company matching, auto‑scan scheduler, then QatarEnergy.
+- **Tenders (all 3 sources LIVE + deployed):** Monaqasat + Ashghal + QatarEnergy are built, scanned, and deployed — **25,138 tenders live**, with winners linked to companies (Ashghal 28 + QatarEnergy 261). Monaqasat's activity‑code detail is re‑enriching overnight (memory‑safe; a parser bug that dropped long activity names was fixed + versioned). Pending tender items: **activity‑code → company matching signal** (task #72 — needs the overnight enrich finished), **auto‑scan scheduler** (task #73, parked), competition tracking.
 - Several other batches are **BUILT‑UNDEPLOYED** awaiting a deploy (Bella G4.2/G2.3 + super‑upgrade, 3 new sources, 0‑Risk Phase 1, notifications foundation).
 - Big **pending** areas: Bella (Arabic voice, Research tools, Team, admin Bella), the product‑portal vision sections (Map, People lockdown, CRM, Jobs, Billing, Settings, Team, Onboarding), self‑marketing engine (~70%, awaiting my decisions), Research (paused on Firecrawl Spark).
 
