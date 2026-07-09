@@ -53,6 +53,7 @@ router.get('/engine-status', async (req, res) => {
           (SELECT count(*) FROM companies WHERE COALESCE(archived,false)=false AND is_active IS NOT false AND website IS NOT NULL AND btrim(website)<>'' AND stage9_at IS NULL)::int AS map_left,
           (SELECT count(*) FROM companies WHERE COALESCE(archived,false)=false AND is_active IS NOT false AND website IS NOT NULL AND btrim(website)<>'' AND stage7_at IS NOT NULL AND stage10_at IS NULL)::int AS email_left,
           (SELECT count(*) FROM companies WHERE COALESCE(archived,false)=false AND is_active IS NOT false AND website IS NOT NULL AND btrim(website)<>'' AND stage7_at IS NOT NULL AND stage11_at IS NULL)::int AS facts_left,
+          (SELECT count(*) FROM companies WHERE COALESCE(archived,false)=false AND is_active IS NOT false AND website IS NOT NULL AND btrim(website)<>'' AND stage12_at IS NULL)::int AS tech_left,
           (SELECT count(*) FROM companies WHERE COALESCE(archived,false)=false AND is_active IS NOT false)::int AS total,
           (SELECT count(*) FROM companies WHERE COALESCE(archived,false)=false AND is_active IS NOT false AND website IS NOT NULL AND btrim(website)<>'')::int AS with_website
         `).catch(() => ({ rows: [{}] })),
@@ -114,7 +115,8 @@ router.post('/engine/rescan', async (req, res, next) => {
       map:     { set: 'stage9_at=NULL',  where: `${active} AND ${hasSite}`, prio: 'stage9_at ASC NULLS FIRST',  label: 'network mapping' },
       email:   { set: 'stage10_at=NULL', where: `${active} AND ${hasSite}`, prio: 'stage10_at ASC NULLS FIRST', label: 'email finding' },
       facts:   { set: 'stage11_at=NULL', where: `${active} AND ${hasSite}`, prio: 'stage11_at ASC NULLS FIRST', label: 'company facts' },
-      all:     { set: 'stage7_at=NULL, stage8_at=NULL, stage9_at=NULL, stage10_at=NULL, stage11_at=NULL', where: active, prio: 'updated_at ASC', label: 'all engines' },
+      tech:    { set: 'stage12_at=NULL', where: `${active} AND ${hasSite}`, prio: 'stage12_at ASC NULLS FIRST', label: 'tech-stack scan' },
+      all:     { set: 'stage7_at=NULL, stage8_at=NULL, stage9_at=NULL, stage10_at=NULL, stage11_at=NULL, stage12_at=NULL', where: active, prio: 'updated_at ASC', label: 'all engines' },
     };
     const sc = SCOPES[scope] || SCOPES.all;
     const sql = limit

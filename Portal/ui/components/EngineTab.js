@@ -31,6 +31,7 @@ const ENGINES = [
   { key: 'map_left',     name: 'Engine 3 · Network Mapper',    left: 'Companies still to map',             desc: 'Maps partners, clients, affiliates and competitors into the business graph.' },
   { key: 'email_left',   name: 'Engine 4 · Email Finder',      left: 'Harvested sites still to email-find', desc: 'Finds decision-maker emails — matches published addresses to people, learns each company\'s email format, and verifies every address before saving.' },
   { key: 'facts_left',   name: 'Engine 5 · Company Facts',     left: 'Harvested sites still to fact-check', desc: 'Pulls capital, financials and shareholders from each company\'s own website — only when the page states them, and only validated values are saved.' },
+  { key: 'tech_left',    name: 'Engine 6 · Tech Stack',        left: 'Websites still to fingerprint',       desc: 'Detects what each company\'s website runs — CMS, e-commerce, analytics, chat, payment gateways — from unambiguous markers in the page itself. 100% local, $0.' },
 ];
 const CARD = { border: '1px solid var(--border)', borderRadius: '12px', padding: '16px', background: 'var(--bg-elev, rgba(255,255,255,0.02))', marginBottom: '16px' };
 
@@ -120,7 +121,7 @@ export function EngineTab() {
             <div><div class="muted" style=${{ fontSize: '11px' }}>Last activity</div>${agoFn(s.beat_age_ms)}</div>
             <div><div class="muted" style=${{ fontSize: '11px' }}>Uptime</div>${uptimeFn(hb.started_at)}</div>
             <div><div class="muted" style=${{ fontSize: '11px' }}>Rounds this run</div>${nf(hb.round_no)}</div>
-            <div><div class="muted" style=${{ fontSize: '11px' }}>Found · Harvested · Mapped · Emailed · Facts</div><b>${nf(hb.found_total)}</b> · <b>${nf(hb.harvested_total)}</b> · <b>${nf(hb.mapped_total)}</b> · <b>${nf(hb.email_total)}</b> · <b>${nf(hb.facts_total)}</b></div>
+            <div><div class="muted" style=${{ fontSize: '11px' }}>Found · Harvested · Mapped · Emailed · Facts · Tech</div><b>${nf(hb.found_total)}</b> · <b>${nf(hb.harvested_total)}</b> · <b>${nf(hb.mapped_total)}</b> · <b>${nf(hb.email_total)}</b> · <b>${nf(hb.facts_total)}</b> · <b>${nf(hb.tech_total)}</b></div>
             <div><div class="muted" style=${{ fontSize: '11px' }}>JS scraper (Crawl4AI)</div>${s.crawl4ai && s.crawl4ai.up ? html`<span style=${{ color: '#22c55e', fontWeight: 700 }}>● live</span>` : html`<span class="muted">○ offline</span>`}</div>
           </div>
         </div>
@@ -161,8 +162,8 @@ export function EngineTab() {
           </div>
         </div>
 
-        ${total > 0 && fr.find_left === 0 && fr.harvest_left === 0 && fr.map_left === 0 && fr.email_left === 0 && fr.facts_left === 0 ? html`<div style=${{ ...CARD, border: '1px solid rgba(34,197,94,0.4)', background: 'rgba(34,197,94,0.06)' }}>
-          <b>All ${nf(total)} companies have been processed by Engines 1–5.</b> The engines are caught up and idle until new companies arrive or you re-scan.
+        ${total > 0 && fr.find_left === 0 && fr.harvest_left === 0 && fr.map_left === 0 && fr.email_left === 0 && fr.facts_left === 0 && (fr.tech_left ?? 0) === 0 ? html`<div style=${{ ...CARD, border: '1px solid rgba(34,197,94,0.4)', background: 'rgba(34,197,94,0.06)' }}>
+          <b>All ${nf(total)} companies have been processed by Engines 1–6.</b> The engines are caught up and idle until new companies arrive or you re-scan.
         </div>` : null}
 
         ${coverage && coverage.companies ? html`<div style=${CARD}>
@@ -213,6 +214,7 @@ export function EngineTab() {
             <button class="sys-btn sys-btn-secondary" disabled=${rescanning} onClick=${() => rescan('harvest', `re-harvesting every known site (${nf(fr.with_website)})`)}>Re-harvest sites (${nf(fr.with_website)})</button>
             <button class="sys-btn sys-btn-secondary" disabled=${rescanning} onClick=${() => rescan('email', `re-finding emails on every harvested site (${nf(fr.with_website)})`)}>Re-find emails (${nf(fr.with_website)})</button>
             <button class="sys-btn sys-btn-secondary" disabled=${rescanning} onClick=${() => rescan('facts', `re-checking facts on every harvested site (${nf(fr.with_website)})`)}>Re-check facts (${nf(fr.with_website)})</button>
+            <button class="sys-btn sys-btn-secondary" disabled=${rescanning} onClick=${() => rescan('tech', `re-fingerprinting the tech stack on every site (${nf(fr.with_website)})`)}>Re-scan tech (${nf(fr.with_website)})</button>
           </div>
         </div>
 

@@ -124,11 +124,11 @@ Read `product_vision_roadmap` first for planning; round‑2 deltas in `vision_wa
 ## 5. Immediate open items (as of 2026‑07‑08)
 
 1. ✅ **Tender batch DEPLOYED (staging + prod) + all scans run 2026‑07‑08** — Ashghal stage 2, Monaqasat activities parser fix + `detail_v` versioning, RAM tuning, QatarEnergy source, source chips. **25,138 tenders live** (Monaqasat 21,045 + Ashghal 2,857 + QatarEnergy 1,236); 289 winner→company links (Ashghal 28 + QatarEnergy 261).
-   - ⚠️ **Follow‑up Tenders UI polish BUILT 2026‑07‑08 (Val feedback) — UNDEPLOYED, needs one more Push+Prod:** default view = **Open** (+ chips reordered Open/Awarded/All); **"detail pending"** hint scoped to Monaqasat only (was wrongly showing on all Ashghal/QatarEnergy — their data is complete); **Signals "Tenders · N" chip** now shows the true total (was a confusing window pseudo‑count of 32).
-2. 🔄 **Finish Monaqasat activity re‑enrich** — Val running **Enrich Tender Details.command** overnight (resumable, memory‑safe, marks `detail_v=2`, newest‑first). Watch with **Check Tender Detail.command**; done when `v2 ≈ detail‑id count`.
+   - ✅ **Follow‑up Tenders UI polish DEPLOYED (Val confirmed 2026‑07‑08):** default view = **Open** (+ chips reordered Open/Awarded/All); **"detail pending"** hint scoped to Monaqasat only (was wrongly showing on all Ashghal/QatarEnergy — their data is complete); **Signals "Tenders · N" chip** now shows the true total (was a confusing window pseudo‑count of 32).
+2. 🔄 **Finish Monaqasat activity re‑enrich** — Val starts **Enrich Tender Details.command** the night of 2026‑07‑08→09 (resumable, memory‑safe, marks `detail_v=2`, newest‑first). First health check before start (Check Tender Detail.command, 2026‑07‑08 21:45): 21,045 total · 5,277 with codes · 13,994 genuinely‑none · **1,334 v2 · 19,711 still to re‑check**; sample v2 tenders spot‑checked good. ~8–12h at concurrency 2 → may need a 2nd night. Done when `v2 ≈ detail‑id count`.
 3. ⬜ **Activity‑code matching** → live buyer‑intent signals (task #72; needs the overnight enrich finished + confirm companies store matchable activity codes).
 4. ⬜ **Auto‑scan scheduler** (task #73, parked until Tenders+Signals feel 100%; QatarEnergy needs no engine, Ashghal/Monaqasat need Crawl4AI).
-5. Multiple **BUILT‑UNDEPLOYED** batches still awaiting a deploy: Bella G4.2/G2.3 + super‑upgrade, 3 new sources, 0 Risk Phase 1, notifications foundation, data‑quality UI, Market Feed rename.
+5. ✅ **Deploy‑state corrected (Val confirmed live, 2026‑07‑08):** the batches previously listed here as built‑undeployed (Bella G4.2/G2.3 + super‑upgrade, 3 new sources, 0 Risk Phase 1, notifications foundation, data‑quality UI, Market Feed rename) **are all deployed** — Push Changes commits the whole tree (`git add -A`), so earlier deploys swept them out. Remaining gaps are **activation items, not deploys**: run the CRA ICT / Made‑in‑Qatar / QFCRA scans locally, Val's Meta WhatsApp setup, notification email triggers/prefs, 0 Risk staging test + lawyer. Val also has "a few comments" on the live features — he'll raise them later.
 
 ## 6. Where the detail lives (memory map)
 - **Tenders:** `tenders_pipeline`, `vision_signals`, `low_ram_tuning`
@@ -165,6 +165,13 @@ Read `product_vision_roadmap` first for planning; round‑2 deltas in `vision_wa
 - **Solutioning.** Be able to generate solutions, suggestions, and concrete implementations to move Bell in a chosen direction.
 - **Self‑economics.** Understand every cost — servers, external APIs, the local domain, hosting, marketing, everything — do its own calculations, grow itself, and always stay profitable.
 
-### 7.4 For the new session
+### 7.4 Data maximization — the local‑engine radar *(added by Val 2026‑07‑08, via chat)*
+- **Upgrade the local enrichment engines** to gather the maximum possible data — **free, built locally**. Enrich the EXISTING database and make sure Bell always holds the **latest** data available.
+- **Research new data**: logistics data, numbers/statistics data, tech‑stack, and any other internet‑available data that can enhance/enrich/upgrade the DB and the offerings — deep‑research the right way to gather each (free/affordable first) and propose additions.
+- **100% valid DB before automated outreach.** Once automated outreach turns on, Bell starts winning its own clients — the DB must be fully trustworthy first. If a company genuinely has NO data anywhere online, that's acceptable — but if data exists, **Bell must have it**. *"Bell is a powerful radar for this kind of data and has to be able to catch each and every possible datum available out there."*
+- Val has more points queued (front end, marketing pages, dashboard, companies search, local scrapers, …) but wants the **current reviewed plan completed 100% first**; he'll add the rest afterwards.
+
+### 7.5 For the new session
 - **Research first, affordably.** For every point above, research thoroughly and find the best, cheapest, or free way to achieve it before proposing any phases.
 - **Then plan.** Only after Val confirms §7 is complete (he has more to add) should the new session propose the phased plan.
+- ✅ **2026‑07‑08: Val GREEN‑LIT phased planning + execution** on the basis of §7.1–7.4. Remaining §7 additions come after the current plan completes. The agreed phase ladder lives in memory (`master_plan_2026_07`).

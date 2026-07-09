@@ -10,6 +10,7 @@
 // "For you" view — unit-testable without a database.
 
 import { query } from '../db.js';
+import { OPEN_TENDER_SELECT_SQL, OPPORTUNITY_INSERT_SQL, buildTenderOpportunitySignals } from '../tenders/match.js';
 
 const state = { last_run_at: null, last_error: null, inserted_last: 0, runs: 0 };
 export function getSignalsState() { return { ...state }; }
@@ -26,6 +27,7 @@ export async function generateSignals() {
     inserted += await genNewsEvents();
     inserted += await genExpansion();
     inserted += await genTenderSignals();
+    inserted += await genTenderOpportunities();
     state.last_error = null;
   } catch (err) {
     state.last_error = err.message;
@@ -201,6 +203,25 @@ async function genTenderSignals() {
        AND COALESCE(t.awarded_at, t.published_at, t.created_at) > now() - interval '${LOOKBACK_HOURS.tender} hours'
     ON CONFLICT (dedup_key) DO NOTHING`);
   return r.rowCount || 0;
+}
+
+// tender OPPORTUNITY (#72) — open tenders matched to a line of business via
+// their activity codes / category (server/tenders/match.js, pure + unit-tested).
+// One signal per tender, NO company (market demand, not a company event): ICP
+// matching rides the `industry` denorm; NULL company keeps them out of the
+// per-company in-market grouping and the map layer by construction. Idempotent
+// via dedup_key 'tenderopp:<id>'; unmatched tenders get NO signal (100% bar —
+// we never invent relevance).
+async function genTenderOpportunities() {
+  const r = await query(OPEN_TENDER_SELECT_SQL);
+  const sigs = buildTenderOpportunitySignals(r.rows);
+  let n = 0;
+  for (const s of sigs) {
+    const ins = await query(OPPORTUNITY_INSERT_SQL,
+      [s.title, s.body, s.ref_id, s.industry, s.importance, s.occurred_at, s.dedup_key]);
+    n += ins.rowCount || 0;
+  }
+  return n;
 }
 
 // ── ICP scoring (pure — used by /api/signals scope=icp) ─────────────────────

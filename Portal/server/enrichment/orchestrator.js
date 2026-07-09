@@ -20,6 +20,7 @@ import * as stage8 from './local/finder.js';
 import * as stage9 from './local/relationships.js';
 import * as stage10 from './local/email_finder.js';
 import * as stage11 from './local/company_facts.js';
+import * as stage12 from './local/tech_stack.js';
 
 const STAGES = {
   1: { module: stage1, label: 'Stage 1 — LinkedIn Discovery',         tool: 'firecrawl_spark_pro' },
@@ -33,6 +34,7 @@ const STAGES = {
   9: { module: stage9, label: 'Local Engine 3 — Network Mapper',      tool: 'local_relationship_mapper' },
   10: { module: stage10, label: 'Local Engine 4 — Email Finder',       tool: 'local_email_finder' },
   11: { module: stage11, label: 'Local Engine 5 — Company Facts',      tool: 'local_company_facts' },
+  12: { module: stage12, label: 'Local Engine 6 — Tech Stack',         tool: 'local_tech_stack' },
 };
 
 // (No more placeholders — every stage is implemented.)
@@ -432,6 +434,25 @@ export async function runHarvestSweep({ limit = 100, triggeredBy = null, jobLog 
     jobLog?.(`  Phase 5 — no companies ready for facts. Skipping.`);
   }
 
+  // Phase 6 — fingerprint what the company's website RUNS (CMS / commerce /
+  // analytics / chat / payments — Engine 6, Stage 12). Independent of harvest
+  // state: any company with a website qualifies. 100% local, $0.
+  const techRows = await query(
+    `SELECT id FROM companies
+      WHERE COALESCE(archived, false) = false AND is_active IS NOT false
+        AND website IS NOT NULL AND btrim(website) <> ''
+        AND stage12_at IS NULL
+      ORDER BY bell_score ASC, id ASC
+      LIMIT $1`, [cap]);
+  const techIds = techRows.rows.map(r => r.id);
+  let techScan = { done: 0, no_data: 0, failed: 0, tech: 0 };
+  if (techIds.length) {
+    jobLog?.(`  Phase 6 — Engine 6 (Tech Stack) on ${techIds.length} company(ies)…`);
+    techScan = await safeRun(() => runStageForCompanies({ stage: 12, companyIds: techIds, triggeredBy, jobLog: (m) => jobLog?.('  [E6] ' + m) })).then(unwrap);
+  } else {
+    jobLog?.(`  Phase 6 — no companies ready for tech scan. Skipping.`);
+  }
+
   // How much frontier remains, so the admin knows whether to run again.
   const remain = await query(
     `SELECT
@@ -439,9 +460,10 @@ export async function runHarvestSweep({ limit = 100, triggeredBy = null, jobLog 
        (SELECT count(*) FROM companies WHERE COALESCE(archived,false)=false AND is_active IS NOT false AND website IS NOT NULL AND btrim(website)<>'' AND stage7_at IS NULL) AS harvest_left,
        (SELECT count(*) FROM companies WHERE COALESCE(archived,false)=false AND is_active IS NOT false AND website IS NOT NULL AND btrim(website)<>'' AND stage9_at IS NULL) AS map_left,
        (SELECT count(*) FROM companies WHERE COALESCE(archived,false)=false AND is_active IS NOT false AND website IS NOT NULL AND btrim(website)<>'' AND stage7_at IS NOT NULL AND stage10_at IS NULL) AS email_left,
-       (SELECT count(*) FROM companies WHERE COALESCE(archived,false)=false AND is_active IS NOT false AND website IS NOT NULL AND btrim(website)<>'' AND stage7_at IS NOT NULL AND stage11_at IS NULL) AS facts_left`);
-  const { find_left, harvest_left, map_left, email_left, facts_left } = remain.rows[0] || {};
-  jobLog?.(`▸▸▸ Sweep complete. Found ${find?.done || 0} site(s); harvested ${harvest?.done || 0}; mapped ${mapped?.done || 0}; emailed ${email?.emails || 0}; facts ${companyFacts?.facts || 0}. Remaining — find: ${find_left}, harvest: ${harvest_left}, map: ${map_left}, email: ${email_left}, facts: ${facts_left}.`);
+       (SELECT count(*) FROM companies WHERE COALESCE(archived,false)=false AND is_active IS NOT false AND website IS NOT NULL AND btrim(website)<>'' AND stage7_at IS NOT NULL AND stage11_at IS NULL) AS facts_left,
+       (SELECT count(*) FROM companies WHERE COALESCE(archived,false)=false AND is_active IS NOT false AND website IS NOT NULL AND btrim(website)<>'' AND stage12_at IS NULL) AS tech_left`);
+  const { find_left, harvest_left, map_left, email_left, facts_left, tech_left } = remain.rows[0] || {};
+  jobLog?.(`▸▸▸ Sweep complete. Found ${find?.done || 0} site(s); harvested ${harvest?.done || 0}; mapped ${mapped?.done || 0}; emailed ${email?.emails || 0}; facts ${companyFacts?.facts || 0}; tech ${techScan?.tech || 0}. Remaining — find: ${find_left}, harvest: ${harvest_left}, map: ${map_left}, email: ${email_left}, facts: ${facts_left}, tech: ${tech_left}.`);
 
   return {
     found: find?.done || 0, find_attempted: findIds.length,
@@ -449,7 +471,8 @@ export async function runHarvestSweep({ limit = 100, triggeredBy = null, jobLog 
     mapped: mapped?.done || 0, map_attempted: mapIds.length,
     emails: email?.emails || 0, email_attempted: emailIds.length,
     facts: companyFacts?.facts || 0, facts_attempted: factsIds.length,
-    find_left: Number(find_left || 0), harvest_left: Number(harvest_left || 0), map_left: Number(map_left || 0), email_left: Number(email_left || 0), facts_left: Number(facts_left || 0),
+    tech: techScan?.tech || 0, tech_attempted: techIds.length,
+    find_left: Number(find_left || 0), harvest_left: Number(harvest_left || 0), map_left: Number(map_left || 0), email_left: Number(email_left || 0), facts_left: Number(facts_left || 0), tech_left: Number(tech_left || 0),
   };
 }
 
@@ -486,7 +509,10 @@ export async function runLocalEnginesForCompanies({ companyIds, triggeredBy = nu
   jobLog?.(`  Engine 5 — Company Facts…`);
   const companyFacts = await safeRun(() => runStageForCompanies({ stage: 11, companyIds: ids, triggeredBy, jobLog: (m) => jobLog?.('  [E5] ' + m) })).then(unwrap);
 
-  jobLog?.(`▸▸▸ Done. Found ${find?.done || 0} site(s); harvested ${harvest?.done || 0}; mapped ${mapped?.done || 0}; emailed ${email?.emails || 0}; facts ${companyFacts?.facts || 0}.`);
+  jobLog?.(`  Engine 6 — Tech Stack…`);
+  const techScan = await safeRun(() => runStageForCompanies({ stage: 12, companyIds: ids, triggeredBy, jobLog: (m) => jobLog?.('  [E6] ' + m) })).then(unwrap);
+
+  jobLog?.(`▸▸▸ Done. Found ${find?.done || 0} site(s); harvested ${harvest?.done || 0}; mapped ${mapped?.done || 0}; emailed ${email?.emails || 0}; facts ${companyFacts?.facts || 0}; tech ${techScan?.tech || 0}.`);
   return {
     selected: ids.length,
     found: find?.done || 0, find_attempted: find?.total || 0,
@@ -494,5 +520,6 @@ export async function runLocalEnginesForCompanies({ companyIds, triggeredBy = nu
     mapped: mapped?.done || 0, map_attempted: mapped?.total || 0,
     emailed: email?.emails || 0,
     facts: companyFacts?.facts || 0,
+    tech: techScan?.tech || 0,
   };
 }

@@ -139,7 +139,11 @@ export function SignalsTab() {
     if (kind === 'tender') return [];
     if (kind) return rows;
     if (scope !== 'global') return rows;
-    const t = tenderSignals.filter((s) => inWindow(s.occurred_at));
+    // Server-generated tender signals (#72 opportunities + awarded links) carry
+    // ref_id = tender id — drop the client-side pseudo-signal for any tender the
+    // server already covers, so the stream never shows the same tender twice.
+    const covered = new Set(rows.filter((r) => r.kind === 'tender' && r.ref_id != null).map((r) => Number(r.ref_id)));
+    const t = tenderSignals.filter((s) => inWindow(s.occurred_at) && !covered.has(s.id - 900000000));
     return [...rows, ...t].sort((a, b) => new Date(b.occurred_at) - new Date(a.occurred_at));
   }, [rows, tenderSignals, kind, scope, windowKey]);
 
@@ -297,7 +301,7 @@ export function SignalsTab() {
                       <button onClick=${(e) => { e.stopPropagation(); navigateTo('companies', s.company_id); }}
                         style=${{ background: 'transparent', border: 'none', padding: 0, color: 'var(--accent-bright, #a5c3ff)', fontSize: '12px', fontWeight: 600, cursor: 'pointer' }}>
                         ${s.company_name || 'Open company'} →</button>` : null}
-                    ${s._tender ? html`
+                    ${s._tender || (s.kind === 'tender' && s.ref_table === 'tenders') ? html`
                       <button onClick=${(e) => { e.stopPropagation(); setKind('tender'); }}
                         style=${{ background: 'transparent', border: 'none', padding: 0, color: 'var(--accent-bright, #a5c3ff)', fontSize: '12px', fontWeight: 600, cursor: 'pointer' }}>
                         Open in Tenders →</button>` : null}
