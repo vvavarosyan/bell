@@ -1,0 +1,43 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "permissions": {
+    "deny": [
+      "Bash(git checkout -b*)",
+      "Bash(git switch -c*)",
+      "Bash(git branch *)",
+      "Bash(git worktree add*)",
+      "Bash(git push --force*)",
+      "Bash(git push -f*)",
+      "Bash(git push origin main*)",
+      "Bash(git push origin +*)",
+      "Bash(git rebase*)",
+      "Bash(git reset --hard*)",
+      "Bash(git filter-branch*)",
+      "Bash(git push origin --delete*)",
+      "Bash(git merge*)",
+      "Bash(git checkout main*)",
+      "Bash(git switch main*)",
+      "Bash(gh pr merge*)",
+      "Read(./.env)",
+      "Read(./.env.*)",
+      "Read(./Config/secrets*)"
+    ],
+    "ask": [
+      "Bash(git push*)",
+      "Bash(git commit*)",
+      "Bash(git tag*)",
+      "Bash(rm -rf*)",
+      "Bash(psql*)",
+      "Bash(dropdb*)",
+      "Bash(launchctl*)"
+    ],
+    "allow": [
+      "Bash(node --check*)",
+      "Bash(node server/tests/*)",
+      "Bash(git status*)",
+      "Bash(git diff*)",
+      "Bash(git log*)",
+      "Bash(git add*)"
+    ]
+  }
+}

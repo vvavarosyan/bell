@@ -7,6 +7,7 @@
 // open the same tender on monaqasat.mof.gov.qa and compare.
 
 import { query } from '../db.js';
+import { DETAIL_V } from '../tenders/scrape_monaqasat.js';
 
 const SRC = 'monaqasat';
 
@@ -24,11 +25,16 @@ const SRC = 'monaqasat';
     const unlinked    = await n(`SELECT count(*)::int n FROM tenders WHERE source=$1 AND NOT (${HAS_ID})`);
     const withActs    = await n(`SELECT count(*)::int n FROM tenders WHERE source=$1 AND jsonb_typeof(raw->'activities')='array' AND jsonb_array_length(raw->'activities')>0`);
     const emptyActs   = await n(`SELECT count(*)::int n FROM tenders WHERE source=$1 AND raw->'activities' = '[]'::jsonb`);
-    const v2          = await n(`SELECT count(*)::int n FROM tenders WHERE source=$1 AND COALESCE(NULLIF(raw->>'detail_v','')::int,1) >= 2`);
-    const pending     = await n(`SELECT count(*)::int n FROM tenders WHERE source=$1 AND ${HAS_ID} AND (NOT jsonb_exists(raw,'activities') OR COALESCE(NULLIF(raw->>'detail_v','')::int,1) < 2)`);
+    const v2          = await n(`SELECT count(*)::int n FROM tenders WHERE source=$1 AND COALESCE(NULLIF(raw->>'detail_v','')::int,1) >= ${DETAIL_V}`);
+    const pending     = await n(`SELECT count(*)::int n FROM tenders WHERE source=$1 AND ${HAS_ID} AND (NOT jsonb_exists(raw,'activities') OR COALESCE(NULLIF(raw->>'detail_v','')::int,1) < ${DETAIL_V})`);
     const withEmail   = await n(`SELECT count(*)::int n FROM tenders WHERE source=$1 AND raw ? 'contact_email'`);
-    const withContract= await n(`SELECT count(*)::int n FROM tenders WHERE source=$1 AND raw ? 'contract_days'`);
+    const withContract= await n(`SELECT count(*)::int n FROM tenders WHERE source=$1 AND (raw ? 'contract_duration' OR raw ? 'contract_days')`);
+    // Junk written by the pre-v3 parser: entity_ref captured the NEXT table header.
+    const junkEntity  = await n(`SELECT count(*)::int n FROM tenders WHERE source=$1 AND raw->>'entity_ref' IN ('Request','Request Types')`);
     const withDesc    = await n(`SELECT count(*)::int n FROM tenders WHERE source=$1 AND raw ? 'description'`);
+    // Closing date — NULL on every Monaqasat tender until the 2026-07-10 fix.
+    const openTot     = await n(`SELECT count(*)::int n FROM tenders WHERE source=$1 AND status='open'`);
+    const openDl      = await n(`SELECT count(*)::int n FROM tenders WHERE source=$1 AND status='open' AND deadline_at IS NOT NULL`);
 
     const pad = (x) => String(x.toLocaleString()).padStart(8);
     console.log('Total Monaqasat tenders:         ' + pad(total));
@@ -36,8 +42,11 @@ const SRC = 'monaqasat';
     console.log('  no detail link on the card:    ' + pad(unlinked) + '   (old awarded cards; nothing to fetch — not "pending")');
     console.log('  WITH activity codes:           ' + pad(withActs));
     console.log('  checked, genuinely none ([]):  ' + pad(emptyActs));
-    console.log('  fixed by new parser (v2):      ' + pad(v2));
+    console.log(`  captured by parser v${DETAIL_V}:        ` + pad(v2));
     console.log('  still to (re)enrich:           ' + pad(pending));
+    console.log('  OPEN with a closing date:      ' + pad(openDl) + `   / ${openTot.toLocaleString()} open`
+      + (openTot && openDl < openTot ? '   ← re-run Enrich Tender Details' : ''));
+    if (junkEntity) console.log('  ⚠ junk entity_ref ("Request"):  ' + pad(junkEntity) + '   ← pre-v3 parser; cleared as rows re-enrich');
     console.log('  with contact email:            ' + pad(withEmail));
     console.log('  with contract duration:        ' + pad(withContract));
     console.log('  with description:              ' + pad(withDesc));
@@ -54,7 +63,7 @@ const SRC = 'monaqasat';
         const acts = (raw.activities || []).map((a) => a.code).join(', ');
         console.log('\n  ' + r.source_ref + ' — ' + String(r.title || '').slice(0, 62));
         console.log('    activities: ' + (acts || '—'));
-        console.log('    contact: ' + (raw.contact_email || '—') + '  ·  contract: ' + (raw.contract_days ? raw.contract_days + ' days' : '—') + '  ·  parser v' + (raw.detail_v || 1));
+        console.log('    contact: ' + (raw.contact_email || '—') + '  ·  contract: ' + (raw.contract_duration || (raw.contract_days != null ? raw.contract_days + ' (unit not stated)' : '—')) + '  ·  parser v' + (raw.detail_v || 1));
       }
     }
 

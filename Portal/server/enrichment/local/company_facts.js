@@ -26,6 +26,7 @@ import { fetchPage } from './http.js';
 import { rendererAvailable, renderPage } from './render.js';
 import { scrapeExtract } from '../clients/firecrawl.js';
 import { recordReject } from './rejects.js';
+import { recordSearch } from './ledger.js';
 
 const LOCAL_FIRST        = process.env.BELL_FACTS_LOCAL !== '0';   // free local parse (default ON)
 const FIRECRAWL_FALLBACK = process.env.BELL_FACTS_FIRECRAWL === '1'; // paid LLM extract (default OFF)
@@ -127,6 +128,7 @@ export function extractFactsLocal(page) {
 async function markStage11(id, status, extras = {}) {
   await query(`UPDATE companies SET stage11_status=$2, stage11_at=now(), extra_fields=extra_fields||$3::jsonb WHERE id=$1`,
     [id, status, JSON.stringify(extras)]);
+  await recordSearch(id, 11, status, extras);
 }
 
 async function getPage(url) {
@@ -205,7 +207,10 @@ export async function enrichCompany(company) {
   const page = await getPage(url);
   if (!page) { await markStage11(company.id, 'no_data', { stage11_skip: 'unreachable' }); return { status: 'no_data', facts: 0 }; }
   if (!FACTS_RX.test((page.title || '') + ' ' + (page.text || ''))) {
-    await markStage11(company.id, 'no_data', { stage11_skip: 'no-facts-keywords' });
+    // A near-empty JS shell that never got rendered was never actually read —
+    // its keyword miss is NOT proof the site shows no facts (ledger: degraded).
+    const shell = (page.text || '').length < 400 && !page.rendered;
+    await markStage11(company.id, 'no_data', { stage11_skip: shell ? 'js-shell-unrendered' : 'no-facts-keywords' });
     return { status: 'no_data', facts: 0 };
   }
 

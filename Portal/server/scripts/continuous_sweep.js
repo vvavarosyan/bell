@@ -131,8 +131,34 @@ async function beat(state, s = {}) {
     hbState = 'sweeping'; hbStats = { ...totals };
     let r;
     try {
-      r = await runHarvestSweep({ limit: chunk, triggeredBy: 'continuous', jobLog: null });
+      // ROUND WATCHDOG — round 121 (2026-07-10) hung mid-round for 9+ hours
+      // while the 45s heartbeat timer kept the dashboard reading "sweeping".
+      // Normal rounds finish in ~2 minutes; anything past the ceiling means a
+      // call is wedged (a network fetch, a browser render, or a stuck DB
+      // connection — none provably excludable from inside this process). A
+      // dangling zombie round can't be safely resumed around, so we exit
+      // non-zero and let launchd's KeepAlive relaunch a clean process — the
+      // frontier lives in the DB, so nothing is lost.
+      const WATCHDOG_MS = Number(process.env.BELL_ENGINE_ROUND_WATCHDOG_MS || 45 * 60_000);
+      let watchdogTimer;
+      const watchdog = new Promise((_, reject) => {
+        watchdogTimer = setTimeout(() => reject(new Error('__round_watchdog__')), WATCHDOG_MS);
+        if (watchdogTimer.unref) watchdogTimer.unref();
+      });
+      try {
+        r = await Promise.race([
+          runHarvestSweep({ limit: chunk, triggeredBy: 'continuous', jobLog: null }),
+          watchdog,
+        ]);
+      } finally {
+        clearTimeout(watchdogTimer);
+      }
     } catch (err) {
+      if (err.message === '__round_watchdog__') {
+        log(`✗ Round ${totals.round_no} exceeded the watchdog ceiling — a call is wedged. Restarting the engine (launchd relaunches it automatically; the frontier is saved).`);
+        try { await beat('wedged', totals); } catch { /* ignore */ }
+        process.exit(70);   // EX_SOFTWARE — KeepAlive brings up a fresh process
+      }
       log(`✗ Round ${totals.round_no} failed: ${err.message}`);
       hbState = 'error';
       await beat('error', totals);

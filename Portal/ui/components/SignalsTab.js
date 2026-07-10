@@ -21,7 +21,8 @@ const KIND_META = {
   newly_licensed: { label: 'Newly licensed', color: '#5b8cff', sector: 3 },
   partnership:    { label: 'Partnerships',   color: '#14b8a6', sector: 4 },
   leadership:     { label: 'Leadership',     color: '#a855f7', sector: 5 },
-  news_event:     { label: 'In the news',    color: '#94a3b8', sector: 6 },
+  disclosure:     { label: 'Disclosures',    color: '#06b6d4', sector: 6 },
+  news_event:     { label: 'In the news',    color: '#94a3b8', sector: 7 },
 };
 const KINDS = Object.keys(KIND_META);
 const SECTOR_DEG = 360 / KINDS.length;   // radar sector width (adapts to kind count)

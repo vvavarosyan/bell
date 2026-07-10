@@ -217,6 +217,8 @@ export const api = {
   engineControl:          (body) => request('/api/enrichment/engine/control', { method: 'POST', body: JSON.stringify(body) }),
   engineRescan:           (scope, limit = null) => request('/api/enrichment/engine/rescan', { method: 'POST', body: JSON.stringify(limit ? { scope, limit } : { scope }) }),
   enrichmentCoverage:     () => request('/api/enrichment/coverage'),
+  searchProof:            (companyId) => request('/api/enrichment/search-proof/' + companyId),
+  searchProofStats:       () => request('/api/enrichment/search-proof-stats'),
   runEnrichment:          (body) => request('/api/enrichment/run', { method: 'POST', body: JSON.stringify(body) }),
   runHarvestSweep:        (limit = 100) => request('/api/enrichment/sweep', { method: 'POST', body: JSON.stringify({ limit }) }),
   finderAudit:            () => request('/api/enrichment/finder-audit'),

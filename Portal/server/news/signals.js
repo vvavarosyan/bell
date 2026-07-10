@@ -11,11 +11,12 @@
 
 import { query } from '../db.js';
 import { OPEN_TENDER_SELECT_SQL, OPPORTUNITY_INSERT_SQL, buildTenderOpportunitySignals } from '../tenders/match.js';
+import { QSE_SIGNAL_SQL } from '../qse/sql.js';
 
 const state = { last_run_at: null, last_error: null, inserted_last: 0, runs: 0 };
 export function getSignalsState() { return { ...state }; }
 
-const LOOKBACK_HOURS = { hiring: 48, newly_licensed: 72, partnership: 72, leadership: 72, news_event: 48, expansion: 336, tender: 720 };
+const LOOKBACK_HOURS = { hiring: 48, newly_licensed: 72, partnership: 72, leadership: 72, news_event: 48, expansion: 336, tender: 720, disclosure: 336 };
 
 export async function generateSignals() {
   let inserted = 0;
@@ -28,6 +29,7 @@ export async function generateSignals() {
     inserted += await genExpansion();
     inserted += await genTenderSignals();
     inserted += await genTenderOpportunities();
+    inserted += await genQseDisclosures();
     state.last_error = null;
   } catch (err) {
     state.last_error = err.message;
@@ -224,6 +226,23 @@ async function genTenderOpportunities() {
   return n;
 }
 
+// disclosure — QSE stock-exchange disclosures (Phase 2 C1): financial results,
+// dividends, board changes, AGMs, buybacks for the ~54 listed companies. Rows
+// come from qse_disclosures (Run QSE Scan.command → mirrored to prod); only
+// dated announcements become signals. The SQL lives in qse/sql.js (pure) so
+// the PGlite test can run the exact string. The window is enforced inside the
+// SQL (336h — LOOKBACK_HOURS.disclosure documents it). The table may not exist
+// until migration 079 applies — tolerate that instead of failing every tick.
+async function genQseDisclosures() {
+  try {
+    const r = await query(QSE_SIGNAL_SQL);
+    return r.rowCount || 0;
+  } catch (err) {
+    if (/qse_disclosures/.test(err.message)) return 0;   // migration 079 not applied yet
+    throw err;
+  }
+}
+
 // ── ICP scoring (pure — used by /api/signals scope=icp) ─────────────────────
 // icp = { target_industries: [], target_keywords: [], target_sizes: [] }
 // Returns { score: 0..1, reasons: [] } — score 0 means "not a match".
@@ -280,12 +299,13 @@ const INTENT_WEIGHT = {
   hiring: 22,          // actively hiring — budget + growth
   leadership: 18,      // new decision-maker — a window to engage
   partnership: 14,     // doing deals — active in market
+  disclosure: 14,      // exchange disclosure — results, capital moves, board changes
   newly_licensed: 12,  // just entered the market
   news_event: 8,       // in the news — context
 };
 const KIND_LABEL = {
   tender: 'winning tenders', expansion: 'scaling fast', hiring: 'actively hiring', leadership: 'new leadership',
-  partnership: 'new partnerships', newly_licensed: 'newly licensed', news_event: 'in the news',
+  partnership: 'new partnerships', disclosure: 'exchange disclosures', newly_licensed: 'newly licensed', news_event: 'in the news',
 };
 function recencyMult(occurredAt, now = Date.now()) {
   const days = Math.max(0, (now - new Date(occurredAt).getTime()) / 86_400_000);

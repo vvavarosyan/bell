@@ -27,6 +27,7 @@ import { inferSeniority } from '../seniority.js';
 import { fetchPage, toRootUrl, sameHost, hostOf, pool } from './http.js';
 import { renderPage, rendererAvailable, closeRenderer } from './render.js';
 import { recordReject } from './rejects.js';
+import { recordSearch } from './ledger.js';
 import {
   findEmails, findPhones, findSocials, preferOwnEmails,
   guessAddress, extractTeam, extractPartners, pickLogo,
@@ -244,6 +245,10 @@ export async function enrichCompany(company) {
     stage7_pages:      pages.map(p => ({ url: p.url, kind: p.kind })),
     stage7_rendered:   renderMode,
     stage7_found:      { emails: wE, phones: wP, socials: wS, people: peopleAdded, partners: partners.length },
+    // Proof-of-search: a JS-shell homepage crawled WITHOUT a successful render
+    // was never actually readable — "no data" from it proves nothing (the
+    // ledger demotes it to degraded_empty instead of verified_empty).
+    stage7_shell_unrendered: pages[0].page.text.length < JS_SHELL_CHARS && !renderMode,
   };
   const wroteSomething = (wE + wP + wS + peopleAdded + partners.length) > 0 || !!address || !!logo;
   await markStage(company.id, wroteSomething ? 'done' : 'no_data', summary);
@@ -412,6 +417,7 @@ async function markStage(companyId, status, extras = null) {
   } else {
     await query(`UPDATE companies SET stage7_status = $2, stage7_at = now() WHERE id = $1`, [companyId, status]);
   }
+  await recordSearch(companyId, 7, status, extras);
 }
 
 // ---------------------------------------------------------------------------
@@ -439,6 +445,9 @@ export async function enrichCompanies(companies, jobLog = null) {
           (r.reason ? ` (${r.reason})` : ''));
       } catch (err) {
         failed++;
+        // Stamp the failure — a company left on 'running' never re-enters the
+        // frontier and silently poisons the proof-of-search set.
+        try { await markStage(c.id, 'failed', { stage7_error: String(err.message || err).slice(0, 140) }); } catch { /* ignore */ }
         jobLog?.(`  ✗ [${++finished}/${total}] ${c.name} — ${err.message}`);
       }
     });

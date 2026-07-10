@@ -207,21 +207,32 @@ export async function runPush({ full = false, reset = false } = {}) {
     await reconcileContributedDeletions(base, token, summary);
   }
 
+  // Per-table isolation: one failing table (e.g. a table prod's code doesn't
+  // know yet, mid-deploy) must not sink the other tables' push. The watermark
+  // only advances when EVERY table succeeded, so a failed table's rows are
+  // simply re-sent by the next push — the idempotent-resend guarantee holds.
+  let tableFailures = 0;
   for (const { name, watermark, selfRef, syncWhere } of MIRROR_TABLES) {
-    const rows = await selectRows(name, watermark, wm, selfRef, full || reset, syncWhere);
-    let upserted = 0, skipped = 0;
-    for (let i = 0; i < rows.length; i += CHUNK_SIZE) {
-      const chunk = rows.slice(i, i + CHUNK_SIZE);
-      const res = await postChunk(ingestUrl, token, name, chunk, mode);
-      upserted += res.upserted || 0;
-      skipped  += res.skipped  || 0;
-      if (Array.isArray(res.errors) && res.errors.length && summary.errors.length < 50) {
-        summary.errors.push(...res.errors.map((e) => ({ table: name, ...e })));
+    try {
+      const rows = await selectRows(name, watermark, wm, selfRef, full || reset, syncWhere);
+      let upserted = 0, skipped = 0;
+      for (let i = 0; i < rows.length; i += CHUNK_SIZE) {
+        const chunk = rows.slice(i, i + CHUNK_SIZE);
+        const res = await postChunk(ingestUrl, token, name, chunk, mode);
+        upserted += res.upserted || 0;
+        skipped  += res.skipped  || 0;
+        if (Array.isArray(res.errors) && res.errors.length && summary.errors.length < 50) {
+          summary.errors.push(...res.errors.map((e) => ({ table: name, ...e })));
+        }
       }
+      summary.tables[name] = { selected: rows.length, upserted, skipped };
+      summary.total_upserted += upserted;
+      summary.total_skipped  += skipped;
+    } catch (err) {
+      tableFailures++;
+      summary.tables[name] = { error: err.message };
+      if (summary.errors.length < 50) summary.errors.push({ table: name, phase: 'push', error: err.message });
     }
-    summary.tables[name] = { selected: rows.length, upserted, skipped };
-    summary.total_upserted += upserted;
-    summary.total_skipped  += skipped;
   }
 
   // On a reset, prod was wiped + repopulated, so any tombstones are moot — just
@@ -230,7 +241,12 @@ export async function runPush({ full = false, reset = false } = {}) {
     await query(`DELETE FROM sync_deletions`).catch(() => {});
   }
 
-  await setSetting(SETTINGS_WATERMARK, startedAt);
+  if (tableFailures === 0) {
+    await setSetting(SETTINGS_WATERMARK, startedAt);
+    summary.watermark_advanced = true;
+  } else {
+    summary.watermark_advanced = false;   // failed tables re-send next push
+  }
   summary.finished_at = new Date().toISOString();
   return summary;
 }
