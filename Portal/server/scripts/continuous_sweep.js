@@ -36,6 +36,29 @@ for (const sig of ['SIGTERM', 'SIGINT']) process.on(sig, () => { stopping = true
 
 const STARTED_AT = new Date();
 
+// ── SINGLETON GUARD (2026-07-09) ────────────────────────────────────────────
+// Two engines sweeping the same frontier is silently destructive: they double
+// the Postgres pool load (the June-2026 "timeout exceeded when trying to
+// connect" storm), double the Crawl4AI/Playwright browsers on an 8GB Mac, and
+// fight over the single heartbeat row. It happened for real when the foreground
+// runner and the LaunchAgent were both up. So: if another instance beat within
+// the last 90s AND its pid is still alive on this machine, exit quietly. The
+// LaunchAgent's KeepAlive simply retries (ThrottleInterval 20s) and takes over
+// the moment the other instance stops.
+async function anotherEngineIsRunning() {
+  try {
+    const r = await query(`SELECT pid, updated_at, state FROM engine_heartbeat WHERE id = 1`);
+    const hb = r.rows[0];
+    if (!hb || !hb.pid || Number(hb.pid) === process.pid) return false;
+    const ageMs = Date.now() - new Date(hb.updated_at).getTime();
+    if (ageMs > 90_000) return false;                      // stale → previous engine is gone
+    try { process.kill(Number(hb.pid), 0); } catch { return false; }   // pid not alive → take over
+    log(`⊘ Another engine is already running (pid ${hb.pid}, beat ${Math.round(ageMs / 1000)}s ago). Exiting.`);
+    log('  Close the other one (the foreground Terminal window, or Uninstall the service) to switch.');
+    return true;
+  } catch { return false; }   // can't tell → proceed rather than block the engine
+}
+
 async function beat(state, s = {}) {
   try {
     await query(
@@ -77,6 +100,7 @@ async function beat(state, s = {}) {
 
 (async () => {
   log('▸▸▸ Continuous Enrichment Engine started — always-on, resumable.');
+  if (await anotherEngineIsRunning()) { try { await pool.end(); } catch { /* ignore */ } process.exit(0); }
   let totals = { round_no: 0, found_total: 0, harvested_total: 0, mapped_total: 0, email_total: 0, facts_total: 0, tech_total: 0 };
   await beat('starting', totals);
 

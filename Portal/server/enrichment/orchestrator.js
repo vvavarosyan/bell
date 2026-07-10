@@ -102,6 +102,7 @@ export async function runStageForCompanies({ stage, companyIds, triggeredBy = nu
   let usdTotal = 0;
   let emailsWritten = 0;
   let factsWritten = 0;
+  let techWritten = 0;
   const errors = [];
 
   // Bulk path: if the stage module exposes enrichCompanies(), use it.
@@ -114,6 +115,7 @@ export async function runStageForCompanies({ stage, companyIds, triggeredBy = nu
       usdTotal = r.usd;
       emailsWritten = Number(r.emails || 0);
       factsWritten = Number(r.facts || 0);
+      techWritten = Number(r.tech || 0);   // Engine 6 — without this the dashboard's Tech counter stays 0
       await query(`UPDATE enrichment_runs SET progress_done = $2 WHERE id = $1`, [runId, companies.length]);
     } catch (err) {
       failed = companies.length;
@@ -181,6 +183,7 @@ export async function runStageForCompanies({ stage, companyIds, triggeredBy = nu
     usd: usdTotal,
     emails: emailsWritten,
     facts: factsWritten,
+    tech: techWritten,
   };
 }
 

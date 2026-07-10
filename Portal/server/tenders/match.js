@@ -119,6 +119,7 @@ export const NAME_KEYWORDS = [
   ['construction', [T.CONSTRUCTION]], ['contracting', [T.CONSTRUCTION]],
   ['civil works', [T.CONSTRUCTION]], ['road', [T.CONSTRUCTION]], ['bridge', [T.CONSTRUCTION]],
   ['infrastructure', [T.CONSTRUCTION]], ['demolition', [T.CONSTRUCTION]], ['excavation', [T.CONSTRUCTION]],
+  ['refurbish', [T.CONSTRUCTION]], ['renovation', [T.CONSTRUCTION]], ['civil work', [T.CONSTRUCTION]],   // real title: "Refurbishment Works for Various MPH … FIBA 2027"
   ['drainage', [T.CONSTRUCTION, T.ENERGY]], ['sewerage', [T.ENERGY]], ['sewage', [T.ENERGY]],
   ['water treatment', [T.ENERGY]], ['desalination', [T.ENERGY]], ['electricity', [T.ENERGY]],
   ['power', [T.ENERGY]], ['substation', [T.ENERGY]], ['solar', [T.ENERGY]], ['renewable', [T.ENERGY]],
