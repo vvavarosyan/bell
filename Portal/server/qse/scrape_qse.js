@@ -309,7 +309,19 @@ export function noticeToRow(n) {
 
 // ── fetching (retry once, 20s timeout, degrade to null — like QatarEnergy) ──
 
-async function fetchText(url, { method = 'GET', body = null, timeoutMs = 20_000 } = {}) {
+async function fetchText(url, opts = {}) {
+  const first = await fetchTextRaw(url, opts);
+  if (first !== null) return first;
+  // www.qe.com.qa is a CNAME whose resolution intermittently fails on local
+  // resolvers while the apex host answers with the same content (observed
+  // live 2026-07-11: dig www → empty, dig apex → 213.130.102.251, apex 200).
+  if (url.includes('//www.qe.com.qa/')) {
+    return fetchTextRaw(url.replace('//www.qe.com.qa/', '//qe.com.qa/'), opts);
+  }
+  return null;
+}
+
+async function fetchTextRaw(url, { method = 'GET', body = null, timeoutMs = 20_000 } = {}) {
   for (let attempt = 0; attempt < 2; attempt++) {
     const ctl = new AbortController();
     const to = setTimeout(() => ctl.abort(), timeoutMs);
