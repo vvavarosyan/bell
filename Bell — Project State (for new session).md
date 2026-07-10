@@ -121,6 +121,22 @@ Read `product_vision_roadmap` first for planning; round‑2 deltas in `vision_wa
 
 ---
 
+## 5b. Session log — 2026‑07‑09 (read this first)
+
+**Shipped + deployed:** #72 tender→industry matching + opportunity signals · Engine 6 (tech‑stack fingerprints, migration 076) · multi‑industry ICP (`signals.industries[]`, migration 077) · tender industries + Tenders "For you"/industry filter (migration 078) · stuck‑tender + rescan‑safety fixes.
+
+**Verified live:** tenders now carry industry chips; open tenders **336/366 categorised (92%)**; stuck tenders resolved (`fetchable + pending: 0`; the 1,774 are old award cards with **no detail link** — nothing to fetch, honestly reported).
+
+**✅ RESOLVED — accidental mass re‑queue + repair.** A "Re‑scan tech" click hit an older Portal process; the route's `SCOPES[scope] || SCOPES.all` fallback re‑queued **every engine for every company**, including **Engine 1 (Website Finder) — the only PAID engine**. The route now **rejects unknown scopes (400)**. `Preview/Apply Engine Flag Repair.command` restored `stageN_at` only where `stageN_status` proved the engine had already run. **Confirmed fixed:** Engine 1 to‑do 60,337 → **2,629** (genuine backlog), restore now 0. **No credits were burned** — the heartbeat proved the daemon never ran a round.
+
+**✅ RESOLVED — the always‑on engine (was dead ~11.5 days, since 2026‑06‑27).** `Check Engine Service.command` proved it: `last exit code = 78 (EX_CONFIG)`, `runs = 564` → **launchd could not configure the job and never executed node** (hence zero log lines). Cause: the plist's `WorkingDirectory` and both log paths lived inside `~/Desktop`, which macOS denies to background jobs. Verified safe to drop `WorkingDirectory` (db.js reads only env vars; no dotenv/`process.cwd()`; ESM imports resolve from the script path). Installer rewritten → `bootout`/`bootstrap`/`kickstart`, `WorkingDirectory=$HOME`, logs to **`~/Library/Logs/bell-qa/`**, and it now verifies the pid. **Confirmed running (pid 89752).** New tools: **Check Engine Service.command** (read‑only probe) and **Start Engine (foreground).command** (fallback that runs in a Terminal window).
+
+**⚠️ Never run two engines at once.** The foreground runner + the LaunchAgent together double the Postgres pool load and the browser memory on the 8GB Mac — almost certainly the cause of the June `timeout exceeded when trying to connect` storm. A **singleton guard** now makes `continuous_sweep.js` exit if another live instance beat within 90s (KeepAlive retries and takes over). It cannot stop instances already running — close the foreground window when the service is up.
+
+**Remaining 30 uncategorised open tenders:** 14 are titled literally `- Materials Department` (+ `Mekaines RPS - GTC`) — the source states **no industry**, so they stay uncategorised by doctrine (never guess). ⚠️ Worth ONE live check whether the Monaqasat card title is being truncated (titles beginning with the tender ref). `Refurbishment … FIBA 2027` fixed via new keywords (refurbish/renovation/civil work) — **needs a re‑run of Backfill Tender Industries.command after the next deploy**.
+
+**Built, not yet run:** MOCI Stage‑2 (`Diagnose MOCI Details.command` → send `state/diagnostic-details.json`) — see "Bell — MOCI Stage‑2 Design (Phase 2 A1).md".
+
 ## 5. Immediate open items (as of 2026‑07‑08)
 
 1. ✅ **Tender batch DEPLOYED (staging + prod) + all scans run 2026‑07‑08** — Ashghal stage 2, Monaqasat activities parser fix + `detail_v` versioning, RAM tuning, QatarEnergy source, source chips. **25,138 tenders live** (Monaqasat 21,045 + Ashghal 2,857 + QatarEnergy 1,236); 289 winner→company links (Ashghal 28 + QatarEnergy 261).
