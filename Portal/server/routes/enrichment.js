@@ -170,6 +170,48 @@ router.get('/coverage', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+// GET /api/enrichment/search-proof/:id — proof-of-search record for ONE company
+// (Phase 2 A3): the latest ledger outcome per engine + total attempts. This is
+// what makes "genuinely no data online" a proven claim instead of an assumption.
+// Tolerates a not-yet-applied migration 080 (empty result, not a 500).
+router.get('/search-proof/:id', async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) return res.status(400).json({ error: 'bad_request', reason: 'bad id' });
+    const latest = await query(
+      `SELECT DISTINCT ON (stage) stage, engine, outcome, searched, at
+         FROM search_ledger
+        WHERE company_id = $1
+        ORDER BY stage, at DESC`,
+      [id],
+    ).catch(() => ({ rows: [] }));
+    const total = await query(
+      `SELECT count(*)::int AS n FROM search_ledger WHERE company_id = $1`, [id],
+    ).catch(() => ({ rows: [{ n: 0 }] }));
+    res.json({ rows: latest.rows, attempts: total.rows[0].n });
+  } catch (err) { next(err); }
+});
+
+// GET /api/enrichment/search-proof-stats — ledger rollup for the Local Engines
+// dashboard: latest-attempt outcome counts per engine, plus totals.
+router.get('/search-proof-stats', async (req, res, next) => {
+  try {
+    const byEngine = await query(
+      `SELECT engine, outcome, count(*)::int AS n FROM (
+         SELECT DISTINCT ON (company_id, stage) engine, outcome
+           FROM search_ledger
+          ORDER BY company_id, stage, at DESC
+       ) latest
+       GROUP BY engine, outcome
+       ORDER BY engine, outcome`,
+    ).catch(() => ({ rows: [] }));
+    const totals = await query(
+      `SELECT count(*)::int AS attempts, count(DISTINCT company_id)::int AS companies FROM search_ledger`,
+    ).catch(() => ({ rows: [{ attempts: 0, companies: 0 }] }));
+    res.json({ by_engine: byEngine.rows, totals: totals.rows[0] });
+  } catch (err) { next(err); }
+});
+
 // GET /api/enrichment/results — engine output + data-quality summary, for tuning.
 // The decisive number is person_emails.pattern_verified: if it's 0 while emails
 // exist, the network is blocking SMTP and Engine 4 is only matching published

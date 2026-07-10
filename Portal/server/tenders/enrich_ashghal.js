@@ -17,6 +17,7 @@
 
 import { query } from '../db.js';
 import { render, mapPool, ramSafeConcurrency } from './scrape_monaqasat.js';
+import { packRaw } from './raw.js';
 
 const CONCURRENCY_DEFAULT = ramSafeConcurrency(process.env.BELL_ASHGHAL_CONCURRENCY);
 
@@ -108,9 +109,11 @@ export async function enrichAshghalDetails({ scope = 'open', concurrency = CONCU
       if (d.project_id) newRaw.project_id = d.project_id;
       if (d.description) newRaw.description = d.description;
       const cat = (!row.category && d.category) ? d.category : row.category;
+      const packed = packRaw(newRaw);            // never slice serialized JSON
+      if (!packed) { failed++; return; }         // leave the row for a later run
       await q(
         `UPDATE tenders SET raw = $2::jsonb, category = COALESCE($3, category), updated_at = now() WHERE id = $1`,
-        [row.id, JSON.stringify(newRaw).slice(0, 20000), cat],
+        [row.id, packed, cat],
       );
       enriched++;
     } catch {

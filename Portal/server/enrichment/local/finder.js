@@ -19,6 +19,7 @@
 import { query } from '../../db.js';
 import { recomputeBellScoreForCompany } from '../../assembly/bell_score.js';
 import { fetchPage, hostOf, pool } from './http.js';
+import { recordSearch } from './ledger.js';
 import { searchWeb, rendererAvailable, closeRenderer, beginSearchSession, searchState } from './render.js';
 import { search as firecrawlSearch } from '../clients/firecrawl.js';
 import * as apify from '../clients/apify.js';
@@ -425,11 +426,27 @@ export async function enrichCompany(company) {
   // Apify returns rich places ({url, phone, title}); the other two return bare
   // URL strings, normalized to {url} with no Maps proof. Every candidate is still
   // verified/corroborated below before it can be saved.
+  // Proof-of-search: track which search tiers ACTUALLY ran and stayed healthy.
+  // A tier that self-disabled (token/quota/captcha) mid-run counts as NOT run —
+  // 'no data' after a dead tier proves nothing (ledger_rules.js turns that into
+  // degraded_empty instead of verified_empty).
+  const tiers = { guess: cands.length > 0, apify: false, firecrawl: false, headless: false };
   let results = await apifyMapsPlaces(company);
-  if (!results.length && FIRECRAWL_FINDER) results = (await firecrawlSearchUrls(company)).map(url => ({ url }));
+  tiers.apify = APIFY_FINDER && !AP.disabled;
+  if (!results.length && FIRECRAWL_FINDER) {
+    results = (await firecrawlSearchUrls(company)).map(url => ({ url }));
+    tiers.firecrawl = !FC.disabled;
+  }
   if (!results.length && await rendererAvailable()) {
     results = (await searchWeb(`${company.name} Qatar official website`, { limit: 6 })).map(url => ({ url }));
+    tiers.headless = !searchState().disabled;
   }
+  // "Search complete" = the fallback chain was never truncated by a dead tier:
+  // either some tier produced candidates (later tiers are skipped BY DESIGN),
+  // or every CONFIGURED tier ran healthy down to the headless last resort.
+  // Only a complete chain that still found nothing is proof of absence.
+  const searchComplete = results.length > 0 ||
+    ((!APIFY_FINDER || tiers.apify) && (!FIRECRAWL_FINDER || tiers.firecrawl) && tiers.headless);
   let firstCandidate = null;
   for (const res of results) {
     const url = res && res.url;
@@ -459,7 +476,7 @@ export async function enrichCompany(company) {
     return { status: 'candidate', candidate: firstCandidate.root };
   }
 
-  await markStage(company.id, 'no_data', { stage8_checked_at: new Date().toISOString() });
+  await markStage(company.id, 'no_data', { stage8_checked_at: new Date().toISOString(), stage8_tiers: tiers, stage8_search_complete: searchComplete });
   return { status: 'no_data', reason: 'not_found' };
 }
 
@@ -509,6 +526,7 @@ async function markStage(companyId, status, extras = null) {
   } else {
     await query(`UPDATE companies SET stage8_status = $2, stage8_at = now() WHERE id = $1`, [companyId, status]);
   }
+  await recordSearch(companyId, 8, status, extras);
 }
 
 // ---------------------------------------------------------------------------
@@ -538,6 +556,9 @@ export async function enrichCompanies(companies, jobLog = null) {
             : ` — ${r.reason || 'not found'}`));
       } catch (err) {
         failed++;
+        // Without this stamp a crashed company kept stage8_status='running'
+        // forever — off the frontier, never retried, invisible in any audit.
+        try { await markStage(c.id, 'failed', { stage8_error: String(err.message || err).slice(0, 140) }); } catch { /* ignore */ }
         jobLog?.(`  ✗ [${++finished}/${total}] ${c.name} — ${err.message}`);
       }
     });

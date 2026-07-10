@@ -8,7 +8,8 @@
 // with a small `limit`, by the recurring scan to top up fresh rows.
 
 import { query } from '../db.js';
-import { render, BASE, mapPool, parseDetailInto } from './scrape_monaqasat.js';
+import { render, BASE, mapPool, parseDetailInto, DETAIL_V } from './scrape_monaqasat.js';
+import { packRaw } from './raw.js';
 import { tenderIndustries } from './match.js';
 
 // ⚠ A tender only has a USABLE detail page when raw.detail_id is a real string.
@@ -20,7 +21,10 @@ import { tenderIndustries } from './match.js';
 // run — 1,774 tenders looping forever, reported as "0 detailed in 0m"
 // (found 2026-07-09). Require a non-empty STRING everywhere instead.
 const HAS_DETAIL_ID = `jsonb_typeof(raw -> 'detail_id') = 'string' AND btrim(raw ->> 'detail_id') <> ''`;
-const NEEDS_DETAIL  = `(NOT jsonb_exists(raw, 'activities') OR COALESCE(NULLIF(raw->>'detail_v', '')::int, 1) < 2)`;
+// Re-fetch anything captured by an older detail parser. DETAIL_V is the single
+// source of truth (scrape_monaqasat.js) — bumping it there re-checks the archive
+// once, newest-first + resumable. Never hardcode the version here.
+export const NEEDS_DETAIL = `(NOT jsonb_exists(raw, 'activities') OR COALESCE(NULLIF(raw->>'detail_v', '')::int, 1) < ${DETAIL_V})`;
 
 /** How many tenders still need detail (have a REAL detail_id, no activities yet). */
 export async function pendingDetailCount(source = 'monaqasat') {
@@ -81,25 +85,51 @@ export async function enrichPendingTenders({ source = 'monaqasat', concurrency, 
       const page = await render(`${BASE}/TendersOnlineServices/TenderDetails/${detailId}`, 15_000);
       if (!page || !page.text) { failed++; return; }   // render failed → stays pending, retried next run
       const work = { raw: { ...(row.raw || {}) }, deadline_at: row.deadline_at };
-      parseDetailInto(work, page.text);
+      // `contract_days` asserted a unit the source never states (see
+      // parseDetailInto). Drop the stale field so a re-parsed row carries only
+      // the verbatim `contract_duration`; if this page doesn't state a duration
+      // at all, the tender honestly has none.
+      delete work.raw.contract_days;
+      // The pre-v4 regex stamped entity_ref with the literal header "Request"
+      // on every enriched tender. parseDetailInto only sets entity_ref when the
+      // page states a real one, so on pages without one the junk would survive
+      // this merge forever — drop it; a real value gets re-written below.
+      if (work.raw.entity_ref === 'Request') delete work.raw.entity_ref;
+      // Pass the HTML: the detail fields come from real <td> cells, because a
+      // rendered Subject cell can contain newlines and break text pairing.
+      parseDetailInto(work, page.text, page.html);
       if (work.raw.activities) {
         // Activity codes just landed → this is the AUTHORITATIVE moment to
         // (re)compute the tender's line(s) of business (migration 078).
         const m = tenderIndustries({ title: row.title, category: row.category, raw: work.raw });
+        const packed = packRaw(work.raw);
+        if (!packed) { failed++; return; }   // too big even trimmed → stays pending
         await q(
           `UPDATE tenders SET raw = $2::jsonb, deadline_at = COALESCE($3, deadline_at),
                   industries = $4::text[], primary_industry = $5, updated_at = now()
             WHERE id = $1`,
-          [row.id, JSON.stringify(work.raw).slice(0, 20000), work.deadline_at,
-           m.tags.length ? m.tags : null, m.primary],
+          [row.id, packed, work.deadline_at, m.tags.length ? m.tags : null, m.primary],
         );
         enriched++;
       } else if (page.text.length > 1500 && /Tender number/i.test(page.text)) {
         // The page TRULY rendered (has the tender header + real length) but this
         // tender genuinely lists no activity codes — older tenders use a leaner
         // detail format. Stamp [] so we don't keep re-fetching it.
-        await q(`UPDATE tenders SET raw = jsonb_set(jsonb_set(raw, '{activities}', '[]'::jsonb), '{detail_v}', '2'::jsonb), updated_at = now() WHERE id = $1`, [row.id]);
-        failed++;
+        //
+        // ⚠️ This branch used to write ONLY {activities:[], detail_v} and threw
+        // away everything else the page did give us — closing date, contact
+        // email, contract duration, description — for ~14k no-code tenders.
+        // Persist the parsed row instead; parseDetailInto already stamped the
+        // current detail_v on work.raw.
+        work.raw.activities = [];
+        const packed = packRaw(work.raw);
+        if (!packed) { failed++; return; }
+        await q(
+          `UPDATE tenders SET raw = $2::jsonb, deadline_at = COALESCE($3, deadline_at), updated_at = now()
+            WHERE id = $1`,
+          [row.id, packed, work.deadline_at],
+        );
+        failed++;   // counter means "no activity codes", not "nothing captured"
       } else {
         // Suspiciously thin page → likely a partial render. Leave it PENDING so a
         // re-run retries it, rather than marking it permanently empty.

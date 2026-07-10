@@ -21,7 +21,23 @@ import { crawl4aiRender } from '../enrichment/local/crawl4ai.js';
 import { renderPage, rendererAvailable } from '../enrichment/local/render.js';
 
 export const BASE = 'https://monaqasat.mof.gov.qa';
-const LABELS = 'Publish date|Award date|Closing date|Requested Sector Type|Tender Bond|Documents value|Ministry|Type|Report|Attached';
+
+/**
+ * Detail-parser version. Rows stamped with a LOWER version get re-fetched by
+ * server/tenders/enrich.js, so bumping this re-checks the whole archive once
+ * (newest first, resumable). Bump on any material detail-parser change and the
+ * enricher + health scripts follow automatically — never hardcode the number.
+ *   v2 (2026-07-08) activities regex fix — long activity names were dropped
+ *   v3 (2026-07-10) closing-date fix — deadline_at was NULL on every tender
+ *   v4 (2026-07-10) header/value table parsing — entity_ref was the literal
+ *                   string "Request", description was truncated, contract
+ *                   duration asserted an unstated unit; plus `raw.fields`,
+ *                   the verbatim capture of every published field.
+ */
+export const DETAIL_V = 4;
+// ⚠️ Cards say "Close date" (verified live 2026-07-10: 20/20 on open page 3,
+// zero "Closing date"). The DETAIL page says "Closing Date". Match both.
+const LABELS = 'Publish date|Award date|Clos(?:ing|e) date|Requested Sector Type|Tender Bond|Documents value|Ministry|Type|Report|Attached';
 const MAX_PAGES = Math.min(Math.max(Number(process.env.BELL_TENDER_MAX_PAGES) || 25, 1), 1500);
 const WITH_DETAILS = process.env.BELL_TENDER_DETAILS !== '0';   // default ON
 // Peak memory during a scan/enrich is dominated by the headless browser, so an
@@ -124,9 +140,22 @@ export function parseListing(page, status) {
     return null;
   };
 
-  // cards start with a tender number NNNN/YYYY; lookbehind avoids splitting
-  // inside a number ("2580"→"80/2026") or a date ("02/07/2026"→"07/2026").
-  const cards = page.text.split(/(?=(?<![\d\/])\d{2,6}\/20\d{2}\b)/);
+  // Cards start with their tender number ALONE on its own line — split ONLY
+  // there. ⚠️ Titles routinely EMBED internal committee refs mid-line (e.g.
+  // "… - LTC-2417/2025 - Materials Department", "… GTC -1264/2025 - …"): the
+  // old char-class lookbehind split at those too, minting a PHANTOM tender per
+  // embedded ref (fake source_ref, fragment title, no detail link, wrong
+  // title-fallback industry) while the REAL card lost its title tail + every
+  // field after the split point — and a phantom could collide with and corrupt
+  // a real tender sharing that ref (seen live: real awarded 2247/2024 stomped
+  // by the "- Water Projects Department" phantom until a later re-scan healed
+  // it). Line-anchored split PROVEN LIVE 2026-07-10 on open p1–21 + awarded
+  // p1/p2/p3/p300/p600/p1000: fixed-count = old-count minus phantoms on every
+  // page (zero real cards lost/gained), 0 unpaired open cards, truncated
+  // titles restored. htmlToText collapses only HORIZONTAL whitespace, so the
+  // ref-alone-on-its-line structure survives in page.text ([^\S\n] = any
+  // whitespace except newline, i.e. spaces/tabs/\r/nbsp).
+  const cards = page.text.split(/(?=^[^\S\n]*\d{2,6}\/20\d{2}[^\S\n]*$)/m);
   for (const card of cards) {
     const numM = card.match(/^\s*(\d{2,6}\/20\d{2})\b/);
     if (!numM) continue;
@@ -138,7 +167,11 @@ export function parseListing(page, status) {
 
     const pubStr   = pick(card, /Publish date\s*([\d/]+)/i);
     const awdStr   = pick(card, /Award date\s*([\d/]+)/i);
-    const closeStr = pick(card, /Closing date\s*([\d/]+)/i);
+    // Open cards label this "Close date" — the old /Closing date/ never matched,
+    // so EVERY Monaqasat card carried deadline_at = NULL (found 2026-07-10:
+    // 324/324 open tenders had no closing date). Awarded cards have no close
+    // date at all (only "Award date") — correctly yields null there.
+    const closeStr = pick(card, /Clos(?:ing|e) date\s*([\d/]+)/i);
     const sector   = pick(card, /Requested Sector Type\s+([\s\S]*?)\s+(?:Tender Bond|Documents value|Ministry)/i);
     const ministry = pick(card, /\bMinistry\s+([\s\S]*?)\s+(?:Type|Report|Attached)\b/i);
     const typ      = pick(card, /\bType\s+(Public Tender|Two Phase Tender|Limited Tender|Mumarasa|Practice|Auction|Tender)\b/i)
@@ -173,14 +206,223 @@ export function parseListing(page, status) {
 }
 
 // ── detail-page enrichment ───────────────────────────────────────────────────
+
+/**
+ * Pull the Closing Date out of a detail page's TEXT — pure, no network.
+ *
+ * ⚠️ The detail page renders a TABLE whose first row is the header
+ * (Tender number · Type · Subject · … · Documents value · **Closing Date**) and
+ * whose second row holds the values. htmlToText turns each cell into its own
+ * line, so "Closing Date" is a HEADER label — the date sits ~10 cells later.
+ * The old regex looked for a date within 60 chars of the label and therefore
+ * NEVER matched (found 2026-07-10: all 324 open Monaqasat tenders, including
+ * the 303 with detail pages, had deadline_at = NULL). Worse, a laxer window
+ * would have captured the tender NUMBER's year or the Subject's digits.
+ *
+ * So we pair positionally, exactly as the table does: count the header cells
+ * (Closing Date is the LAST one), then take that many value cells and read the
+ * last. Empty cells (e.g. a blank "Entity's tender number") render as blank
+ * lines and are PRESERVED as cells — dropping them shifted the columns and was
+ * a real 1-in-6 failure during verification. If the shape doesn't hold, or the
+ * final cell isn't purely a date, we return null and Bell simply has no
+ * deadline for that tender — never a guessed one.
+ *
+ * PROVEN LIVE 2026-07-10: 12/12 detail pages (open + awarded, incl. the
+ * empty-cell page) matched the DOM's own header/value pairing exactly.
+ */
+
+/**
+ * Decode the entities htmlToText leaves behind. Crawl4AI/Playwright return a
+ * serialized DOM (entities already decoded), but a plain `fetch` of the same
+ * page yields `Entity&#x27;s tender number`. Both must parse identically.
+ */
+const decodeEntities = (s) => String(s || '')
+  .replace(/&#x([0-9a-f]+);/gi, (_, h) => { try { return String.fromCodePoint(parseInt(h, 16)); } catch { return ' '; } })
+  .replace(/&#(\d+);/g, (_, d) => { try { return String.fromCodePoint(Number(d)); } catch { return ' '; } })
+  .replace(/&quot;/gi, '"').replace(/&apos;/gi, "'").replace(/&lt;/gi, '<').replace(/&gt;/gi, '>')
+  .replace(/&amp;/gi, '&').replace(/&nbsp;/gi, ' ');
+
+/** Compare labels regardless of entity encoding, case, or punctuation. */
+const normLabel = (s) => decodeEntities(s).toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+
+const cellText = (h) => decodeEntities(String(h).replace(/<[^>]+>/g, ' ')).replace(/\s+/g, ' ').trim();
+
+const splitCells = (text) =>
+  String(text || '').split('\n').map((l) => l.replace(/\r/g, ' ').trim());
+
+/**
+ * Every `<table>` on the page as rows-of-cells. Verified live: the detail page
+ * has 4 flat tables, no nesting, no comments inside cells. Comments are stripped
+ * first anyway — a commented-out `<td>` silently shifted the Ashghal winner
+ * columns once, and that class of bug is what this file exists to prevent.
+ */
+export function parseHtmlTables(html) {
+  const clean = String(html || '').replace(/<!--[\s\S]*?-->/g, ' ');
+  const out = [];
+  for (const t of clean.matchAll(/<table\b[\s\S]*?<\/table>/gi)) {
+    const rows = [...t[0].matchAll(/<tr\b[\s\S]*?<\/tr>/gi)]
+      .map((r) => [...r[0].matchAll(/<t[hd]\b[^>]*>([\s\S]*?)<\/t[hd]>/gi)].map((c) => cellText(c[1])))
+      .filter((r) => r.length);
+    if (rows.length) out.push(rows);
+  }
+  return out;
+}
+
+/**
+ * label → value for every field in the detail page's tables — the ONE primitive
+ * the whole detail parser is built on.
+ *
+ * ⚠️ Read this before touching it. Each field lives in a table whose FIRST row
+ * is the header and whose SECOND row is the values ("Closing Date" is a HEADER;
+ * its value sits ~10 cells later). Regexes that scan forward from a label
+ * capture the NEXT HEADER. That is what shipped, and it silently corrupted
+ * production (found 2026-07-10 on live tender 3445/2026):
+ *   · `deadline_at` NULL on all 324 open tenders   ("Closing Date" is a header)
+ *   · `entity_ref` = the literal string "Request"  (it grabbed "Request Types")
+ *   · `description` truncated to "Supply of General Gifts to"
+ *
+ * A text/line-position parser is NOT enough either: the rendered Subject cell
+ * contains real CR/LF (the source writes `&#xD;&#xA;` inside it), so on the
+ * Crawl4AI/Playwright path — the one production uses — one value cell spans
+ * several lines and every later column shifts. Proven: a line-pairing version
+ * scored 12/12 on plain-fetch HTML and only 6/12 on browser-serialized HTML.
+ * So we read the real `<td>` cells and never infer position from whitespace.
+ *
+ * PROVEN LIVE 2026-07-10: 12/12 detail pages (open + awarded, incl. an empty
+ * `Entity's tender number` cell) on BOTH the plain-fetch and browser-serialized
+ * HTML, checked against each page's own DOM header/value pairing.
+ *
+ * Unknown table shape → the field is simply absent. Bell reports no value
+ * rather than a wrong one.
+ */
+export function detailFields(html) {
+  const fields = new Map();
+  for (const { label, value } of detailFieldList(html)) {
+    const k = normLabel(label);
+    if (!fields.has(k)) fields.set(k, value);
+  }
+  return fields;
+}
+
+/**
+ * Same capture as `detailFields`, but ORDERED and keeping each label exactly as
+ * the page prints it — so Bell can store and show every published field, not
+ * just the handful it models as columns.
+ *
+ * Val's rule (2026-07-10): *"gather that data/numbers and present the same exact
+ * way, just 3, 12, etc. we should not skip or avoid any data."* Several of these
+ * values are bare numbers whose unit the source never states (`Contract
+ * Duration 3`, `Warranty Period 12`, `Final Insurance 10`). We keep them
+ * verbatim — the honest record — and never append a unit we inferred.
+ */
+export function detailFieldList(html) {
+  const out = [];
+  const seen = new Set();
+  const add = (label, value) => {
+    const l = String(label || '').trim();
+    const v = String(value ?? '').trim();
+    const k = normLabel(l);
+    if (!k || seen.has(k) || out.length >= 40) return;
+    seen.add(k);
+    out.push({ label: l.slice(0, 60), value: v.slice(0, 300) });
+  };
+  for (const rows of parseHtmlTables(html)) {
+    if (rows.length < 2) continue;
+    const head = rows[0].map(normLabel);
+    if (head[0] === 'name' && head[1] === 'value') {
+      // two-column "Name | Value" table (Contract Duration, Warranty Period, …)
+      for (const r of rows.slice(1)) if (r.length >= 2 && r[0]) add(r[0], r[1]);
+    } else if (head.includes('closing date') || head.includes('brief description')) {
+      rows[0].forEach((h, i) => add(h, rows[1][i] ?? ''));
+    }
+  }
+  return out;
+}
+
+/**
+ * Read the value paired to `label` in one of the detail page's HEADER/VALUE
+ * tables — pure, no network.
+ *
+ * ⚠️ Every field on the detail page lives in a table whose FIRST row is the
+ * header and whose SECOND row is the values. htmlToText renders each cell on
+ * its own line, so a label like "Closing Date" or "Entity's tender number" is
+ * a HEADER — its value sits N cells later, where N = the number of headers.
+ * Regexes that scan forward from the label capture the NEXT HEADER instead.
+ * That is exactly what happened in production (found 2026-07-10):
+ *   · `deadline_at` was NULL on all 324 open tenders ("Closing Date" header)
+ *   · `entity_ref` was the literal string **"Request"** (it grabbed the next
+ *     header, "Request Types") on every enriched tender
+ *   · `description` was truncated to a few words
+ *
+ * So we pair positionally, exactly as the table does: find the label's index
+ * within its header block, then read the same index from the value block.
+ * Empty cells (a blank "Entity's tender number", an empty "Auction Type")
+ * render as blank lines and are PRESERVED as cells — dropping them shifts every
+ * later column and was a real 1-in-6 failure during verification. If the shape
+ * doesn't hold, we return null: Bell reports no value rather than a wrong one.
+ *
+ * PROVEN LIVE 2026-07-10 against each page's own DOM header/value pairing.
+ */
+export function tableCell(text, label) {
+  const lines = splitCells(text);
+  const want = normLabel(label);
+  const i = lines.findIndex((l) => normLabel(l) === want);
+  if (i < 0) return null;
+
+  let s = i; while (s > 0 && lines[s - 1] !== '') s--;   // header block start
+  let e = i; while (e + 1 < lines.length && lines[e + 1] !== '') e++;   // …and end
+  const n = e - s + 1;              // header cell count
+  const k = i - s;                  // our label's column
+  if (n < 2 || n > 24) return null; // not a header row we recognise → refuse
+
+  let j = e + 1;                    // skip the blank separator row
+  while (j < lines.length && lines[j] === '') j++;
+  const values = lines.slice(j, j + n);   // exactly n cells, blanks included
+  if (values.length !== n) return null;   // truncated value row → refuse
+
+  const v = decodeEntities(values[k]).trim();
+  return v || null;
+}
+
+/**
+ * Read a row from the page's two-column "Name | Value" table (Contract
+ * Duration, Warranty Period, …), where the label is a VALUE in column 0 and
+ * its value is the very next cell.
+ */
+export function nameValue(text, name) {
+  const lines = splitCells(text);
+  const want = normLabel(name);
+  const i = lines.findIndex((l) => normLabel(l) === want);
+  if (i < 0) return null;
+  for (let j = i + 1; j < Math.min(lines.length, i + 3); j++) {
+    if (lines[j]) return decodeEntities(lines[j]).trim();
+  }
+  return null;
+}
+
+/**
+ * The tender's closing date as printed (dd/mm/yyyy), or null.
+ * Prefers the real `<td>` cells; falls back to line pairing when only text is
+ * available (e.g. a cached page.text with no html).
+ */
+export function parseClosingDate(text, html) {
+  const v = (html ? detailFields(html).get('closing date') : null) ?? tableCell(text, 'Closing Date');
+  return v && /^\d{1,2}\/\d{1,2}\/20\d{2}$/.test(v) ? v : null;
+}
+
 /**
  * Parse a rendered detail page's text into a row IN PLACE — pure, no network.
  * Shared by the inline scrape path and the resumable DB backfill
  * (server/tenders/enrich.js), so both extract identical fields.
  */
-export function parseDetailInto(row, text) {
+export function parseDetailInto(row, text, html) {
   const t = String(text || '');
   if (!row.raw) row.raw = {};
+  // Field lookup from the page's real table cells (see detailFields). When no
+  // html is supplied we fall back to line pairing, which is correct as long as
+  // no value cell contains a newline.
+  const F = html ? detailFields(html) : null;
+  const field = (label) => (F ? (F.get(normLabel(label)) || null) : null);
 
   // activities list: "<5-6 digit code> <name>" pairs inside the activities block
   // (the "Activity name/code" header → the next section, e.g. Special Conditions).
@@ -197,27 +439,59 @@ export function parseDetailInto(row, text) {
         .filter((a) => a.name.length >= 3).slice(0, 40)
     : [];
   if (activities.length) row.raw.activities = activities;
-  // Parser version — lets the enricher re-do rows captured by the old (buggy)
-  // activities regex. Bump this whenever the detail parser changes materially.
-  row.raw.detail_v = 2;
+  // Parser version — lets the enricher re-do rows captured by an older parser.
+  // Bump this whenever the detail parser changes materially.
+  row.raw.detail_v = DETAIL_V;
 
-  const closing = pick(t, /Closing Date[\s\S]{0,60}?(\d{1,2}\/\d{1,2}\/20\d{2})/i);
+  const closing = parseClosingDate(t, html);
   if (closing) { const d = parseDate(closing); if (d) row.deadline_at = d; }
 
-  const contract = pick(t, /Contract Duration\s*(\d+)/i);
-  if (contract) row.raw.contract_days = Number(contract) || null;   // Monaqasat states duration in DAYS (e.g. 730 = ~2yr), not months
+  // Contract Duration — from the two-column "Name | Value" table.
+  // ⚠️ The site prints a BARE NUMBER ("Contract Duration | 3") with NO unit,
+  // while the neighbouring row spells its unit out ("Contract Preparation
+  // Period | 90 Days from contract date"). The old parser asserted DAYS, so a
+  // tender showing "3" was published as "3 days". The source does not state the
+  // unit, so Bell does not claim one: keep the value VERBATIM and only record a
+  // unit when the page itself writes one.
+  const durationRaw = field('Contract Duration') ?? nameValue(t, 'Contract Duration');
+  if (durationRaw) {
+    row.raw.contract_duration = durationRaw.slice(0, 60);          // exactly as printed
+    const withUnit = durationRaw.match(/^(\d+)\s*(day|week|month|year)s?\b/i);
+    if (withUnit) {
+      row.raw.contract_duration_value = Number(withUnit[1]);
+      row.raw.contract_duration_unit = withUnit[2].toLowerCase() + 's';
+    }
+  }
+  // Legacy `contract_days` is deliberately NOT written any more (it asserted an
+  // unstated unit). enrich.js drops it from rows it re-parses; the UI reads
+  // contract_duration and falls back to the old field for un-re-enriched rows.
 
-  const entityRef = pick(t, /Entity'?s tender number\s+([A-Za-z0-9\/\-]+)/i);
-  if (entityRef) row.raw.entity_ref = entityRef;
+  const entityRef = field("Entity's tender number") ?? tableCell(t, "Entity's tender number");
+  if (entityRef && entityRef.length <= 60) row.raw.entity_ref = entityRef;
 
   const email = (t.match(/Email\s*([a-z0-9._%+-]+@[a-z0-9.-]+\.[a-z]{2,})/i) || [])[1];
   if (email) row.raw.contact_email = email;
 
-  // Brief Description — the rich free-text scope of work. In the newer detail
-  // layout it's the first value cell after the "Evaluation Basis" header, ending
-  // where the Targeted Tenderer Type value begins (Companies/Contractors/…).
-  const desc = pick(t, /Evaluation Basis\s+([\s\S]{20,2500}?)\s+(?:Companies|Contractors|Individuals|Suppliers\s*\/\s*Service Providers|Both|All)\b/i);
+  // Brief Description — the free-text scope of work; the FIRST value cell of the
+  // second header/value table. The old regex read "everything between the
+  // Evaluation Basis header and the next Targeted-Tenderer keyword", which cut
+  // the text at the first occurrence of a word like "Companies" — production
+  // rows were truncated to a few words ("Supply of General Gifts to").
+  const desc = field('Brief Description') ?? tableCell(t, 'Brief Description');
   if (desc && desc.trim().length > 15) row.raw.description = desc.trim().slice(0, 2000);
+
+  // EVERY published field, verbatim, in page order — including the ones Bell has
+  // no column for (Request Types, Envelopes system, Targeted Tenderer Type,
+  // Service Delivery Method, Auction Type, Local Value System, Tender Validity
+  // Period, Evaluation Basis, Technical Evaluation Criteria, Final Insurance,
+  // Execution Delivery Location, Contract Preparation Period, Warranty Period,
+  // Maintenance Period, Financial Disbursement Method…). Values stay exactly as
+  // printed — bare numbers stay bare. Empty cells are dropped: the source left
+  // them blank, so Bell states nothing. (Val 2026-07-10: don't skip any data.)
+  if (html) {
+    const fields = detailFieldList(html).filter((f) => f.value);
+    if (fields.length) row.raw.fields = fields;
+  }
 
   return row;
 }
@@ -227,7 +501,7 @@ export async function enrichDetail(row) {
   if (!row || !row.raw || !row.raw.detail_id) return;
   const page = await render(`${BASE}/TendersOnlineServices/TenderDetails/${row.raw.detail_id}`, 15_000);
   if (!page || !page.text) return;
-  parseDetailInto(row, page.text);
+  parseDetailInto(row, page.text, page.html);
 }
 
 // ── orchestration ────────────────────────────────────────────────────────────

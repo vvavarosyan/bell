@@ -10,6 +10,7 @@
 // Nothing is written.
 
 import { query } from '../db.js';
+import { DETAIL_V } from '../tenders/scrape_monaqasat.js';
 
 const pad = (x, n = 10) => String(typeof x === 'number' ? x.toLocaleString() : x).padStart(n);
 const yn = (b) => (b ? 'YES' : 'no');
@@ -114,7 +115,7 @@ const n1 = async (sql, p = []) => Number((await query(sql, p)).rows[0].n);
   const HAS_ID = `jsonb_typeof(raw->'detail_id')='string' AND btrim(raw->>'detail_id')<>''`;
   const pend = await n1(
     `SELECT count(*)::int n FROM tenders WHERE source='monaqasat' AND ${HAS_ID}
-       AND (NOT jsonb_exists(raw,'activities') OR COALESCE(NULLIF(raw->>'detail_v','')::int,1) < 2)`);
+       AND (NOT jsonb_exists(raw,'activities') OR COALESCE(NULLIF(raw->>'detail_v','')::int,1) < ${DETAIL_V})`);
   const unlinked = await n1(`SELECT count(*)::int n FROM tenders WHERE source='monaqasat' AND NOT (${HAS_ID})`);
   console.log('  fetchable + still pending:       ' + pad(pend));
   console.log('  no detail link on the card:      ' + pad(unlinked) + '   (nothing to fetch — excluded from "pending")');
@@ -122,7 +123,7 @@ const n1 = async (sql, p = []) => Number((await query(sql, p)).rows[0].n);
     const sample = (await query(
       `SELECT id, source_ref, status, raw->>'detail_id' AS detail_id
          FROM tenders WHERE source='monaqasat' AND ${HAS_ID}
-          AND (NOT jsonb_exists(raw,'activities') OR COALESCE(NULLIF(raw->>'detail_v','')::int,1) < 2)
+          AND (NOT jsonb_exists(raw,'activities') OR COALESCE(NULLIF(raw->>'detail_v','')::int,1) < ${DETAIL_V})
         ORDER BY COALESCE(awarded_at, published_at, created_at) DESC NULLS LAST LIMIT 3`)).rows;
     const { render, BASE } = await import('../tenders/scrape_monaqasat.js');
     for (const t of sample) {

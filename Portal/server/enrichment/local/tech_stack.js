@@ -21,6 +21,7 @@
 import { query } from '../../db.js';
 import { fetchPage } from './http.js';
 import { rendererAvailable, renderPage } from './render.js';
+import { recordSearch } from './ledger.js';
 
 const TS = { scanned: 0, detected: 0, companies_with_tech: 0, errors: 0 };
 export function techState() { return { ...TS }; }
@@ -108,6 +109,7 @@ function toUrl(website) {
 async function markStage12(id, status, extras = {}) {
   await query(`UPDATE companies SET stage12_status=$2, stage12_at=now(), extra_fields=extra_fields||$3::jsonb WHERE id=$1`,
     [id, status, JSON.stringify(extras)]);
+  await recordSearch(id, 12, status, extras);
 }
 
 async function getPage(url) {
@@ -143,8 +145,12 @@ export async function enrichCompany(company) {
   TS.detected += found.length;
   if (found.length) TS.companies_with_tech++;
 
+  // A JS-shell page that never got rendered can still yield markers (analytics
+  // tags live in the shell HTML), but an EMPTY result from it proves nothing —
+  // flag it so the ledger records degraded_empty, not proof of absence.
+  const shell = (page.html || '').length < 600 && !page.rendered;
   await markStage12(company.id, found.length ? 'done' : 'no_data',
-    { stage12_tech: found.length, stage12_source: page.finalUrl || url });
+    { stage12_tech: found.length, stage12_source: page.finalUrl || url, ...(shell && !found.length ? { stage12_shell_unrendered: true } : {}) });
   return { status: found.length ? 'done' : 'no_data', tech: found.length };
 }
 

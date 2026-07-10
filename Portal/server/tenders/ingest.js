@@ -9,6 +9,7 @@
 
 import { query } from '../db.js';
 import { tenderIndustries } from './match.js';
+import { packRaw } from './raw.js';
 
 const SOURCES = new Set(['monaqasat', 'ashghal', 'qatarenergy', 'kahramaa', 'qse', 'manual']);
 const STATUSES = new Set(['open', 'awarded', 'cancelled', 'closed', 'archived', 'prospected']);
@@ -75,7 +76,7 @@ export async function ingestTenders(rows = []) {
         [source.toLowerCase(), clean(r?.source_ref, 120), title, clean(r?.buyer, 200),
          clean(r?.category, 80), status, clean(r?.award_company_name, 200), num(r?.value_amount),
          clean(r?.currency, 8), clean(r?.url, 600), ts(r?.published_at), ts(r?.deadline_at),
-         ts(r?.awarded_at), r?.raw ? JSON.stringify(r.raw).slice(0, 20000) : null,
+         ts(r?.awarded_at), r?.raw ? packRaw(r.raw) : null,   // never slice serialized JSON
          m.tags.length ? m.tags : null, m.primary]
       );
       if (res.rows[0] && res.rows[0].is_insert) inserted++; else updated++;

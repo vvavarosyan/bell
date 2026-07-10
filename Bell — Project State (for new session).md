@@ -1,6 +1,6 @@
 # Bell Data Intelligence — Project State & Handoff
 
-**As of:** 2026‑07‑08 · **Purpose:** a complete, current snapshot of what Bell is, what's **done**, what's **built but not deployed**, what's **in‑flight**, and what's **pending** — so a new session can understand 100% of where we are **before** any new planning. This is a *state record, not a plan.* Phased planning is deliberately left for Val + the new session together.
+**As of:** 2026‑07‑10 · **Read `CLAUDE.md` first — it is the operating contract and is auto‑loaded by Claude Code. Then §5a below (latest session).** · **Purpose:** a complete, current snapshot of what Bell is, what's **done**, what's **built but not deployed**, what's **in‑flight**, and what's **pending** — so a new session can understand 100% of where we are **before** any new planning. This is a *state record, not a plan.* Phased planning is deliberately left for Val + the new session together.
 
 > **Accuracy note:** This synthesizes the persistent memory (`MEMORY.md` + the individual memory files) plus the 2026‑07‑06→08 tender work. Memory is point‑in‑time; **verify against current code / the live site before asserting any file:line or behavior as fact.** Deep detail for each area lives in the memory file named in *(→ memory: slug)*.
 
@@ -121,7 +121,43 @@ Read `product_vision_roadmap` first for planning; round‑2 deltas in `vision_wa
 
 ---
 
-## 5b. Session log — 2026‑07‑09 (read this first)
+## 5a. Session log — 2026‑07‑10 (READ THIS FIRST)
+
+**Tooling change:** the project moves to **Claude Code** (Code tab of the Claude desktop app), opened on this folder. `CLAUDE.md` (new, repo root) is auto‑loaded every session and is now the single source of truth for rules + state. `.claude/settings.json` (new) enforces the guardrails. `NEXT SESSION — START HERE.md` is rewritten as a Claude Code kickoff.
+
+**⭐ Repo branch policy, permanent:** exactly **two** branches — `develop` (staging) and `main` (production). Verified 2026‑07‑10: local and origin both hold only these two. Claude must **never** create, delete, rename, force‑push, or rebase a branch, and never push `main` without Val's say‑so in that session.
+
+**The "27 uncategorised open tenders" were PHANTOM ROWS.** Monaqasat card titles embed the buyer's own reference (`General Supply of Gifts … - LTC-2417/2025 - Materials Department`, real card = `3445/2026`). The old splitter started a new card at every `NNNN/YYYY`, so each embedded ref **minted a fake tender and truncated the real one** (the host lost its title tail plus buyer, bond, sector and both dates). A phantom could also collide with a genuine tender sharing that ref via `ON CONFLICT (source, source_ref)` and overwrite it. Fixed with a line‑anchored split, proven live across 27 list pages (open p1–21, awarded p1/2/3/300/600/1000): zero real cards lost.
+
+**Chasing it exposed three more silent corruptions + one invented unit + one data‑loss bug:**
+- `deadline_at` was **NULL on all 324 open Monaqasat tenders**. Cards say "Close date" (the parser looked for "Closing date"); the detail page's "Closing Date" is a *column header*. The opportunity‑signal guard is `deadline_at IS NULL OR > now()`, so NULL passed silently and no one noticed.
+- `entity_ref` was the literal string **`"Request"`** on every enriched tender — the regex scanned forward from the label and captured the next header, "Request Types".
+- `description` was truncated to a few words.
+- `contract_days` **asserted a unit the source never prints** (`Contract Duration | 3`, bare). Now stored verbatim as `contract_duration`; a unit is recorded only when the page writes one (`90 Days from contract date`).
+- Three write paths did `JSON.stringify(raw).slice(0, 20000)` — slicing serialized JSON yields invalid jsonb, Postgres rejects it, the row's `catch` swallows the error, and the tender is **silently lost**. Replaced by `packRaw()` in the new `server/tenders/raw.js`.
+
+**Root cause of the middle group:** the detail page is **header/value tables**. Any regex scanning forward from a label captures the next header. Everything now reads real `<td>` cells via `detailFields(html)`.
+**⚠️ The trap:** a line‑position parser scored **12/12 on `fetch()` HTML but 6/12 on browser‑serialized HTML** (the rendered Subject cell contains real CR/LF). Production renders via Crawl4AI/Playwright, i.e. browser HTML. **Always verify parsers against browser‑serialized HTML.**
+
+**Also built (Val: "we should not skip or avoid any data"):** every published field is now captured verbatim, in page order (`raw.fields`) — 25 fields on a sample page, 23 with values, blank cells dropped. Rendered in the drawer as an **"As published"** block. Bare numbers (`Contract Duration 3`, `Warranty Period 12`, `Final Insurance 10`) stay bare.
+
+**Verification:** 55/55 unit tests (`server/tests/tender_phantom_split.test.mjs`) · 6/6 PGlite on real migrations 075+078+016 · 12/12 live detail pages against each page's own DOM · `node --check` clean · no import cycles · hooks verified.
+
+**Run by Val, done:** `Run Tender Scan` (529 scraped, 90 new) → `Preview` + `Apply Tender Phantom Repair` → **29 phantoms deleted locally and on prod** (12 open, 17 awarded). **Prod = 25,199 tenders.**
+
+**⏳ Pending, in order** (Val was mid‑`Enrich Tender Details`, hours, resumable):
+1. `Check Tender Detail.command` → expect `OPEN with a closing date ≈ 324/324`, no junk `entity_ref`.
+2. `Backfill Tender Industries.command`.
+3. Val tests: local Portal → Signals → Tenders → a Monaqasat tender shows a closing date, full description, "As published" block, no `- Materials Department` rows.
+4. Deploy both envs. Commit: `Monaqasat: fix phantom tenders, closing dates, entity_ref, description`.
+
+**Also open:** **271 rows "awaiting host heal"** — fragment rows whose host title is still truncated (hosts sit in the awarded archive). They look like phantoms but are unproven, so the tool refuses to delete them. Clear via `Backfill Full Tender Archive.command` (hours) → re‑run Preview/Apply. Not urgent. And one more enrich pass (or a `DETAIL_V` bump to 4) will backfill the 25‑field capture onto rows enriched before this change.
+
+**⚠️ RAM:** the always‑on engine was running when the tender enrich started. On the 8 GB Mac, pause it (local Portal → Local Engines → Pause) during long enrich runs.
+
+**MOCI Stage‑2 is PARKED** at Val's request — the diagnose run needed hours of manual scrolling. Design preserved in `Bell — MOCI Stage-2 Design (Phase 2 A1).md`; resume when he's ready.
+
+## 5b. Session log — 2026‑07‑09
 
 **Shipped + deployed:** #72 tender→industry matching + opportunity signals · Engine 6 (tech‑stack fingerprints, migration 076) · multi‑industry ICP (`signals.industries[]`, migration 077) · tender industries + Tenders "For you"/industry filter (migration 078) · stuck‑tender + rescan‑safety fixes.
 
@@ -133,7 +169,7 @@ Read `product_vision_roadmap` first for planning; round‑2 deltas in `vision_wa
 
 **⚠️ Never run two engines at once.** The foreground runner + the LaunchAgent together double the Postgres pool load and the browser memory on the 8GB Mac — almost certainly the cause of the June `timeout exceeded when trying to connect` storm. A **singleton guard** now makes `continuous_sweep.js` exit if another live instance beat within 90s (KeepAlive retries and takes over). It cannot stop instances already running — close the foreground window when the service is up.
 
-**Remaining 30 uncategorised open tenders:** 14 are titled literally `- Materials Department` (+ `Mekaines RPS - GTC`) — the source states **no industry**, so they stay uncategorised by doctrine (never guess). ⚠️ Worth ONE live check whether the Monaqasat card title is being truncated (titles beginning with the tender ref). `Refurbishment … FIBA 2027` fixed via new keywords (refurbish/renovation/civil work) — **needs a re‑run of Backfill Tender Industries.command after the next deploy**.
+**Remaining 27 uncategorised open tenders** (after the refurbishment keywords shipped and the backfill re‑ran → **339/366 = 93%**): 13× `- Materials Department`, 1× `- Water Projects Department`, 1× `Mekaines RPS - GTC`. All begin with `- ` + a **department name** → likely the Monaqasat card title is `<ref> - <Department>` with the ref stripped, i.e. the source gives no subject. **Next session: one live Chrome check of tender 2417/2025** — if its detail page has a fuller title or activity codes, extend the scraper; otherwise they stay honestly uncategorised (a buyer's department is NOT what it's buying — HMC buys drugs *and* IT *and* cleaning; never guess).
 
 **Built, not yet run:** MOCI Stage‑2 (`Diagnose MOCI Details.command` → send `state/diagnostic-details.json`) — see "Bell — MOCI Stage‑2 Design (Phase 2 A1).md".
 

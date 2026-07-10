@@ -1,37 +1,82 @@
-# Bell Data Intelligence — next-session kickoff prompt
+# Bell Data Intelligence — session kickoff
 
-*(Paste everything below the line into a new session to continue seamlessly.)*
+**Last updated:** 2026‑07‑10 (end of the Monaqasat data‑integrity session)
+
+This project now runs in **Claude Code** (the **Code** tab of the Claude desktop app), opened on this folder.
+
+`CLAUDE.md` in this folder is loaded automatically at the start of every session — it carries the rules, the plan, the current state, and the source quirks. **You do not need to paste a long prompt any more.** Just open the folder and say what you want.
 
 ---
 
-We're continuing work on **Bell Data Intelligence** (bell.qa) — my Qatar business-intelligence platform. One codebase, three deployments (local Mac engine, app.bell.qa portal, admin.bell.qa) + a separate Next.js marketing site. Railway + Postgres + Cloudflare + Clerk + Stripe + Resend. We've been building the **tender data pipeline** and I want to keep going.
+## Paste this on the first Claude Code session
 
-**FIRST, before anything: read your memory file `tenders_pipeline.md`** (it's in MEMORY.md's index) — it's the master record of the whole tender workstream with every decision, bug, fix, and pending item. Skim MEMORY.md for the broader project too. The summary below is just orientation; the memory has the real detail. Verify anything you're about to rely on against the current code/live site — don't assume.
+> Read `CLAUDE.md`, then `Bell — Project State (for new session).md`.
+>
+> Give me a short, honest read‑back of where we are — including anything you can't verify. Then check whether `Enrich Tender Details` has finished (`Check Tender Detail.command` reads the local DB), and tell me the next step.
+>
+> Remember: I don't use the terminal. Everything I do is a double‑click `.command` file or a button in the local Portal. Never push `main` without me saying so, and never create a new branch.
 
-## Where we are (as of 2026-07-06)
+That's it. Everything else it needs is in `CLAUDE.md`.
 
-**Monaqasat (source #1) — solid + trustworthy:**
-- ~21,000 tenders live on prod, all **correctly paired** after we fixed a critical index-drift bug (each tender now maps to its own detail page by matching the title to the link's own text — verified 20/20 and 14/14 live). A "Repair Tenders (fix links).command" re-paired everything + cleared the old wrong detail.
-- **Detail enrichment is the one thing in flight**: I run **"Enrich Tender Details.command"** (lean + fully resumable) to fill each tender's activity codes, contact, contract, and description. It may be fully done, partly done, or not yet run — **check the pending count first** and ask me. (There's also a heavier "Backfill Full Tender Archive.command" that re-walks cards first — not needed after the Repair.)
+---
 
-**Ashghal (source #2) — stage 1 done + live:**
-- Ashghal's own **open** tenders (~35, source='ashghal', buyer "Public Works Authority (Ashghal)") are captured + live via `scrape_ashghal.js` + "Run Ashghal Scan.command". Parser is cell-by-cell on the list table (verified 35/35 live).
-- **Stage 2 is pending** (this is the main tender task now): the **Closed/Archived** lists (~2,800) paginate via ASP.NET `__doPostBack` (10/page, no URL param — verified), so they need click-driven pagination; the **Awarded winner/bidder tables** (DisplayofAwarding.aspx — the PRIZE: winning contractor + all bidders + prices + ICV → real company linkage + buyer-intent signals); **Prospected** (upcoming projects by quarter); **Pre-Qualifications/EOIs**; and per-tender detail. Study each live via Chrome, build carefully, and verify the parser on real data before shipping.
+## ⏳ Where we stopped (do these in order)
 
-**Tenders UI**: lives INSIDE the **Signals** section (a "Tenders" tab/chip + folded into "All types") — NOT a sidebar item. `TendersTab.js` (embeddable), backed by enhanced `/api/tenders` (filters/facets/sync-status/:id) + a prod `/api/sync/count`.
+`Enrich Tender Details.command` was running. When it finishes:
 
-## Pending work, priority order
-1. **Ashghal stage 2** — postback pagination for closed/archived + Awarded winner tables (start here — it's the prize) + prospected + pre-qual + detail. (memory task #77)
-2. **Activity-code matching** — match each tender's activity codes to my companies in that line of business → live buyer-intent signals in Signals. Needs Monaqasat enrichment finished (activity data) + first confirm my companies store matchable activity codes. (task #72)
-3. **Auto-scan scheduler** — a macOS LaunchAgent "Install Tender Auto-Scan.command" to run scans daily and auto-push. I PARKED this until Tenders + Signals feel 100%. (task #73)
-4. Later: QatarEnergy (source #3), Competition tracking (Firecrawl monitor → signal).
+1. **`Check Tender Detail.command`** — expect `OPEN with a closing date` ≈ **324 / 324**, and no line warning about junk `entity_ref`.
+   ⚠️ It will *also* say **`captured by parser v4: 0`** and **`still to (re)enrich: ~21,000`**. **That is expected — not a failure.** `DETAIL_V` was bumped 3 → 4 so the archive gets one more pass to pick up the new "As published" field capture. You'll do that pass in step 6.
+2. **`Backfill Tender Industries.command`** — recompute categorisation on the cleaned set.
+3. **Test** in the local Portal (`127.0.0.1:3939`) → **Signals → Tenders** → open any Monaqasat tender. You should see a real **closing date**, a **full description**, and **no** cards titled `- Materials Department`.
+4. **Deploy both environments:** `Push Changes.command`, then `Open Production Release.command`.
+   Commit message: `Monaqasat: fix phantom tenders, closing dates, entity_ref, description`
+5. **Re‑run `Enrich Tender Details.command`** (hours, resumable). This is the v4 pass — it adds the **"As published"** block (every field the source prints, verbatim) to each tender.
+6. **`Check Tender Detail.command`** again — `captured by parser v4` should now be climbing toward the detail‑page count.
 
-## Hard constraints — follow these
-- **I'm click-only.** Everything must be a double-click `.command` file or an in-portal button. Never ask me to type terminal commands. Long runs must be RESUMABLE (I may Ctrl-C mid-run and re-run).
-- **Deploy** = double-click "Push Changes.command" (→ staging), then "Open Production Release.command" (→ prod). Scrapers/scans run on my Mac (local) — no deploy needed to run them; deploy only for UI changes + parity. Needs the Crawl4AI engine running for scans.
-- **100% accuracy bar.** Prove parsers against live data (run the exact logic in Chrome on the real page and show X/X correct) before shipping. The mispairing bug came from rushing — don't repeat it. Use PGlite for SQL logic, `node --check` for syntax.
-- **Batched deploys**: build + verify locally through a phase, deploy both envs once at the end, and end each turn with clear numbered steps + what-to-test + a short commit message + any questions separated out.
-- **Bella model** = `claude-sonnet-5` (never send `temperature`); marketing Bella + news = `claude-haiku-4-5`. Never fable/opus for Bella. (Standing rule, not tender-specific.)
+⚠️ **While a long enrich runs, pause the always‑on engine** — local Portal → **Local Engines → Pause**. Two browser stacks on an 8 GB Mac is what caused the old slowdowns. Un‑pause afterwards.
 
-## Start by asking me
-(a) Did "Enrich Tender Details.command" finish (pending count 0)? and (b) ready to build **Ashghal stage 2, winner tables first**? Then dive in — study the live Ashghal pages via Chrome, build the parser, verify it on real data, and wire it into the existing `tenders` pipeline (`source='ashghal'`, winner → `linkTenderCompanies`).
+---
+
+## Still open, not urgent
+
+- **271 tenders "awaiting host heal."** They look like phantom rows, but their host tender lives in the awarded archive whose title is still truncated, so the repair tool refuses to prove — and refuses to delete — them. To clear: run **`Backfill Full Tender Archive.command`** (hours), then **Preview** → **Apply Tender Phantom Repair** again. Archived rows only.
+
+---
+
+## What was done in the last session
+
+The "27 uncategorised open tenders" turned out to be **phantom rows the scraper invented**, and chasing them exposed three more silent corruptions. All fixed, all proven on live data, **not yet deployed**:
+
+| Bug | Effect in production |
+|---|---|
+| Card splitter split on refs **embedded in titles** (`… - LTC-2417/2025 - …`) | invented 29 fake tenders **and truncated the real ones** (host lost buyer, bond, dates) |
+| `Closing date` read with the wrong label / from a table **header** | `deadline_at` was NULL on **all 324 open** Monaqasat tenders |
+| `entity_ref` regex captured the **next column header** | every enriched tender stored the literal string `"Request"` |
+| `description` regex cut at the first keyword | descriptions truncated to a few words |
+| `contract_days` asserted a unit the page never prints | a tender showing `3` was published as "3 days" |
+| `JSON.stringify(raw).slice(0, 20000)` in 3 write paths | invalid jsonb → Postgres rejects → error swallowed → **row silently lost** |
+
+**Root cause of the middle four:** the detail page is **header/value tables**, so any regex that scans forward from a label captures the next header. Everything now reads real `<td>` cells (`detailFields(html)` in `scrape_monaqasat.js`).
+
+**The trap worth remembering:** a line‑position parser scored **12/12 on `fetch()` HTML and 6/12 on browser‑serialized HTML** — because the rendered Subject cell contains real CR/LF. Browser HTML is what production uses. Always verify against it.
+
+Verification: **55/55** unit tests (`server/tests/tender_phantom_split.test.mjs`), **6/6** PGlite on real migrations, **12/12** live detail pages, `node --check` clean.
+
+Repair already run by Val: **29 phantoms deleted** locally and on prod. Prod now holds **25,199** tenders.
+
+---
+
+## New files from that session
+
+- `server/tenders/raw.js` — `packRaw()`; never truncate serialized JSON.
+- `server/scripts/repair_tender_phantoms.js` + **`Preview Tender Phantom Repair.command`** / **`Apply Tender Phantom Repair.command`**.
+- `server/tests/tender_phantom_split.test.mjs` — 55 tests.
+- `CLAUDE.md`, `.claude/settings.json` — the working agreement and its guardrails.
+
+---
+
+## The plan
+
+Six phases, green‑lit. Phase 1 (tenders → buyer‑intent signals) is done. **Phase 2 (data maximization) is current:** Engine 6 tech‑stack is live and running; next is **A3 proof‑of‑search ledger**, then **C1 QSE disclosures**. **MOCI Stage‑2 is parked** at Val's request. Then Phase 3 Bella‑as‑brain, 4 onboarding, 5 Team, 6 Bell‑as‑a‑business.
+
+Full detail: `CLAUDE.md` §6 and `Bell — Project State (for new session).md`.

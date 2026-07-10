@@ -34,6 +34,7 @@ import { renderPage, rendererAvailable, closeRenderer, searchWeb, beginSearchSes
 import { significantTokens, GENERIC_WORDS, REDIRECT_TRAP_HOSTS } from './finder.js';
 import { extractPartners } from './extract.js';
 import { classifyCountry } from './country.js';
+import { recordSearch } from './ledger.js';
 
 export const STAGE_LABEL = 'Local Engine 3 — Network Mapper';
 export const TOOL_NAME   = 'local_relationship_mapper';
@@ -485,6 +486,7 @@ async function markStage(companyId, status, extras = null) {
   } else {
     await query(`UPDATE companies SET stage9_status = $2, stage9_at = now() WHERE id = $1`, [companyId, status]);
   }
+  await recordSearch(companyId, 9, status, extras);
 }
 
 // ---------------------------------------------------------------------------
@@ -520,6 +522,9 @@ export async function enrichCompanies(companies, jobLog = null) {
           (r.reason ? ` (${r.reason})` : ''));
       } catch (err) {
         failed++;
+        // Stamp the failure — a company left on 'running' never re-enters the
+        // frontier and silently poisons the proof-of-search set.
+        try { await markStage(c.id, 'failed', { stage9_error: String(err.message || err).slice(0, 140) }); } catch { /* ignore */ }
         jobLog?.(`  ✗ [${++finished}/${total}] ${c.name} — ${err.message}`);
       }
     });

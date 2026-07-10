@@ -9,6 +9,7 @@ import { navigateTo } from '../lib/router.js';
 import { formatValue, isEmptyValue } from '../lib/format.js';
 import { BellScore } from './BellScore.js';
 import { ContactIcons } from './ContactIcons.js';
+import { SearchProofBlock } from './SearchProof.js';
 import { RequestDetailsBox } from './RequestDetailsBox.js';
 import { CompanyLogo } from './CompanyLogo.js';
 import { SourceBadge } from './SourceBadge.js';
@@ -662,6 +663,12 @@ function CompanyTab({ company, extra, similar, relationships, contacts, onReload
             ${extra.website_description ? html`<div class="kv"><dt>Description</dt><dd>${extra.website_description}</dd></div>` : null}
             ${extra.website_keywords ? html`<div class="kv"><dt>Keywords</dt><dd>${extra.website_keywords}</dd></div>` : null}
           </dl>
+        </section>
+      ` : null}
+
+      ${isLocalEngine ? html`
+        <section class="group" key="search-proof">
+          <${SearchProofBlock} companyId=${company.id} />
         </section>
       ` : null}
 

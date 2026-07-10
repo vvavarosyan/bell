@@ -8,6 +8,7 @@ import { useState, useEffect } from 'react';
 import { html } from '../lib/html.js';
 import { api } from '../lib/api.js';
 import { toast } from '../lib/toast.js';
+import { SearchProofStatsCard } from './SearchProof.js';
 
 const STATE_META = {
   sweeping: { label: 'Live · sweeping', color: '#22c55e' },
@@ -15,6 +16,7 @@ const STATE_META = {
   starting: { label: 'Starting…', color: '#22c55e' },
   paused:   { label: 'Paused', color: '#f59e0b' },
   error:    { label: 'Live · recovering', color: '#f59e0b' },
+  wedged:   { label: 'Recovering — a round got stuck and the engine restarted itself', color: '#e5534b' },
   stopped:  { label: 'Stopped (no recent heartbeat)', color: '#e5534b' },
   off:      { label: 'Not running', color: '#64748b' },
 };
@@ -195,6 +197,9 @@ export function EngineTab() {
             ${coverage.jobs ? html`<div><div class="muted" style=${{ fontSize: '11px' }}>Jobs (active)</div><b>${nf(coverage.jobs.active)}</b> <span class="muted" style=${{ fontSize: '10.5px' }}>of ${nf(coverage.jobs.total)}</span></div>` : null}
           </div>` : null}
         </div>` : null}
+
+        <${SearchProofStatsCard} cardStyle=${CARD} />
+
 
         <div style=${CARD}>
           <div style=${{ fontWeight: 700, fontSize: '14px', marginBottom: '4px' }}>Re-scan the database</div>

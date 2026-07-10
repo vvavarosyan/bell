@@ -79,6 +79,10 @@ export const MIRROR_TABLES = [
   // the 'tender' signals from these rows. award_company_id is a soft ref (no FK),
   // so ordering doesn't matter.
   { name: 'tenders',              watermark: 'updated_at' },
+  // QSE stock-exchange disclosures (scraped locally via "Run QSE Scan.command").
+  // Mirrored like tenders; prod regenerates the 'disclosure' signals from these
+  // rows. company_id is a soft ref (no FK), so ordering doesn't matter.
+  { name: 'qse_disclosures',      watermark: 'updated_at' },
 ];
 
 export const MIRROR_TABLE_NAMES = new Set(MIRROR_TABLES.map((t) => t.name));

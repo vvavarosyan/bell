@@ -22,6 +22,7 @@ import { upsertContact, isJunkEmail } from '../../lib/contacts.js';
 import { verifyEmail, emailDomain } from './emailverify.js';
 import { decodeFormat, emailFromFormat, inferStructuralFormat, splitName } from './email_patterns.js';
 import { recordReject } from './rejects.js';
+import { recordSearch } from './ledger.js';
 
 const PER_COMPANY_CAP = Number(process.env.BELL_EMAIL_PER_COMPANY || 25);
 
@@ -43,6 +44,7 @@ async function markStage10(id, status, extras = {}) {
     `UPDATE companies SET stage10_status = $2, stage10_at = now(), extra_fields = extra_fields || $3::jsonb WHERE id = $1`,
     [id, status, JSON.stringify(extras)],
   );
+  await recordSearch(id, 10, status, extras);
 }
 
 export async function enrichCompany(company) {

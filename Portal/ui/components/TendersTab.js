@@ -27,6 +27,32 @@ function fmtDate(iso) { if (!iso) return '—'; try { return new Date(iso).toLoc
 function fmtVal(n, cur) { if (n == null) return null; const v = Number(n); if (!Number.isFinite(v) || v <= 0) return null; return (cur || 'QAR') + ' ' + v.toLocaleString(); }
 const srcLabel = (s) => SOURCE_LABEL[s] || (s ? s[0].toUpperCase() + s.slice(1) : '—');
 
+// Monaqasat prints Contract Duration as a bare number with NO unit ("3"), so we
+// show it verbatim and never append "days" (the old UI did, turning a "3" into
+// "3 days"). Rows re-enriched by parser v3+ carry `contract_duration`; rows not
+// yet re-enriched still hold the legacy `contract_days`, shown unit-less with a
+// hint. A page that DOES state a unit ("90 Days") keeps it.
+// Fields the drawer already renders on their own line — skipped in "As published"
+// so nothing is shown twice. Everything else the source prints IS shown.
+const fieldKey = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+const SHOWN_FIELDS = new Set([
+  'tender number', 'type', 'subject', 'ministry', 'tender bond', 'documents value qr',
+  'closing date', 'brief description', 'contract duration',
+].map(fieldKey));
+
+function contractDuration(raw) {
+  // The page states a unit only sometimes ("90 Days from contract date"); more
+  // often it prints a bare number ("3"). Show the number the source printed, and
+  // say plainly when no unit was given — a bare "3" reads as nonsense, and "3
+  // days" would be a fabrication.
+  if (raw.contract_duration) {
+    const v = String(raw.contract_duration);
+    return raw.contract_duration_unit || /[a-z]/i.test(v) ? v : `${v} (unit not stated at source)`;
+  }
+  if (raw.contract_days != null) return `${raw.contract_days} (unit not stated at source)`;
+  return null;
+}
+
 function StatusBadge({ status }) {
   const m = STATUS_META[status] || { label: status || '—', color: '#9ca5b9' };
   return html`<span style=${{ fontSize: '10.5px', fontWeight: 700, letterSpacing: '.04em', textTransform: 'uppercase', color: m.color, background: m.color + '1f', border: '1px solid ' + m.color + '55', borderRadius: '999px', padding: '2px 9px', whiteSpace: 'nowrap' }}>${m.label}</span>`;
@@ -241,7 +267,7 @@ export function TendersTab({ embedded = false } = {}) {
               ${line('Closing date', detail.deadline_at ? fmtDate(detail.deadline_at) : null)}
               ${line('Tender bond', fmtVal(raw.tender_bond, 'QAR'))}
               ${line('Documents value', fmtVal(raw.documents_value, 'QAR'))}
-              ${line('Contract duration', raw.contract_days ? raw.contract_days + ' days' : null)}
+              ${line('Contract duration', contractDuration(raw))}
               ${line('Procurement contact', raw.contact_email ? html`<a href=${'mailto:' + raw.contact_email} style=${{ color: 'var(--accent-bright, #a5c3ff)' }}>${raw.contact_email}</a>` : null)}
               ${detail.award_company_name ? line('Awarded to', detail.award_company_id
                 ? html`<button onClick=${() => navigateTo('companies', detail.award_company_id)} style=${{ background: 'transparent', border: 'none', padding: 0, color: 'var(--accent-bright, #a5c3ff)', fontSize: '12.5px', fontWeight: 600, cursor: 'pointer' }}>${detail.award_company_name} →</button>`
@@ -255,6 +281,22 @@ export function TendersTab({ embedded = false } = {}) {
                     <span style=${{ flex: 1, color: 'var(--text)' }}>${a.name || ''}</span></div>`)}
                   <div class="muted small" style=${{ marginTop: '6px' }}>These map tenders to Bell companies in the same line of business.</div>
                 </div>` : null}
+
+              ${(() => {
+                // Every remaining field the source published, exactly as printed.
+                // Bare numbers stay bare — several ("Contract Duration 3",
+                // "Warranty Period 12") carry no unit on the page, and Bell will
+                // not invent one. Fields already shown above are not repeated.
+                const extra = (Array.isArray(raw.fields) ? raw.fields : []).filter((f) => f && f.value && !SHOWN_FIELDS.has(fieldKey(f.label)));
+                if (!extra.length) return null;
+                return html`<div style=${{ marginTop: '16px' }}>
+                  <div style=${{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.06em', color: 'var(--text)', marginBottom: '7px' }}>As published · ${extra.length}</div>
+                  ${extra.map((f, i) => html`<div key=${i} style=${{ display: 'flex', gap: '10px', padding: '4px 0', fontSize: '12px', alignItems: 'baseline' }}>
+                    <span class="muted" style=${{ flex: '0 0 46%' }}>${f.label}</span>
+                    <span style=${{ flex: 1, color: 'var(--text)', whiteSpace: 'pre-wrap' }}>${f.value}</span></div>`)}
+                  <div class="muted small" style=${{ marginTop: '6px' }}>Shown exactly as ${srcLabel(detail.source)} publishes them. Where a number has no unit, the source states none.</div>
+                </div>`;
+              })()}
 
               ${detail.url ? html`<div style=${{ marginTop: '18px' }}>
                 <a href=${detail.url} target="_blank" rel="noopener noreferrer"
