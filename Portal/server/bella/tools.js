@@ -14,6 +14,7 @@
 
 import { query } from '../db.js';
 import { planSteps, planSummary } from './plan.js';
+import openstatsRouter from '../routes/openstats.js';
 import companiesRouter from '../routes/companies.js';
 import peopleRouter    from '../routes/people.js';
 import jobsRouter      from '../routes/jobs.js';
@@ -414,6 +415,31 @@ export const TOOLS = [
       return { disclosures: r.rows };
     },
     summarize: (args, r) => `${(r?.disclosures || []).length} QSE disclosures${args.category ? ' (' + args.category + ')' : ''}`,
+  },
+
+  {
+    definition: {
+      name: 'get_market_stats',
+      description: 'Qatar MARKET statistics derived from official open data Bell holds: monthly import/export values (QAR) with top partner countries, monthly real-estate transactions (count, total value, average price/m2), and business-licence dynamics (issued vs canceled per month — market entry/exit). Use for questions about the Qatari economy, trade, property market, or business formation trends. Each block names its source dataset and sync date.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    async execute(_args, ctx) {
+      const { payload } = await internalCall(openstatsRouter, 'GET', '/', ctx, {});
+      if (!payload || payload.error) return { error: payload?.reason || 'stats unavailable' };
+      // Trim the series for the model: newest 12 points per series is plenty.
+      const trim = (a) => (Array.isArray(a) ? a.slice(0, 12) : a);
+      return {
+        trade: { ...payload.trade, imports_monthly: trim(payload.trade?.imports_monthly), exports_monthly: trim(payload.trade?.exports_monthly) },
+        real_estate: { monthly: trim(payload.real_estate?.monthly) },
+        business_licenses: {
+          issued_monthly: trim(payload.business_licenses?.issued_monthly),
+          canceled_monthly: trim(payload.business_licenses?.canceled_monthly),
+        },
+        sources: payload.sources,
+        note: 'All values are sums/averages of figures the official datasets state (QAR). Cite the month and source when quoting.',
+      };
+    },
+    summarize: () => 'Qatar market statistics',
   },
 
   {

@@ -9,6 +9,7 @@ import { api } from '../lib/api.js';
 import { toast } from '../lib/toast.js';
 import { navigateTo } from '../lib/router.js';
 import { FeedSourcesNetwork } from './FeedSourcesNetwork.js';
+import { MarketPulse } from './MarketPulse.js';
 
 const CATEGORIES = [
   ['', 'All'], ['economic', 'Economic'], ['political', 'Political'], ['corporate', 'Corporate'],
@@ -272,6 +273,7 @@ export function MarketFeedTab({ mode } = {}) {
             <div class="feed-bdi-stat"><b>${(stats.research_feed_events || 0)}</b><span>Research in feed</span></div>
           </div>
         ` : null}
+        <${MarketPulse} />
         <div class="feed-aside-title">Trending companies</div>
         ${trending.length === 0 ? html`<div class="muted small">Nothing trending yet.</div>` :
           trending.map(c => html`

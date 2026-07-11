@@ -219,6 +219,7 @@ export const api = {
   enrichmentCoverage:     () => request('/api/enrichment/coverage'),
   searchProof:            (companyId) => request('/api/enrichment/search-proof/' + companyId),
   searchProofStats:       () => request('/api/enrichment/search-proof-stats'),
+  openStats:              () => request('/api/open-stats'),
   runEnrichment:          (body) => request('/api/enrichment/run', { method: 'POST', body: JSON.stringify(body) }),
   runHarvestSweep:        (limit = 100) => request('/api/enrichment/sweep', { method: 'POST', body: JSON.stringify({ limit }) }),
   finderAudit:            () => request('/api/enrichment/finder-audit'),
