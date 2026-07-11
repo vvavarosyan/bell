@@ -194,6 +194,12 @@ function App({ initialUser, initialTenant, mode }) {
           case 'show_people':
             if (currentRoute().tab !== 'people') { stashPending(a); navigateTo('people'); }
             break;
+          // Tenders live INSIDE the Signals section (SignalsTab relays
+          // show_tenders onward to the embedded TendersTab).
+          case 'show_tenders':
+          case 'show_signals':
+            if (currentRoute().tab !== 'signals') { stashPending(a); navigateTo('signals'); }
+            break;
           case 'fill_field': {
             // The target view may be mid-navigation or still fetching its data
             // (the ICP form loads on first open) — retry on a backoff before

@@ -13,6 +13,7 @@ import { html } from '../lib/html.js';
 import { api } from '../lib/api.js';
 import { navigateTo } from '../lib/router.js';
 import { TendersTab } from './TendersTab.js';
+import { BELLA_ACTION_EVENT, takePending, stashPending } from '../lib/bellaBus.js';
 
 const KIND_META = {
   tender:         { label: 'Tenders',        color: '#eab308', sector: 0 },
@@ -105,6 +106,38 @@ export function SignalsTab() {
     const t = setInterval(loadT, 120_000);
     return () => { dead = true; clearInterval(t); };
   }, []);
+
+  // Bella drives this section (show_signals / show_tenders ui-actions).
+  // window.__bellaPending is a single consuming slot, so a pending
+  // show_tenders is re-stashed for the embedded TendersTab, which mounts on
+  // the next render and consumes it itself. While TendersTab IS mounted its
+  // own live listener applies filters — we only switch the sub-view.
+  const kindRef = useRef(kind);
+  useEffect(() => { kindRef.current = kind; }, [kind]);
+  useEffect(() => {
+    const applySignals = (a) => {
+      if (!a || a.type !== 'show_signals') return false;
+      setKind(a.kind && KIND_META[a.kind] ? a.kind : '');
+      if (a.window && WINDOW_MS[a.window]) setWindowKey(a.window);
+      if (a.scope === 'global' || a.scope === 'icp') setScope(a.scope);
+      return true;
+    };
+    const p = takePending('show_signals');
+    if (p) applySignals(p);
+    const pt = takePending('show_tenders');
+    if (pt) { stashPending(pt); setKind('tender'); }
+    const onAction = (e) => {
+      const a = e.detail;
+      if (!a) return;
+      if (a.type === 'show_signals') { applySignals(a); return; }
+      if (a.type === 'show_tenders' && kindRef.current !== 'tender') {
+        stashPending(a);
+        setKind('tender');
+      }
+    };
+    window.addEventListener(BELLA_ACTION_EVENT, onAction);
+    return () => window.removeEventListener(BELLA_ACTION_EVENT, onAction);
+  }, []);   // eslint-disable-line react-hooks/exhaustive-deps
 
   const inWindow = (iso) => (Date.now() - new Date(iso).getTime()) <= WINDOW_MS[windowKey];
 

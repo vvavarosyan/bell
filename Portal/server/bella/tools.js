@@ -1307,6 +1307,69 @@ export const TOOLS = [
 
   {
     definition: {
+      name: 'show_tenders',
+      description: 'OPEN the Tenders browser in the app, filtered — the real grid, in front of the user. Use whenever they want to SEE/browse tenders ("show me open IT tenders"). Filters: status (open|awarded|prospected|archived), source (monaqasat|ashghal|qatarenergy), industry (canonical tag), q (free text), icp (true = matching their ICP industries). Pair with get_tenders only when you also need the numbers yourself.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          status:   { type: 'string', description: 'open | awarded | prospected | archived' },
+          source:   { type: 'string', description: 'monaqasat | ashghal | qatarenergy' },
+          industry: { type: 'string', description: 'canonical industry tag, e.g. "Information Technology"' },
+          q:        { type: 'string', description: 'free-text search' },
+          icp:      { type: 'boolean', description: 'true = only tenders matching the user\'s ICP' },
+        },
+      },
+    },
+    async execute(args) {
+      const status = args.status ? String(args.status).toLowerCase() : '';
+      const source = args.source ? String(args.source).toLowerCase() : '';
+      if (status && !['open', 'awarded', 'prospected', 'archived', 'closed', 'cancelled'].includes(status)) {
+        return { error: 'unknown status', valid: ['open', 'awarded', 'prospected', 'archived'] };
+      }
+      if (source && !['monaqasat', 'ashghal', 'qatarenergy'].includes(source)) {
+        return { error: 'unknown source', valid: ['monaqasat', 'ashghal', 'qatarenergy'] };
+      }
+      return { ok: true, opened: 'tenders', status: status || 'open', source, industry: args.industry || '', q: args.q || '', icp: args.icp === true };
+    },
+    summarize: (args) => `showing tenders${args.status ? ' (' + args.status + ')' : ''}${args.industry ? ' · ' + args.industry : ''}${args.icp ? ' · ICP' : ''}`,
+    uiAction: (args, result) => (result && !result.error ? {
+      type: 'show_tenders',
+      status: result.status, source: result.source, industry: result.industry, q: result.q, icp: result.icp,
+    } : null),
+  },
+
+  {
+    definition: {
+      name: 'show_signals',
+      description: 'OPEN the Signals radar in the app, filtered — use whenever the user wants to SEE signals ("show me this week\'s disclosures", "what\'s on my radar"). kind: tender|hiring|expansion|newly_licensed|partnership|leadership|disclosure|news_event (empty = all). window: 24h|3d|7d|14d. scope: global|icp ("For you").',
+      input_schema: {
+        type: 'object',
+        properties: {
+          kind:   { type: 'string', description: 'tender | hiring | expansion | newly_licensed | partnership | leadership | disclosure | news_event' },
+          window: { type: 'string', description: '24h | 3d | 7d | 14d' },
+          scope:  { type: 'string', description: 'global | icp' },
+        },
+      },
+    },
+    async execute(args) {
+      const KINDS = ['tender', 'hiring', 'expansion', 'newly_licensed', 'partnership', 'leadership', 'disclosure', 'news_event'];
+      const WINDOWS = ['24h', '3d', '7d', '14d'];
+      const kind = args.kind ? String(args.kind).toLowerCase() : '';
+      const window = args.window ? String(args.window).toLowerCase() : '';
+      const scope = args.scope ? String(args.scope).toLowerCase() : '';
+      if (kind && !KINDS.includes(kind)) return { error: 'unknown kind', valid: KINDS };
+      if (window && !WINDOWS.includes(window)) return { error: 'unknown window', valid: WINDOWS };
+      if (scope && !['global', 'icp'].includes(scope)) return { error: 'unknown scope', valid: ['global', 'icp'] };
+      return { ok: true, opened: 'signals', kind, window, scope };
+    },
+    summarize: (args) => `showing signals${args.kind ? ' (' + args.kind + ')' : ''}${args.scope === 'icp' ? ' · For you' : ''}`,
+    uiAction: (args, result) => (result && !result.error ? {
+      type: 'show_signals', kind: result.kind, window: result.window, scope: result.scope,
+    } : null),
+  },
+
+  {
+    definition: {
       name: 'propose_plan',
       description: 'ONE up-front approval for a whole multi-step job. Use when a request needs SEVERAL actions that would each ask for approval (emails, WhatsApp, sequence enrollments, CRM writes, reveals, ICP/preference updates): first ask any clarifying questions (which email style? which sequence? is the ICP set?), THEN call this ONCE with the complete numbered step list. The user sees every step on a single card and approves once; after approval you execute all steps with no further cards. Each step: tool = the exact tool you will call, what = a specific human description ("Send personalized email to Al Waab Design (info@alwaab.qa)"). Every send/enrollment/reveal must be its OWN step — the card is the user\'s complete picture of what will happen. Do NOT use this for a single action or for read-only work.',
       input_schema: {

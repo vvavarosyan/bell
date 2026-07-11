@@ -89,22 +89,27 @@ export async function ttsStream(text, signal) {
   const key = await elevenKey();
   if (!key) throw new Error('elevenlabs_key_missing');
   const url = `https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(pickVoice(text))}/stream?output_format=${encodeURIComponent(OUTPUT)}`;
-  const call = (withSettings) => fetch(url, {
+  // Arabic replies: pin the language so the multilingual model never reads
+  // Arabic text with foreign phonemes. Detection = the reply text itself
+  // (same per-turn rule as pickVoice above).
+  const arabic = ARABIC_RX.test(String(text));
+  const call = (withExtras) => fetch(url, {
     method: 'POST',
     signal,
     headers: { 'xi-api-key': key, 'Content-Type': 'application/json' },
     body: JSON.stringify({
       text: String(text).slice(0, 1500),
       model_id: TTS_MODEL,
-      ...(withSettings ? { voice_settings: VOICE_SETTINGS } : {}),
+      ...(withExtras ? { voice_settings: VOICE_SETTINGS } : {}),
+      ...(withExtras && arabic ? { language_code: 'ar' } : {}),
     }),
   });
   let res = await call(true);
-  // Insurance: if a model/plan rejects a voice_settings field (400), retry
-  // plain rather than failing the whole reply.
+  // Insurance: if a model/plan rejects voice_settings or language_code (400),
+  // retry plain rather than failing the whole reply.
   if (res.status === 400) {
     const body = await res.text().catch(() => '');
-    console.warn('[bella] TTS 400 with voice_settings, retrying plain:', body.slice(0, 160));
+    console.warn('[bella] TTS 400 with extras, retrying plain:', body.slice(0, 160));
     res = await call(false);
   }
   if (!res.ok) {

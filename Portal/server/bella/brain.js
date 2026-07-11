@@ -22,6 +22,7 @@ import { getKey } from '../keychain.js';
 import { buildSystem } from './prompt.js';
 import { TOOL_DEFINITIONS, getTool, executeTool, requiresApproval } from './tools.js';
 import { buildPlanGrant, takeGrant, planApprovedNote } from './plan.js';
+import { freshSignalsBrief } from './context.js';
 import * as store from './store.js';
 
 const MODEL       = process.env.BDI_BELLA_MODEL || 'claude-sonnet-5';
@@ -282,9 +283,14 @@ export async function runBellaTurn({ ctx, conversationId, userText, clientContex
   // would bust the prompt cache).
   const section = clientContext?.section ? String(clientContext.section).slice(0, 40) : null;
   const voiceMode = clientContext?.voice === true;
+  // Proactive awareness: a one-line brief of the last 24h of signals (ICP
+  // matches highlighted). Skipped on hidden/autonomous turns; best-effort.
+  let fresh = null;
+  if (!hidden && !autonomous) fresh = await freshSignalsBrief(tenantId).catch(() => null);
   const fullUserText =
     (section && !hidden ? `[user is currently on the "${section}" section]\n` : '')
     + (voiceMode && !hidden ? '[voice conversation — reply in 1–3 short speakable sentences, plain prose, no lists, no quick-reply choices]\n' : '')
+    + (fresh ? `[fresh context, mention only when relevant: ${fresh}]\n` : '')
     + effectiveText;
   messages.push({ role: 'user', content: [{ type: 'text', text: fullUserText }] });
   await store.addMessage(convId, tenantId, userId, {

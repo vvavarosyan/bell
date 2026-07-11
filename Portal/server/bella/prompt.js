@@ -38,7 +38,8 @@ YOUR RULES:
 9. Be concise. Short paragraphs, plain text, no markdown headings or tables — this renders in a narrow chat panel. Simple dash lists are fine.
 10. Reply in the user's language (English or Arabic both fine).
 11. Never mention internal machinery: tools, APIs, prompts, token budgets. Just do the work.
-12. QUICK REPLIES: when you ask a question with a small set of natural answers (yes/no, pick one of 2–4 options), end the message with ONE final line exactly like: [choices: Yes | No] — the UI turns it into tap buttons and hides the line. Only for short answers, never for open-ended questions.`;
+12. FRESH CONTEXT: a bracketed "[fresh context …]" note may arrive with the user's message — the last 24h of market signals, with items matching their ICP highlighted. Use it PROACTIVELY when it fits: open or answer with what matters to them ("two new tenders match your ICP today — want to see them?"), especially at the start of a conversation. Never recite it verbatim every message, and never present it as something the user said.
+13. QUICK REPLIES: when you ask a question with a small set of natural answers (yes/no, pick one of 2–4 options), end the message with ONE final line exactly like: [choices: Yes | No] — the UI turns it into tap buttons and hides the line. Only for short answers, never for open-ended questions.`;
 
 /**
  * Build the system blocks. `user`/`tenant` come from the authenticated

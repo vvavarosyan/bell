@@ -10,6 +10,7 @@
 import { useState, useEffect, useCallback } from 'react';
 import { html } from '../lib/html.js';
 import { api } from '../lib/api.js';
+import { BELLA_ACTION_EVENT, takePending } from '../lib/bellaBus.js';
 import { navigateTo } from '../lib/router.js';
 
 const PAGE = 30;
@@ -104,6 +105,23 @@ export function TendersTab({ embedded = false } = {}) {
     const t = setTimeout(() => { setOffset(0); setFilters((f) => ({ ...f, q: qInput.trim() })); }, 400);
     return () => clearTimeout(t);
   }, [qInput]);
+
+  // Bella drives the tender filters (show_tenders ui-action). q MUST go
+  // through setQInput — the 400ms debounce effect above would otherwise wipe
+  // a directly-written filters.q right after mount.
+  useEffect(() => {
+    const apply = (a) => {
+      if (!a || a.type !== 'show_tenders') return;
+      setScope(a.icp === true ? 'icp' : 'global');
+      setQInput(a.q || '');
+      setFilters({ status: a.status || 'open', source: a.source || '', buyer: '', year: '', q: a.q || '', industry: a.industry || '' });
+      setOffset(0);
+    };
+    apply(takePending('show_tenders'));
+    const onAction = (e) => apply(e.detail);
+    window.addEventListener(BELLA_ACTION_EVENT, onAction);
+    return () => window.removeEventListener(BELLA_ACTION_EVENT, onAction);
+  }, []);   // eslint-disable-line react-hooks/exhaustive-deps
 
   const setFilter = (patch) => { setOffset(0); setFilters((f) => ({ ...f, ...patch })); };
 
