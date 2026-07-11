@@ -21,6 +21,7 @@
 import { getKey } from '../keychain.js';
 import { buildSystem } from './prompt.js';
 import { TOOL_DEFINITIONS, getTool, executeTool, requiresApproval } from './tools.js';
+import { buildPlanGrant, takeGrant, planApprovedNote } from './plan.js';
 import * as store from './store.js';
 
 const MODEL       = process.env.BDI_BELLA_MODEL || 'claude-sonnet-5';
@@ -252,6 +253,11 @@ export async function runBellaTurn({ ctx, conversationId, userText, clientContex
   // narrates from. Hidden: no user bubble is rendered (display content '').
   let effectiveText = userText;
   let hidden = false;
+  // An APPROVED plan (propose_plan) grants this turn a per-tool budget so the
+  // whole job runs card-free — the one card already showed the user every
+  // step. The grant never outlives the turn and never covers tools the plan
+  // didn't name. (Val's multi-action autonomy spec, 2026-07-08.)
+  let grant = null;
   const actionMatch = /^\[\[action:(\d+):(approved|denied)\]\]$/.exec(userText.trim());
   if (actionMatch) {
     hidden = true;
@@ -259,7 +265,14 @@ export async function runBellaTurn({ ctx, conversationId, userText, clientContex
     if (!action) {
       effectiveText = '[System note: the referenced action no longer exists. Tell the user briefly.]';
     } else if (actionMatch[2] === 'approved') {
-      effectiveText = `[System note: the user APPROVED your proposed ${action.tool} (action #${action.id}) and it has been executed. Result: ${action.result_summary || action.status}. Tell the user the outcome, then continue helping.]`;
+      if (action.tool === 'propose_plan') {
+        let args = action.args;
+        if (typeof args === 'string') { try { args = JSON.parse(args); } catch { args = {}; } }
+        grant = buildPlanGrant(args, (name) => !!getTool(name));
+        effectiveText = planApprovedNote(action.id, args);
+      } else {
+        effectiveText = `[System note: the user APPROVED your proposed ${action.tool} (action #${action.id}) and it has been executed. Result: ${action.result_summary || action.status}. Tell the user the outcome, then continue helping.]`;
+      }
     } else {
       effectiveText = `[System note: the user DENIED your proposed ${action.tool} (action #${action.id}). Acknowledge briefly; do not retry unless they ask.]`;
     }
@@ -280,7 +293,8 @@ export async function runBellaTurn({ ctx, conversationId, userText, clientContex
 
   let totalIn = 0, totalOut = 0, totalCacheRead = 0;
   try {
-    for (let round = 0; round < MAX_ROUNDS; round++) {
+    const maxRounds = grant ? 10 : MAX_ROUNDS;   // an approved plan runs many steps
+    for (let round = 0; round < maxRounds; round++) {
       setHistoryCacheBreakpoint(messages);
       const { blocks, stopReason, inputTokens, cacheReadTokens, outputTokens } =
         await streamModelResponse({ apiKey, system, messages, signal, onToken: (t) => send('token', { t }) });
@@ -313,7 +327,7 @@ export async function runBellaTurn({ ctx, conversationId, userText, clientContex
         // Approval gate (Val's D2): 'always' tools gate in every mode;
         // 'act'/'spend' gate unless the user chose no-approval in Settings.
         // Autonomous (scheduled) runs skip gates — pre-approved at scheduling.
-        if (!autonomous && requiresApproval(tool, approvalMode)) {
+        if (!autonomous && requiresApproval(tool, approvalMode) && !takeGrant(grant, tu.name)) {
           let summary;
           try { summary = tool.describe ? tool.describe(tu.input || {}) : 'Run ' + tu.name; } catch { summary = 'Run ' + tu.name; }
           const actionId = await store.proposeAction(tenantId, userId, convId, tu.name, tu.input || {}, summary);

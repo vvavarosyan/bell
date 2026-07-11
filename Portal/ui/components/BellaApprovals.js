@@ -26,7 +26,7 @@ async function fetchPending() {
   return (r.actions || []).filter((a) => a.status === 'proposed');
 }
 
-export function BellaApprovals() {
+export function BellaApprovals({ onDecided = null }) {
   const [pending, setPending] = useState([]);
   const [busyId, setBusyId] = useState(null);
 
@@ -48,6 +48,9 @@ export function BellaApprovals() {
       toast(verdict === 'approved'
         ? ('✓ ' + (r?.summary || a.result_summary || a.tool))
         : ('Denied — ' + (a.result_summary || a.tool)), verdict === 'approved' ? undefined : 'error');
+      // The host (BellaChat) sends the hidden continuation so Bella narrates
+      // — and for an approved PLAN actually executes it.
+      try { onDecided?.(a, verdict); } catch { /* ignore */ }
     } catch (err) {
       toast('Could not process: ' + (err?.message || 'failed'), 'error');
     } finally {

@@ -13,6 +13,7 @@
 // flag on each definition is the hook the brain already honors.
 
 import { query } from '../db.js';
+import { planSteps, planSummary } from './plan.js';
 import companiesRouter from '../routes/companies.js';
 import peopleRouter    from '../routes/people.js';
 import jobsRouter      from '../routes/jobs.js';
@@ -1302,6 +1303,44 @@ export const TOOLS = [
     },
     summarize: (args) => `opened person #${args.id}`,
     uiAction: (args) => (Number(args.id) ? { type: 'open_record', tab: 'people', id: Number(args.id) } : null),
+  },
+
+  {
+    definition: {
+      name: 'propose_plan',
+      description: 'ONE up-front approval for a whole multi-step job. Use when a request needs SEVERAL actions that would each ask for approval (emails, WhatsApp, sequence enrollments, CRM writes, reveals, ICP/preference updates): first ask any clarifying questions (which email style? which sequence? is the ICP set?), THEN call this ONCE with the complete numbered step list. The user sees every step on a single card and approves once; after approval you execute all steps with no further cards. Each step: tool = the exact tool you will call, what = a specific human description ("Send personalized email to Al Waab Design (info@alwaab.qa)"). Every send/enrollment/reveal must be its OWN step — the card is the user\'s complete picture of what will happen. Do NOT use this for a single action or for read-only work.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          title: { type: 'string', description: 'Short job title, e.g. "Interior Design outreach".' },
+          steps: {
+            type: 'array',
+            items: {
+              type: 'object',
+              properties: {
+                tool: { type: 'string', description: 'Exact tool name this step will call.' },
+                what: { type: 'string', description: 'Specific description the user will read.' },
+              },
+              required: ['tool', 'what'],
+            },
+          },
+        },
+        required: ['steps'],
+      },
+    },
+    approval: 'always',   // the single card IS the mechanism
+    async execute(args) {
+      const steps = planSteps(args);
+      if (!steps.length) return { error: 'a plan needs at least one step with tool + what' };
+      const unknown = steps.filter((st) => !BY_NAME.has(st.tool)).map((st) => st.tool);
+      return {
+        ok: true, approved: true, steps,
+        ...(unknown.length ? { warning: 'these step tools do not exist and will NOT be pre-approved: ' + unknown.join(', ') } : {}),
+        note: 'The plan was approved. Execute every step now — they will not raise further approval cards this turn.',
+      };
+    },
+    describe: (args) => planSummary(args),
+    summarize: (args) => `plan proposed (${planSteps(args).length} steps)`,
   },
 
   {

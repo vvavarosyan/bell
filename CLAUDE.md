@@ -25,6 +25,7 @@ Val is the founder and sole operator. He is **not** a developer and does not rea
 - [ ] **7.** After all enrich passes: `Install Always-On Engine.command` (safely restarts the engine service — it froze mid‑round 2026‑07‑10 09:26; a **45‑minute round watchdog** is now in the tree so a future stuck round restarts itself), then local Portal → **Local Engines → Resume**. ⚠️ Do step 5b (Portal restart) BEFORE this, or the new proof‑of‑search rows have no table to land in.
 
 **Not urgent, whenever he has a spare night:**
+- [ ] **`Enrich Ashghal Details.command`** — fills real description/bond/fees for the ~2,800 CLOSED/archived Ashghal tenders (open ones already done; QatarEnergy fully detailed 2026‑07‑11, 1,236/1,236). Browser‑based, hours, resumable; don't run alongside another long enrich.
 - [ ] **271 rows "awaiting host heal"** — fragment rows whose host title is still truncated (hosts sit in the awarded archive). They look like phantoms but are **unproven**, so the repair tool refuses to delete them. Clear via `Backfill Full Tender Archive.command` (hours) → then `Preview Tender Phantom Repair.command` → `Apply Tender Phantom Repair.command`.
 
 **Parked at Val's request:** MOCI Stage‑2 (the diagnose run needed hours of manual scrolling). Design preserved in `Bell — MOCI Stage-2 Design (Phase 2 A1).md`. Don't restart it without asking.

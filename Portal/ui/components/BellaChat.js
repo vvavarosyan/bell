@@ -356,7 +356,7 @@ export function BellaChat({ onClose }) {
         <button class="bella-head-btn" title="Close" onClick=${onClose}>✕</button>
       </div>
 
-      <${BellaApprovals} />
+      <${BellaApprovals} onDecided=${(a, verdict) => send(`[[action:${a.id}:${verdict}]]`, { hidden: true })} />
 
       ${showList ? html`
         <div class="bella-convlist">

@@ -237,7 +237,7 @@ export async function proposeAction(tenantId, userId, conversationId, tool, args
   const r = await query(
     `INSERT INTO bella_actions (tenant_id, user_id, conversation_id, tool, args, status, result_summary)
      VALUES ($1, $2, $3, $4, $5, 'proposed', $6) RETURNING id`,
-    [tenantId, userId, conversationId, tool, JSON.stringify(args || {}), (summary || '').slice(0, 400)]
+    [tenantId, userId, conversationId, tool, JSON.stringify(args || {}), (summary || '').slice(0, 900)]
   );
   return r.rows[0].id;
 }

@@ -18,6 +18,7 @@ import { toast } from '../lib/toast.js';
 import { currentRoute, navigateTo } from '../lib/router.js';
 import { emitBellaAction, stashPending, fireToolEffects } from '../lib/bellaBus.js';
 import { fireApprovalsChanged } from './BellaApprovals.js';
+import { cutSpeechSegment, segmentAll } from '../lib/speech.js';
 
 const SILENCE_MS = 900;      // pause that ends an utterance
 const MIN_SPEECH_MS = 350;   // shorter blips are ignored (coughs, clicks)
@@ -51,6 +52,7 @@ export function BellaVoice({ onClose, onOpenChat }) {
 
   const cleanup = useCallback(() => {
     aliveRef.current = false;
+    try { speechRunRef.current?.stop(); } catch { /* ignore */ }
     try { streamRef.current?.abort(); } catch { /* ignore */ }
     try { audioRef.current?.pause(); } catch { /* ignore */ }
     const m = mediaRef.current;
@@ -105,34 +107,75 @@ export function BellaVoice({ onClose, onOpenChat }) {
     } catch { resolve(); }
   });
 
-  const speak = async (text) => {
-    const clean = text.replace(CHOICES_RX, '').trim();
-    if (!clean) { setSt('listening'); return; }
-    setSt('speaking');
-    setLine(clean.slice(0, 120));
-    let url = null;
-    try { url = await api.bellaTts(clean); } catch { url = null; }   // ElevenLabs down → fall back
-    try {
-      if (url) {
-        await new Promise((resolve) => {
-          const a = new Audio(url);
-          audioRef.current = a;
-          // Interruption handle (tap OR sustained speech): pause + resolve so
-          // the turn flow never hangs on a cancelled playback.
-          stopAudioRef.current = () => { try { a.pause(); } catch { /* ignore */ } resolve(); };
-          a.onended = resolve;
-          a.onerror = resolve;
-          a.play().catch(resolve);
-        });
-        audioRef.current = null;
-        stopAudioRef.current = null;
-        URL.revokeObjectURL(url);
-      } else {
-        await browserSpeak(clean);           // free browser voice — never silent
-        stopAudioRef.current = null;
+  // ── sentence-chunked speech (Phase 3): a per-turn queue of short segments.
+  // The first sentence goes to TTS while the rest of the reply still streams,
+  // and segment N+1's audio is fetched while segment N plays — she starts
+  // talking after ONE sentence instead of after the whole turn + whole mp3.
+  const speechRunRef = useRef(null);
+  const newSpeechRun = () => {
+    const run = { stopped: false, items: [], _finished: false };
+    let resolveDone;
+    run.done = new Promise((r) => { resolveDone = r; });
+    let playing = false;
+    const maybeFinish = () => { if (run.stopped || (run._finished && !run.items.length && !playing)) resolveDone(); };
+    const playLoop = async () => {
+      if (playing) return;
+      playing = true;
+      while (!run.stopped && run.items.length) {
+        const item = run.items.shift();
+        if (aliveRef.current) { setSt('speaking'); setLine(item.text.slice(0, 120)); }
+        const url = await item.urlP;                       // prefetched while previous segment played
+        if (run.stopped) { if (url) { try { URL.revokeObjectURL(url); } catch { /* ignore */ } } break; }
+        try {
+          if (url) {
+            await new Promise((resolve) => {
+              const a = new Audio(url);
+              audioRef.current = a;
+              // Interruption handle (tap OR sustained speech): pause + resolve
+              // so the turn flow never hangs on a cancelled playback.
+              stopAudioRef.current = () => { try { a.pause(); } catch { /* ignore */ } resolve(); };
+              a.onended = resolve;
+              a.onerror = resolve;
+              a.play().catch(resolve);
+            });
+            audioRef.current = null;
+            stopAudioRef.current = null;
+            try { URL.revokeObjectURL(url); } catch { /* ignore */ }
+          } else {
+            await browserSpeak(item.text);                 // free browser voice — never silent
+            stopAudioRef.current = null;
+          }
+        } catch { try { await browserSpeak(item.text); } catch { /* ignore */ } }
       }
-    } catch { try { await browserSpeak(clean); } catch { /* ignore */ } }
-    if (aliveRef.current && stateRef.current === 'speaking') { setLine(''); setSt('listening'); }
+      playing = false;
+      maybeFinish();
+    };
+    run.push = (text) => {
+      const clean = String(text || '').trim();
+      if (!clean || run.stopped) return;
+      run.items.push({ text: clean, urlP: api.bellaTts(clean).catch(() => null) });
+      playLoop();
+    };
+    run.finish = () => { run._finished = true; maybeFinish(); };
+    run.stop = () => {
+      run.stopped = true;
+      run.items = [];
+      try { stopAudioRef.current?.(); } catch { /* ignore */ }
+      maybeFinish();
+    };
+    speechRunRef.current = run;
+    return run;
+  };
+
+  // Speak a COMPLETE text (chat replies voiced while voice mode is on).
+  const speak = async (text) => {
+    const segs = segmentAll(text);
+    if (!segs.length) { setSt('listening'); return; }
+    const run = newSpeechRun();
+    for (const seg of segs) run.push(seg);
+    run.finish();
+    await run.done;
+    if (aliveRef.current && !run.stopped && stateRef.current === 'speaking') { setLine(''); setSt('listening'); }
   };
 
   const runTurn = async (text) => {
@@ -140,12 +183,25 @@ export function BellaVoice({ onClose, onOpenChat }) {
     setLine('“' + text.slice(0, 100) + '”');
     let finalText = '';
     let errored = null;
+    // Speech starts the moment the FIRST sentence has streamed.
+    const run = newSpeechRun();
+    let speechBuf = '';
+    const feedSpeech = (t) => {
+      if (run.stopped) return;
+      speechBuf += t;
+      for (;;) {
+        const cut = cutSpeechSegment(speechBuf);
+        if (!cut) break;
+        speechBuf = cut.rest;
+        run.push(cut.segment);
+      }
+    };
     try {
       const stream = await api.bellaChat(
         { conversation_id: convIdRef.current, message: text, context: { section: currentRoute().tab, voice: true } },
         {
           onMeta: (m) => { if (m.conversation_id) convIdRef.current = m.conversation_id; },
-          onToken: (d) => { finalText += d.t || ''; },
+          onToken: (d) => { finalText += d.t || ''; feedSpeech(d.t || ''); },
           onTool: (t) => { if (t.status === 'done') fireToolEffects(t.name); },   // voice writes refresh open tabs too
           onNavigate: (n) => {
             if (n?.section) {
@@ -170,9 +226,14 @@ export function BellaVoice({ onClose, onOpenChat }) {
     } finally {
       streamRef.current = null;
     }
-    if (!aliveRef.current) return;
-    if (errored) { toast('Bella: ' + errored, 'error'); setLine(''); setSt('listening'); return; }
-    await speak(finalText);
+    if (!aliveRef.current) { run.stop(); return; }
+    if (errored) { run.stop(); toast('Bella: ' + errored, 'error'); setLine(''); setSt('listening'); return; }
+    // Flush whatever remains after the stream ended (choices tail is UI-only).
+    const rest = speechBuf.replace(CHOICES_RX, '').trim();
+    if (rest && !run.stopped) run.push(rest);
+    run.finish();
+    await run.done;
+    if (aliveRef.current && !run.stopped) { setLine(''); setSt('listening'); }
   };
 
   const processUtterance = async (blob) => {
@@ -327,7 +388,8 @@ export function BellaVoice({ onClose, onOpenChat }) {
   // just start talking; the VAD loop commits it after sustained speech).
   const interrupt = () => {
     if (stateRef.current === 'speaking') {
-      stopAudioRef.current?.();
+      speechRunRef.current?.stop();
+      try { streamRef.current?.abort(); } catch { /* ignore */ }   // speech overlaps streaming now
       setLine('');
       setSt('listening');
     }
