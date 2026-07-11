@@ -12,6 +12,7 @@
 // sequences) arrive in G2 behind the approval gate — the `requires_approval`
 // flag on each definition is the hook the brain already honors.
 
+import { query } from '../db.js';
 import companiesRouter from '../routes/companies.js';
 import peopleRouter    from '../routes/people.js';
 import jobsRouter      from '../routes/jobs.js';
@@ -37,6 +38,12 @@ const TOOL_TIMEOUT_MS = 12_000;
 export const NAV_SECTIONS = [
   'market-feed', 'signals', 'map', 'companies', 'people', 'jobs',
   'deep-data', 'crm', 'research', 'billing', 'account',
+];
+
+// Settings (account) sub-pages Bella may open — the AccountTab left rail.
+// Needed because the ICP form lives on a sub-page the router can't deep-link.
+export const ACCOUNT_SUBSECTIONS = [
+  'profile', 'email', 'domain', 'whatsapp', 'icp', 'bella', 'notifications', 'preferences', 'security',
 ];
 
 // ---------------------------------------------------------------------------
@@ -343,22 +350,69 @@ export const TOOLS = [
   {
     definition: {
       name: 'get_tenders',
-      description: 'Recent Qatar public tenders and awards (Monaqasat, Ashghal, QatarEnergy, Kahramaa, QSE). An AWARD to a company is a strong buyer-intent / active-vendor signal you can act on. Filter by status (open | awarded).',
+      description: 'Qatar public tenders and awards (Monaqasat, Ashghal, QatarEnergy). An AWARD to a company is a strong buyer-intent / active-vendor signal; an OPEN tender in the user\'s industry is a live sales opportunity (deadline_at = submission deadline). Filter by status, free-text q, industry, source, buyer — or icp=true for tenders matching the user\'s ICP industries.',
       input_schema: {
         type: 'object',
         properties: {
-          status: { type: 'string', description: 'open | awarded' },
-          limit:  { type: 'integer', description: '1-25 (default 10).' },
+          status:   { type: 'string', description: 'open | awarded | prospected | archived' },
+          q:        { type: 'string', description: 'free-text search in title/buyer/ref' },
+          industry: { type: 'string', description: 'one canonical industry tag, e.g. "Information Technology"' },
+          source:   { type: 'string', description: 'monaqasat | ashghal | qatarenergy' },
+          buyer:    { type: 'string', description: 'exact buyer name' },
+          icp:      { type: 'boolean', description: 'true = only tenders matching the user\'s ICP target industries' },
+          limit:    { type: 'integer', description: '1-25 (default 10).' },
         },
       },
     },
     async execute(args, ctx) {
       const { payload } = await internalCall(tendersRouter, 'GET', '/', ctx, {
-        query: { status: args.status, limit: Math.min(Math.max(Number(args.limit) || 10, 1), 25) },
+        query: {
+          status: args.status, q: args.q, industry: args.industry, source: args.source, buyer: args.buyer,
+          ...(args.icp === true ? { icp: '1' } : {}),
+          limit: Math.min(Math.max(Number(args.limit) || 10, 1), 25),
+        },
       });
-      return { tenders: (payload?.rows || []).map((r) => pick(r, ['id', 'title', 'buyer', 'status', 'award_company_name', 'award_company_id', 'value_amount', 'currency', 'published_at', 'awarded_at', 'url'])) };
+      if (payload?.icp_missing) return { tenders: [], note: 'The user has no ICP target industries set yet — suggest filling the ICP in Settings → Company & ICP.' };
+      return { total_matching: payload?.total ?? null, tenders: (payload?.rows || []).map((r) => pick(r, ['id', 'title', 'buyer', 'status', 'source', 'primary_industry', 'industries', 'deadline_at', 'award_company_name', 'award_company_id', 'value_amount', 'currency', 'published_at', 'awarded_at', 'url'])) };
     },
-    summarize: (args, r) => `${(r?.tenders || []).length} tenders${args.status ? ' (' + args.status + ')' : ''}`,
+    summarize: (args, r) => `${(r?.tenders || []).length} tenders${args.status ? ' (' + args.status + ')' : ''}${args.icp ? ' · ICP' : ''}`,
+  },
+
+  {
+    definition: {
+      name: 'get_disclosures',
+      description: 'Qatar Stock Exchange disclosures for the ~54 listed companies: financial results, dividends, board changes, AGMs, buybacks, plus exchange market notices. The freshest official corporate events in Qatar. Filter by category, ticker symbol, or free-text q.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          category: { type: 'string', description: 'financial_results | dividend | capital_action | board | agm | investor_call | general | market_notice' },
+          symbol:   { type: 'string', description: 'QSE ticker, e.g. QNBK' },
+          q:        { type: 'string', description: 'free-text search in the headline' },
+          days:     { type: 'integer', description: 'look-back window in days (default 30, max 365)' },
+          limit:    { type: 'integer', description: '1-25 (default 10).' },
+        },
+      },
+    },
+    async execute(args) {
+      const params = [];
+      const conds = [];
+      if (args.category) { params.push(String(args.category).toLowerCase()); conds.push(`category = $${params.length}`); }
+      if (args.symbol)   { params.push(String(args.symbol).toUpperCase());   conds.push(`symbol = $${params.length}`); }
+      if (args.q)        { params.push('%' + String(args.q).replace(/[%_\\]/g, '') + '%'); conds.push(`headline ILIKE $${params.length}`); }
+      const days = Math.min(Math.max(Number(args.days) || 30, 1), 365);
+      conds.push(`published_at > now() - interval '${days} days'`);
+      const limit = Math.min(Math.max(Number(args.limit) || 10, 1), 25);
+      const r = await query(
+        `SELECT id, symbol, company_name, company_id, category, headline, summary, url, published_at
+           FROM qse_disclosures
+          WHERE ${conds.join(' AND ')}
+          ORDER BY published_at DESC
+          LIMIT ${limit}`,
+        params,
+      ).catch((e) => (/qse_disclosures/.test(e.message) ? { rows: [] } : Promise.reject(e)));
+      return { disclosures: r.rows };
+    },
+    summarize: (args, r) => `${(r?.disclosures || []).length} QSE disclosures${args.category ? ' (' + args.category + ')' : ''}`,
   },
 
   {
@@ -1253,7 +1307,7 @@ export const TOOLS = [
   {
     definition: {
       name: 'fill_field',
-      description: 'TYPE a value into a form field the user is looking at, exactly as if they typed it — Settings, ICP profile, CRM, research, filters, anything on screen. Identify the field by its visible label or placeholder (e.g. "Company name", "Website", "note"). Only fills what is currently visible, so navigate/open the right view first. After filling, tell the user what you set and let them review and save — never claim it is saved.',
+      description: 'TYPE a value into a form field the user is looking at, exactly as if they typed it — Settings, ICP profile, CRM, research, filters, anything on screen. Identify the field by its visible label or placeholder (e.g. "Company name", "Website", "note"). Only fills what is currently visible, so navigate/open the right view first (for Settings sub-pages use navigate with a subsection, e.g. section "account" + subsection "icp"). IMPORTANT: the result only confirms the typing was SENT to the page, not that it landed — say you have typed it and ask the user to check the field; never claim it is filled or saved as a fact.',
       input_schema: {
         type: 'object',
         properties: {
@@ -1265,19 +1319,29 @@ export const TOOLS = [
     },
     async execute(args) {
       if (!args.field) return { error: 'need a field label' };
-      return { ok: true, field: String(args.field), value: String(args.value ?? '') };
+      // HONEST result: the server cannot see the browser. The typing is
+      // dispatched to the page (ui_action); whether it landed is only visible
+      // to the user — a failed fill shows them a red toast. Bella must not
+      // claim success as a fact (the old {ok:true} made her lie for months).
+      return {
+        dispatched: true, field: String(args.field), value: String(args.value ?? ''),
+        note: 'Typing was sent to the page. NOT confirmed and NOT saved — tell the user you typed it and ask them to check the field (a red notice appears if the field was not found), then let them review and save.',
+      };
     },
-    summarize: (args) => `filled "${String(args.field || '').slice(0, 40)}"`,
+    summarize: (args) => `typed into "${String(args.field || '').slice(0, 40)}" (unconfirmed)`,
     uiAction: (args) => ({ type: 'fill_field', field: String(args.field || ''), value: String(args.value ?? '') }),
   },
 
   {
     definition: {
       name: 'navigate',
-      description: 'Move the user\'s portal to a section. Use when they ask to see or go somewhere. Sections: ' + NAV_SECTIONS.join(', ') + '.',
+      description: 'Move the user\'s portal to a section. Use when they ask to see or go somewhere. Sections: ' + NAV_SECTIONS.join(', ') + '. For a Settings sub-page (e.g. the ICP form), use section "account" plus a subsection: ' + ACCOUNT_SUBSECTIONS.join(', ') + '.',
       input_schema: {
         type: 'object',
-        properties: { section: { type: 'string', description: 'One of: ' + NAV_SECTIONS.join(', ') } },
+        properties: {
+          section: { type: 'string', description: 'One of: ' + NAV_SECTIONS.join(', ') },
+          subsection: { type: 'string', description: 'Only with section "account" — one of: ' + ACCOUNT_SUBSECTIONS.join(', ') },
+        },
         required: ['section'],
       },
     },
@@ -1286,9 +1350,13 @@ export const TOOLS = [
     async execute(args) {
       const section = String(args.section || '').toLowerCase();
       if (!NAV_SECTIONS.includes(section)) return { error: 'unknown section', valid: NAV_SECTIONS };
-      return { ok: true, navigated: section };
+      const subsection = args.subsection ? String(args.subsection).toLowerCase() : null;
+      if (subsection && (section !== 'account' || !ACCOUNT_SUBSECTIONS.includes(subsection))) {
+        return { error: 'unknown subsection (only valid with section "account")', valid: ACCOUNT_SUBSECTIONS };
+      }
+      return { ok: true, navigated: section, ...(subsection ? { subsection } : {}) };
     },
-    summarize: (args) => `→ ${args.section}`,
+    summarize: (args) => `→ ${args.section}${args.subsection ? ' · ' + args.subsection : ''}`,
     clientEffect: 'navigate',
   },
 ];

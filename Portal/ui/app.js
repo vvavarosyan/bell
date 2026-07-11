@@ -14,6 +14,7 @@ import { api } from './lib/api.js';
 import { Sidebar, NAV_IDS } from './components/Sidebar.js';
 import { currentRoute, navigateTo } from './lib/router.js';
 import { bellaFillField, stashPending, BELLA_ACTION_EVENT } from './lib/bellaBus.js';
+import { toast } from './lib/toast.js';
 import { ComingSoon } from './components/ComingSoon.js';
 import { CompaniesTab, ArchivedCompaniesTab } from './components/CompaniesTab.js';
 import { PeopleTab }    from './components/PeopleTab.js';
@@ -193,9 +194,26 @@ function App({ initialUser, initialTenant, mode }) {
           case 'show_people':
             if (currentRoute().tab !== 'people') { stashPending(a); navigateTo('people'); }
             break;
-          case 'fill_field':
-            // The target view may be mid-navigation — retry once after a beat.
-            if (!bellaFillField(a)) setTimeout(() => bellaFillField(a), 350);
+          case 'fill_field': {
+            // The target view may be mid-navigation or still fetching its data
+            // (the ICP form loads on first open) — retry on a backoff before
+            // giving up. A silent no-op here was the root of "Bella says filled
+            // but the field is empty" — a failed fill must be VISIBLE.
+            if (bellaFillField(a)) break;
+            const retries = [350, 1200, 2500];
+            const attempt = (i) => setTimeout(() => {
+              if (bellaFillField(a)) return;
+              if (i + 1 < retries.length) attempt(i + 1);
+              else toast(`Bella couldn't find the "${String(a.field || '').slice(0, 40)}" field on this screen — nothing was typed.`, 'error');
+            }, retries[i]);
+            attempt(0);
+            break;
+          }
+          case 'settings_section':
+            // Bella opens a specific Settings sub-page (e.g. Company & ICP).
+            // AccountTab listens live when mounted; otherwise stash + navigate
+            // so it applies the moment the tab mounts.
+            if (currentRoute().tab !== 'account') { stashPending(a); navigateTo('account'); }
             break;
           default: break;
         }

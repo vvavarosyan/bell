@@ -8,6 +8,25 @@
 
 export const BELLA_ACTION_EVENT = 'bella:ui-action';
 
+// Which window events a completed Bella tool should fire, so open tabs (CRM
+// list, credit pill, Settings forms) refresh live instead of serving stale
+// state. Shared by BellaChat AND BellaVoice — voice-driven writes must refresh
+// the UI too, or the stale Settings form silently reverts them on Save.
+export const TOOL_EFFECTS = {
+  reveal_companies: ['bdi:crm-changed', 'bdi:credits-changed'],
+  add_to_crm: ['bdi:crm-changed'], add_crm_note: ['bdi:crm-changed'],
+  update_crm_note: ['bdi:crm-changed'], delete_crm_note: ['bdi:crm-changed'],
+  add_crm_task: ['bdi:crm-changed'], update_crm_task: ['bdi:crm-changed'],
+  delete_crm_task: ['bdi:crm-changed'], set_crm_status: ['bdi:crm-changed'],
+  create_deal: ['bdi:crm-changed'], update_deal: ['bdi:crm-changed'],
+  delete_deal: ['bdi:crm-changed'], send_email: ['bdi:crm-changed'],
+  enroll_in_sequence: ['bdi:crm-changed'], send_whatsapp: ['bdi:crm-changed'],
+  update_icp: ['bdi:icp-changed'], update_account_prefs: ['bdi:account-changed'],
+};
+export const fireToolEffects = (toolName) => (TOOL_EFFECTS[toolName] || []).forEach((ev) => {
+  try { window.dispatchEvent(new CustomEvent(ev)); } catch { /* ignore */ }
+});
+
 // A show_* action fired just before we navigate to its tab is stashed here so
 // the tab can pick it up the moment it mounts (the live event fires before the
 // component exists). The tab reads + clears it on mount.
@@ -80,17 +99,39 @@ export function findFillTarget(hint) {
     let score = 0;
     if (h === key) score = 100;
     else if (h.includes(key) || key.includes(h)) score = 60;
-    else { const kw = key.split(' ').filter(Boolean); const hit = kw.filter((w) => w.length > 2 && h.includes(w)).length; if (hit) score = 20 * hit; }
+    else {
+      // Keyword tier: a MULTI-word hint must hit >= 2 words — one shared
+      // generic word ("name") must never claim the field (it typed company
+      // names into the email display-name box). Single-word hints keep 1.
+      const kw = key.split(' ').filter(Boolean);
+      const hit = kw.filter((w) => w.length > 2 && h.includes(w)).length;
+      if (hit >= Math.min(2, kw.length)) score = 20 * hit;
+    }
     if (score > bestScore) { bestScore = score; best = el; }
   }
   return bestScore >= 20 ? best : null;
 }
 
+const TRUTHY = new Set(['true', 'yes', 'on', '1', 'checked', 'enable', 'enabled']);
+
 /** Fill a form field Bella pointed at. Returns true if a field was found+set. */
 export function bellaFillField({ field, value } = {}) {
   const el = findFillTarget(field);
   if (!el) return false;
+  // Checkboxes/radios: React listens to clicks, not value writes. Click only
+  // when the current state differs from the requested one.
+  if (el.type === 'checkbox' || el.type === 'radio') {
+    const want = TRUTHY.has(String(value ?? '').toLowerCase().trim());
+    if (el.checked !== want) { try { el.click(); } catch { /* ignore */ } }
+    try { el.scrollIntoView({ block: 'center', behavior: 'smooth' }); } catch { /* ignore */ }
+    return el.checked === want;
+  }
   setNativeValue(el, value == null ? '' : String(value));
+  // Chip-style inputs commit their draft only on Enter (e.g. the ICP target
+  // lists) — they opt in via data-bella-commit="enter" and we press it.
+  if (el.getAttribute('data-bella-commit') === 'enter') {
+    try { el.dispatchEvent(new KeyboardEvent('keydown', { key: 'Enter', bubbles: true })); } catch { /* ignore */ }
+  }
   try { el.scrollIntoView({ block: 'center', behavior: 'smooth' }); el.focus({ preventScroll: true }); } catch { /* ignore */ }
   return true;
 }

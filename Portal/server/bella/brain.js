@@ -80,6 +80,7 @@ async function streamModelResponse({ apiKey, system, messages, signal, onToken }
   const blocks = [];
   let stopReason = null;
   let inputTokens = 0;
+  let cacheReadTokens = 0;
   let outputTokens = 0;
   let streamError = null;
 
@@ -87,6 +88,9 @@ async function streamModelResponse({ apiKey, system, messages, signal, onToken }
     if (event === 'message_start') {
       const u = data?.message?.usage || {};
       inputTokens = (u.input_tokens || 0) + (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0);
+      // Tracked separately so the log shows the cache-hit rate — a silent
+      // cache-buster (anything that varies the fixed prefix) must be visible.
+      cacheReadTokens = u.cache_read_input_tokens || 0;
     } else if (event === 'content_block_start') {
       const cb = data.content_block || {};
       blocks[data.index] = cb.type === 'tool_use'
@@ -132,7 +136,7 @@ async function streamModelResponse({ apiKey, system, messages, signal, onToken }
   const cleaned = blocks.filter((b) => b && !(b.type === 'text' && !String(b.text || '').trim()));
   return {
     blocks: cleaned.length ? cleaned : [{ type: 'text', text: '(no answer this round — please ask again)' }],
-    stopReason, inputTokens, outputTokens,
+    stopReason, inputTokens, cacheReadTokens, outputTokens,
   };
   } catch (err) {
     if (timedOut) throw new Error('the model did not answer within 90 seconds — please try again');
@@ -165,6 +169,30 @@ async function anthropicKey() {
 }
 
 const textOf = (blocks) => blocks.filter((b) => b.type === 'text').map((b) => b.text).join('').trim();
+
+// Move the message-level cache breakpoint to the last content block of the
+// last message before each model call. The fixed prefix (tool schemas + both
+// system blocks) already carries 3 of the 4 allowed breakpoints; this 4th one
+// makes the replayed HISTORY (up to 30 messages incl. 12KB tool results) a
+// cache read (~0.1× input price, much faster prefill) on every tool-loop round
+// and every follow-up turn, instead of re-processing it in full each time.
+// Exactly ONE holder at a time: older breakpoints are stripped first (they
+// also come back from the DB on replay — contentJson stores what we sent).
+// Round-to-round the breakpoint moves only a few blocks, well inside the
+// API's 20-block lookback, so the previous cache entry is always found.
+function setHistoryCacheBreakpoint(messages) {
+  let last = null;
+  for (const m of messages) {
+    if (!Array.isArray(m.content)) continue;
+    for (const b of m.content) {
+      if (b && typeof b === 'object') {
+        if (b.cache_control) delete b.cache_control;
+        last = b;
+      }
+    }
+  }
+  if (last) last.cache_control = { type: 'ephemeral' };
+}
 
 /**
  * Runs one full Bella turn.
@@ -211,10 +239,13 @@ export async function runBellaTurn({ ctx, conversationId, userText, clientContex
   }
   send('meta', { conversation_id: convId });
 
-  const prefs = await store.getBellaPrefs(userId);
+  // Prefs + history are independent reads — fetch them together.
+  const [prefs, messages] = await Promise.all([
+    store.getBellaPrefs(userId),
+    store.loadModelMessages(convId, HISTORY_MAX),
+  ]);
   const approvalMode = prefs.approval_mode === 'auto' ? 'auto' : 'ask';
   const system = buildSystem(ctx.user, ctx.tenant, prefs);
-  const messages = await store.loadModelMessages(convId, HISTORY_MAX);
 
   // Approval continuations: after the Approve/Deny buttons the client sends
   // "[[action:ID:approved|denied]]" — swap it for a framing note the model
@@ -247,12 +278,13 @@ export async function runBellaTurn({ ctx, conversationId, userText, clientContex
     role: 'user', content: hidden ? '' : userText, contentJson: [{ type: 'text', text: fullUserText }],
   });
 
-  let totalIn = 0, totalOut = 0;
+  let totalIn = 0, totalOut = 0, totalCacheRead = 0;
   try {
     for (let round = 0; round < MAX_ROUNDS; round++) {
-      const { blocks, stopReason, inputTokens, outputTokens } =
+      setHistoryCacheBreakpoint(messages);
+      const { blocks, stopReason, inputTokens, cacheReadTokens, outputTokens } =
         await streamModelResponse({ apiKey, system, messages, signal, onToken: (t) => send('token', { t }) });
-      totalIn += inputTokens; totalOut += outputTokens;
+      totalIn += inputTokens; totalOut += outputTokens; totalCacheRead += cacheReadTokens;
 
       const toolUses = blocks.filter((b) => b.type === 'tool_use');
       if (stopReason !== 'tool_use' || toolUses.length === 0) {
@@ -263,10 +295,19 @@ export async function runBellaTurn({ ctx, conversationId, userText, clientContex
         break;
       }
 
-      // Execute this round's tools under the user's auth context.
+      // Execute this round's tools under the user's auth context. They are
+      // independent in-process dispatches, so run them CONCURRENTLY — a round
+      // with 3 tool calls costs the slowest one, not the sum (each already has
+      // its own 12s timeout). `slots`/`metaSlots` are filled by index so the
+      // tool_result order still mirrors the model's tool_use order exactly,
+      // as the API requires. Approval proposals stay sequential (rare, and
+      // each needs its own DB row + card in a stable order).
       const meta = { tools: [] };
-      const results = [];
-      for (const tu of toolUses) {
+      const slots = new Array(toolUses.length);
+      const metaSlots = new Array(toolUses.length);
+      const runners = [];
+      for (let i = 0; i < toolUses.length; i++) {
+        const tu = toolUses[i];
         const tool = getTool(tu.name);
 
         // Approval gate (Val's D2): 'always' tools gate in every mode;
@@ -279,38 +320,43 @@ export async function runBellaTurn({ ctx, conversationId, userText, clientContex
           send('approval', { action_id: actionId, tool: tu.name, summary });
           meta.approvals = meta.approvals || [];
           meta.approvals.push({ action_id: actionId, tool: tu.name, summary });
-          meta.tools.push({ name: tu.name, summary: 'awaiting your approval' });
-          results.push({
+          metaSlots[i] = { name: tu.name, summary: 'awaiting your approval' };
+          slots[i] = {
             type: 'tool_result', tool_use_id: tu.id,
             content: JSON.stringify({ status: 'approval_required', action_id: actionId, note: 'Proposed to the user — they must click Approve in the chat. Briefly state what you proposed and wait. Do NOT call this tool again for the same thing.' }),
-          });
+          };
           continue;
         }
 
         // Client-side effects (navigate) go straight to the browser.
         if (tool?.clientEffect === 'navigate') {
-          send('navigate', { section: tu.input?.section });
+          send('navigate', { section: tu.input?.section, subsection: tu.input?.subsection || null });
           meta.navigate = tu.input?.section;
         } else {
           send('tool', { name: tu.name, status: 'running' });
         }
 
-        const { result, summary, isError } = await executeTool(tu.name, tu.input, { ...ctx, conversationId: convId });
-        results.push({ type: 'tool_result', tool_use_id: tu.id, content: JSON.stringify(result).slice(0, 12_000), ...(isError ? { is_error: true } : {}) });
-        if (tool?.clientEffect !== 'navigate') {
-          send('tool', { name: tu.name, status: isError ? 'error' : 'done', summary });
-        }
-        // Rich UI actions (open a record / filter a grid / fill a field) so Bella
-        // can act on the app, not just describe it. Computed from input + result
-        // once the tool succeeds; the client applies it via ui/lib/bellaBus.js.
-        if (!isError && typeof tool?.uiAction === 'function') {
-          let act = null;
-          try { act = tool.uiAction(tu.input || {}, result); } catch { act = null; }
-          if (act) { send('ui_action', act); meta.ui_action = act; }
-        }
-        meta.tools.push({ name: tu.name, summary });
-        await store.logAction(tenantId, userId, convId, tu.name, tu.input, isError ? 'error' : 'done', summary);
+        runners.push((async () => {
+          const { result, summary, isError } = await executeTool(tu.name, tu.input, { ...ctx, conversationId: convId });
+          slots[i] = { type: 'tool_result', tool_use_id: tu.id, content: JSON.stringify(result).slice(0, 12_000), ...(isError ? { is_error: true } : {}) };
+          if (tool?.clientEffect !== 'navigate') {
+            send('tool', { name: tu.name, status: isError ? 'error' : 'done', summary });
+          }
+          // Rich UI actions (open a record / filter a grid / fill a field) so Bella
+          // can act on the app, not just describe it. Computed from input + result
+          // once the tool succeeds; the client applies it via ui/lib/bellaBus.js.
+          if (!isError && typeof tool?.uiAction === 'function') {
+            let act = null;
+            try { act = tool.uiAction(tu.input || {}, result); } catch { act = null; }
+            if (act) { send('ui_action', act); meta.ui_action = act; }
+          }
+          metaSlots[i] = { name: tu.name, summary };
+          await store.logAction(tenantId, userId, convId, tu.name, tu.input, isError ? 'error' : 'done', summary);
+        })());
       }
+      await Promise.all(runners);
+      meta.tools = metaSlots.filter(Boolean);
+      const results = slots.filter(Boolean);
 
       await store.addMessage(convId, tenantId, userId, {
         role: 'assistant', content: textOf(blocks), contentJson: blocks, meta,
@@ -325,6 +371,7 @@ export async function runBellaTurn({ ctx, conversationId, userText, clientContex
     }
 
     send('done', { conversation_id: convId, usage: { input_tokens: totalIn, output_tokens: totalOut }, turns_today: budget.turns });
+    console.log(`[bella] turn ok · in=${totalIn} (cache_read=${totalCacheRead}, ${totalIn ? Math.round((totalCacheRead / totalIn) * 100) : 0}%) · out=${totalOut}`);
   } catch (err) {
     if (err?.name === 'AbortError' && signal?.aborted) return;   // client left — nothing to report
     console.error('[bella] turn failed:', err.message);
