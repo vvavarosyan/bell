@@ -9,7 +9,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { html } from '../lib/html.js';
 import { api } from '../lib/api.js';
 import { currentRoute, navigateTo } from '../lib/router.js';
-import { emitBellaAction } from '../lib/bellaBus.js';
+import { emitBellaAction, stashPending, fireToolEffects } from '../lib/bellaBus.js';
 
 const SUGGESTIONS = [
   'How many construction companies are in Qatar?',
@@ -61,21 +61,10 @@ const TOOL_LABELS = {
   navigate: 'Navigating',
 };
 
-// Which window events a completed Bella action should fire, so open tabs
-// (CRM list, credit pill) refresh live instead of waiting for a reload.
-const TOOL_EFFECTS = {
-  reveal_companies: ['bdi:crm-changed', 'bdi:credits-changed'],
-  add_to_crm: ['bdi:crm-changed'], add_crm_note: ['bdi:crm-changed'],
-  update_crm_note: ['bdi:crm-changed'], delete_crm_note: ['bdi:crm-changed'],
-  add_crm_task: ['bdi:crm-changed'], update_crm_task: ['bdi:crm-changed'],
-  delete_crm_task: ['bdi:crm-changed'], set_crm_status: ['bdi:crm-changed'],
-  create_deal: ['bdi:crm-changed'], update_deal: ['bdi:crm-changed'],
-  delete_deal: ['bdi:crm-changed'], send_email: ['bdi:crm-changed'],
-  enroll_in_sequence: ['bdi:crm-changed'], send_whatsapp: ['bdi:crm-changed'],
-};
-const fireEffects = (toolName) => (TOOL_EFFECTS[toolName] || []).forEach((ev) => {
-  try { window.dispatchEvent(new CustomEvent(ev)); } catch { /* ignore */ }
-});
+// Tool → window-event effects live in bellaBus.js (shared with BellaVoice —
+// voice-driven writes must refresh open tabs too, or the stale Settings form
+// silently reverts them on Save).
+const fireEffects = fireToolEffects;
 
 // "14:32" today, "Jul 3 · 14:32" otherwise.
 const fmtTime = (iso) => {
@@ -264,15 +253,27 @@ export function BellaChat({ onClose }) {
             });
           },
           onNavigate: (n) => {
-            if (n?.section) { try { navigateTo(n.section); } catch { /* ignore */ } }
-            patchLast((m) => ({ ...m, tools: [...(m.tools || []), { name: 'navigate', status: 'done', summary: '→ ' + (n?.section || '') }] }));
+            if (n?.section) {
+              try {
+                // Sub-section (e.g. Settings → Company & ICP): stash before
+                // navigating so AccountTab applies it on mount; if it's already
+                // mounted its live listener catches the emitted event instead.
+                if (n.subsection) {
+                  const act = { type: 'settings_section', id: n.subsection };
+                  if (currentRoute().tab === n.section) emitBellaAction(act);
+                  else stashPending(act);
+                }
+                navigateTo(n.section);
+              } catch { /* ignore */ }
+            }
+            patchLast((m) => ({ ...m, tools: [...(m.tools || []), { name: 'navigate', status: 'done', summary: '→ ' + (n?.section || '') + (n?.subsection ? ' · ' + n.subsection : '') }] }));
           },
           onUiAction: (a) => {
             try { emitBellaAction(a); } catch { /* ignore */ }
             const label = a?.type === 'open_record' ? ('→ ' + (a.tab || 'record') + ' #' + a.id)
               : a?.type === 'show_companies' ? 'showing companies'
               : a?.type === 'show_people' ? 'showing people'
-              : a?.type === 'fill_field' ? ('filled “' + String(a.field || '').slice(0, 30) + '”')
+              : a?.type === 'fill_field' ? ('typed into “' + String(a.field || '').slice(0, 30) + '” — check the field')
               : (a?.type || 'ui');
             patchLast((m) => ({ ...m, tools: [...(m.tools || []), { name: 'ui', status: 'done', summary: label }] }));
           },

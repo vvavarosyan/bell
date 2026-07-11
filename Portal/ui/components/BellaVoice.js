@@ -16,7 +16,7 @@ import { html } from '../lib/html.js';
 import { api } from '../lib/api.js';
 import { toast } from '../lib/toast.js';
 import { currentRoute, navigateTo } from '../lib/router.js';
-import { emitBellaAction } from '../lib/bellaBus.js';
+import { emitBellaAction, stashPending, fireToolEffects } from '../lib/bellaBus.js';
 
 const SILENCE_MS = 900;      // pause that ends an utterance
 const MIN_SPEECH_MS = 350;   // shorter blips are ignored (coughs, clicks)
@@ -145,7 +145,18 @@ export function BellaVoice({ onClose, onOpenChat }) {
         {
           onMeta: (m) => { if (m.conversation_id) convIdRef.current = m.conversation_id; },
           onToken: (d) => { finalText += d.t || ''; },
-          onNavigate: (n) => { if (n?.section) { try { navigateTo(n.section); } catch { /* ignore */ } } },
+          onTool: (t) => { if (t.status === 'done') fireToolEffects(t.name); },   // voice writes refresh open tabs too
+          onNavigate: (n) => {
+            if (n?.section) {
+              try {
+                if (n.subsection) {
+                  const act = { type: 'settings_section', id: n.subsection };
+                  if (currentRoute().tab === n.section) emitBellaAction(act); else stashPending(act);
+                }
+                navigateTo(n.section);
+              } catch { /* ignore */ }
+            }
+          },
           onUiAction: (a) => { try { emitBellaAction(a); } catch { /* ignore */ } },
           onApproval: () => setPendingApprovals((n) => n + 1),
           onError: (e) => { errored = e?.message || 'Something went wrong.'; },

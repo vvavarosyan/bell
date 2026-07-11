@@ -151,7 +151,7 @@ Portal/
     scripts/        one‑shot + diagnostic scripts run by .command files
     tests/          node test files (run with plain `node`)
   migrations/       NNN_name.sql, applied in order at Portal boot. Latest = 078.
-  ui/components/    Preact + htm. No build step.
+  ui/components/    React 18 (esm.sh import map) + htm tagged templates. No build step.
 Data/Companies/1. Data Gathering/Directories/   MOCI, QFC, QFZ, QSTP scrapers (Python)
 *.command                                        Val's entry points
 ```
@@ -163,7 +163,7 @@ Data/Companies/1. Data Gathering/Directories/   MOCI, QFC, QFZ, QSTP scrapers (P
 ## 5. Current state (2026‑07‑10)
 
 ### Live
-25,199 tenders (Monaqasat + Ashghal + QatarEnergy) · tender→industry matching + opportunity signals · multi‑industry ICP scoring · Engine 6 tech‑stack fingerprinting (running, ~9.6k companies left) · Bella G1–G4.2 (chat + voice + 41 tools) · news publishing + SEO · Import Phase 2 · credit/reveal system · 0 Risk Phase 1.
+25,199 tenders (Monaqasat + Ashghal + QatarEnergy) · tender→industry matching + opportunity signals · QSE disclosures (420 live, 'disclosure' signals) · multi‑industry ICP scoring · Engine 6 tech‑stack fingerprinting · Bella G1–G4.2 (chat + voice + 50 tools) · news publishing + SEO · Import Phase 2 · credit/reveal system · 0 Risk Phase 1.
 
 ~191K companies, ~76K active, ~16K with websites.
 
@@ -186,7 +186,7 @@ Also open: **271 rows "awaiting host heal"** — needs `Backfill Full Tender Arc
 
 1. **Tenders → buyer‑intent signals** — ✅ done. Remaining: `#73` auto‑scan scheduler (LaunchAgent, daily, all sources), parked until Val has watched signals for a few days.
 2. **Data maximization** ← *current phase.* Engine 6 done. **A3 proof‑of‑search ledger + C1 QSE disclosures: BUILT 2026‑07‑10** (in the tree, undeployed — see §5). Remaining in phase: C2 utilization (derive statistics/signals from the od_* datasets Bell already holds), C4 Kahramaa/MoT tenders (fold into #73). **MOCI Stage‑2 is PARKED** at Val's request (the diagnostic run was painful); the design lives in `Bell — MOCI Stage-2 Design (Phase 2 A1).md`.
-3. **Bella as the brain of the business** — her fill‑in must actually fill fields (it reports success and doesn't); total awareness of signals/news/tenders/deep‑data; near‑instant responses **via architecture only** (parallel tools, prompt caching, fewer round trips — the model is fixed); multi‑action autonomy with one up‑front approval bundle.
+3. **Bella as the brain of the business** ← *current phase, batch 1 BUILT + live‑verified 2026‑07‑11 (on develop, not on prod):* fill‑in fixed end‑to‑end (honest tool results — fill_field never claims success; failed fills show a red toast; data‑bella‑fill on Settings/ICP fields; Enter‑commit for chip fields; checkbox support; navigate now reaches Settings sub‑pages e.g. the ICP form; update_icp/update_account_prefs refresh the on‑screen form — the silent Save‑revert trap is gone) · speed (4th prompt‑cache breakpoint on conversation history — measured 94% cache read on turn 2; tools in a round run concurrently; cache‑hit % logged per turn) · awareness (get_tenders: q/industry/source/buyer/ICP filters + deadlines; NEW get_disclosures for QSE events; 50 tools total). REMAINING in phase: voice pipeline streaming (sentence‑chunked TTS — buffered today), multi‑action autonomy with one up‑front approval bundle, proactive signal awareness (nothing injects fresh signals into a turn yet), show_tenders/show_signals UI‑driving tools.
 4. **Signup & onboarding** — more signup fields (QID is PDPPL‑sensitive, confirm with Val), guided visual setup, % completion, "Bella does it for me".
 5. **Team** — Clerk Organizations. Backend foundation exists but is dormant (migration 027). Unbuilt.
 6. **Bell as a business** — competition watch, Qatar regulatory knowledge base, self‑economics cost dashboard, moat strategy.

@@ -5,6 +5,7 @@ import { useState, useEffect, useRef } from 'react';
 import { html } from '../lib/html.js';
 import { api } from '../lib/api.js';
 import { toast } from '../lib/toast.js';
+import { BELLA_ACTION_EVENT, takePending } from '../lib/bellaBus.js';
 
 const SECTIONS = [
   { id: 'profile',       label: 'Profile' },
@@ -37,6 +38,32 @@ export function AccountTab() {
   useEffect(() => { (async () => {
     try { setData(await api.getAccount()); } catch { setData({ profile: {}, notifications: {}, preferences: {} }); }
   })(); }, []);
+
+  // Bella integration (all hooks above the early return — Rules of Hooks):
+  //  • 'settings_section' ui-action switches the visible sub-page (live when
+  //    mounted; stashed by app.js + picked up here on mount otherwise).
+  //  • When Bella WRITES the ICP / account prefs through her tools, the cached
+  //    form state here went stale — and clicking Save then silently REVERTED
+  //    her write. Refetch on her change events instead.
+  useEffect(() => {
+    const applySection = (a) => {
+      if (a?.type === 'settings_section' && SECTIONS.some((s) => s.id === a.id)) setSection(a.id);
+    };
+    applySection(takePending('settings_section'));
+    const onAction = (e) => applySection(e.detail);
+    const onIcpChanged = () => setIcp(null);   // loader effect refetches (guarded on icp === null)
+    const onAccountChanged = async () => {
+      try { setData(await api.getAccount()); } catch { /* keep current */ }
+    };
+    window.addEventListener(BELLA_ACTION_EVENT, onAction);
+    window.addEventListener('bdi:icp-changed', onIcpChanged);
+    window.addEventListener('bdi:account-changed', onAccountChanged);
+    return () => {
+      window.removeEventListener(BELLA_ACTION_EVENT, onAction);
+      window.removeEventListener('bdi:icp-changed', onIcpChanged);
+      window.removeEventListener('bdi:account-changed', onAccountChanged);
+    };
+  }, []);
 
   // Sending-identity hooks MUST be declared above the early return (Rules of Hooks).
   const [identities, setIdentities] = useState(null);
@@ -142,6 +169,7 @@ export function AccountTab() {
           ${(opts || []).filter(o => !icpArr(k).some(x => x.toLowerCase() === o.toLowerCase())).map(o => html`<button key=${o} type="button" onClick=${() => addChip(k, o)} style=${CHIP_SUGGEST}>+ ${o}</button>`)}
         </div>` : null}
       <input class="sys-input" placeholder=${placeholder || 'Type your own and press Enter…'} value=${chipDraft[k] || ''}
+        data-bella-fill=${k.replace(/_/g, ' ')} data-bella-commit="enter"
         onInput=${e => setChipDraft(d => ({ ...d, [k]: e.target.value }))}
         onKeyDown=${e => { if (e.key === 'Enter') { e.preventDefault(); commitDraft(k); } }} />
     </div>`;
@@ -243,7 +271,7 @@ export function AccountTab() {
   const field = (k, lbl, opts = {}) => html`
     <div class=${'sys-field' + (opts.full ? ' full' : '')}>
       <label>${lbl}</label>
-      <input class="sys-input" type=${opts.type || 'text'} placeholder=${opts.ph || ''}
+      <input class="sys-input" type=${opts.type || 'text'} placeholder=${opts.ph || ''} data-bella-fill=${lbl}
         value=${p[k] || ''} onInput=${e => setProfile(k, e.target.value)} />
     </div>`;
 
@@ -265,7 +293,7 @@ export function AccountTab() {
   const waField = (k, lbl, ph, opts = {}) => html`
     <div class="sys-field ${opts.full ? 'full' : ''}">
       <label>${lbl}</label>
-      <input class="sys-input" type=${opts.type || 'text'} placeholder=${ph || ''} value=${waForm[k] || ''}
+      <input class="sys-input" type=${opts.type || 'text'} placeholder=${ph || ''} data-bella-fill=${lbl} value=${waForm[k] || ''}
         onInput=${e => setWaForm(f => ({ ...f, [k]: e.target.value }))} />
     </div>`;
 
@@ -294,7 +322,7 @@ export function AccountTab() {
           ${field('booking_link', 'Booking link', { ph: 'Calendly / Cal.com' })}
           <div class="sys-field full">
             <label>Short bio</label>
-            <textarea class="sys-textarea" value=${p.bio || ''} onInput=${e => setProfile('bio', e.target.value)}></textarea>
+            <textarea class="sys-textarea" data-bella-fill="Short bio" value=${p.bio || ''} onInput=${e => setProfile('bio', e.target.value)}></textarea>
           </div>
         </div>
         <div class="sys-actions"><button class="sys-btn" disabled=${saving} onClick=${() => save({ profile: data.profile }, 'Profile saved')}>${saving ? 'Saving…' : 'Save profile'}</button></div>
@@ -343,10 +371,10 @@ export function AccountTab() {
         ${icp === null ? html`<div class="empty">Loading…</div>` : html`
           <div style=${ICP_GROUP}>About your company</div>
           <div class="sys-grid">
-            <div class="sys-field full"><label>Company name</label><input class="sys-input" value=${icp.company_name || ''} onInput=${e => setIcpField('company_name', e.target.value)} /></div>
-            <div class="sys-field full"><label>What your company does</label><textarea class="sys-textarea" value=${icp.company_about || ''} onInput=${e => setIcpField('company_about', e.target.value)}></textarea></div>
-            <div class="sys-field full"><label>Products & services</label><textarea class="sys-textarea" value=${icp.products_services || ''} onInput=${e => setIcpField('products_services', e.target.value)}></textarea></div>
-            <div class="sys-field full"><label>Current customers</label><textarea class="sys-textarea" value=${icp.current_customers || ''} onInput=${e => setIcpField('current_customers', e.target.value)}></textarea></div>
+            <div class="sys-field full"><label>Company name</label><input class="sys-input" data-bella-fill="Company name" value=${icp.company_name || ''} onInput=${e => setIcpField('company_name', e.target.value)} /></div>
+            <div class="sys-field full"><label>What your company does</label><textarea class="sys-textarea" data-bella-fill="What your company does" value=${icp.company_about || ''} onInput=${e => setIcpField('company_about', e.target.value)}></textarea></div>
+            <div class="sys-field full"><label>Products & services</label><textarea class="sys-textarea" data-bella-fill="Products and services" value=${icp.products_services || ''} onInput=${e => setIcpField('products_services', e.target.value)}></textarea></div>
+            <div class="sys-field full"><label>Current customers</label><textarea class="sys-textarea" data-bella-fill="Current customers" value=${icp.current_customers || ''} onInput=${e => setIcpField('current_customers', e.target.value)}></textarea></div>
           </div>
           <div class="sys-field full" style=${{ marginTop: '12px' }}>
             <label>Pricing — one row per product / service</label>
@@ -371,7 +399,7 @@ export function AccountTab() {
               </select>
             </div>
             <div class="sys-field full"><label>Buying signals to watch for</label>${chipField('target_keywords', ICP_SIGNALS, 'Add a buying signal…')}</div>
-            <div class="sys-field full"><label>Notes</label><textarea class="sys-textarea" value=${icp.icp_notes || ''} onInput=${e => setIcpField('icp_notes', e.target.value)}></textarea></div>
+            <div class="sys-field full"><label>Notes</label><textarea class="sys-textarea" data-bella-fill="ICP notes" value=${icp.icp_notes || ''} onInput=${e => setIcpField('icp_notes', e.target.value)}></textarea></div>
           </div>
           <div class="sys-hint" style=${{ marginTop: '8px' }}>Pick from the suggestions or type your own and press Enter. The website filter also lives in Companies → Filters.</div>
           <div class="sys-actions"><button class="sys-btn" disabled=${icpSaving} onClick=${submitIcp}>${icpSaving ? 'Saving…' : 'Save company profile'}</button></div>
@@ -383,10 +411,10 @@ export function AccountTab() {
         <h2>Email</h2>
         <div class="sys-hint">Your sending identity and signature for emails sent from the CRM.</div>
         <div class="sys-field"><label>Display name</label>
-          <input class="sys-input" placeholder="Name shown on your emails" value=${p.display_name || ''} onInput=${e => setProfile('display_name', e.target.value)} /></div>
+          <input class="sys-input" placeholder="Name shown on your emails" data-bella-fill="Display name" value=${p.display_name || ''} onInput=${e => setProfile('display_name', e.target.value)} /></div>
         <div class="sys-field full">
           <label>Email signature</label>
-          <textarea class="sys-textarea" style=${{ minHeight: '130px' }} value=${p.email_signature || ''} onInput=${e => setProfile('email_signature', e.target.value)}></textarea>
+          <textarea class="sys-textarea" style=${{ minHeight: '130px' }} data-bella-fill="Email signature" value=${p.email_signature || ''} onInput=${e => setProfile('email_signature', e.target.value)}></textarea>
         </div>
         <label class="sys-toggle" style=${{ borderTop: '1px solid var(--border)', borderBottom: 0 }}>
           <input type="checkbox" style=${cbStyle} checked=${data.preferences?.append_signature !== false} onChange=${e => setPref('append_signature', e.target.checked)} />
