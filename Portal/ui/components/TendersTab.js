@@ -38,6 +38,10 @@ const fieldKey = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, ' '
 const SHOWN_FIELDS = new Set([
   'tender number', 'type', 'subject', 'ministry', 'tender bond', 'documents value qr',
   'closing date', 'brief description', 'contract duration',
+  // QatarEnergy detail rows that duplicate lines the drawer already shows
+  // (ref, closing date, winner, price, title, the description block):
+  'limited', 'general', 'tender id', 'po number', 'bid closing date',
+  'awarded to', 'price', 'tender description', 'scope of work description',
 ].map(fieldKey));
 
 function contractDuration(raw) {

@@ -9,6 +9,7 @@
 
 import { runTenderScan } from '../tenders/scrape.js';
 import { pushTendersToProd } from '../tenders/push_prod.js';
+import { enrichQatarEnergyDetails, pendingQatarEnergyDetailCount } from '../tenders/enrich_qatarenergy.js';
 
 (async () => {
   console.log('Bell — QatarEnergy Tender Scan');
@@ -31,6 +32,17 @@ import { pushTendersToProd } from '../tenders/push_prod.js';
       console.log('  ' + s.source_ref + '  ' + String(s.title || '').slice(0, 66));
       console.log('  Buyer: ' + (s.buyer || '—') + '  ·  Status: ' + s.status + '  ·  Section: ' + (raw.section || '—') +
         (s.award_company_name ? ('  ·  Winner: ' + s.award_company_name) : ''));
+    }
+
+    // Per-tender detail pages (scope of work, issue period, bond validity —
+    // everything the source publishes, captured verbatim). Plain fetch,
+    // resumable; the first run covers the whole archive (~10 min), after that
+    // only new tenders. Safe to close anytime — it continues next run.
+    const pending = await pendingQatarEnergyDetailCount();
+    if (pending > 0) {
+      console.log('\n' + pending.toLocaleString() + ' tender detail page(s) to fetch (full scope of work etc.)…');
+      const d = await enrichQatarEnergyDetails({ onProgress: (m) => console.log(m) });
+      console.log('  ' + d.enriched.toLocaleString() + ' detailed · ' + d.failed + ' will retry next run');
     }
 
     if ((r.scraped || 0) === 0) {
