@@ -10,6 +10,7 @@
 import { query } from '../db.js';
 import { tenderIndustries } from './match.js';
 import { packRaw } from './raw.js';
+import { mergeCrossPostedTenders } from './merge_crossposted.js';
 
 const SOURCES = new Set(['monaqasat', 'ashghal', 'qatarenergy', 'kahramaa', 'qse', 'manual']);
 const STATUSES = new Set(['open', 'awarded', 'cancelled', 'closed', 'archived', 'prospected']);
@@ -85,6 +86,9 @@ export async function ingestTenders(rows = []) {
     }
   }
   const linked = await linkTenderCompanies();
+  // Cross-posted Kahramaa↔Monaqasat tenders collapse into ONE row naming both
+  // sources (Val 2026-07-12) — runs after every batch so re-scans re-merge.
+  await mergeCrossPostedTenders().catch((err) => console.error('[tenders] merge:', err.message));
   return { inserted, updated, linked };
 }
 

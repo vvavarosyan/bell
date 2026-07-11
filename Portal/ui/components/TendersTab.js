@@ -281,6 +281,13 @@ export function TendersTab({ embedded = false } = {}) {
             return html`
               <div style=${{ fontSize: '15px', fontWeight: 700, color: 'var(--text)', lineHeight: 1.35, marginBottom: '12px' }}>${detail.title}</div>
               ${detail.source_ref ? html`<div class="muted small" style=${{ marginBottom: '12px' }}>Reference #${detail.source_ref}${raw.entity_ref ? ' · buyer ref ' + raw.entity_ref : ''}</div>` : null}
+              ${raw.kahramaa ? html`
+                <div style=${{ fontSize: '12px', border: '1px solid var(--border)', borderRadius: '8px', padding: '8px 10px', margin: '0 0 14px', background: 'var(--bg-elev, rgba(255,255,255,0.02))' }}>
+                  <b>Published on both portals</b> — Monaqasat and Kahramaa (ref ${raw.kahramaa.source_ref})
+                  ${raw.kahramaa.department ? html`<div class="muted small">Kahramaa department: ${raw.kahramaa.department}</div>` : null}
+                  ${raw.kahramaa.fees ? html`<div class="muted small">Kahramaa document fees: ${raw.kahramaa.fees}</div>` : null}
+                  ${raw.kahramaa.bid_bond ? html`<div class="muted small">Kahramaa bid bond: ${raw.kahramaa.bid_bond}</div>` : null}
+                </div>` : null}
               ${raw.description ? html`<div style=${{ fontSize: '12.5px', lineHeight: 1.55, color: 'var(--text)', margin: '0 0 14px', paddingBottom: '12px', borderBottom: '1px solid var(--border)' }}>${raw.description}</div>` : null}
               ${line('Buyer', detail.buyer)}
               ${line('Type', raw.type)}
