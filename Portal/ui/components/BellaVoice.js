@@ -17,6 +17,7 @@ import { api } from '../lib/api.js';
 import { toast } from '../lib/toast.js';
 import { currentRoute, navigateTo } from '../lib/router.js';
 import { emitBellaAction, stashPending, fireToolEffects } from '../lib/bellaBus.js';
+import { fireApprovalsChanged } from './BellaApprovals.js';
 
 const SILENCE_MS = 900;      // pause that ends an utterance
 const MIN_SPEECH_MS = 350;   // shorter blips are ignored (coughs, clicks)
@@ -158,7 +159,7 @@ export function BellaVoice({ onClose, onOpenChat }) {
             }
           },
           onUiAction: (a) => { try { emitBellaAction(a); } catch { /* ignore */ } },
-          onApproval: () => setPendingApprovals((n) => n + 1),
+          onApproval: () => { fireApprovalsChanged(); setPendingApprovals((n) => n + 1); },   // durable inbox + dock badge
           onError: (e) => { errored = e?.message || 'Something went wrong.'; },
         }
       );

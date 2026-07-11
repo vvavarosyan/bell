@@ -111,8 +111,10 @@ When you build something he must run, you build the `.command` for it.
 - **Never create a branch.** No `feature/…`, no `fix/…`, no `claude/…`, no date‑stamped branches, no worktree branches. Commit straight to `develop`. Val has said branch sprawl from previous Claude Code sessions was a real problem; two clean branches is the permanent state.
 - **Never `git checkout -b`, `git branch`, `git switch -c`, or `git worktree add`.** If you think a branch is warranted, stop and ask Val first.
 - **Never delete, rename, force‑push, rebase, or reset** any branch. No `git push --force`, no history rewriting.
-- Never push `main` without Val's explicit say‑so in the current session.
-- **Production ships through a pull request, and only Val merges it.** `Push Changes.command` pushes `develop` (→ staging; it refuses to run from any other branch). `Open Production Release.command` opens a PR `develop` → `main` in Val's browser; **he** clicks Merge, and Railway deploys production. Never merge that PR, never merge `develop` into `main` locally, never push `main` directly. Stay on `develop`; `git rev-parse --abbrev-ref HEAD` must always print `develop`.
+- **Deploys (Val's standing rule, 2026‑07‑11): Claude deploys BOTH environments itself — always together.** Push `develop` (→ staging), then fast‑forward production: `git fetch origin main && git merge origin/main --no-edit && git push origin develop && git push origin develop:main`. Never force‑push; if `develop:main` isn't a fast‑forward after merging origin/main in, STOP and investigate. Only deploy work that is tested + verified (the 100% bar is unchanged — this changes WHO clicks, not what qualifies).
+  ⚠️ **Reversion condition (Val's words):** once Bell is complete and has PAYING USERS, production goes back to manual — Val tests on staging, then merges to prod himself so users are never affected. When that day comes, restore the old rule here.
+  `Push Changes.command` / `Open Production Release.command` remain Val's click‑path for when he deploys himself.
+- Stay on `develop`; `git rev-parse --abbrev-ref HEAD` must always print `develop`.
 - Never commit secrets. `.env`, keychain values, `BDI_SYNC_TOKEN`, API keys — none of it goes in a commit.
 - If you find a stray branch, **report it to Val, don't delete it yourself.**
 

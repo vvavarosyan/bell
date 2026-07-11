@@ -9,11 +9,13 @@ import { html } from '../lib/html.js';
 import { toast } from '../lib/toast.js';
 import { api } from '../lib/api.js';
 import { BellaChat } from './BellaChat.js';
+import { usePendingApprovalCount } from './BellaApprovals.js';
 import { BellaVoice } from './BellaVoice.js';
 
 export function BellaDock() {
   const [open, setOpen] = useState(false);
   const [voice, setVoice] = useState(false);
+  const pendingApprovals = usePendingApprovalCount();   // badge: approvals waiting anywhere
 
   const toggleVoice = async () => {
     if (voice) { setVoice(false); return; }
@@ -29,8 +31,9 @@ export function BellaDock() {
 
   return html`
     <div class="bella-dock">
-      <button class=${'bella-orb' + (open || voice ? ' open' : '')} title="Bella — your Bell assistant" onClick=${() => setOpen((o) => !o)}>
+      <button class=${'bella-orb' + (open || voice ? ' open' : '')} title=${pendingApprovals ? pendingApprovals + ' Bella action(s) waiting for your approval — click to review' : 'Bella — your Bell assistant'} onClick=${() => setOpen((o) => !o)} style=${{ position: 'relative' }}>
         <span class="bella-orb-core"></span>
+        ${pendingApprovals ? html`<span style=${{ position: 'absolute', top: '-4px', right: '-6px', minWidth: '15px', height: '15px', borderRadius: '999px', background: 'var(--amber, #f59e0b)', color: '#111', fontSize: '10px', fontWeight: 800, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 3px' }}>${pendingApprovals}</span>` : null}
       </button>
       <button class=${'bella-dock-btn' + (open ? ' active' : '')} onClick=${() => setOpen((o) => !o)}>
         ${open ? 'Close' : 'Chat'}

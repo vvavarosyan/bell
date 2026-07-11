@@ -10,6 +10,7 @@ import { html } from '../lib/html.js';
 import { api } from '../lib/api.js';
 import { currentRoute, navigateTo } from '../lib/router.js';
 import { emitBellaAction, stashPending, fireToolEffects } from '../lib/bellaBus.js';
+import { BellaApprovals, fireApprovalsChanged, APPROVALS_EVENT } from './BellaApprovals.js';
 
 const SUGGESTIONS = [
   'How many construction companies are in Qatar?',
@@ -110,6 +111,18 @@ export function BellaChat({ onClose }) {
     try { const r = await api.bellaConversations(); setConvs(r.conversations || []); return r.conversations || []; } catch { return []; }
   }, []);
 
+  // message meta freezes approvals at propose time — reconcile against the
+  // REAL bella_actions statuses or decided cards resurrect as "pending".
+  const actionStatusRef = useRef({});
+  const refreshActionStatuses = useCallback(async () => {
+    try {
+      const r = await api.bellaActions(50);
+      const map = {};
+      for (const a of (r.actions || [])) map[a.id] = APPROVAL_STATE[a.status] || a.status;
+      actionStatusRef.current = map;
+    } catch { /* keep current */ }
+  }, []);
+
   const mapServerMessages = (rows) => (rows || []).map((m) => {
     const parsed = m.role === 'assistant' ? splitChoices(m.content || '') : { text: m.content || '', choices: null };
     return {
@@ -119,7 +132,7 @@ export function BellaChat({ onClose }) {
       at: m.created_at || null,
       tools: m.meta?.tools || [],
       approvals: (m.meta?.approvals || []).map((a) => ({
-        ...a, status: APPROVAL_STATE[a.status] || 'pending',
+        ...a, status: actionStatusRef.current[a.action_id] || APPROVAL_STATE[a.status] || 'pending',
       })),
     };
   }).filter((m) => m.content || (m.tools && m.tools.length) || (m.approvals && m.approvals.length));
@@ -136,6 +149,7 @@ export function BellaChat({ onClose }) {
     if (!cid) return;
     const seq = ++syncSeqRef.current;
     try {
+      await refreshActionStatuses();
       const r = await api.bellaMessages(cid);
       if (seq !== syncSeqRef.current || busyRef.current) return;
       const maxId = Math.max(...((r.messages || []).map((m) => Number(m.id) || 0)), 0);
@@ -153,15 +167,26 @@ export function BellaChat({ onClose }) {
 
   // Idle poll — picks up overnight/scheduled results while the panel is open.
   useEffect(() => {
-    const t = setInterval(() => { if (!busyRef.current && convId) syncFromServer(convId); }, 15_000);
+    const t = setInterval(() => {
+      if (busyRef.current) return;
+      if (convId) syncFromServer(convId);
+      refreshConvs();   // voice can create a conversation while this panel is open
+    }, 15_000);
     return () => clearInterval(t);
-  }, [convId, syncFromServer]);
+  }, [convId, syncFromServer, refreshConvs]);
 
   // Keep the view pinned to the newest message while streaming.
   useEffect(() => {
     const el = scrollRef.current;
     if (el) el.scrollTop = el.scrollHeight;
   }, [msgs]);
+
+  // An approval decided elsewhere (inbox, voice, another tab) → resync.
+  useEffect(() => {
+    const on = () => { if (!busyRef.current && convIdRef.current) syncFromServer(convIdRef.current, { force: true }); };
+    window.addEventListener(APPROVALS_EVENT, on);
+    return () => window.removeEventListener(APPROVALS_EVENT, on);
+  }, [syncFromServer]);
 
   // Abort an in-flight stream if the panel unmounts mid-answer.
   useEffect(() => () => { try { streamRef.current?.abort(); } catch { /* ignore */ } }, []);
@@ -215,6 +240,7 @@ export function BellaChat({ onClose }) {
         if (tool) fireEffects(tool);
       }
       patchApproval(actionId, (a) => ({ ...a, status: verdict, note: r?.summary || null }));
+      fireApprovalsChanged();
       send(`[[action:${actionId}:${verdict}]]`, { hidden: true });
     } catch (err) {
       patchApproval(actionId, (a) => ({ ...a, status: 'error', note: err?.message || 'failed' }));
@@ -277,10 +303,13 @@ export function BellaChat({ onClose }) {
               : (a?.type || 'ui');
             patchLast((m) => ({ ...m, tools: [...(m.tools || []), { name: 'ui', status: 'done', summary: label }] }));
           },
-          onApproval: (a) => patchLast((m) => ({
-            ...m,
-            approvals: [...(m.approvals || []), { action_id: a.action_id, tool: a.tool, summary: a.summary, status: 'pending' }],
-          })),
+          onApproval: (a) => {
+            fireApprovalsChanged();   // durable inbox + dock badge pick it up
+            patchLast((m) => ({
+              ...m,
+              approvals: [...(m.approvals || []), { action_id: a.action_id, tool: a.tool, summary: a.summary, status: 'pending' }],
+            }));
+          },
           onError: (e) => patchLast((m) => ({ ...m, streaming: false, error: e?.message || 'Something went wrong.' })),
           onDone: () => patchLast((m) => {
             const parsed = splitChoices(m.content);
@@ -326,6 +355,8 @@ export function BellaChat({ onClose }) {
         <button class="bella-head-btn" onClick=${newChat}>New</button>
         <button class="bella-head-btn" title="Close" onClick=${onClose}>✕</button>
       </div>
+
+      <${BellaApprovals} />
 
       ${showList ? html`
         <div class="bella-convlist">

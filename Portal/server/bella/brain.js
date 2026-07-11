@@ -323,7 +323,7 @@ export async function runBellaTurn({ ctx, conversationId, userText, clientContex
           metaSlots[i] = { name: tu.name, summary: 'awaiting your approval' };
           slots[i] = {
             type: 'tool_result', tool_use_id: tu.id,
-            content: JSON.stringify({ status: 'approval_required', action_id: actionId, note: 'Proposed to the user — they must click Approve in the chat. Briefly state what you proposed and wait. Do NOT call this tool again for the same thing.' }),
+            content: JSON.stringify({ status: 'approval_required', action_id: actionId, note: 'Proposed to the user — an Approve/Deny card is waiting at the TOP of the Bella chat panel (and a badge on the Bella orb). Tell them to open the Bella panel and approve it there. Do NOT call this tool again for the same thing.' }),
           };
           continue;
         }
