@@ -10,6 +10,7 @@ import { toast } from '../lib/toast.js';
 import { navigateTo } from '../lib/router.js';
 import { FeedSourcesNetwork } from './FeedSourcesNetwork.js';
 import { MarketPulse } from './MarketPulse.js';
+import { Pagination } from './Pagination.js';
 
 const CATEGORIES = [
   ['', 'All'], ['economic', 'Economic'], ['political', 'Political'], ['corporate', 'Corporate'],
@@ -37,10 +38,9 @@ function timeAgo(iso) {
 export function MarketFeedTab({ mode } = {}) {
   const isAdmin = mode !== 'user';   // admin.bell.qa / local engine may delete wrong items
   const [events, setEvents]   = useState([]);
-  const [cursor, setCursor]   = useState(null);
-  const [page, setPage]       = useState(0);   // 30/page pager over the loaded feed (Val 2026-07-12)
+  const [total, setTotal]     = useState(0);
+  const [offset, setOffset]   = useState(0);   // offset/total pager — real "page N of M" (Val 2026-07-12)
   const [loading, setLoading] = useState(true);
-  const [loadingMore, setLoadingMore] = useState(false);
   const [stats, setStats]     = useState(null);
   const [trending, setTrending] = useState([]);
   const [sources, setSources] = useState([]);   // live sources for the network visual
@@ -76,43 +76,23 @@ export function MarketFeedTab({ mode } = {}) {
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const r = await api.feed({ ...filterParams(), limit: PAGE });
+      const r = await api.feed({ ...filterParams(), limit: PAGE, offset });
       const evs = r.events || [];
       setEvents(evs);
-      setCursor(r.next_cursor || null);
-      setPage(0);
+      if (typeof r.total === 'number') setTotal(r.total);
       maxIdRef.current = maxId(evs);
     } catch (err) { toast('Feed load failed: ' + err.message, 'error'); }
     finally { setLoading(false); }
-  }, [filterParams]);
+  }, [filterParams, offset]);
 
-  const loadMore = async () => {
-    if (!cursor || loadingMore) return;
-    setLoadingMore(true);
-    try {
-      const r = await api.feed({ ...filterParams(), cursor, limit: PAGE });
-      setEvents(prev => {
-        const seen = new Set(prev.map(e => e.id));
-        return [...prev, ...(r.events || []).filter(e => !seen.has(e.id))];
-      });
-      setCursor(r.next_cursor || null);
-    } catch (err) { toast('Load more failed: ' + err.message, 'error'); }
-    finally { setLoadingMore(false); }
-  };
-
-  // Prev/next 30-per-page paging over the loaded feed. Going forward past what's
-  // loaded fetches the next slice via the cursor, then advances (Val 2026-07-12).
-  const pageEvents = events.slice(page * PAGE, page * PAGE + PAGE);
-  const hasNext = (page + 1) * PAGE < events.length || !!cursor;
-  const nextPage = async () => {
-    if ((page + 1) * PAGE < events.length) { setPage(page + 1); return; }
-    if (cursor) { await loadMore(); setPage(page + 1); }
-  };
-  const prevPage = () => setPage(p => Math.max(0, p - 1));
+  const pageEvents = events;
 
   const refreshStats = useCallback(async () => {
     try { setStats(await api.feedStats()); } catch { /* ignore */ }
   }, []);
+
+  // Any filter change snaps back to page 1 (setOffset(0) is a no-op if already 0).
+  useEffect(() => { setOffset(0); }, [category, kind, q]);
 
   // Initial load + trending.
   useEffect(() => { load(); }, [load]);
@@ -122,11 +102,12 @@ export function MarketFeedTab({ mode } = {}) {
     (async () => { try { const s = await api.feedSources(); setSources(s.rows || []); } catch {} })();
   }, [refreshStats]);
 
-  // Live updates: prepend new items + refresh stats every 20s.
+  // Live updates: only prepend on page 1 (offset 0); refresh stats every 20s.
+  // On deeper pages the list is a stable page slice, so we leave it untouched.
   useEffect(() => {
     const t = setInterval(async () => {
       refreshStats();
-      if (!maxIdRef.current) return;
+      if (offset !== 0 || !maxIdRef.current) return;
       try {
         const r = await api.feed({ ...filterParams(), after_id: maxIdRef.current, limit: 30 });
         if (r.events && r.events.length) {
@@ -134,13 +115,15 @@ export function MarketFeedTab({ mode } = {}) {
           setEvents(prev => {
             const seen = new Set(prev.map(e => e.id));
             const fresh = r.events.filter(e => !seen.has(e.id));
-            return fresh.length ? [...fresh, ...prev] : prev;
+            if (!fresh.length) return prev;
+            setTotal(t => t + fresh.length);
+            return [...fresh, ...prev].slice(0, PAGE);
           });
         }
       } catch { /* ignore */ }
     }, 20_000);
     return () => clearInterval(t);
-  }, [filterParams, refreshStats]);
+  }, [filterParams, refreshStats, offset]);
 
   const breaking = events.filter(e => (e.importance || 0) >= 0.7).slice(0, 8);
 
@@ -180,6 +163,7 @@ export function MarketFeedTab({ mode } = {}) {
         ` : null}
 
         <!-- Primary switch: News / Research / New companies -->
+        <div class="feed-tablabel"><span class="feed-cats-label">View</span></div>
         <div class="feed-tabs">
           ${[['', 'All'], ['news', 'News'], ['research', 'Research'], ['company_registered', 'New companies']].map(([val, label]) => html`
             <button key=${val || 'all'}
@@ -190,7 +174,7 @@ export function MarketFeedTab({ mode } = {}) {
 
         <!-- Secondary: topic categories -->
         <div class="feed-filters">
-          <span class="feed-cats-label">Topics</span>
+          <span class="feed-cats-label">Topic</span>
           ${CATEGORIES.map(([val, label]) => html`
             <button key=${val || 'all'}
               class=${'feed-chip ' + (category === val ? 'active' : '')}
@@ -200,6 +184,9 @@ export function MarketFeedTab({ mode } = {}) {
           <input class="feed-search" type="text" placeholder="Search the feed…"
             value=${q} onChange=${e => setQ(e.target.value)}
             onKeyDown=${e => { if (e.key === 'Enter') load(); }} />
+        </div>
+        <div class="filt-help">
+          Pick a <b>View</b> (All, News, Research, New companies), then narrow by <b>Topic</b> or search.${total ? html` <b>${total.toLocaleString()}</b> items — page through them below.` : ''}
         </div>
 
         <!-- Feed -->
@@ -234,12 +221,8 @@ export function MarketFeedTab({ mode } = {}) {
                 ? html`<${ResearchFeedCard} key=${e.id} e=${e} onOpen=${onOpen} onDelete=${onDelete} />`
                 : html`<${FeedCard} key=${e.id} e=${e} onOpen=${onOpen} onDelete=${onDelete} />`;
             })}
-          ${!loading && events.length > 0 && (page > 0 || hasNext) ? html`
-            <div class="pager">
-              <button class="pager-btn" disabled=${page === 0} onClick=${prevPage}>← Prev</button>
-              <span class="pager-info">${page * PAGE + 1}–${page * PAGE + pageEvents.length}</span>
-              <button class="pager-btn" disabled=${!hasNext || loadingMore} onClick=${nextPage}>${loadingMore ? '…' : 'Next →'}</button>
-            </div>` : null}
+          ${!loading && total > PAGE ? html`
+            <div class="feed-pager"><${Pagination} total=${total} limit=${PAGE} offset=${offset} onChange=${setOffset} /></div>` : null}
         </div>
       </div>
 

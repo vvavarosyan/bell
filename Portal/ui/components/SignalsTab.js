@@ -13,6 +13,7 @@ import { html } from '../lib/html.js';
 import { api } from '../lib/api.js';
 import { navigateTo } from '../lib/router.js';
 import { TendersTab } from './TendersTab.js';
+import { Pagination } from './Pagination.js';
 import { BELLA_ACTION_EVENT, takePending, stashPending } from '../lib/bellaBus.js';
 
 const KIND_META = {
@@ -53,30 +54,32 @@ function blipXY(sig, windowKey) {
 
 export function SignalsTab() {
   const [rows, setRows] = useState([]);
+  const [total, setTotal] = useState(0);   // true windowed signal count (server) — honest "page N of M"
   const [scope, setScope] = useState('global');
   const [windowKey, setWindowKey] = useState('7d');
   const [kind, setKind] = useState('');
   const [loading, setLoading] = useState(true);
   const [icpMissing, setIcpMissing] = useState(false);
   const [selectedId, setSelectedId] = useState(null);
-  const [streamPage, setStreamPage] = useState(0);   // 30/page pager for the stream (Val 2026-07-12)
+  const [streamPage, setStreamPage] = useState(0);   // server-paginated 30/page (Val 2026-07-12)
   const [inMarket, setInMarket] = useState([]);
   const [inMarketIcp, setInMarketIcp] = useState(false);
-  const [openTenders, setOpenTenders] = useState([]);
   const [tenderTotal, setTenderTotal] = useState(0);   // true total tenders Bell tracks (for the Tenders chip)
   const scoreColor = (n) => (n >= 60 ? '#6fcf97' : n >= 35 ? '#f5c84c' : '#9ca5b9');
 
+  const STREAM = 30;
   const load = useCallback(async ({ silent = false } = {}) => {
     if (!silent) setLoading(true);
     try {
-      const params = { window: windowKey, scope };
+      const params = { window: windowKey, scope, limit: STREAM, offset: streamPage * STREAM };
       if (kind) params.kind = kind;
       const r = await api.signals(params);
       setRows(r.rows || []);
+      if (typeof r.total === 'number') setTotal(r.total);
       setIcpMissing(!!r.icp_missing);
     } catch { /* keep last rows */ }
     finally { if (!silent) setLoading(false); }
-  }, [windowKey, scope, kind]);
+  }, [windowKey, scope, kind, streamPage]);
 
   useEffect(() => { load(); }, [load]);
   useEffect(() => {
@@ -95,15 +98,15 @@ export function SignalsTab() {
     return () => { dead = true; clearInterval(t); };
   }, []);
 
-  // Recent tenders (open + newly awarded) — folded into the radar/stream under
-  // "All types" and browsable in full under the Tenders tab.
+  // True tender count for the "Tenders" pill — that pill opens the FULL tender
+  // browser (all 27k+); the radar/stream below is recent *signals* only.
   useEffect(() => {
     let dead = false;
-    const loadT = () => api.tenders({ limit: 40 })
-      .then((r) => { if (!dead) { setOpenTenders(r.rows || []); setTenderTotal(r.total || 0); } })
+    const loadT = () => api.tenders({ limit: 1 })
+      .then((r) => { if (!dead) setTenderTotal(r.total || 0); })
       .catch(() => {});
     loadT();
-    const t = setInterval(loadT, 120_000);
+    const t = setInterval(loadT, 300_000);
     return () => { dead = true; clearInterval(t); };
   }, []);
 
@@ -139,55 +142,35 @@ export function SignalsTab() {
     return () => window.removeEventListener(BELLA_ACTION_EVENT, onAction);
   }, []);   // eslint-disable-line react-hooks/exhaustive-deps
 
-  const inWindow = (iso) => (Date.now() - new Date(iso).getTime()) <= WINDOW_MS[windowKey];
-
-  // Live tenders as radar signals — so procurement demand shows in "All types"
-  // and under the Tenders tab. Numeric id offset keeps them collision-free with
-  // real signal ids; they carry no ICP score (the Tenders tab is the full browser).
-  const tenderSignals = useMemo(() => (openTenders || []).map((t) => ({
-    id: 900000000 + Number(t.id),
-    kind: 'tender',
-    subkind: t.status,
-    title: (t.status === 'awarded' && t.award_company_name) ? `${t.award_company_name} won — ${t.title}` : t.title,
-    body: [t.buyer, t.deadline_at ? 'closes ' + new Date(t.deadline_at).toLocaleDateString() : null].filter(Boolean).join(' · '),
-    company_id: t.award_company_id || null,
-    company_name: t.award_company_name || null,
-    occurred_at: t.awarded_at || t.published_at || t.created_at,
-    importance: 0.7,
-    _tender: true,
-  })), [openTenders]);
-
+  // The Tenders pill shows the full tender-database count; other pills show their
+  // in-window signal count (from the /stats endpoint, loaded below).
+  const [kindCounts, setKindCounts] = useState({});
+  useEffect(() => {
+    let dead = false;
+    api.signalStats().then((r) => {
+      if (dead) return;
+      const c = {};
+      for (const row of (r.kinds || [])) c[row.kind] = row.c7d;
+      setKindCounts(c);
+    }).catch(() => {});
+    return () => { dead = true; };
+  }, []);
   const counts = useMemo(() => {
-    const c = {};
-    for (const r of rows) c[r.kind] = (c[r.kind] || 0) + 1;
-    // Tenders is a full browser (25k+), not a windowed signal bucket — show the
-    // true total Bell tracks rather than a window-filtered pseudo-count.
-    if (tenderTotal) c.tender = tenderTotal;
+    const c = { ...kindCounts };
+    if (tenderTotal) c.tender = tenderTotal;   // full browser, not a windowed bucket
     return c;
-  }, [rows, tenderTotal]);
+  }, [kindCounts, tenderTotal]);
 
-  // What the radar + stream render. A specific kind → server rows for that kind;
-  // the Tenders tab (kind='tender') is the embedded browser, handled separately;
-  // "All types" on the global view folds live tenders into the stream.
-  const displayRows = useMemo(() => {
-    if (kind === 'tender') return [];
-    if (kind) return rows;
-    if (scope !== 'global') return rows;
-    // Server-generated tender signals (#72 opportunities + awarded links) carry
-    // ref_id = tender id — drop the client-side pseudo-signal for any tender the
-    // server already covers, so the stream never shows the same tender twice.
-    const covered = new Set(rows.filter((r) => r.kind === 'tender' && r.ref_id != null).map((r) => Number(r.ref_id)));
-    const t = tenderSignals.filter((s) => inWindow(s.occurred_at) && !covered.has(s.id - 900000000));
-    return [...rows, ...t].sort((a, b) => new Date(b.occurred_at) - new Date(a.occurred_at));
-  }, [rows, tenderSignals, kind, scope, windowKey]);
+  // The radar + stream render the server page directly. kind='tender' hands off
+  // to the embedded full Tenders browser; every other view is recent *signals*,
+  // server-paginated and windowed. Tenders themselves are reachable in full via
+  // the Tenders pill (they also surface here as 'tender' opportunity signals).
+  const displayRows = kind === 'tender' ? [] : rows;
 
-  // The stream lists 30 at a time (the radar still shows every blip). Reset to
-  // the first page whenever the filters change.
-  const STREAM = 30;
+  // Snap to page 1 whenever the filters change (server re-paginates).
   useEffect(() => { setStreamPage(0); }, [kind, scope, windowKey]);
-  const streamTotal = displayRows.length;
-  const streamRows = displayRows.slice(streamPage * STREAM, streamPage * STREAM + STREAM);
-  const streamHasNext = (streamPage + 1) * STREAM < streamTotal;
+  const streamTotal = total;
+  const streamRows = displayRows;
 
   return html`
     <div class="page-fill"><div class="page-scroll">
@@ -217,8 +200,14 @@ export function SignalsTab() {
         <span class="filt-label">Type</span>
         <div class="pilltabs">
           <button class=${'pilltab' + (kind === '' ? ' active' : '')} onClick=${() => setKind('')}>All types</button>
-          ${KINDS.map((k) => html`<button key=${k} class=${'pilltab' + (kind === k ? ' active' : '')} onClick=${() => setKind(kind === k ? '' : k)}>${KIND_META[k].label}${counts[k] ? html`<span class="ct">${counts[k].toLocaleString()}</span>` : ''}</button>`)}
+          ${KINDS.map((k) => html`<button key=${k}
+            class=${'pilltab' + (k === 'tender' ? ' pilltab-db' : '') + (kind === k ? ' active' : '')}
+            onClick=${() => setKind(kind === k ? '' : k)}>${KIND_META[k].label}${counts[k] ? html`<span class="ct">${counts[k].toLocaleString()}</span>` : ''}</button>`)}
         </div>
+      </div>
+      <div class="filt-help">
+        Tap a type to filter. <b>All types</b> shows recent market signals from the last ${WINDOWS.find(([k]) => k === windowKey)?.[1]}${total ? ` (${total.toLocaleString()})` : ''}.
+        <b>Tenders${tenderTotal ? ` (${tenderTotal.toLocaleString()})` : ''}</b> opens Bell’s full procurement database — the complete archive, searchable and filterable, not just this window.
       </div>
 
       ${scope === 'icp' && icpMissing ? html`
@@ -292,8 +281,8 @@ export function SignalsTab() {
             <text x=${C + R_MAX - 4} y=${C + 12} text-anchor="end" font-size="8" fill="var(--text-dim, #9ca5b9)">${WINDOWS.find(([k]) => k === windowKey)?.[1]} ago</text>
           </svg>
           <div class="muted small" style=${{ marginTop: '8px', textAlign: 'center' }}>
-            ${loading ? 'Sweeping the market…' : displayRows.length
-              ? `${displayRows.length} signals in the last ${WINDOWS.find(([k]) => k === windowKey)?.[1]} — see the stream below to inspect`
+            ${loading ? 'Sweeping the market…' : total
+              ? `${total.toLocaleString()} signal${total === 1 ? '' : 's'} in the last ${WINDOWS.find(([k]) => k === windowKey)?.[1]} — see the stream below to inspect`
               : 'The radar is warming up — signals appear as Bell detects market movement.'}
           </div>
 
@@ -353,10 +342,10 @@ export function SignalsTab() {
                 </div>`;
             })}
           ${!loading && streamTotal > STREAM ? html`
-            <div class="pager">
-              <button class="pager-btn" disabled=${streamPage === 0} onClick=${() => setStreamPage(p => Math.max(0, p - 1))}>← Prev</button>
-              <span class="pager-info">${streamPage * STREAM + 1}–${Math.min((streamPage + 1) * STREAM, streamTotal)} of ${streamTotal.toLocaleString()}</span>
-              <button class="pager-btn" disabled=${!streamHasNext} onClick=${() => setStreamPage(p => p + 1)}>Next →</button>
+            <div class="feed-pager">
+              <${Pagination} total=${streamTotal} limit=${STREAM} offset=${streamPage * STREAM}
+                onChange=${(o) => setStreamPage(Math.floor(o / STREAM))} />
+              <span class="muted small" style=${{ flexBasis: '100%', textAlign: 'center' }}>recent signals · last ${WINDOWS.find(([k]) => k === windowKey)?.[1]}</span>
             </div>` : null}
         </div>
       </div>`}

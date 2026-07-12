@@ -32,31 +32,36 @@ async function attachCompanies(events) {
   }
 }
 
-// GET /api/feed
+// GET /api/feed — offset/total pagination (Val 2026-07-12: real "page N of M" so
+// the whole 15,000+ stream is reachable, not just the first page). `after_id`
+// still returns only newer items for the live-prepend ticker.
 router.get('/', async (req, res, next) => {
   try {
-    const limit = Math.min(Number(req.query.limit ?? 30), 60);
-    const where = [];
-    const params = [];
+    const limit  = Math.min(Number(req.query.limit ?? 30), 60);
+    const offset = Math.max(0, Number(req.query.offset ?? 0));
+    const kind   = req.query.kind;
+    const afterId = req.query.after_id ? Number(req.query.after_id) : null;
 
-    const kind = req.query.kind;
-
-    // Research tab: read PUBLISHED reports directly from research_reports — the
+    // Research tab: page PUBLISHED reports directly from research_reports — the
     // deterministic source bell.qa/research uses — because the research
     // feed_events path proved unreliable on prod. Research is corporate
     // intelligence, so it only appears under the Corporate / All category chips.
-    if (kind === 'research' && !req.query.after_id && !req.query.cursor) {
+    if (kind === 'research' && !afterId) {
       const cat = req.query.category;
       if (cat && CATEGORIES.includes(cat) && cat !== 'corporate') {
-        return res.json({ events: [], next_cursor: null });
+        return res.json({ events: [], total: 0 });
       }
+      const totalR = await query(`
+        SELECT count(*)::int AS total
+          FROM research_reports r JOIN research_jobs j ON j.id = r.job_id
+         WHERE r.is_published = true AND lower(j.type) <> 'person'`);
       const rr = await query(`
         SELECT r.id AS report_id, r.job_id, r.title, r.summary, r.sections, r.public_slug, r.published_at,
                j.type AS job_type, j.target_label
           FROM research_reports r JOIN research_jobs j ON j.id = r.job_id
          WHERE r.is_published = true AND lower(j.type) <> 'person'
          ORDER BY r.published_at DESC NULLS LAST
-         LIMIT $1`, [limit]);
+         LIMIT $1 OFFSET $2`, [limit, offset]);
       const rEvents = [];
       for (const row of rr.rows) {
         let sources = [];
@@ -70,8 +75,11 @@ router.get('/', async (req, res, next) => {
           occurred_at: row.published_at,
         });
       }
-      return res.json({ events: rEvents, next_cursor: null });
+      return res.json({ events: rEvents, total: totalR.rows[0].total });
     }
+
+    const where = [];
+    const params = [];
 
     if (kind && KINDS.includes(kind)) { params.push(kind); where.push(`kind = $${params.length}`); }
 
@@ -87,22 +95,26 @@ router.get('/', async (req, res, next) => {
     const companyId = req.query.company_id ? Number(req.query.company_id) : null;
     if (companyId) { params.push(companyId); where.push(`$${params.length} = ANY(linked_company_ids)`); }
 
-    // Live prepend: only items newer than after_id.
-    const afterId = req.query.after_id ? Number(req.query.after_id) : null;
-    if (afterId) { params.push(afterId); where.push(`id > $${params.length}`); }
-
-    // Keyset pagination downward: cursor = "<occurredISO>__<id>".
-    if (!afterId && req.query.cursor) {
-      const [occ, cid] = String(req.query.cursor).split('__');
-      if (occ && cid) {
-        params.push(occ); const p1 = params.length;
-        params.push(Number(cid)); const p2 = params.length;
-        where.push(`(occurred_at < $${p1} OR (occurred_at = $${p1} AND id < $${p2}))`);
-      }
+    // Live prepend: only items newer than after_id — no offset/total needed.
+    if (afterId) {
+      params.push(afterId); where.push(`id > $${params.length}`);
+      const whereSql = `WHERE ${where.join(' AND ')}`;
+      params.push(limit);
+      const sql = `
+        SELECT id, kind, ref_table, ref_id, title, summary, url, image_url, category,
+               source_name, sentiment, importance, entities, linked_company_ids,
+               payload, occurred_at
+          FROM feed_events ${whereSql}
+          ORDER BY occurred_at DESC, id DESC
+          LIMIT $${params.length}`;
+      const r = await query(sql, params);
+      await attachCompanies(r.rows);
+      return res.json({ events: r.rows, total: null });
     }
 
     const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
-    params.push(limit);
+    const countR = await query(`SELECT count(*)::int AS total FROM feed_events ${whereSql}`, params);
+    const dataParams = [...params, limit, offset];
     const sql = `
       SELECT id, kind, ref_table, ref_id, title, summary, url, image_url, category,
              source_name, sentiment, importance, entities, linked_company_ids,
@@ -110,59 +122,12 @@ router.get('/', async (req, res, next) => {
         FROM feed_events
         ${whereSql}
         ORDER BY occurred_at DESC, id DESC
-        LIMIT $${params.length}`;
-    const r = await query(sql, params);
+        LIMIT $${dataParams.length - 1} OFFSET $${dataParams.length}`;
+    const r = await query(sql, dataParams);
     const events = r.rows;
     await attachCompanies(events);
 
-    const last = events[events.length - 1];
-    const next_cursor = (!afterId && events.length === limit && last)
-      ? `${new Date(last.occurred_at).toISOString()}__${last.id}`
-      : null;
-
-    // Safety net (Val 2026-07-04): a PUBLISHED research report must appear in the
-    // feed even if its feed_events row failed to write. On the FIRST page, pull
-    // published reports straight from research_reports and merge any that aren't
-    // already present (deduped by report id). Computed AFTER next_cursor so it
-    // never disturbs keyset pagination.
-    if ((!kind || kind === 'research') && !afterId && !req.query.cursor) {
-      try {
-        const have = new Set(events.filter((e) => e.kind === 'research').map((e) => Number(e.ref_id)));
-        const rr = await query(`
-          SELECT r.id AS report_id, r.job_id, r.title, r.summary, r.sections, r.public_slug, r.published_at,
-                 j.type AS job_type, j.target_label
-            FROM research_reports r
-            JOIN research_jobs j ON j.id = r.job_id
-           WHERE r.is_published = true AND lower(j.type) <> 'person'
-           ORDER BY r.published_at DESC NULLS LAST
-           LIMIT 25`);
-        let added = false;
-        for (const row of rr.rows) {
-          if (have.has(Number(row.report_id))) continue;
-          let sources = [];
-          try {
-            const s = await query(`SELECT url, label FROM research_sources WHERE job_id = $1 ORDER BY id`, [row.job_id]);
-            sources = s.rows;
-          } catch { /* sources optional */ }
-          events.push({
-            id: 'r' + row.report_id,
-            kind: 'research', ref_table: 'research_reports', ref_id: Number(row.report_id),
-            title: row.title, summary: row.summary, url: '/research/' + (row.public_slug || ''),
-            image_url: null, category: 'corporate', source_name: 'Bell Research',
-            sentiment: null, importance: 0.7, entities: {}, linked_company_ids: [], companies: [],
-            payload: {
-              sections: row.sections, sources, job_id: row.job_id,
-              public_slug: row.public_slug, job_type: row.job_type, target_label: row.target_label,
-            },
-            occurred_at: row.published_at,
-          });
-          added = true;
-        }
-        if (added) events.sort((a, b) => new Date(b.occurred_at || 0) - new Date(a.occurred_at || 0));
-      } catch (e) { console.error('[feed] research safety-net failed:', e.message); }
-    }
-
-    res.json({ events, next_cursor });
+    res.json({ events, total: countR.rows[0].total });
   } catch (err) { next(err); }
 });
 

@@ -102,27 +102,26 @@ export function JobsTab({ mode = 'local-admin' } = {}) {
       <button onClick=${load}>Refresh</button>
     </div>
 
-    ${showFilters ? html`<div class="bdi-filter-inline">
-      <div class="bdi-filter-drop">
-        <div class="bdi-filter-head"><strong>Filters</strong><span class="spacer"></span>
-          <button class="bdi-filter-clear" onClick=${() => { setType(''); setWorkplace(''); setSeniority(''); setPostedWithin(''); setActiveFilter(''); setOffset(0); }}>Clear all</button>
-          <button class="bdi-filter-x" onClick=${() => setShowFilters(false)} title="Close">✕</button>
-        </div>
-        <div class="bdi-filter-body"><div class="bdi-filter-grid">
-          ${secF('Type', sel(type, setType, options.types, 'All types'))}
-          ${secF('Workplace', sel(workplace, setWorkplace, options.workplaces, 'Any workplace'))}
-          ${secF('Seniority', sel(seniority, setSeniority, options.seniorities, 'Any seniority'))}
-          ${secF('Date posted', sel(postedWithin, setPostedWithin, [
-            { v: '7', label: 'Last 7 days' }, { v: '30', label: 'Last 30 days' }, { v: '90', label: 'Last 90 days' },
-          ], 'Any date'))}
-          ${secF('Status', sel(activeFilter, setActiveFilter, [
-            { v: 'true', label: 'Active only' }, { v: 'false', label: 'Expired only' },
-          ], 'All jobs'))}
-        </div></div>
-      </div>
-    </div>` : null}
-
     <div class="grid-pane">
+      ${showFilters ? html`<div class="bdi-filter-anchor">
+        <div class="bdi-filter-drop">
+          <div class="bdi-filter-head"><strong>Filters</strong><span class="spacer"></span>
+            <button class="bdi-filter-clear" onClick=${() => { setType(''); setWorkplace(''); setSeniority(''); setPostedWithin(''); setActiveFilter(''); setOffset(0); }}>Clear all</button>
+            <button class="bdi-filter-x" onClick=${() => setShowFilters(false)} title="Close">✕</button>
+          </div>
+          <div class="bdi-filter-body"><div class="bdi-filter-grid">
+            ${secF('Type', sel(type, setType, options.types, 'All types'))}
+            ${secF('Workplace', sel(workplace, setWorkplace, options.workplaces, 'Any workplace'))}
+            ${secF('Seniority', sel(seniority, setSeniority, options.seniorities, 'Any seniority'))}
+            ${secF('Date posted', sel(postedWithin, setPostedWithin, [
+              { v: '7', label: 'Last 7 days' }, { v: '30', label: 'Last 30 days' }, { v: '90', label: 'Last 90 days' },
+            ], 'Any date'))}
+            ${secF('Status', sel(activeFilter, setActiveFilter, [
+              { v: 'true', label: 'Active only' }, { v: 'false', label: 'Expired only' },
+            ], 'All jobs'))}
+          </div></div>
+        </div>
+      </div>` : null}
       <div class="grid-wrap">
         <table class="grid">
           <thead>

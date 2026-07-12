@@ -12,44 +12,65 @@ const router = Router();
 const KINDS = new Set(['hiring', 'newly_licensed', 'partnership', 'leadership', 'news_event', 'expansion', 'tender', 'disclosure']);
 const WINDOWS = { '24h': '24 hours', '3d': '3 days', '7d': '7 days', '14d': '14 days' };
 
-// GET /api/signals?window=7d&kind=&scope=global|icp&limit=120
+// GET /api/signals?window=7d&kind=&scope=global|icp&limit=30&offset=0
+// Offset/total pagination (Val 2026-07-12) — "All types" pages through EVERY
+// signal in the window instead of silently capping at 120. `total` is the true
+// windowed count so the UI can show an honest "page N of M".
 router.get('/', async (req, res, next) => {
   try {
     const windowSql = WINDOWS[String(req.query.window || '7d')] || WINDOWS['7d'];
-    const limit = Math.min(Math.max(Number(req.query.limit) || 120, 1), 300);
-    const params = [];
+    const limit  = Math.min(Math.max(Number(req.query.limit) || 30, 1), 300);
+    const offset = Math.max(0, Number(req.query.offset) || 0);
+
+    const kindParams = [];
     let kindSql = '';
     if (req.query.kind && KINDS.has(String(req.query.kind))) {
-      params.push(String(req.query.kind));
-      kindSql = `AND kind = $${params.length}`;
+      kindParams.push(String(req.query.kind));
+      kindSql = `AND kind = $${kindParams.length}`;
     }
-    params.push(limit);
-    const r = await query(
-      `SELECT id, kind, subkind, company_id, company_name, title, body, source_kind,
-              ref_table, ref_id, industry, industries, employee_count, importance, occurred_at
-         FROM signals
-        WHERE occurred_at > now() - interval '${windowSql}' ${kindSql}
-        ORDER BY occurred_at DESC
-        LIMIT $${params.length}`,
-      params,
-    );
-    let rows = r.rows;
+
+    const selectCols = `id, kind, subkind, company_id, company_name, title, body, source_kind,
+              ref_table, ref_id, industry, industries, employee_count, importance, occurred_at`;
 
     if (String(req.query.scope) === 'icp') {
+      // ICP view: score the whole window in memory, then slice — so match_score
+      // ordering is correct across pages. Bounded fetch keeps it cheap.
       const icpR = await query(
         `SELECT target_industries, target_keywords, target_sizes FROM tenant_profile WHERE tenant_id = $1`,
         [req.tenant.id],
       );
       const icp = icpR.rows[0] || {};
       const hasIcp = (icp.target_industries || []).length || (icp.target_keywords || []).length || (icp.target_sizes || []).length;
-      if (!hasIcp) return res.json({ rows: [], icp_missing: true });
-      rows = rows
+      if (!hasIcp) return res.json({ rows: [], total: 0, icp_missing: true });
+      const all = await query(
+        `SELECT ${selectCols}
+           FROM signals
+          WHERE occurred_at > now() - interval '${windowSql}' ${kindSql}
+          ORDER BY occurred_at DESC
+          LIMIT 3000`,
+        kindParams,
+      );
+      const matched = all.rows
         .map((s) => { const m = scoreSignalForIcp(s, icp); return { ...s, match_score: m.score, match_reasons: m.reasons }; })
         .filter((s) => s.match_score > 0)
         .sort((a, b) => b.match_score - a.match_score || new Date(b.occurred_at) - new Date(a.occurred_at));
+      return res.json({ rows: matched.slice(offset, offset + limit), total: matched.length });
     }
 
-    res.json({ rows });
+    const countR = await query(
+      `SELECT count(*)::int AS total FROM signals WHERE occurred_at > now() - interval '${windowSql}' ${kindSql}`,
+      kindParams,
+    );
+    const dataParams = [...kindParams, limit, offset];
+    const r = await query(
+      `SELECT ${selectCols}
+         FROM signals
+        WHERE occurred_at > now() - interval '${windowSql}' ${kindSql}
+        ORDER BY occurred_at DESC
+        LIMIT $${dataParams.length - 1} OFFSET $${dataParams.length}`,
+      dataParams,
+    );
+    res.json({ rows: r.rows, total: countR.rows[0].total });
   } catch (err) { next(err); }
 });
 
