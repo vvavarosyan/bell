@@ -4,12 +4,13 @@
 // Weekly Real Estate Sales Bulletin). Every figure is source-stated (Rule 2.1);
 // the Map layer is added separately. Hooks live at the top of each component.
 
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { html } from '../lib/html.js';
 import { api } from '../lib/api.js';
 import { Pagination } from './Pagination.js';
+import { loadMapboxGL } from '../lib/mapbox.js';
 
-const SUBTABS = [['stats', 'Market stats'], ['buildings', 'Buildings'], ['transactions', 'Transactions']];
+const SUBTABS = [['stats', 'Market stats'], ['buildings', 'Buildings'], ['transactions', 'Transactions'], ['map', 'Map']];
 
 function compactQar(n) {
   if (n == null) return '—';
@@ -36,7 +37,10 @@ export function RealEstateTab() {
           ${SUBTABS.map(([id, label]) => html`<button key=${id} class=${'pilltab' + (sub === id ? ' active' : '')} onClick=${() => setSub(id)}>${label}</button>`)}
         </div>
       </div>
-      ${sub === 'stats' ? html`<${StatsView} />` : sub === 'buildings' ? html`<${BuildingsView} />` : html`<${TransactionsView} />`}
+      ${sub === 'stats' ? html`<${StatsView} />`
+        : sub === 'buildings' ? html`<${BuildingsView} />`
+        : sub === 'transactions' ? html`<${TransactionsView} />`
+        : html`<${MapView} />`}
     </div></div>`;
 }
 
@@ -222,4 +226,144 @@ function TransactionsView() {
         </table>
       </div>
       <div class="feed-pager"><${Pagination} total=${total} limit=${PAGE} offset=${offset} onChange=${setOffset} /></div>`}`;
+}
+
+// ------------------------------------------------------------------------- Map
+// District price heat (circles at district centroids, colour = avg QAR/m², size =
+// deal volume) + a toggleable building-points layer. Reuses the shared Mapbox
+// loader + the portal's mapbox token (like the main Map).
+const PRICE_STOPS = [
+  ['≤ 2,000', '#3b82f6'], ['4,000', '#22c55e'], ['6,000', '#eab308'],
+  ['9,000', '#f97316'], ['≥ 13,000', '#ef4444'],
+];
+function MapView() {
+  const containerRef = useRef(null);
+  const mapRef = useRef(null);
+  const [status, setStatus] = useState('loading');   // loading | no_token | ready | error
+  const [showBuildings, setShowBuildings] = useState(false);
+  const [stats, setStats] = useState(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    let map = null;
+    (async () => {
+      try {
+        let token;
+        try { token = (await api.publicToken('mapbox')).value; }
+        catch { if (!cancelled) setStatus('no_token'); return; }
+        if (cancelled) return;
+
+        const [mapboxgl, data] = await Promise.all([loadMapboxGL(), api.realEstateMap()]);
+        if (cancelled) return;
+        mapboxgl.accessToken = token;
+
+        const districts = {
+          type: 'FeatureCollection',
+          features: (data.districts || []).filter((d) => d.lat != null && d.avg_sqm != null).map((d) => ({
+            type: 'Feature', geometry: { type: 'Point', coordinates: [Number(d.lng), Number(d.lat)] },
+            properties: { ename: d.ename, deals: d.deals || 0, avg_sqm: d.avg_sqm || 0 },
+          })),
+        };
+        const buildings = {
+          type: 'FeatureCollection',
+          features: (data.buildings || []).filter((b) => b.lat != null).map((b) => ({
+            type: 'Feature', geometry: { type: 'Point', coordinates: [Number(b.lng), Number(b.lat)] },
+            properties: { ename: b.ename, category: b.category || '', district: b.district_ename || '' },
+          })),
+        };
+        setStats({ districts: districts.features.length, buildings: buildings.features.length });
+
+        map = new mapboxgl.Map({
+          container: containerRef.current,
+          style: 'mapbox://styles/mapbox/dark-v11',
+          center: [51.2, 25.3], zoom: 8.4, attributionControl: false,
+        });
+        mapRef.current = map;
+        map.addControl(new mapboxgl.NavigationControl({ showCompass: false }), 'top-right');
+        map.addControl(new mapboxgl.FullscreenControl(), 'top-right');
+
+        map.on('load', () => {
+          if (cancelled) return;
+          map.addSource('re-districts', { type: 'geojson', data: districts });
+          map.addLayer({
+            id: 're-districts', type: 'circle', source: 're-districts',
+            paint: {
+              'circle-radius': ['interpolate', ['linear'], ['get', 'deals'], 1, 6, 200, 16, 800, 26, 1500, 34],
+              'circle-color': ['interpolate', ['linear'], ['get', 'avg_sqm'],
+                2000, '#3b82f6', 4000, '#22c55e', 6000, '#eab308', 9000, '#f97316', 13000, '#ef4444'],
+              'circle-opacity': 0.62, 'circle-stroke-width': 1, 'circle-stroke-color': 'rgba(255,255,255,0.35)',
+            },
+          });
+          map.addSource('re-buildings', { type: 'geojson', data: buildings });
+          map.addLayer({
+            id: 're-buildings', type: 'circle', source: 're-buildings',
+            layout: { visibility: 'none' },
+            paint: { 'circle-radius': ['interpolate', ['linear'], ['zoom'], 8, 1.6, 14, 4],
+              'circle-color': '#a5c3ff', 'circle-opacity': 0.8, 'circle-stroke-width': 0 },
+          });
+
+          const popup = new mapboxgl.Popup({ closeButton: false, offset: 12 });
+          map.on('click', 're-districts', (e) => {
+            const p = e.features[0].properties;
+            popup.setLngLat(e.lngLat).setHTML(
+              `<div style="font:600 13px system-ui;color:#111">${p.ename}</div>
+               <div style="font:12px system-ui;color:#333;margin-top:3px">${Number(p.avg_sqm).toLocaleString()} QAR/m² · ${Number(p.deals).toLocaleString()} deals</div>`
+            ).addTo(map);
+          });
+          map.on('click', 're-buildings', (e) => {
+            const p = e.features[0].properties;
+            popup.setLngLat(e.lngLat).setHTML(
+              `<div style="font:600 13px system-ui;color:#111">${p.ename || 'Building'}</div>
+               <div style="font:12px system-ui;color:#333;margin-top:3px">${[p.category, p.district].filter(Boolean).join(' · ')}</div>`
+            ).addTo(map);
+          });
+          for (const layer of ['re-districts', 're-buildings']) {
+            map.on('mouseenter', layer, () => { map.getCanvas().style.cursor = 'pointer'; });
+            map.on('mouseleave', layer, () => { map.getCanvas().style.cursor = ''; });
+          }
+          if (!cancelled) setStatus('ready');
+        });
+        map.on('error', () => { if (!cancelled) setStatus('error'); });
+      } catch { if (!cancelled) setStatus('error'); }
+    })();
+    return () => { cancelled = true; if (map) { try { map.remove(); } catch { /* noop */ } } mapRef.current = null; };
+  }, []);
+
+  // Toggle the (already-loaded) building layer — kept hidden until asked for, so
+  // the map opens light and only renders 7k points on demand.
+  useEffect(() => {
+    const map = mapRef.current;
+    if (!map || status !== 'ready' || !map.getLayer('re-buildings')) return;
+    map.setLayoutProperty('re-buildings', 'visibility', showBuildings ? 'visible' : 'none');
+  }, [showBuildings, status]);
+
+  if (status === 'no_token') {
+    return html`<div class="empty">The map needs a Mapbox token. A platform admin can set it in Settings → integrations.</div>`;
+  }
+
+  return html`
+    <div style=${{ position: 'relative', borderRadius: '14px', overflow: 'hidden', border: '1px solid var(--border)', height: '68vh', minHeight: '460px' }}>
+      <div ref=${containerRef} style=${{ position: 'absolute', inset: 0 }}></div>
+      ${status === 'loading' ? html`<div class="empty" style=${{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>Loading the map…</div>` : null}
+      ${status === 'error' ? html`<div class="empty" style=${{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>The map failed to load.</div>` : null}
+
+      <!-- Legend + toggles -->
+      <div style=${{ position: 'absolute', top: '12px', left: '12px', background: 'rgba(13,18,35,0.86)', border: '1px solid var(--border)', borderRadius: '10px', padding: '11px 13px', backdropFilter: 'blur(4px)', maxWidth: '210px' }}>
+        <div style=${{ fontSize: '10.5px', fontWeight: 700, letterSpacing: '.06em', textTransform: 'uppercase', color: 'var(--text)', marginBottom: '7px' }}>Avg price · QAR/m²</div>
+        <div style=${{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+          ${PRICE_STOPS.map(([label, color]) => html`<div key=${label} style=${{ display: 'flex', alignItems: 'center', gap: '7px' }}>
+            <span style=${{ width: '11px', height: '11px', borderRadius: '50%', background: color, flexShrink: 0 }}></span>
+            <span class="muted small">${label}</span>
+          </div>`)}
+        </div>
+        <div class="muted small" style=${{ marginTop: '6px', opacity: 0.7 }}>circle size = deal volume</div>
+        <label style=${{ display: 'flex', alignItems: 'center', gap: '7px', marginTop: '10px', paddingTop: '9px', borderTop: '1px solid var(--border)', cursor: 'pointer', fontSize: '12px', color: 'var(--text)' }}>
+          <input type="checkbox" checked=${showBuildings} onChange=${(e) => setShowBuildings(e.target.checked)} />
+          Show buildings${stats ? html` <span class="muted small">(${stats.buildings.toLocaleString()})</span>` : ''}
+        </label>
+      </div>
+    </div>
+    <div class="muted small" style=${{ marginTop: '8px', lineHeight: 1.5 }}>
+      Each dot is a district — colour is its average price per m², size is deal volume. Tap a dot for detail. Buildings load on demand. (Land parcels &amp; land-use polygons are a heavier layer coming next.)
+    </div>`;
 }
