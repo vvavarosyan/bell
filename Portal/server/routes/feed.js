@@ -154,7 +154,12 @@ router.get('/stats', async (req, res, next) => {
         (SELECT count(DISTINCT industry)::int FROM companies WHERE industry IS NOT NULL AND industry <> '') AS bdi_industries,
         -- Research feed diagnostic (Val 2026-07-04): published vs in-feed on THIS db.
         (SELECT count(*)::int FROM research_reports WHERE is_published = true) AS research_published,
-        (SELECT count(*)::int FROM feed_events WHERE kind = 'research') AS research_feed_events
+        (SELECT count(*)::int FROM feed_events WHERE kind = 'research') AS research_feed_events,
+        -- Per-kind breakdown so the Market Feed VIEW tabs each show their own
+        -- count (Val 2026-07-12: "what are all those 61K rows?" — 'All' is every
+        -- event type, news is only one slice).
+        (SELECT jsonb_object_agg(kind, c)
+           FROM (SELECT kind, count(*)::int AS c FROM feed_events GROUP BY kind) k) AS kind_counts
     `);
     const news = getNewsState();
     res.json({

@@ -165,11 +165,15 @@ export function MarketFeedTab({ mode } = {}) {
         <!-- Primary switch: News / Research / New companies -->
         <div class="feed-tablabel"><span class="feed-cats-label">View</span></div>
         <div class="feed-tabs">
-          ${[['', 'All'], ['news', 'News'], ['research', 'Research'], ['company_registered', 'New companies']].map(([val, label]) => html`
-            <button key=${val || 'all'}
-              class=${'feed-tab' + (val === 'research' ? ' research' : '') + (kind === val ? ' active' : '')}
-              onClick=${() => setKind(val)}>${label}</button>
-          `)}
+          ${[['', 'All'], ['news', 'News'], ['research', 'Research'], ['company_registered', 'New companies']].map(([val, label]) => {
+            const kc = stats?.kind_counts || {};
+            const n = val === '' ? (stats?.total_events ?? null) : (kc[val] ?? null);
+            return html`
+              <button key=${val || 'all'}
+                class=${'feed-tab' + (val === 'research' ? ' research' : '') + (kind === val ? ' active' : '')}
+                onClick=${() => setKind(val)}>${label}${n != null ? html`<span class="feed-tab-ct">${n.toLocaleString()}</span>` : ''}</button>
+            `;
+          })}
         </div>
 
         <!-- Secondary: topic categories -->
@@ -186,7 +190,7 @@ export function MarketFeedTab({ mode } = {}) {
             onKeyDown=${e => { if (e.key === 'Enter') load(); }} />
         </div>
         <div class="filt-help">
-          Pick a <b>View</b> (All, News, Research, New companies), then narrow by <b>Topic</b> or search.${total ? html` <b>${total.toLocaleString()}</b> items — page through them below.` : ''}
+          <b>All</b> counts every event type — news, new company registrations, market signals, data updates and research. <b>News</b> alone is ${stats?.kind_counts?.news != null ? html`<b>${stats.kind_counts.news.toLocaleString()}</b>` : 'a subset'}. Pick a <b>View</b>, then narrow by <b>Topic</b> or search.
         </div>
 
         <!-- Feed -->
