@@ -16,14 +16,14 @@ const WEBSITE_OPTS = [['has', 'Has website'], ['none', 'No website']];
 
 export const EMPTY_FILTERS = {
   industries: [], statuses: [], sources: [], empBuckets: [],
-  city: '', foundedMin: '', foundedMax: '', scoreMin: '', website: '',
+  city: '', ageMin: '', ageMax: '', scoreMin: '', website: '',
   hasEmail: false, hasPhone: false, hasLinkedin: false, hasPeople: false,
 };
 
 export function countActiveFilters(f) {
   if (!f) return 0;
   return f.industries.length + f.statuses.length + f.sources.length + f.empBuckets.length
-    + (String(f.city).trim() ? 1 : 0) + (f.foundedMin ? 1 : 0) + (f.foundedMax ? 1 : 0) + (f.scoreMin ? 1 : 0)
+    + (String(f.city).trim() ? 1 : 0) + (f.ageMin ? 1 : 0) + (f.ageMax ? 1 : 0) + (f.scoreMin ? 1 : 0)
     + (f.website ? 1 : 0)
     + COMPLETE.reduce((n, [k]) => n + (f[k] ? 1 : 0), 0);
 }
@@ -119,7 +119,7 @@ export function CompanyFilters({ value, industries = [], onApply, onClose }) {
           ${sec('Website', html`<div class="bdi-chiprow">${WEBSITE_OPTS.map(([k, label]) => chip(d.website === k, label, () => set('website', d.website === k ? '' : k)))}</div>`)}
           ${sec('Has data', html`<div class="bdi-chiprow">${COMPLETE.map(([k, label]) => chip(d[k], label, () => set(k, !d[k])))}</div>`)}
           ${sec('Location', html`<input class="bdi-filter-input" type="text" placeholder="City…" value=${d.city} onChange=${(e) => set('city', e.target.value)} style=${{ width: '160px' }} />`)}
-          ${sec('Founded year', html`<div style=${{ display: 'flex', alignItems: 'center', gap: '6px' }}>${num('foundedMin', 'from')}<span class="muted">–</span>${num('foundedMax', 'to')}</div>`)}
+          ${sec('Company age (years)', html`<div style=${{ display: 'flex', alignItems: 'center', gap: '6px' }}>${num('ageMin', 'min')}<span class="muted">–</span>${num('ageMax', 'max')}<span class="muted small" style=${{ marginLeft: '4px' }}>yrs old</span></div>`)}
           ${sec('Min Bell score', html`${num('scoreMin', '0–100')}`)}
         </div>
       </div>

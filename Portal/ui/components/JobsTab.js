@@ -37,6 +37,7 @@ export function JobsTab({ mode = 'local-admin' } = {}) {
   const [options, setOptions] = useState({ types: [], workplaces: [], seniorities: [] });
   const [loading, setLoading] = useState(false);
   const [openedId, setOpenedId] = useState(null);
+  const [showFilters, setShowFilters] = useState(false);   // Filters panel (Val 2026-07-12, like Companies)
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -82,24 +83,44 @@ export function JobsTab({ mode = 'local-admin' } = {}) {
       ${opts.map((o) => html`<option key=${o.v ?? o} value=${o.v ?? o}>${o.label ?? nice(o)}</option>`)}
     </select>`;
 
+  const jobsFilterCount = (type ? 1 : 0) + (workplace ? 1 : 0) + (seniority ? 1 : 0) + (postedWithin ? 1 : 0) + (activeFilter ? 1 : 0);
+  const secF = (label, body) => html`<div class="bdi-filter-sec"><div class="bdi-filter-label">${label}</div>${body}</div>`;
+
   return html`
     <div class="grid-toolbar">
       <input type="text" placeholder="Search title, company, location, description…"
         value=${q} onChange=${e => { setQ(e.target.value); setOffset(0); }}
         style=${{ minWidth: '170px', flex: '0 1 230px' }} />
-      ${sel(type, setType, options.types, 'All types')}
-      ${sel(workplace, setWorkplace, options.workplaces, 'Any workplace')}
-      ${sel(seniority, setSeniority, options.seniorities, 'Any seniority')}
-      ${sel(postedWithin, setPostedWithin, [
-        { v: '7', label: 'Last 7 days' }, { v: '30', label: 'Last 30 days' }, { v: '90', label: 'Last 90 days' },
-      ], 'Any date')}
-      ${sel(activeFilter, setActiveFilter, [
-        { v: 'true', label: 'Active only' }, { v: 'false', label: 'Expired only' },
-      ], 'All jobs')}
+      <button
+        class=${'toolbar-toggle' + (jobsFilterCount > 0 || showFilters ? ' accent' : '')}
+        onClick=${() => setShowFilters(v => !v)}
+        title="Filters — type, workplace, seniority, date posted, status"
+        style=${{ whiteSpace: 'nowrap' }}
+      >☰ Filters${jobsFilterCount > 0 ? ` · ${jobsFilterCount}` : ''}</button>
       ${loading ? html`<span class="count">loading…</span>` : html`<${Pagination} total=${total} limit=${limit} offset=${offset} onChange=${setOffset} />`}
       <span class="spacer"></span>
       <button onClick=${load}>Refresh</button>
     </div>
+
+    ${showFilters ? html`<div class="bdi-filter-anchor">
+      <div class="bdi-filter-drop">
+        <div class="bdi-filter-head"><strong>Filters</strong><span class="spacer"></span>
+          <button class="bdi-filter-clear" onClick=${() => { setType(''); setWorkplace(''); setSeniority(''); setPostedWithin(''); setActiveFilter(''); setOffset(0); }}>Clear all</button>
+          <button class="bdi-filter-x" onClick=${() => setShowFilters(false)} title="Close">✕</button>
+        </div>
+        <div class="bdi-filter-body"><div class="bdi-filter-grid">
+          ${secF('Type', sel(type, setType, options.types, 'All types'))}
+          ${secF('Workplace', sel(workplace, setWorkplace, options.workplaces, 'Any workplace'))}
+          ${secF('Seniority', sel(seniority, setSeniority, options.seniorities, 'Any seniority'))}
+          ${secF('Date posted', sel(postedWithin, setPostedWithin, [
+            { v: '7', label: 'Last 7 days' }, { v: '30', label: 'Last 30 days' }, { v: '90', label: 'Last 90 days' },
+          ], 'Any date'))}
+          ${secF('Status', sel(activeFilter, setActiveFilter, [
+            { v: 'true', label: 'Active only' }, { v: 'false', label: 'Expired only' },
+          ], 'All jobs'))}
+        </div></div>
+      </div>
+    </div>` : null}
 
     <div class="grid-pane">
       <div class="grid-wrap">

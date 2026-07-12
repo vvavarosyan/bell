@@ -30,6 +30,7 @@ export function PeopleTab({ mode = 'local-admin' } = {}) {
   const [addedBefore, setAddedBefore] = useState('');
   const [loading, setLoading]   = useState(false);
   const [openedId, setOpenedId] = useState(null);
+  const [showFilters, setShowFilters] = useState(false);   // Filters panel (Val 2026-07-12, like Companies)
   const [selected, setSelected] = useState(() => new Set());
   const [activeJob, setActiveJob] = useState(null);
   const [locked, setLocked]     = useState(false);   // PEOPLE PUBLIC LOCKDOWN (server-driven)
@@ -196,6 +197,9 @@ export function PeopleTab({ mode = 'local-admin' } = {}) {
     `;
   }
 
+  const peopleFilterCount = (company.trim() ? 1 : 0) + (source ? 1 : 0) + (employment ? 1 : 0)
+    + (emailStatus ? 1 : 0) + (addedAfter ? 1 : 0) + (addedBefore ? 1 : 0);
+
   return html`
     <div class="grid-toolbar">
       <input
@@ -203,52 +207,12 @@ export function PeopleTab({ mode = 'local-admin' } = {}) {
         value=${q} onChange=${e => { setQ(e.target.value); setOffset(0); }}
         style=${{ minWidth: '160px', flex: '0 1 200px' }}
       />
-      <input
-        type="text" placeholder="Employer company…"
-        value=${company} onChange=${e => { setCompany(e.target.value); setOffset(0); }}
-        style=${{ minWidth: '150px', flex: '0 1 170px' }}
-      />
-      <select
-        title="Filter by source"
-        value=${source}
-        onChange=${e => { setSource(e.target.value); setOffset(0); }}
-      >
-        <option value="">All sources</option>
-        <option value="MoPH">MoPH</option>
-        <option value="LinkedIn">LinkedIn</option>
-        <option value="MadeInQatar">Made in Qatar</option>
-        <option value="QFCRA">QFCRA</option>
-        <option value="manual">Manual</option>
-      </select>
-      <select
-        title="Filter by employment links"
-        value=${employment}
-        onChange=${e => { setEmployment(e.target.value); setOffset(0); }}
-      >
-        <option value="">All people</option>
-        <option value="with">Has employment link</option>
-        <option value="without">No employment link</option>
-      </select>
-      ${!isUser ? html`
-      <select
-        title="Filter by email status (admin)"
-        value=${emailStatus}
-        onChange=${e => { setEmailStatus(e.target.value); setOffset(0); }}
-      >
-        <option value="">Any email status</option>
-        <option value="verified">Email verified</option>
-        <option value="pattern">Verified (pattern)</option>
-        <option value="matched">Matched from page</option>
-        <option value="has">Has any email</option>
-        <option value="none">No email</option>
-      </select>
-      <input type="date" title="Added on/after (admin)" value=${addedAfter}
-        onChange=${e => { setAddedAfter(e.target.value); setOffset(0); }}
-        style=${{ flex: '0 0 auto' }} />
-      <input type="date" title="Added on/before (admin)" value=${addedBefore}
-        onChange=${e => { setAddedBefore(e.target.value); setOffset(0); }}
-        style=${{ flex: '0 0 auto' }} />
-      ` : null}
+      <button
+        class=${'toolbar-toggle' + (peopleFilterCount > 0 || showFilters ? ' accent' : '')}
+        onClick=${() => setShowFilters(v => !v)}
+        title="Filters — employer, source, employment, email status, date added"
+        style=${{ whiteSpace: 'nowrap' }}
+      >☰ Filters${peopleFilterCount > 0 ? ` · ${peopleFilterCount}` : ''}</button>
       ${loading ? html`<span class="count">loading…</span>` : html`<${Pagination} total=${total} limit=${limit} offset=${offset} onChange=${setOffset} />`}
       <span class="spacer"></span>
       <button onClick=${load}>Refresh</button>
@@ -256,6 +220,36 @@ export function PeopleTab({ mode = 'local-admin' } = {}) {
         ${archivedMode ? 'View Active' : 'View Archived'}
       </button>
     </div>
+
+    ${showFilters ? html`<div class="bdi-filter-anchor">
+      <div class="bdi-filter-drop">
+        <div class="bdi-filter-head"><strong>Filters</strong><span class="spacer"></span>
+          <button class="bdi-filter-clear" onClick=${() => { setCompany(''); setSource(''); setEmployment(''); setEmailStatus(''); setAddedAfter(''); setAddedBefore(''); setOffset(0); }}>Clear all</button>
+          <button class="bdi-filter-x" onClick=${() => setShowFilters(false)} title="Close">✕</button>
+        </div>
+        <div class="bdi-filter-body"><div class="bdi-filter-grid">
+          <div class="bdi-filter-sec"><div class="bdi-filter-label">Employer</div>
+            <input class="bdi-filter-input" type="text" placeholder="Company…" value=${company} onChange=${e => { setCompany(e.target.value); setOffset(0); }} style=${{ width: '180px' }} /></div>
+          <div class="bdi-filter-sec"><div class="bdi-filter-label">Source</div>
+            <select class="bdi-filter-input" value=${source} onChange=${e => { setSource(e.target.value); setOffset(0); }}>
+              <option value="">All sources</option><option value="MoPH">MoPH</option><option value="LinkedIn">LinkedIn</option><option value="MadeInQatar">Made in Qatar</option><option value="QFCRA">QFCRA</option><option value="manual">Manual</option>
+            </select></div>
+          <div class="bdi-filter-sec"><div class="bdi-filter-label">Employment</div>
+            <select class="bdi-filter-input" value=${employment} onChange=${e => { setEmployment(e.target.value); setOffset(0); }}>
+              <option value="">All people</option><option value="with">Has employment link</option><option value="without">No employment link</option>
+            </select></div>
+          ${!isUser ? html`
+          <div class="bdi-filter-sec"><div class="bdi-filter-label">Email status</div>
+            <select class="bdi-filter-input" value=${emailStatus} onChange=${e => { setEmailStatus(e.target.value); setOffset(0); }}>
+              <option value="">Any</option><option value="verified">Verified</option><option value="pattern">Verified (pattern)</option><option value="matched">Matched from page</option><option value="has">Has any email</option><option value="none">No email</option>
+            </select></div>
+          <div class="bdi-filter-sec"><div class="bdi-filter-label">Added after</div>
+            <input class="bdi-filter-input" type="date" value=${addedAfter} onChange=${e => { setAddedAfter(e.target.value); setOffset(0); }} /></div>
+          <div class="bdi-filter-sec"><div class="bdi-filter-label">Added before</div>
+            <input class="bdi-filter-input" type="date" value=${addedBefore} onChange=${e => { setAddedBefore(e.target.value); setOffset(0); }} /></div>` : null}
+        </div></div>
+      </div>
+    </div>` : null}
 
     ${selected.size > 0 ? html`
       <div class="bulk-bar">

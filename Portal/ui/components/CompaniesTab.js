@@ -103,8 +103,12 @@ export function CompaniesTab({ archivedMode: initialArchived = false, mode = 'lo
       if (f.sources.length)    params.sources    = f.sources.join(',');
       if (f.empBuckets.length) params.emp_buckets = f.empBuckets.join(',');
       if (String(f.city).trim()) params.city = f.city.trim();
-      if (f.foundedMin) params.founded_min = f.foundedMin;
-      if (f.foundedMax) params.founded_max = f.foundedMax;
+      // Company age (years) → founded-year range: older = founded earlier.
+      // "at least ageMin years old" ⇒ founded on/before thisYear−ageMin (founded_max);
+      // "at most ageMax years old" ⇒ founded on/after thisYear−ageMax (founded_min).
+      const thisYear = new Date().getFullYear();
+      if (f.ageMin) params.founded_max = thisYear - Number(f.ageMin);
+      if (f.ageMax) params.founded_min = thisYear - Number(f.ageMax);
       if (f.scoreMin)   params.score_min   = f.scoreMin;
       if (f.website === 'has')  params.has_website = '1';
       else if (f.website === 'none') params.has_website = '0';
