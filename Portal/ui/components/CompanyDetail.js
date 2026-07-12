@@ -917,6 +917,14 @@ function IntelTab({ financials, shareholders, partnerships, tech = [] }) {
     return v || '';
   };
   const srcChip = (s) => s ? html`<span style=${{ fontSize: '9.5px', color: 'var(--text-dim)' }}>${srcLabel(s)}</span>` : null;
+  // Registry figures (e.g. QFC share capital) are shown verbatim as recorded in
+  // the official register — which can include nominal/placeholder amounts. A
+  // subtle "as recorded" tag sets that expectation so an unusual value doesn't
+  // read as an audited number (Val 2026-07-12).
+  const isRegistry = (s) => /registry|qfc|moci|qfcra/i.test(String(s || ''));
+  const regCaveat = (e) => (!e.estimated && isRegistry(e.source))
+    ? html`<span class="muted" style=${{ fontSize: '9px', opacity: 0.7, marginLeft: '3px' }} title="Shown exactly as recorded in the official register — may be a nominal or placeholder amount, not an audited figure.">· as recorded</span>`
+    : null;
   const confColor = (c) => c === 'high' ? '#6fcf97' : c === 'medium' ? '#f5c84c' : '#9ca5b9';
   // Reported figures get a filled dot; an ESTIMATE gets a hollow ring — a
   // distinct mark so an interpolated value is never read as a reported number.
@@ -934,11 +942,11 @@ function IntelTab({ financials, shareholders, partnerships, tech = [] }) {
           <div style=${{ fontSize: '12.5px', fontWeight: 700, color: 'var(--text)', marginBottom: '3px' }}>${g.label}</div>
           ${(g.entries || []).map((e, i) => html`<div key=${i} style=${{ display: 'flex', justifyContent: 'space-between', gap: '10px', fontSize: '12px', padding: '2px 0', color: 'var(--text-muted)' }}>
             <span>${e.period !== '—' ? e.period : ''}${e.estimated ? html`<span style=${{ marginLeft: '6px', fontSize: '9px', color: 'var(--text-dim)', border: '1px solid var(--text-dim)', borderRadius: '4px', padding: '0 4px' }}>est.</span>` : null}</span>
-            <span style=${{ textAlign: 'right', color: e.estimated ? 'var(--text-dim)' : 'var(--text)', fontStyle: e.estimated ? 'italic' : 'normal' }}>${e.estimated ? '~' : ''}${fmtFin(e)} ${confDot(e.confidence, e.estimated)} ${srcChip(e.source)}</span>
+            <span style=${{ textAlign: 'right', color: e.estimated ? 'var(--text-dim)' : 'var(--text)', fontStyle: e.estimated ? 'italic' : 'normal' }}>${e.estimated ? '~' : ''}${fmtFin(e)} ${confDot(e.confidence, e.estimated)} ${srcChip(e.source)}${regCaveat(e)}</span>
           </div>`)}
         </div>`)}
       </div>
-      <div class="muted small" style=${{ marginTop: '6px', padding: '0 10px', lineHeight: 1.5 }}>Each figure shows its source; the dot is confidence (green high · amber medium · grey low). “est.” = interpolated between two reported years, not itself reported.</div>
+      <div class="muted small" style=${{ marginTop: '6px', padding: '0 10px', lineHeight: 1.5 }}>Each figure shows its source; the dot is confidence (green high · amber medium · grey low). “est.” = interpolated between two reported years, not itself reported. “as recorded” = shown verbatim from the official register (may be a nominal/placeholder amount).</div>
     ` : null}
 
     ${shareholders.length ? html`
