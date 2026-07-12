@@ -2,6 +2,7 @@
 
 import { Router } from 'express';
 import { query } from '../db.js';
+import { consolidateFinancials } from '../lib/financials.js';
 import {
   listCompanyContacts, loadCompanyContactsByIds,
   upsertContact, setPrimaryContact, deleteContact,
@@ -454,6 +455,9 @@ router.get('/:id', async (req, res, next) => {
       people_count:  peopleCount,
       contacts: maskedContacts,
       financials:   financials.rows,
+      // Clean, source-attributed, confidence-tagged view + conservative
+      // interpolated estimates (Val 2026-07-12) — the reliable presentation.
+      financials_grouped: consolidateFinancials(financials.rows, { estimate: true }),
       shareholders: shareholders.rows,
       partnerships: partnerships.rows,
       rejects:      rejects,

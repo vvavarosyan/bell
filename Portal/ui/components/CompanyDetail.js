@@ -484,7 +484,7 @@ export function CompanyDetail({ companyId, onMutated, onDeleted, canHardDelete =
         ${tab === 'people'  ? (data.people_locked
           ? html`<${PeopleLockedBanner} count=${data.people_count ?? 0} compact=${true} />`
           : html`<${PeopleView}  people=${data.people} isUser=${isUser} onReveal=${revealPerson} />`) : null}
-        ${tab === 'intel'   ? html`<${IntelTab} financials=${data.financials || []} shareholders=${data.shareholders || []} partnerships=${data.partnerships || []} tech=${data.tech || []} />` : null}
+        ${tab === 'intel'   ? html`<${IntelTab} financials=${data.financials_grouped || []} shareholders=${data.shareholders || []} partnerships=${data.partnerships || []} tech=${data.tech || []} />` : null}
         ${isLocalEngine && tab === 'sources' ? html`<${SourcesActivityTab} company=${c} extra=${extra} contacts=${data.contacts || []} people=${data.people || []} financials=${data.financials || []} shareholders=${data.shareholders || []} rejects=${data.rejects || []} />` : null}
         ${tab === 'legal'   ? html`<${LegalTab}    sources=${sources} extra=${extra} isUser=${isUser} />` : null}
       </div>
@@ -905,17 +905,36 @@ function IntelTab({ financials, shareholders, partnerships, tech = [] }) {
     color: 'var(--text-dim)', margin: '18px 0 8px',
   }}>${label}${n ? ` · ${n}` : ''}</div>`;
   const cellStyle = { padding: '7px 10px', fontSize: '12.5px', color: 'var(--text)', borderBottom: '1px solid rgba(255,255,255,0.05)' };
-  const srcChip = (s) => s ? html`<span style=${{ fontSize: '9.5px', color: 'var(--text-dim)' }}>${String(s).replace('research:job-', 'research #')}</span>` : null;
+  // Friendly source label + a confidence dot (green high · amber medium · grey
+  // low) so a customer can judge how solid each figure is (Val 2026-07-12).
+  const srcLabel = (s) => {
+    const v = String(s || '');
+    if (/^estimate:/i.test(v)) return 'estimated';
+    if (/qse|exchange/i.test(v)) return 'QSE';
+    if (/registry|moci|qfc/i.test(v)) return 'registry';
+    if (/^research/i.test(v)) return v.replace('research:job-', 'research #');
+    if (/website|firecrawl|scrape/i.test(v)) return 'website';
+    return v || '';
+  };
+  const srcChip = (s) => s ? html`<span style=${{ fontSize: '9.5px', color: 'var(--text-dim)' }}>${srcLabel(s)}</span>` : null;
+  const confColor = (c) => c === 'high' ? '#6fcf97' : c === 'medium' ? '#f5c84c' : '#9ca5b9';
+  const confDot = (c) => html`<span title=${c + ' confidence'} style=${{ display: 'inline-block', width: '7px', height: '7px', borderRadius: '50%', background: confColor(c), marginLeft: '2px', verticalAlign: 'middle' }}></span>`;
+  const fmtFin = (e) => (e.value_text || (e.value_num != null ? Number(e.value_num).toLocaleString() : '—')) + (e.currency ? ' ' + e.currency : '');
+  const finRows = financials.reduce((n, g) => n + (g.entries ? g.entries.length : 0), 0);
 
   return html`<div class="overview" style=${{ padding: '4px 14px 16px' }}>
     ${financials.length ? html`
-      ${sectionHead('Financials', financials.length)}
+      ${sectionHead('Financials', finRows)}
       <div>
-        ${financials.map(f => html`<div key=${f.id} style=${{ display: 'flex', justifyContent: 'space-between', gap: '10px', ...cellStyle }}>
-          <span><strong style=${{ textTransform: 'capitalize' }}>${String(f.metric).replace(/_/g, ' ')}</strong>${f.period ? html` <span class="muted small">· ${f.period}</span>` : null}</span>
-          <span style=${{ textAlign: 'right' }}>${f.value_text || (f.value_num != null ? Number(f.value_num).toLocaleString() : '—')}${f.currency ? ' ' + f.currency : ''} ${srcChip(f.source)}</span>
+        ${financials.map(g => html`<div key=${g.key} style=${{ padding: '8px 10px', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+          <div style=${{ fontSize: '12.5px', fontWeight: 700, color: 'var(--text)', marginBottom: '3px' }}>${g.label}</div>
+          ${(g.entries || []).map((e, i) => html`<div key=${i} style=${{ display: 'flex', justifyContent: 'space-between', gap: '10px', fontSize: '12px', padding: '2px 0', color: 'var(--text-muted)' }}>
+            <span>${e.period !== '—' ? e.period : ''}${e.estimated ? html`<span style=${{ marginLeft: '6px', fontSize: '9px', color: 'var(--yellow, #f5c84c)', border: '1px solid var(--yellow, #f5c84c)', borderRadius: '4px', padding: '0 4px' }}>est.</span>` : null}</span>
+            <span style=${{ textAlign: 'right', color: 'var(--text)' }}>${fmtFin(e)} ${confDot(e.confidence)} ${srcChip(e.source)}</span>
+          </div>`)}
         </div>`)}
       </div>
+      <div class="muted small" style=${{ marginTop: '6px', padding: '0 10px', lineHeight: 1.5 }}>Each figure shows its source; the dot is confidence (green high · amber medium · grey low). “est.” = interpolated between two reported years, not itself reported.</div>
     ` : null}
 
     ${shareholders.length ? html`

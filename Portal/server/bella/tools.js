@@ -151,8 +151,14 @@ function companyDetailOut(payload) {
   if (Array.isArray(payload?.tech) && payload.tech.length) {
     out.tech = payload.tech.slice(0, 25).map((t) => pick(t, ['tech', 'category']));
   }
-  if (Array.isArray(payload?.financials) && payload.financials.length) {
-    out.financials = payload.financials.slice(0, 12).map((f) => pick(f, ['metric', 'value_text', 'value_num', 'currency', 'period', 'as_of']));
+  // Clean, consolidated financials (source + confidence + estimate flags) so
+  // Bella can cite reliable figures in outreach — the latest per metric.
+  if (Array.isArray(payload?.financials_grouped) && payload.financials_grouped.length) {
+    out.financials = payload.financials_grouped.slice(0, 8).map((g) => {
+      const e = (g.entries || [])[0] || {};
+      return { metric: g.label, period: e.period || null, value: e.value_text || e.value_num || null,
+        currency: e.currency || null, confidence: e.confidence || null, estimated: !!e.estimated };
+    });
   }
   return out;
 }
