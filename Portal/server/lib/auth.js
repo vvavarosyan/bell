@@ -20,6 +20,7 @@
 import { verifyToken, createClerkClient } from '@clerk/backend';
 import { query, withTransaction } from '../db.js';
 import { capabilitiesForMode } from './capabilities.js';
+import { findPendingInvite, acceptInvite } from './team.js';
 
 const MODE = (process.env.BDI_MODE || 'local-admin').toLowerCase();
 const CLERK_SECRET = process.env.CLERK_SECRET_KEY || null;
@@ -155,6 +156,14 @@ export async function requireAuth(req, res, next) {
     }
   }
   if (!r.rows.length) {
+    // A row may exist but be INACTIVE — removed from a team (Phase 5) or on a
+    // suspended tenant. Answer with a clean 403 instead of a 500.
+    const inactive = await query(
+      `SELECT 1 FROM users WHERE clerk_user_id = $1 AND is_active = false LIMIT 1`, [clerkUserId],
+    ).catch(() => ({ rows: [] }));
+    if (inactive.rows.length) {
+      return res.status(403).json({ error: 'account_inactive', reason: 'Your access has been removed — contact your team’s admin.' });
+    }
     // Still no row after attempt — something is genuinely broken
     return res.status(500).json({
       error: 'provisioning_failed',
@@ -430,33 +439,45 @@ async function lazyProvisionUser(clerkUserId) {
       return;
     }
 
-    // (c) Brand new user — create personal tenant + user row
-    const slugBase = slugify(fullName) || slugify(primaryEmail.split('@')[0]) || 'workspace';
-    let slug = slugBase, i = 0;
-    while (true) {
-      const s = await client.query(`SELECT 1 FROM tenants WHERE slug = $1 LIMIT 1`, [slug]);
-      if (!s.rows.length) break;
-      i++; slug = `${slugBase}-${i}`;
+    // (c) Brand new user. TEAM INVITE (Phase 5): if this email was invited,
+    //     join that tenant as the invited role; otherwise create a personal
+    //     tenant + owner. Staff (platform_admin) are never auto-joined.
+    const q = (s, p) => client.query(s, p);
+    const invite = isPlatformAdmin ? null : await findPendingInvite(primaryEmail, q);
+    let tenantId, effRole, tenantName;
+    if (invite) {
+      tenantId = Number(invite.tenant_id);
+      effRole = invite.role;
+      const t = await q(`SELECT name FROM tenants WHERE id = $1`, [tenantId]);
+      tenantName = t.rows[0]?.name || 'team';
+    } else {
+      const slugBase = slugify(fullName) || slugify(primaryEmail.split('@')[0]) || 'workspace';
+      let slug = slugBase, i = 0;
+      while (true) {
+        const s = await q(`SELECT 1 FROM tenants WHERE slug = $1 LIMIT 1`, [slug]);
+        if (!s.rows.length) break;
+        i++; slug = `${slugBase}-${i}`;
+      }
+      tenantName = `${firstName || slugBase}'s Workspace`.replace(/^'s/, 'Personal');
+      const tR = await q(`INSERT INTO tenants (name, slug, plan) VALUES ($1, $2, 'free') RETURNING id`, [tenantName, slug]);
+      tenantId = Number(tR.rows[0].id);
+      effRole = role;
     }
-    const tenantName = `${firstName || slugBase}'s Workspace`.replace(/^'s/, 'Personal');
 
-    const tR = await client.query(`
-      INSERT INTO tenants (name, slug, plan) VALUES ($1, $2, 'free') RETURNING id
-    `, [tenantName, slug]);
-    const tenantId = Number(tR.rows[0].id);
-
-    await client.query(`
+    const uR = await q(`
       INSERT INTO users (
         tenant_id, clerk_user_id, email, full_name, first_name, last_name,
         avatar_url, role, joined_at
       ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, now())
+      RETURNING id
     `, [
       tenantId, clerkUserId, primaryEmail.toLowerCase(),
       fullName, firstName || null, lastName || null,
       clerkUser.imageUrl || null,
-      role,
+      effRole,
     ]);
-    console.log(`[auth] LAZY-provisioned ${primaryEmail} as ${role} of new tenant '${tenantName}' (id=${tenantId})`);
+    if (invite) await acceptInvite(invite.id, Number(uR.rows[0].id), q);
+    console.log(`[auth] LAZY-provisioned ${primaryEmail} as ${effRole} of tenant '${tenantName}' (id=${tenantId})${invite ? ' [invited]' : ''}`);
   });
 }
 

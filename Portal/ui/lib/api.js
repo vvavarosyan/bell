@@ -139,6 +139,14 @@ export const api = {
   adminUsers:             (q = '') => request('/api/admin/users' + (q ? '?' + new URLSearchParams({ q }) : '')),
   adminUser:              (id) => request('/api/admin/users/' + id),
   adminRevealId:          (id, userId) => request('/api/admin/users/' + id + '/reveal-id?user_id=' + userId),
+
+  // Team (Phase 5)
+  teamMembers:            () => request('/api/team/members'),
+  teamInvites:            () => request('/api/team/invites'),
+  teamInvite:             (email, role) => request('/api/team/invites', { method: 'POST', body: JSON.stringify({ email, role }) }),
+  teamRevokeInvite:       (id) => request('/api/team/invites/' + id + '/revoke', { method: 'POST' }),
+  teamSetRole:            (id, role) => request('/api/team/members/' + id, { method: 'PATCH', body: JSON.stringify({ role }) }),
+  teamRemove:             (id) => request('/api/team/members/' + id, { method: 'DELETE' }),
   adminUserCredits:       (id, delta, note) => request(`/api/admin/users/${id}/credits`, { method: 'POST', body: JSON.stringify({ delta, note }) }),
   adminUserSuspend:       (id, suspend) => request(`/api/admin/users/${id}/suspend`, { method: 'POST', body: JSON.stringify({ suspend }) }),
   adminUserPlan:          (id, plan) => request(`/api/admin/users/${id}/plan`, { method: 'POST', body: JSON.stringify({ plan }) }),

@@ -16,6 +16,7 @@ import { currentRoute, navigateTo } from './lib/router.js';
 import { bellaFillField, stashPending, BELLA_ACTION_EVENT, BELLA_FILL_RESULT_EVENT, visibleFillLabels } from './lib/bellaBus.js';
 import { toast } from './lib/toast.js';
 import { ComingSoon } from './components/ComingSoon.js';
+import { TeamTab } from './components/TeamTab.js';
 import { CompaniesTab, ArchivedCompaniesTab } from './components/CompaniesTab.js';
 import { PeopleTab }    from './components/PeopleTab.js';
 import { JobsTab }      from './components/JobsTab.js';
@@ -71,6 +72,7 @@ const VIEWS = {
   'market-feed': { Component: MarketFeedTab },
   'signals':     { Component: SignalsTab },
   'crm':         { Component: CrmTab },
+  'team':        { Component: TeamTab },
   'companies':   { Component: CompaniesTab },
   'people':      { Component: PeopleTab },
   'jobs':        { Component: JobsTab },

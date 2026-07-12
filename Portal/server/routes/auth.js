@@ -13,6 +13,7 @@ import { Webhook } from 'svix';
 import { query, withTransaction } from '../db.js';
 import { requireAuth, getModeInfo, orgRoleToBell } from '../lib/auth.js';
 import { ensureWelcome } from '../lib/notifications.js';
+import { findPendingInvite, acceptInvite } from '../lib/team.js';
 
 const router = Router();
 
@@ -91,31 +92,34 @@ async function handleUserCreated(clerkUser) {
   const fullName  = [firstName, lastName].filter(Boolean).join(' ').trim() || primaryEmail.split('@')[0];
 
   await withTransaction(async (client) => {
-    // 1. Auto-create a personal tenant for the new user.
-    //    Name defaults to "<First>'s Workspace" or the email local-part.
-    const slugBase = slugify(fullName) || slugify(primaryEmail.split('@')[0]) || 'workspace';
-    const slug = await uniqueSlug(client, slugBase);
-    const tenantName = `${firstName || slugBase}'s Workspace`.replace(/^'s/, 'Personal');
-
-    const tenantR = await client.query(`
-      INSERT INTO tenants (name, slug, plan)
-      VALUES ($1, $2, 'free')
-      RETURNING id
-    `, [tenantName, slug]);
-    const tenantId = Number(tenantR.rows[0].id);
-
-    // 2. Decide the user's role. Bell.qa staff (emails in
-    //    BDI_PLATFORM_ADMIN_EMAILS) become platform_admin; everyone else
-    //    becomes the owner of their auto-created tenant.
+    const q = (s, p) => client.query(s, p);
+    // Bell.qa staff (emails in BDI_PLATFORM_ADMIN_EMAILS) become platform_admin.
     const platformAdmins = (process.env.BDI_PLATFORM_ADMIN_EMAILS || '')
       .split(',')
       .map(s => s.trim().toLowerCase())
       .filter(Boolean);
     const isPlatformAdmin = platformAdmins.includes(primaryEmail.toLowerCase());
-    const role = isPlatformAdmin ? 'platform_admin' : 'owner';
 
-    // 3. Insert the user row
-    await client.query(`
+    // TEAM INVITE (Phase 5): if this email was invited to a tenant, JOIN that
+    // tenant as the invited role — no new personal workspace. Staff are never
+    // auto-joined. Otherwise, create the personal tenant + owner (default path).
+    const invite = isPlatformAdmin ? null : await findPendingInvite(primaryEmail, q);
+    let tenantId, role, tenantName;
+    if (invite) {
+      tenantId = Number(invite.tenant_id);
+      role = invite.role;
+      const t = await q(`SELECT name FROM tenants WHERE id = $1`, [tenantId]);
+      tenantName = t.rows[0]?.name || 'team';
+    } else {
+      const slugBase = slugify(fullName) || slugify(primaryEmail.split('@')[0]) || 'workspace';
+      const slug = await uniqueSlug(client, slugBase);
+      tenantName = `${firstName || slugBase}'s Workspace`.replace(/^'s/, 'Personal');
+      const tenantR = await q(`INSERT INTO tenants (name, slug, plan) VALUES ($1, $2, 'free') RETURNING id`, [tenantName, slug]);
+      tenantId = Number(tenantR.rows[0].id);
+      role = isPlatformAdmin ? 'platform_admin' : 'owner';
+    }
+
+    const uR = await q(`
       INSERT INTO users (
         tenant_id, clerk_user_id, email, full_name, first_name, last_name,
         avatar_url, role, joined_at
@@ -127,6 +131,7 @@ async function handleUserCreated(clerkUser) {
             last_name  = EXCLUDED.last_name,
             avatar_url = EXCLUDED.avatar_url,
             updated_at = now()
+      RETURNING id
     `, [
       tenantId, clerkUserId, primaryEmail.toLowerCase(),
       fullName, firstName || null, lastName || null,
@@ -134,7 +139,8 @@ async function handleUserCreated(clerkUser) {
       role,
     ]);
 
-    console.log(`[auth] provisioned user ${primaryEmail} as ${role} of tenant '${tenantName}' (id=${tenantId})`);
+    if (invite) await acceptInvite(invite.id, Number(uR.rows[0].id), q);
+    console.log(`[auth] provisioned user ${primaryEmail} as ${role} of tenant '${tenantName}' (id=${tenantId})${invite ? ' [invited]' : ''}`);
   });
 
   // Welcome (in-app + branded email) — best-effort + idempotent. Also fired on

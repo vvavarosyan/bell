@@ -66,6 +66,7 @@ import detailRequestsRouter    from './routes/detail_requests.js';
 import outreachRouter          from './routes/outreach.js';
 import icpRouter               from './routes/icp.js';
 import onboardingRouter        from './routes/onboarding.js';
+import teamRouter              from './routes/team.js';
 import exportRouter            from './routes/export.js';
 import importsRouter           from './routes/imports.js';
 import contributionsRouter     from './routes/contributions.js';
@@ -198,6 +199,7 @@ app.use('/api/detail-requests', ...feature, detailRequestsRouter);
 app.use('/api/outreach',        ...feature, outreachRouter);
 app.use('/api/icp',             ...feature, icpRouter);
 app.use('/api/onboarding',      ...feature, onboardingRouter);
+app.use('/api/team',            ...feature, teamRouter);
 app.use('/api/export',          ...feature, exportRouter);
 app.use('/api/imports',         ...feature, importsRouter);
 // Stats backs the app shell/header — signed in only, no subscription gate so an
