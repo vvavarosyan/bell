@@ -66,6 +66,19 @@ export function setActiveConversation(id, { broadcast = true } = {}) {
   if (broadcast) { try { window.dispatchEvent(new CustomEvent(BELLA_CONV_EVENT, { detail: { id: id ?? null } })); } catch { /* ignore */ } }
 }
 
+// "Bella does it for me" (Phase 4 onboarding): open the chat with a seeded
+// instruction that auto-sends. BellaDock opens the panel on the event; BellaChat
+// consumes the seed — on mount if it was just opened, or via the event listener
+// if it's already open — and sends it. One-shot: takeBellaSeed clears the slot.
+export const BELLA_OPEN_EVENT = 'bdi:bella-open';
+export function openBella(message) {
+  try { window.__bellaSeed = message ? String(message) : null; } catch { /* ignore */ }
+  try { window.dispatchEvent(new CustomEvent(BELLA_OPEN_EVENT)); } catch { /* ignore */ }
+}
+export function takeBellaSeed() {
+  try { const s = window.__bellaSeed; window.__bellaSeed = null; return s || null; } catch { return null; }
+}
+
 /** The session's active conversation id, or null if none / gone stale. */
 export function getActiveConversation(staleMs = BELLA_CONV_STALE_MS) {
   try {

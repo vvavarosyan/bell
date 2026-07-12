@@ -10,7 +10,8 @@ import { html } from '../lib/html.js';
 import { api } from '../lib/api.js';
 import { currentRoute, navigateTo } from '../lib/router.js';
 import { emitBellaAction, stashPending, fireToolEffects,
-  BELLA_CONV_EVENT, getActiveConversation, setActiveConversation, BELLA_FILL_RESULT_EVENT } from '../lib/bellaBus.js';
+  BELLA_CONV_EVENT, getActiveConversation, setActiveConversation, BELLA_FILL_RESULT_EVENT,
+  BELLA_OPEN_EVENT, takeBellaSeed } from '../lib/bellaBus.js';
 import { BellaApprovals, fireApprovalsChanged, APPROVALS_EVENT } from './BellaApprovals.js';
 
 const SUGGESTIONS = [
@@ -169,10 +170,25 @@ export function BellaChat({ onClose }) {
   useEffect(() => {
     (async () => {
       const list = await refreshConvs();
+      // "Bella does it for me" (onboarding): if a seed instruction was stashed
+      // just before we opened, run it as a fresh task (convId is null at mount,
+      // so send() opens a new conversation for it) and skip the resume.
+      const seed = takeBellaSeed();
+      if (seed) { lastIdRef.current = 0; setTimeout(() => sendRef.current?.(seed), 0); return; }
       const active = getActiveConversation();
       if (active != null && list.some((c) => c.id === active)) openConversation(active);
       else newChat();
     })();
+  }, []);   // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Already-open case: a "Bella does it for me" click while the panel is open.
+  useEffect(() => {
+    const on = () => {
+      const seed = takeBellaSeed();
+      if (seed && !busyRef.current) sendRef.current?.(seed);
+    };
+    window.addEventListener(BELLA_OPEN_EVENT, on);
+    return () => window.removeEventListener(BELLA_OPEN_EVENT, on);
   }, []);   // eslint-disable-line react-hooks/exhaustive-deps
 
   // Voice (or another tab) started/continued a thread → adopt it so the voice

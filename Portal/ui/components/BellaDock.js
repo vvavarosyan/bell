@@ -4,18 +4,26 @@
 // she listens and speaks (BellaVoice). Both can run together — they share
 // the same conversation server-side.
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { html } from '../lib/html.js';
 import { toast } from '../lib/toast.js';
 import { api } from '../lib/api.js';
 import { BellaChat } from './BellaChat.js';
 import { usePendingApprovalCount } from './BellaApprovals.js';
 import { BellaVoice } from './BellaVoice.js';
+import { BELLA_OPEN_EVENT } from '../lib/bellaBus.js';
 
 export function BellaDock() {
   const [open, setOpen] = useState(false);
   const [voice, setVoice] = useState(false);
   const pendingApprovals = usePendingApprovalCount();   // badge: approvals waiting anywhere
+
+  // "Bella does it for me" (onboarding) opens the chat with a seeded task.
+  useEffect(() => {
+    const onOpen = () => setOpen(true);
+    window.addEventListener(BELLA_OPEN_EVENT, onOpen);
+    return () => window.removeEventListener(BELLA_OPEN_EVENT, onOpen);
+  }, []);
 
   const toggleVoice = async () => {
     if (voice) { setVoice(false); return; }
