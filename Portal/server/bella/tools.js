@@ -527,6 +527,30 @@ export const TOOLS = [
 
   {
     definition: {
+      name: 'search_qatar_kb',
+      description: 'Search Bell\'s Qatar Knowledge Base — official Qatar government sources (Ministry of Foreign Affairs, Council of Ministers, Shura Council, International Media Office to start; laws + government fees/processes being added) covering Qatar\'s political system, ministries, state structure, and key people/leaders. Use for ANY question about how Qatar is governed, its institutions, officials, the constitution, or the state. ALWAYS quote/cite the returned source name + url + as-of date. If it returns no passages, tell the user you don\'t have that in the knowledge base yet — do NOT guess a fact, fee, law or name (Rule 2.1).',
+      input_schema: { type: 'object', properties: { q: { type: 'string', description: 'the question or keywords' }, limit: { type: 'integer', description: '1-8 (default 5)' } }, required: ['q'] },
+    },
+    async execute(args) {
+      const q = String(args.q || '').trim();
+      if (q.length < 2) return { passages: [] };
+      const limit = Math.min(Math.max(Number(args.limit) || 5, 1), 8);
+      const r = await query(
+        `SELECT p.title, p.url, p.lang, p.fetched_at, s.name AS source,
+                ts_headline('simple', p.content, plainto_tsquery('simple', $1), 'MaxWords=55,MinWords=20,MaxFragments=2,StartSel=<,StopSel=>') AS excerpt,
+                ts_rank(p.ts, plainto_tsquery('simple', $1)) AS rank
+           FROM knowledge_pages p LEFT JOIN knowledge_sources s ON s.id = p.source_id
+          WHERE p.active AND p.ts @@ plainto_tsquery('simple', $1)
+          ORDER BY rank DESC LIMIT ${limit}`, [q],
+      ).catch((e) => (/knowledge_pages/.test(e.message) ? { rows: [] } : Promise.reject(e)));
+      if (!r.rows.length) return { passages: [], note: 'No match in the Qatar Knowledge Base — tell the user you do not have that yet; never invent a fact/fee/law/name.' };
+      return { passages: r.rows.map((x) => ({ title: x.title, source: x.source, url: x.url, lang: x.lang, as_of: x.fetched_at, excerpt: String(x.excerpt || '').replace(/[<>]/g, '').replace(/\s+/g, ' ').slice(0, 420) })) };
+    },
+    summarize: (args, r) => `${(r?.passages || []).length} Qatar KB passages`,
+  },
+
+  {
+    definition: {
       name: 'get_data_stats',
       description: 'Platform-wide data statistics: total/active companies, people count, jobs, deep-data datasets.',
       input_schema: { type: 'object', properties: {} },

@@ -96,6 +96,12 @@ export const MIRROR_TABLES = [
   // gis_scan_progress stays LOCAL-only (never mirrored) — it's scan bookkeeping.
   { name: 'gis_cadastre_plots',       watermark: 'updated_at' },
   { name: 'gis_landuse',              watermark: 'updated_at' },
+  // Qatar Knowledge Base (crawled locally via "Run Qatar Knowledge Scan.command").
+  // Mirrored so Bella + the user-facing browser can query it on prod. source_id
+  // is a soft ref; knowledge_changes is the change feed.
+  { name: 'knowledge_sources',        watermark: 'updated_at' },
+  { name: 'knowledge_pages',          watermark: 'updated_at' },
+  { name: 'knowledge_changes',        watermark: 'detected_at' },
 ];
 
 export const MIRROR_TABLE_NAMES = new Set(MIRROR_TABLES.map((t) => t.name));
