@@ -330,8 +330,31 @@ html, body {
 
 .feed-filters { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; margin-bottom: 12px; }
 .feed-filters .spacer { flex: 1; }
-.feed-chip { font-size: 12px; padding: 5px 11px; border-radius: 999px; border: 1px solid var(--border); background: transparent; color: var(--text-muted); cursor: pointer; white-space: nowrap; }
+.feed-chip { font-size: 12px; padding: 5px 12px; border-radius: 999px; border: 1px solid var(--border); background: var(--bg-elev, rgba(255,255,255,.04)); color: var(--text-muted); cursor: pointer; white-space: nowrap; transition: border-color .12s, color .12s, background .12s; }
+.feed-chip:hover { border-color: var(--accent, #3b82f6); color: var(--text); }
 .feed-chip.active { background: var(--accent, #3b82f6); border-color: var(--accent, #3b82f6); color: #fff; }
+
+/* ── Shared filter controls (Val 2026-07-12: the tabs/sub-tabs didn't read as
+   clickable and weren't well organized). A labelled group + a connected
+   segmented control for either/or choices, and obviously-tappable pill tabs
+   for multi-choice rows. Used across Signals, Market Feed and Tenders. */
+.filt-bar   { display: flex; align-items: center; gap: 8px 16px; flex-wrap: wrap; margin-bottom: 12px; }
+.filt-group { display: inline-flex; align-items: center; gap: 8px; }
+.filt-label { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .07em; color: var(--text-dim); flex-shrink: 0; }
+.seg        { display: inline-flex; background: var(--bg-elev-2, rgba(255,255,255,.05)); border: 1px solid var(--border); border-radius: 9px; padding: 3px; gap: 2px; }
+.seg-btn    { padding: 5px 12px; border: 0; border-radius: 7px; background: transparent; color: var(--text-muted); font: inherit; font-size: 12.5px; font-weight: 600; cursor: pointer; white-space: nowrap; transition: background .12s, color .12s; }
+.seg-btn:hover:not(.active) { color: var(--text); background: rgba(255,255,255,.04); }
+.seg-btn.active { background: var(--accent); color: #fff; }
+.pilltabs   { display: flex; flex-wrap: wrap; gap: 6px; }
+.pilltab    { font-size: 12px; padding: 5px 12px; border-radius: 999px; border: 1px solid var(--border); background: var(--bg-elev, rgba(255,255,255,.04)); color: var(--text-muted); cursor: pointer; white-space: nowrap; transition: border-color .12s, color .12s, background .12s; }
+.pilltab:hover:not(.active) { border-color: var(--accent); color: var(--text); }
+.pilltab.active { background: var(--accent); border-color: var(--accent); color: #fff; font-weight: 600; }
+.pilltab .ct { opacity: .65; margin-left: 3px; }
+/* Simple prev/next pager (Market Feed + Signals). */
+.pager      { display: flex; align-items: center; justify-content: center; gap: 14px; margin: 16px 0 6px; }
+.pager-btn  { background: var(--bg-elev); border: 1px solid var(--border); color: var(--text); border-radius: 8px; padding: 6px 14px; font-size: 12.5px; cursor: pointer; }
+.pager-btn:disabled { color: var(--text-muted); cursor: default; opacity: .5; }
+.pager-info { font-size: 12px; color: var(--text-muted); }
 .feed-search { padding: 6px 12px; min-width: 200px; border-radius: 8px; border: 1px solid var(--border); background: rgba(255,255,255,.03); color: var(--text); font-size: 12.5px; }
 
 .feed-stream { display: flex; flex-direction: column; gap: 12px; }
@@ -358,13 +381,13 @@ html, body {
    fills the page height; the parent clips so neither column scrolls the page. */
 .feed-split       { flex: 1; min-height: 0; display: flex; gap: 18px; align-items: stretch; padding: 18px 22px; overflow: hidden; }
 .feed-split-main  { flex: 1; min-width: 0; height: 100%; overflow-y: auto; }
-.feed-split-aside { flex: 0 0 240px; height: 100%; overflow-y: auto; }
+.feed-split-aside { flex: 0 0 288px; height: 100%; overflow-y: auto; }
 /* Narrow screens: fall back to one scroller so nothing is cut off. */
 @media (max-width: 880px) {
   .feed-split       { flex-direction: column; overflow-y: auto; padding: 14px 16px; }
   .feed-split-main, .feed-split-aside { height: auto; overflow-y: visible; flex: 0 0 auto; }
 }
-.feed-aside { width: 240px; flex-shrink: 0; border-left: 1px solid var(--border); padding-left: 16px; }
+.feed-aside { width: 288px; flex-shrink: 0; border-left: 1px solid var(--border); padding-left: 18px; }
 .feed-aside-title { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; color: var(--text-dim); margin-bottom: 10px; }
 .feed-trend-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; padding: 7px 8px; border-radius: 7px; border: none; background: transparent; color: var(--text); cursor: pointer; text-align: left; }
 .feed-trend-row:hover { background: rgba(255,255,255,.04); }

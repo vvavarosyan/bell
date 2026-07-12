@@ -145,14 +145,6 @@ export function TendersTab({ embedded = false } = {}) {
   const statusCount = (s) => { const row = (facets.statuses || []).find((x) => x.status === s); return row ? row.n : 0; };
   const allCount = (facets.statuses || []).reduce((a, x) => a + (x.n || 0), 0);
 
-  const chip = (on, label, onClick, color) => html`
-    <button onClick=${onClick} style=${{
-      background: on ? (color ? color + '22' : 'var(--accent)') : 'var(--bg-elev-2, rgba(255,255,255,0.04))',
-      border: '1px solid ' + (on ? (color || 'var(--accent)') : 'var(--border)'),
-      color: on ? (color || '#fff') : 'var(--text-muted)',
-      borderRadius: '999px', padding: '4px 12px', fontSize: '12px', fontWeight: 600, cursor: 'pointer',
-    }}>${label}</button>`;
-
   const selectStyle = { background: 'var(--bg-elev)', border: '1px solid var(--border)', color: 'var(--text)', borderRadius: '8px', padding: '6px 8px', fontSize: '12.5px', maxWidth: '190px' };
 
   // Sync chip text
@@ -179,9 +171,12 @@ export function TendersTab({ embedded = false } = {}) {
         <span style=${{ flex: 1 }}></span>
         <!-- Same Global / For-you toggle the other Signals tabs have (Val 2026-07-09).
              "For you" keeps only tenders whose line of business overlaps your ICP. -->
-        <div style=${{ display: 'flex', gap: '6px' }}>
-          ${chip(scope === 'global', 'Global', () => { setOffset(0); setScope('global'); })}
-          ${chip(scope === 'icp', 'For you', () => { setOffset(0); setScope('icp'); })}
+        <div class="filt-group">
+          <span class="filt-label">Show</span>
+          <div class="seg">
+            <button class=${'seg-btn' + (scope === 'global' ? ' active' : '')} onClick=${() => { setOffset(0); setScope('global'); }}>Global</button>
+            <button class=${'seg-btn' + (scope === 'icp' ? ' active' : '')} onClick=${() => { setOffset(0); setScope('icp'); }}>For you</button>
+          </div>
         </div>
         ${syncChip}
       </div>
@@ -194,19 +189,26 @@ export function TendersTab({ embedded = false } = {}) {
         </div>` : null}
 
       <!-- filters -->
-      <div style=${{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center', marginBottom: '10px' }}>
-        ${chip(filters.status === 'open', `Open${statusCount('open') ? ' · ' + statusCount('open').toLocaleString() : ''}`, () => setFilter({ status: 'open' }), STATUS_META.open.color)}
-        ${chip(filters.status === 'awarded', `Awarded${statusCount('awarded') ? ' · ' + statusCount('awarded').toLocaleString() : ''}`, () => setFilter({ status: 'awarded' }), STATUS_META.awarded.color)}
-        ${chip(filters.status === '', `All${allCount ? ' · ' + allCount.toLocaleString() : ''}`, () => setFilter({ status: '' }))}
+      <div class="filt-bar">
+        <div class="filt-group">
+          <span class="filt-label">Status</span>
+          <div class="seg">
+            <button class=${'seg-btn' + (filters.status === 'open' ? ' active' : '')} onClick=${() => setFilter({ status: 'open' })}>Open${statusCount('open') ? html`<span class="ct"> ${statusCount('open').toLocaleString()}</span>` : ''}</button>
+            <button class=${'seg-btn' + (filters.status === 'awarded' ? ' active' : '')} onClick=${() => setFilter({ status: 'awarded' })}>Awarded${statusCount('awarded') ? html`<span class="ct"> ${statusCount('awarded').toLocaleString()}</span>` : ''}</button>
+            <button class=${'seg-btn' + (filters.status === '' ? ' active' : '')} onClick=${() => setFilter({ status: '' })}>All${allCount ? html`<span class="ct"> ${allCount.toLocaleString()}</span>` : ''}</button>
+          </div>
+        </div>
         <span style=${{ flex: 1 }}></span>
         <input value=${qInput} onInput=${(e) => setQInput(e.target.value)} placeholder="Search any detail — title, ref, buyer, winner…"
           style=${{ ...selectStyle, maxWidth: '270px', minWidth: '160px' }} />
       </div>
       ${(facets.sources || []).length > 1 ? html`
-      <div style=${{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center', marginBottom: '10px' }}>
-        <span class="muted small" style=${{ marginRight: '2px' }}>Source</span>
-        ${chip(filters.source === '', 'All', () => setFilter({ source: '' }))}
-        ${facets.sources.map((s) => chip(filters.source === s.source, `${srcLabel(s.source)} · ${(s.n || 0).toLocaleString()}`, () => setFilter({ source: s.source }), '#5b8cff'))}
+      <div class="filt-bar">
+        <span class="filt-label">Source</span>
+        <div class="pilltabs">
+          <button class=${'pilltab' + (filters.source === '' ? ' active' : '')} onClick=${() => setFilter({ source: '' })}>All</button>
+          ${facets.sources.map((s) => html`<button key=${s.source} class=${'pilltab' + (filters.source === s.source ? ' active' : '')} onClick=${() => setFilter({ source: s.source })}>${srcLabel(s.source)}<span class="ct">${(s.n || 0).toLocaleString()}</span></button>`)}
+        </div>
       </div>` : null}
       <div style=${{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center', marginBottom: '16px' }}>
         <select value=${filters.buyer} onChange=${(e) => setFilter({ buyer: e.target.value })} style=${selectStyle}>

@@ -59,6 +59,7 @@ export function SignalsTab() {
   const [loading, setLoading] = useState(true);
   const [icpMissing, setIcpMissing] = useState(false);
   const [selectedId, setSelectedId] = useState(null);
+  const [streamPage, setStreamPage] = useState(0);   // 30/page pager for the stream (Val 2026-07-12)
   const [inMarket, setInMarket] = useState([]);
   const [inMarketIcp, setInMarketIcp] = useState(false);
   const [openTenders, setOpenTenders] = useState([]);
@@ -180,13 +181,13 @@ export function SignalsTab() {
     return [...rows, ...t].sort((a, b) => new Date(b.occurred_at) - new Date(a.occurred_at));
   }, [rows, tenderSignals, kind, scope, windowKey]);
 
-  const chip = (on, label, onClick, color) => html`
-    <button onClick=${onClick} style=${{
-      background: on ? (color ? color + '22' : 'var(--accent)') : 'var(--bg-elev-2, rgba(255,255,255,0.04))',
-      border: '1px solid ' + (on ? (color || 'var(--accent)') : 'var(--border)'),
-      color: on ? (color || '#fff') : 'var(--text-muted)',
-      borderRadius: '999px', padding: '4px 12px', fontSize: '12px', fontWeight: 600, cursor: 'pointer',
-    }}>${label}</button>`;
+  // The stream lists 30 at a time (the radar still shows every blip). Reset to
+  // the first page whenever the filters change.
+  const STREAM = 30;
+  useEffect(() => { setStreamPage(0); }, [kind, scope, windowKey]);
+  const streamTotal = displayRows.length;
+  const streamRows = displayRows.slice(streamPage * STREAM, streamPage * STREAM + STREAM);
+  const streamHasNext = (streamPage + 1) * STREAM < streamTotal;
 
   return html`
     <div class="page-fill"><div class="page-scroll">
@@ -197,18 +198,27 @@ export function SignalsTab() {
         <span class="muted small">market movement, detected by Bell</span>
         <span class="spacer" style=${{ flex: 1 }}></span>
         ${kind !== 'tender' ? html`
-        <div style=${{ display: 'flex', gap: '6px' }}>
-          ${chip(scope === 'global', 'Global', () => setScope('global'))}
-          ${chip(scope === 'icp', 'For you', () => setScope('icp'))}
+        <div class="filt-group">
+          <span class="filt-label">Show</span>
+          <div class="seg">
+            <button class=${'seg-btn' + (scope === 'global' ? ' active' : '')} onClick=${() => setScope('global')}>Global</button>
+            <button class=${'seg-btn' + (scope === 'icp' ? ' active' : '')} onClick=${() => setScope('icp')}>For you</button>
+          </div>
         </div>
-        <div style=${{ display: 'flex', gap: '6px' }}>
-          ${WINDOWS.map(([k, label]) => chip(windowKey === k, label, () => setWindowKey(k)))}
+        <div class="filt-group">
+          <span class="filt-label">Last</span>
+          <div class="seg">
+            ${WINDOWS.map(([k, label]) => html`<button key=${k} class=${'seg-btn' + (windowKey === k ? ' active' : '')} onClick=${() => setWindowKey(k)}>${label}</button>`)}
+          </div>
         </div>` : null}
       </div>
 
-      <div style=${{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginBottom: '16px' }}>
-        ${chip(kind === '', 'All types', () => setKind(''))}
-        ${KINDS.map((k) => chip(kind === k, `${KIND_META[k].label}${counts[k] ? ` · ${counts[k]}` : ''}`, () => setKind(kind === k ? '' : k), KIND_META[k].color))}
+      <div class="filt-bar">
+        <span class="filt-label">Type</span>
+        <div class="pilltabs">
+          <button class=${'pilltab' + (kind === '' ? ' active' : '')} onClick=${() => setKind('')}>All types</button>
+          ${KINDS.map((k) => html`<button key=${k} class=${'pilltab' + (kind === k ? ' active' : '')} onClick=${() => setKind(kind === k ? '' : k)}>${KIND_META[k].label}${counts[k] ? html`<span class="ct">${counts[k].toLocaleString()}</span>` : ''}</button>`)}
+        </div>
       </div>
 
       ${scope === 'icp' && icpMissing ? html`
@@ -309,7 +319,7 @@ export function SignalsTab() {
         <div style=${{ order: 1, flex: '1 1 380px', minWidth: '300px' }}>
           ${loading ? html`<div class="empty">Loading signals…</div>` :
             displayRows.length === 0 ? html`<div class="empty">${scope === 'icp' ? 'No signals match your ICP in this window yet — widen the window or adjust your profile.' : 'No signals in this window yet.'}</div>` :
-            displayRows.map((s) => {
+            streamRows.map((s) => {
               const meta = KIND_META[s.kind] || KIND_META.news_event;
               const sel = selectedId === s.id;
               return html`
@@ -342,6 +352,12 @@ export function SignalsTab() {
                   </div>
                 </div>`;
             })}
+          ${!loading && streamTotal > STREAM ? html`
+            <div class="pager">
+              <button class="pager-btn" disabled=${streamPage === 0} onClick=${() => setStreamPage(p => Math.max(0, p - 1))}>← Prev</button>
+              <span class="pager-info">${streamPage * STREAM + 1}–${Math.min((streamPage + 1) * STREAM, streamTotal)} of ${streamTotal.toLocaleString()}</span>
+              <button class="pager-btn" disabled=${!streamHasNext} onClick=${() => setStreamPage(p => p + 1)}>Next →</button>
+            </div>` : null}
         </div>
       </div>`}
     </div></div>`;

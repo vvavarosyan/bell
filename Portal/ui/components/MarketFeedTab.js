@@ -38,6 +38,7 @@ export function MarketFeedTab({ mode } = {}) {
   const isAdmin = mode !== 'user';   // admin.bell.qa / local engine may delete wrong items
   const [events, setEvents]   = useState([]);
   const [cursor, setCursor]   = useState(null);
+  const [page, setPage]       = useState(0);   // 30/page pager over the loaded feed (Val 2026-07-12)
   const [loading, setLoading] = useState(true);
   const [loadingMore, setLoadingMore] = useState(false);
   const [stats, setStats]     = useState(null);
@@ -71,13 +72,15 @@ export function MarketFeedTab({ mode } = {}) {
 
   const maxId = (arr) => arr.reduce((m, e) => Math.max(m, Number(e.id) || 0), 0);
 
+  const PAGE = 30;
   const load = useCallback(async () => {
     setLoading(true);
     try {
-      const r = await api.feed({ ...filterParams(), limit: 30 });
+      const r = await api.feed({ ...filterParams(), limit: PAGE });
       const evs = r.events || [];
       setEvents(evs);
       setCursor(r.next_cursor || null);
+      setPage(0);
       maxIdRef.current = maxId(evs);
     } catch (err) { toast('Feed load failed: ' + err.message, 'error'); }
     finally { setLoading(false); }
@@ -87,7 +90,7 @@ export function MarketFeedTab({ mode } = {}) {
     if (!cursor || loadingMore) return;
     setLoadingMore(true);
     try {
-      const r = await api.feed({ ...filterParams(), cursor, limit: 30 });
+      const r = await api.feed({ ...filterParams(), cursor, limit: PAGE });
       setEvents(prev => {
         const seen = new Set(prev.map(e => e.id));
         return [...prev, ...(r.events || []).filter(e => !seen.has(e.id))];
@@ -96,6 +99,16 @@ export function MarketFeedTab({ mode } = {}) {
     } catch (err) { toast('Load more failed: ' + err.message, 'error'); }
     finally { setLoadingMore(false); }
   };
+
+  // Prev/next 30-per-page paging over the loaded feed. Going forward past what's
+  // loaded fetches the next slice via the cursor, then advances (Val 2026-07-12).
+  const pageEvents = events.slice(page * PAGE, page * PAGE + PAGE);
+  const hasNext = (page + 1) * PAGE < events.length || !!cursor;
+  const nextPage = async () => {
+    if ((page + 1) * PAGE < events.length) { setPage(page + 1); return; }
+    if (cursor) { await loadMore(); setPage(page + 1); }
+  };
+  const prevPage = () => setPage(p => Math.max(0, p - 1));
 
   const refreshStats = useCallback(async () => {
     try { setStats(await api.feedStats()); } catch { /* ignore */ }
@@ -193,7 +206,7 @@ export function MarketFeedTab({ mode } = {}) {
         <div class="feed-stream">
           ${loading ? html`<div class="empty">Loading the market…</div>` :
             events.length === 0 ? html`<div class="empty">No events yet. Bell is warming up the feed — check back shortly.</div>` :
-            events.map(e => {
+            pageEvents.map(e => {
               const onOpen = () => {
                 if (e.kind === 'company_registered') {
                   const cid = e.ref_id || (e.companies && e.companies[0] && e.companies[0].id);
@@ -221,10 +234,12 @@ export function MarketFeedTab({ mode } = {}) {
                 ? html`<${ResearchFeedCard} key=${e.id} e=${e} onOpen=${onOpen} onDelete=${onDelete} />`
                 : html`<${FeedCard} key=${e.id} e=${e} onOpen=${onOpen} onDelete=${onDelete} />`;
             })}
-          ${!loading && cursor ? html`
-            <button class="feed-loadmore" onClick=${loadMore} disabled=${loadingMore}>
-              ${loadingMore ? 'Loading…' : 'Load more'}
-            </button>` : null}
+          ${!loading && events.length > 0 && (page > 0 || hasNext) ? html`
+            <div class="pager">
+              <button class="pager-btn" disabled=${page === 0} onClick=${prevPage}>← Prev</button>
+              <span class="pager-info">${page * PAGE + 1}–${page * PAGE + pageEvents.length}</span>
+              <button class="pager-btn" disabled=${!hasNext || loadingMore} onClick=${nextPage}>${loadingMore ? '…' : 'Next →'}</button>
+            </div>` : null}
         </div>
       </div>
 
