@@ -153,10 +153,13 @@ router.get('/buildings', async (req, res, next) => {
     const countR = await query(`SELECT count(*)::int AS total FROM gis_landmarks ${whereSql}`, params);
     const dp = [...params, limit, offset];
     const rows = (await query(`
-      SELECT id, ename, aname, category, subcategory_name, district_ename, street_ename,
-             building_no, zone_no, phone, pobox_no, email, photo_url, latitude, longitude, company_id
-        FROM gis_landmarks ${whereSql}
-       ORDER BY ename ASC
+      SELECT l.id, l.ename, l.aname, l.category, l.subcategory_name, l.district_ename, l.street_ename,
+             l.building_no, l.zone_no, l.phone, l.pobox_no, l.email, l.photo_url, l.latitude, l.longitude,
+             l.company_id, c.name AS company_name
+        FROM gis_landmarks l
+        LEFT JOIN companies c ON c.id = l.company_id
+        ${whereSql.replace(/\bename\b/g, 'l.ename').replace(/\bcategory\b/g, 'l.category').replace(/\baname\b/g, 'l.aname').replace(/\bdistrict_ename\b/g, 'l.district_ename').replace(/\bdistrict_aname\b/g, 'l.district_aname').replace(/\bstreet_ename\b/g, 'l.street_ename').replace(/\bstreet_aname\b/g, 'l.street_aname').replace(/\bsubcategory_name\b/g, 'l.subcategory_name').replace(/\bzone_no\b/g, 'l.zone_no').replace(/\bbuilding_no\b/g, 'l.building_no').replace(/\bpobox_no\b/g, 'l.pobox_no')}
+       ORDER BY l.ename ASC
        LIMIT $${dp.length - 1} OFFSET $${dp.length}`, dp)).rows;
     res.json({ rows, total: countR.rows[0].total });
   } catch (err) { next(err); }

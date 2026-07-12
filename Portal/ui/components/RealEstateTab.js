@@ -9,6 +9,7 @@ import { html } from '../lib/html.js';
 import { api } from '../lib/api.js';
 import { Pagination } from './Pagination.js';
 import { loadMapboxGL } from '../lib/mapbox.js';
+import { navigateTo } from '../lib/router.js';
 
 const SUBTABS = [['stats', 'Market stats'], ['buildings', 'Buildings'], ['transactions', 'Transactions'], ['map', 'Map']];
 
@@ -172,6 +173,10 @@ function BuildingsView() {
                 ${b.zone_no ? html`<span> · Zone ${b.zone_no}</span>` : null}
               </div>
               ${b.phone ? html`<div class="muted small" style=${{ marginTop: '3px', opacity: 0.75 }}>☎ ${b.phone}${b.pobox_no ? ` · P.O. ${b.pobox_no}` : ''}</div>` : null}
+              ${b.company_id && b.company_name ? html`
+                <button onClick=${() => navigateTo('companies', b.company_id)}
+                  style=${{ marginTop: '8px', background: 'rgba(111,207,151,0.12)', border: '1px solid rgba(111,207,151,0.3)', borderRadius: '7px', padding: '4px 8px', color: '#6fcf97', fontSize: '11.5px', fontWeight: 600, cursor: 'pointer', width: '100%', textAlign: 'left', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+                  title=${'Open ' + b.company_name}>🏢 ${b.company_name} →</button>` : null}
             </div>
           </div>`)}
       </div>

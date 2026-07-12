@@ -93,6 +93,100 @@ export async function promoteRealEstate() {
   return r.rowCount || 0;
 }
 
+// Link a building (landmark) to a company ONLY when its email resolves to
+// EXACTLY ONE company and is a real, non-generic address (Rule 2.1: a shared/
+// generic email that maps to several companies is NEVER guessed to one). Matches
+// against both companies.email and company_contacts. Idempotent: clears the
+// email-set links then re-asserts, so a company rename/delete self-heals.
+const LINK_CTE = `
+  WITH company_emails AS (
+    SELECT lower(btrim(email)) AS email, id AS company_id
+      FROM companies WHERE email IS NOT NULL AND btrim(email) <> ''
+    UNION
+    SELECT lower(btrim(value)) AS email, company_id
+      FROM company_contacts WHERE type = 'email' AND value IS NOT NULL AND btrim(value) <> ''
+  ),
+  unique_emails AS (
+    SELECT email, min(company_id) AS company_id
+      FROM company_emails
+     GROUP BY email HAVING count(DISTINCT company_id) = 1
+  )`;
+// A landmark email only qualifies if it is well-formed and not a generic mailbox.
+const LINK_WHERE = `
+      l.email ~ '^[^@[:space:]]+@[^@[:space:]]+\\.[^@[:space:]]+$'
+  AND split_part(lower(l.email), '@', 1) NOT IN
+    ('info','admin','contact','sales','enquiries','enquiry','mail','office','support',
+     'hello','general','reception','marketing','hr','careers','jobs','noreply','no-reply','webmaster')`;
+
+// Generic name words that must NOT be the sole basis of a match — two different
+// firms often share only an industry word ("pharmacy", "trading"). A link needs
+// a DISTINCTIVE shared token (or high overall similarity) to be asserted.
+const NAME_STOP = new Set([
+  'company','trading','contracting','general','services','service','group','holding','holdings',
+  'international','establishment','centre','center','qatar','doha','pharmacy','school','travel',
+  'tours','tour','agency','agencies','business','store','stores','trade','industries','industrial',
+  'national','restaurant','cafe','hotel','resort','exchange','bookstore','press','printing','the',
+  'and','for','est','bin','ben','abu','umm','wll','llc','qpsc','company','terminal',
+]);
+function sigTokens(name) {
+  return new Set(String(name || '').toLowerCase().replace(/[^a-z0-9 ]/g, ' ').split(/\s+/)
+    .filter((t) => t.length >= 4 && !NAME_STOP.has(t)));
+}
+function sharesDistinctiveToken(a, b) {
+  const A = sigTokens(a);
+  for (const t of sigTokens(b)) if (A.has(t)) return true;
+  return false;
+}
+// Emails a 3-judge adversarial audit (2026-07-12) found link to a DIFFERENT or
+// merely-uncertain company than the building (e.g. "Ambassador Travels" vs "The
+// Ambassador"; a gmail address that doesn't corroborate the name). Excluded so
+// only genuinely-same-entity links are ever asserted (Val: never unreliable data).
+const LINK_EMAIL_DENY = new Set([
+  'ambassador@qatar.net.qa', 'gatholdings@qatar.net.qa', 'alhassanint@qatar.net.qa', 'pcpcqatar@gmail.com',
+]);
+// A candidate email-unique link is CONFIRMED only if the names corroborate it:
+// a distinctive shared token, or trigram similarity ≥ 0.30 — and it is not on the
+// audit denylist. Otherwise it's an email coincidence and stays UNLINKED (2.1).
+function confirmLink(m) {
+  if (LINK_EMAIL_DENY.has(String(m.email || '').toLowerCase().trim())) return false;
+  return Number(m.sim) >= 0.30 || sharesDistinctiveToken(m.ename, m.company_name);
+}
+
+export async function linkLandmarkCompanies({ apply = false } = {}) {
+  const candidates = (await query(`
+    ${LINK_CTE}
+    SELECT l.id AS landmark_id, l.ename, l.email, l.category, l.district_ename,
+           ue.company_id, c.name AS company_name,
+           similarity(lower(regexp_replace(l.ename, '[^a-zA-Z0-9 ]', '', 'g')),
+                      lower(regexp_replace(c.name,  '[^a-zA-Z0-9 ]', '', 'g'))) AS sim
+      FROM gis_landmarks l
+      JOIN unique_emails ue ON lower(btrim(l.email)) = ue.email
+      JOIN companies c ON c.id = ue.company_id
+     WHERE ${LINK_WHERE}
+     ORDER BY l.ename`)).rows;
+  const confirmed = candidates.filter(confirmLink);
+  const rejected = candidates.filter((m) => !confirmLink(m));
+
+  if (!apply) {
+    return { candidates: candidates.length, confirmed: confirmed.length,
+      samples: confirmed.slice(0, 25), rejected: rejected.slice(0, 25), applied: false };
+  }
+
+  await query(`UPDATE gis_landmarks SET company_id = NULL, updated_at = now() WHERE company_id IS NOT NULL`);
+  let linked = 0;
+  const B = 500;
+  for (let i = 0; i < confirmed.length; i += B) {
+    const batch = confirmed.slice(i, i + B);
+    const vals = batch.map((_, j) => `($${j * 2 + 1}::bigint,$${j * 2 + 2}::bigint)`).join(',');
+    const params = batch.flatMap((m) => [m.landmark_id, m.company_id]);
+    await query(`UPDATE gis_landmarks l SET company_id = v.cid, updated_at = now()
+                   FROM (VALUES ${vals}) AS v(lid, cid) WHERE l.id = v.lid`, params);
+    linked += batch.length;
+  }
+  return { candidates: candidates.length, confirmed: confirmed.length, linked,
+    samples: confirmed.slice(0, 25), applied: true };
+}
+
 export async function pushGisToProd() {
   try {
     const { runPush } = await import('../sync/push.js');

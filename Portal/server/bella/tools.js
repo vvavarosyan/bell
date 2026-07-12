@@ -497,7 +497,7 @@ export const TOOLS = [
         const { payload } = await internalCall(realestateRouter, 'GET', '/buildings', ctx, {
           query: { q: args.q, category: args.category, district: args.district, limit },
         });
-        return { total_matching: payload?.total ?? null, buildings: (payload?.rows || []).map((b) => pick(b, ['ename', 'aname', 'category', 'subcategory_name', 'district_ename', 'street_ename', 'zone_no', 'phone', 'email', 'photo_url'])) };
+        return { total_matching: payload?.total ?? null, buildings: (payload?.rows || []).map((b) => pick(b, ['ename', 'aname', 'category', 'subcategory_name', 'district_ename', 'street_ename', 'zone_no', 'phone', 'email', 'photo_url', 'company_id', 'company_name'])) };
       }
       if (view === 'transactions') {
         const { payload } = await internalCall(realestateRouter, 'GET', '/transactions', ctx, {

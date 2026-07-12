@@ -9,7 +9,7 @@
 import { scrapeGisAll } from '../gis/scrape_gis.js';
 import {
   gisTablesReady, ingestMunicipalities, ingestDistricts, ingestZones, ingestLandmarks,
-  promoteRealEstate, pushGisToProd,
+  promoteRealEstate, linkLandmarkCompanies, pushGisToProd,
 } from '../gis/ingest_gis.js';
 
 (async () => {
@@ -31,6 +31,7 @@ import {
     const nZ = await ingestZones(zones);
     const nL = await ingestLandmarks(landmarks);
     const nRE = await promoteRealEstate();
+    const link = await linkLandmarkCompanies({ apply: true });
 
     console.log('\n── Ingested ─────────────────────────────');
     console.log('  Municipalities:          ' + nM.toLocaleString());
@@ -39,7 +40,8 @@ import {
     console.log('  Landmarks (buildings):   ' + nL.toLocaleString());
     console.log('  Real-estate transactions:' + nRE.toLocaleString());
     const withEmail = landmarks.filter((l) => l.email && /@/.test(l.email)).length;
-    console.log('  Landmarks with a valid email (for company linking): ' + withEmail.toLocaleString());
+    console.log('  Landmarks with a valid email:                ' + withEmail.toLocaleString());
+    console.log('  Buildings linked to a company (verified):    ' + (link.linked ?? 0).toLocaleString() + ' of ' + (link.candidates ?? 0) + ' candidates');
 
     if (process.argv.includes('--no-push')) {
       console.log('\n(--no-push) Skipped the prod publish — data is local only.');
