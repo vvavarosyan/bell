@@ -215,6 +215,36 @@ async function showNetwork(map, companyId, origin) {
   } catch { /* soft — the popup already opened */ }
 }
 
+// --- Real Estate layers (consolidated onto the main Map, Val 2026-07-12) -----
+// District price heat + buildings (loaded once), and land parcels drawn live
+// from Qatar GIS for the current viewport only (we never store 253k polygons).
+let reDataLoading = false;
+async function loadREData(map) {
+  if (reDataLoading || !map.getSource('re-districts')) return;
+  reDataLoading = true;
+  try {
+    const d = await api.realEstateMap();
+    const districts = { type: 'FeatureCollection', features: (d.districts || []).filter((x) => x.lat != null && x.avg_sqm != null).map((x) => ({ type: 'Feature', geometry: { type: 'Point', coordinates: [Number(x.lng), Number(x.lat)] }, properties: { ename: x.ename, deals: x.deals || 0, avg_sqm: x.avg_sqm || 0 } })) };
+    const buildings = { type: 'FeatureCollection', features: (d.buildings || []).filter((x) => x.lat != null).map((x) => ({ type: 'Feature', geometry: { type: 'Point', coordinates: [Number(x.lng), Number(x.lat)] }, properties: { ename: x.ename, category: x.category || '' } })) };
+    if (map.getSource('re-districts')) map.getSource('re-districts').setData(districts);
+    if (map.getSource('re-buildings')) map.getSource('re-buildings').setData(buildings);
+  } catch { /* keep empty */ } finally { reDataLoading = false; }
+}
+let parcelFetchSeq = 0;
+async function fetchParcels(map) {
+  if (!map.getSource('re-parcels')) return;
+  if (map.getZoom() < 14) { map.getSource('re-parcels').setData({ type: 'FeatureCollection', features: [] }); return; }
+  const b = map.getBounds();
+  const bbox = [b.getWest(), b.getSouth(), b.getEast(), b.getNorth()].join(',');
+  const seq = ++parcelFetchSeq;
+  try {
+    const gj = await api.realEstateParcels({ bbox });
+    if (seq === parcelFetchSeq && map.getSource('re-parcels')) {
+      map.getSource('re-parcels').setData(gj && gj.type ? gj : { type: 'FeatureCollection', features: [] });
+    }
+  } catch { /* ignore */ }
+}
+
 // --- Component ------------------------------------------------------------
 
 export function MapTab() {
@@ -232,6 +262,10 @@ export function MapTab() {
   const [showTraffic,  setShowTraffic]  = useState(false);
   const [showWeather,  setShowWeather]  = useState(false);
   const [showSignals,  setShowSignals]  = useState(true);   // Phase D — live signal pins
+  const [showREPrices, setShowREPrices] = useState(false);  // Real Estate: price-by-area heat
+  const [showBuildings, setShowBuildings] = useState(false); // Real Estate: named buildings
+  const [showParcels,  setShowParcels]  = useState(false);  // Real Estate: land parcels (viewport-lazy)
+  const showParcelsRef = useRef(false);
   const [toolsOpen,    setToolsOpen]    = useState(true);   // collapsible toolbox
   const [activeSources, setActiveSources] = useState(new Set(SOURCES));
   const [yearRange,    setYearRange]    = useState({ min: 1950, max: new Date().getFullYear() });
@@ -249,7 +283,15 @@ export function MapTab() {
     setLayerVisibility(map, 'weather-radar',   showWeather);
     setLayerVisibility(map, 'signal-rings',    showSignals);
     setLayerVisibility(map, 'signal-points',   showSignals);
-  }, [showHeatmap, showTraffic, showWeather, showSignals, activeSources, yearRange]);
+    // Real Estate layers
+    setLayerVisibility(map, 're-districts',    showREPrices);
+    setLayerVisibility(map, 're-buildings',    showBuildings);
+    setLayerVisibility(map, 're-parcels-fill', showParcels);
+    setLayerVisibility(map, 're-parcels-line', showParcels);
+    if ((showREPrices || showBuildings) && map.getSource('re-districts')) loadREData(map);
+    showParcelsRef.current = showParcels;
+    if (showParcels) fetchParcels(map);
+  }, [showHeatmap, showTraffic, showWeather, showSignals, showREPrices, showBuildings, showParcels, activeSources, yearRange]);
 
   // ---- Boot -------------------------------------------------------------
   useEffect(() => {
@@ -519,6 +561,39 @@ export function MapTab() {
               'circle-opacity': 0.95,
             },
           });
+
+          // ---- REAL ESTATE layers (toggle off by default) --------------
+          // District price heat: colour = avg QAR/m², size = deal volume.
+          map.addSource('re-districts', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+          map.addLayer({
+            id: 're-districts', type: 'circle', source: 're-districts', layout: { visibility: 'none' },
+            paint: {
+              'circle-radius': ['interpolate', ['linear'], ['get', 'deals'], 1, 6, 200, 16, 800, 26, 1500, 34],
+              'circle-color': ['interpolate', ['linear'], ['get', 'avg_sqm'], 2000, '#3b82f6', 4000, '#22c55e', 6000, '#eab308', 9000, '#f97316', 13000, '#ef4444'],
+              'circle-opacity': 0.6, 'circle-stroke-width': 1, 'circle-stroke-color': 'rgba(255,255,255,0.35)',
+            },
+          });
+          map.addSource('re-buildings', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+          map.addLayer({
+            id: 're-buildings', type: 'circle', source: 're-buildings', layout: { visibility: 'none' },
+            paint: { 'circle-radius': ['interpolate', ['linear'], ['zoom'], 8, 1.6, 14, 4], 'circle-color': '#a5c3ff', 'circle-opacity': 0.85 },
+          });
+          // Land parcels — polygons fetched live per viewport (never stored).
+          map.addSource('re-parcels', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+          map.addLayer({ id: 're-parcels-fill', type: 'fill', source: 're-parcels', layout: { visibility: 'none' }, paint: { 'fill-color': '#5b8cff', 'fill-opacity': 0.07 } });
+          map.addLayer({ id: 're-parcels-line', type: 'line', source: 're-parcels', layout: { visibility: 'none' }, paint: { 'line-color': '#7ea6ff', 'line-width': 0.6, 'line-opacity': 0.55 } });
+          map.on('click', 're-districts', (e) => {
+            const p = e.features[0]?.properties || {};
+            new mapboxgl.Popup({ offset: 10 }).setLngLat(e.lngLat)
+              .setHTML(`<div style="font:600 13px system-ui;color:#111">${p.ename || ''}</div><div style="font:12px system-ui;color:#333;margin-top:2px">${Number(p.avg_sqm || 0).toLocaleString()} QAR/m² · ${Number(p.deals || 0).toLocaleString()} deals</div>`).addTo(map);
+          });
+          map.on('click', 're-parcels-fill', (e) => {
+            const p = e.features[0]?.properties || {};
+            new mapboxgl.Popup({ offset: 6 }).setLngLat(e.lngLat)
+              .setHTML(`<div style="font:600 12px system-ui;color:#111">Parcel ${p.PIN || ''}</div>${p.PDAREA ? `<div style="font:11px system-ui;color:#333">${Number(p.PDAREA).toLocaleString()} m²</div>` : ''}`).addTo(map);
+          });
+          map.on('moveend', () => { if (showParcelsRef.current) fetchParcels(map); });
+
           map.on('click', 'signal-points', (e) => {
             const f = e.features[0]; if (!f) return;
             const p = f.properties || {};
@@ -775,6 +850,26 @@ export function MapTab() {
                 onChange=${e => setShowWeather(e.target.checked)} />
               <span>Weather radar</span>
               <span class="map-toggle-hint">RainViewer</span>
+            </label>
+          </div>
+          <div class="map-controls-section">
+            <div class="map-controls-label">Real estate</div>
+            <label class="map-toggle">
+              <input type="checkbox" checked=${showREPrices}
+                onChange=${e => setShowREPrices(e.target.checked)} />
+              <span>Price by area</span>
+              <span class="map-toggle-hint">QAR/m²</span>
+            </label>
+            <label class="map-toggle">
+              <input type="checkbox" checked=${showBuildings}
+                onChange=${e => setShowBuildings(e.target.checked)} />
+              <span>Buildings</span>
+            </label>
+            <label class="map-toggle">
+              <input type="checkbox" checked=${showParcels}
+                onChange=${e => setShowParcels(e.target.checked)} />
+              <span>Land parcels</span>
+              <span class="map-toggle-hint">zoom in</span>
             </label>
           </div>
           <div class="map-controls-section">

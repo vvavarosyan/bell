@@ -211,4 +211,30 @@ router.get('/map', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+// Viewport proxy for the parcel / land-use polygons. We deliberately never store
+// the ~253k polygons — the map fetches only what's in view, live from Qatar GIS,
+// through here (server-side, so no CORS). Guarded to small (zoomed-in) viewports.
+const GIS_BASE = 'https://services.gisqatar.org.qa/server/rest/services/Vector';
+router.get('/parcels', async (req, res, next) => {
+  try {
+    const bbox = String(req.query.bbox || '').split(',').map(Number);
+    if (bbox.length !== 4 || bbox.some((n) => !Number.isFinite(n))) return res.status(400).json({ error: 'bad_bbox' });
+    const [xmin, ymin, xmax, ymax] = bbox;
+    // Only serve a modest viewport (≈ zoom 14+). Larger → empty, so we never pull
+    // tens of thousands of polygons at once.
+    if ((xmax - xmin) > 0.08 || (ymax - ymin) > 0.08) return res.json({ type: 'FeatureCollection', features: [] });
+    const layer = req.query.layer === 'landuse' ? 'ZoningE' : 'CadastrePlots';
+    const outFields = layer === 'ZoningE' ? 'ZONING,CODE' : 'PIN,PDAREA';
+    const geom = encodeURIComponent(JSON.stringify({ xmin, ymin, xmax, ymax, spatialReference: { wkid: 4326 } }));
+    const url = `${GIS_BASE}/${layer}/MapServer/0/query?geometry=${geom}&geometryType=esriGeometryEnvelope`
+      + `&inSR=4326&spatialRel=esriSpatialRelIntersects&outFields=${outFields}&returnGeometry=true&outSR=4326`
+      + `&maxAllowableOffset=0.00002&resultRecordCount=4000&f=geojson`;
+    const r = await fetch(url, { headers: { 'User-Agent': 'Mozilla/5.0 (compatible; BellDataIntelligence/1.0)' } });
+    if (!r.ok) throw new Error('GIS ' + r.status);
+    const gj = await r.json();
+    res.set('Cache-Control', 'public, max-age=600');
+    res.json(gj && gj.type ? gj : { type: 'FeatureCollection', features: [] });
+  } catch (err) { next(err); }
+});
+
 export default router;

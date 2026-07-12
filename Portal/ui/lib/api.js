@@ -419,6 +419,7 @@ export const api = {
   realEstateBuildings:    (q = {}) => request('/api/real-estate/buildings?' + new URLSearchParams(q)),
   realEstateBuildingCategories: () => request('/api/real-estate/building-categories'),
   realEstateMap:          () => request('/api/real-estate/map'),
+  realEstateParcels:      (q = {}) => request('/api/real-estate/parcels?' + new URLSearchParams(q)),
   // ---- Tenders (Qatar public procurement) ----
   tenders:                (q = {}) => request('/api/tenders?' + new URLSearchParams(q)),
   tenderStats:            () => request('/api/tenders/stats'),
