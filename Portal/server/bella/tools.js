@@ -21,6 +21,7 @@ import jobsRouter      from '../routes/jobs.js';
 import feedRouter      from '../routes/feed.js';
 import signalsRouter   from '../routes/signals.js';
 import tendersRouter   from '../routes/tenders.js';
+import realestateRouter from '../routes/realestate.js';
 import creditsRouter   from '../routes/credits.js';
 import icpRouter       from '../routes/icp.js';
 import statsRouter     from '../routes/stats.js';
@@ -471,6 +472,57 @@ export const TOOLS = [
       };
     },
     summarize: () => 'Qatar market statistics',
+  },
+
+  {
+    definition: {
+      name: 'get_real_estate',
+      description: 'Qatar REAL ESTATE — the property market + physical geography, from the official Weekly Real Estate Sales Bulletin + Qatar GIS. view="stats" (default): market overview + average price/m2 by district + where prices are RISING/FALLING (last 6 months vs the 6 before). view="buildings": search named buildings/towers/commercial/POIs by q (name/district/street), category, or district — each has an address, zone and often a photo. view="transactions": recent registered sales, filter by district or property type. Every figure is source-stated (Rule 2.1); transaction parties are anonymized and never linked to a company.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          view:     { type: 'string', description: 'stats (default) | buildings | transactions' },
+          q:        { type: 'string', description: 'buildings: free-text search in name / district / street' },
+          district: { type: 'string', description: 'filter by district name (buildings + transactions)' },
+          category: { type: 'string', description: 'buildings category, e.g. BUSINESS, LODGING, EDUCATION, HEALTH' },
+          type:     { type: 'string', description: 'transactions: property type, e.g. "Residential Building"' },
+          limit:    { type: 'integer', description: '1-25 (default 12).' },
+        },
+      },
+    },
+    async execute(args, ctx) {
+      const limit = Math.min(Math.max(Number(args.limit) || 12, 1), 25);
+      const view = String(args.view || 'stats').toLowerCase();
+      if (view === 'buildings') {
+        const { payload } = await internalCall(realestateRouter, 'GET', '/buildings', ctx, {
+          query: { q: args.q, category: args.category, district: args.district, limit },
+        });
+        return { total_matching: payload?.total ?? null, buildings: (payload?.rows || []).map((b) => pick(b, ['ename', 'aname', 'category', 'subcategory_name', 'district_ename', 'street_ename', 'zone_no', 'phone', 'email', 'photo_url'])) };
+      }
+      if (view === 'transactions') {
+        const { payload } = await internalCall(realestateRouter, 'GET', '/transactions', ctx, {
+          query: { district: args.district, type: args.type, limit },
+        });
+        return { total_matching: payload?.total ?? null, transactions: (payload?.rows || []).map((t) => pick(t, ['registration_date', 'municipality_name', 'district_name', 'property_type', 'usage', 'property_value', 'area_sqm', 'price_per_sqm', 'currency'])) };
+      }
+      const { payload } = await internalCall(realestateRouter, 'GET', '/stats', ctx, {});
+      if (!payload || payload.error) return { error: 'real-estate stats unavailable' };
+      return {
+        overall: payload.overall,
+        by_district: (payload.byDistrict || []).slice(0, 15),
+        rising: payload.risers,
+        falling: payload.fallers,
+        by_type: payload.byType,
+        buildings_total: payload.buildings?.total,
+        note: 'Prices in QAR/m2, source: Weekly Real Estate Sales Bulletin. Rising/falling = last 6 months vs the prior 6.',
+      };
+    },
+    summarize: (args, r) => {
+      const v = String(args.view || 'stats').toLowerCase();
+      if (v === 'buildings') return `${(r?.buildings || []).length} buildings${args.q ? ' · "' + args.q + '"' : ''}`;
+      if (v === 'transactions') return `${(r?.transactions || []).length} transactions${args.district ? ' · ' + args.district : ''}`;
+      return 'Qatar real-estate market';
+    },
   },
 
   {
