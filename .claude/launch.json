@@ -6,7 +6,8 @@
       "runtimeExecutable": "node",
       "runtimeArgs": ["server.js"],
       "cwd": "Portal/server",
-      "port": 3939
+      "port": 3939,
+      "autoPort": true
     },
     {
       "name": "marketing-site",
