@@ -492,14 +492,14 @@ router.post('/:id/reveal', async (req, res, next) => {
     const actor = req.user?.email || 'unknown';
     if (bypassesCredits(req.user, req.tenant)) {
       await markRevealed(req.tenant?.id, 'company', id, actor);
-      await addRevealedToCrm(req.tenant?.id, 'company', [id], actor);
+      await addRevealedToCrm(req.tenant?.id, 'company', [id], actor, req.user?.id || null);
       return res.json({ revealed: true, charged: 0, unlimited: true, company: await companyContact(id) });
     }
     const result = await revealOne(req.tenant.id, 'company', id, actor);
     if (result.insufficient) {
       return res.status(402).json({ error: 'insufficient_credits', balance: result.balance });
     }
-    await addRevealedToCrm(req.tenant.id, 'company', [id], actor);
+    await addRevealedToCrm(req.tenant.id, 'company', [id], actor, req.user?.id || null);
     res.json({ ...result, company: await companyContact(id) });
   } catch (err) { next(err); }
 });
@@ -512,11 +512,11 @@ router.post('/reveal-bulk', async (req, res, next) => {
     const actor = req.user?.email || 'unknown';
     if (bypassesCredits(req.user, req.tenant)) {
       await markRevealed(req.tenant?.id, 'company', ids, actor);
-      await addRevealedToCrm(req.tenant?.id, 'company', ids, actor);
+      await addRevealedToCrm(req.tenant?.id, 'company', ids, actor, req.user?.id || null);
       return res.json({ unlimited: true, revealed: ids.length, requested: ids.length });
     }
     const out = await revealBulk(req.tenant.id, 'company', ids, actor);
-    await addRevealedToCrm(req.tenant.id, 'company', ids, actor);
+    await addRevealedToCrm(req.tenant.id, 'company', ids, actor, req.user?.id || null);
     res.json(out);
   } catch (err) { next(err); }
 });

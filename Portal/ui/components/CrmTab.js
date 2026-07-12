@@ -70,6 +70,8 @@ export function CrmTab() {
   const [bulkCompose, setBulkCompose] = useState(null);   // null = closed; {subject,body} = open
   const [bulkSending, setBulkSending] = useState(false);
   const [emailMetrics, setEmailMetrics] = useState(null);
+  const [owner, setOwner] = useState('');          // '' | 'me' | 'unassigned' | user id (Phase 5)
+  const [members, setMembers] = useState([]);      // teammates, for assignment + the owner filter
 
   const load = useCallback(async ({ silent = false } = {}) => {
     if (!silent) setLoading(true);
@@ -78,13 +80,14 @@ export function CrmTab() {
       if (status) params.status = status;
       if (revealedOnly) params.source = 'reveal';
       if (q.trim()) params.q = q.trim();
+      if (owner) params.owner = owner;
       const [r, s] = await Promise.all([api.crmRecords(params), api.crmStats()]);
       setRows(r.rows || []);
       setStats(s);
       setTotal(r.total || 0);
     } catch (err) { if (!silent) toast('Load failed: ' + err.message, 'error'); }
     finally { if (!silent) setLoading(false); }
-  }, [entityType, status, revealedOnly, q]);
+  }, [entityType, status, revealedOnly, q, owner]);
 
   useEffect(() => { load(); }, [load]);
   // Live refresh when Bella (or any other surface) changes CRM data — reveal,
@@ -95,7 +98,7 @@ export function CrmTab() {
     return () => window.removeEventListener('bdi:crm-changed', onChange);
   }, [load]);
   // Clear selection + reset the export batch whenever the visible set changes.
-  useEffect(() => { setSelected(new Set()); setBatchIdx(0); }, [entityType, status, revealedOnly, q, view]);
+  useEffect(() => { setSelected(new Set()); setBatchIdx(0); }, [entityType, status, revealedOnly, q, owner, view]);
 
   const batchCount = Math.max(1, Math.ceil(total / EXPORT_MAX));
 
@@ -152,6 +155,7 @@ export function CrmTab() {
   // One-time loads: role (for admin-only bulk enroll), saved segments, sequences.
   useEffect(() => {
     (async () => { try { const m = await api.authMe(); setIsAdmin(m?.user?.role === 'platform_admin'); } catch { /* ignore */ } })();
+    (async () => { try { const r = await api.teamMembers(); setMembers(r.members || []); } catch { /* ignore */ } })();
     (async () => { try { const r = await api.crmSegments(); setSegments(r.rows || []); } catch { /* ignore */ } })();
     (async () => { try { setEmailMetrics(await api.crmEmailMetrics()); } catch { /* ignore */ } })();
     (async () => { try { const r = await api.crmSequences(); setSeqList((r.rows || []).filter(s => s.status === 'active' && s.step_count > 0)); } catch { /* ignore */ } })();
@@ -242,6 +246,14 @@ export function CrmTab() {
           <option value="">All statuses</option>
           ${STATUSES.map(s => html`<option key=${s} value=${s}>${STATUS_META[s].label}</option>`)}
         </select>
+        ${members.length > 1 ? html`<select value=${owner} onChange=${e => setOwner(e.target.value)}
+          title="Filter by who owns the lead"
+          style=${{ background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border)', color: 'var(--text)', padding: '6px 10px', borderRadius: '6px', fontSize: '12px' }}>
+          <option value="">All owners</option>
+          <option value="me">My leads</option>
+          <option value="unassigned">Unassigned</option>
+          ${members.map(m => html`<option key=${m.id} value=${m.id}>${m.full_name || m.email}</option>`)}
+        </select>` : null}
         <input type="text" placeholder="Search…" value=${q}
           onChange=${e => setQ(e.target.value)}
           style=${{ background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border)', color: 'var(--text)', padding: '6px 10px', borderRadius: '6px', fontSize: '12px', minWidth: '180px' }} />
@@ -369,12 +381,13 @@ export function CrmTab() {
                 <div style=${{ fontSize: '11px', color: 'var(--text-muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>${recSub(r) || '—'}</div>
               </div>
               ${r.source === 'reveal' ? html`<span style=${{ fontSize: '9.5px', color: 'var(--text-dim)', border: '1px solid var(--border)', borderRadius: '4px', padding: '1px 5px' }}>revealed</span>` : null}
+              ${members.length > 1 && r.owner_name ? html`<span title=${'Owner: ' + r.owner_name} style=${{ fontSize: '10px', fontWeight: 600, color: 'var(--accent-bright, #a5c3ff)', background: 'rgba(91,140,255,.12)', border: '1px solid rgba(91,140,255,.35)', borderRadius: '999px', padding: '2px 8px', whiteSpace: 'nowrap', maxWidth: '92px', overflow: 'hidden', textOverflow: 'ellipsis' }}>${String(r.owner_name).split(' ')[0]}</span>` : null}
               <${StatusPill} status=${r.status} />
               <span style=${{ fontSize: '10.5px', color: 'var(--text-dim)', minWidth: '60px', textAlign: 'right' }}>${timeAgo(r.last_activity_at)}</span>
             </div>`)}
           </div>`}
 
-      ${openedId ? html`<${RecordDrawer} recordId=${openedId} onClose=${() => setOpenedId(null)} onChanged=${() => load({ silent: true })} />` : null}
+      ${openedId ? html`<${RecordDrawer} recordId=${openedId} members=${members} onClose=${() => setOpenedId(null)} onChanged=${() => load({ silent: true })} />` : null}
       `}
       </div>
     </div>
@@ -638,7 +651,7 @@ function PipelineView() {
 }
 
 // ── Record drawer ───────────────────────────────────────────────────────────
-function RecordDrawer({ recordId, onClose, onChanged }) {
+function RecordDrawer({ recordId, members = [], onClose, onChanged }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(true);
   const [noteText, setNoteText] = useState('');
@@ -690,6 +703,10 @@ function RecordDrawer({ recordId, onClose, onChanged }) {
   const setStatus = async (s) => {
     try { await api.crmUpdateRecord(recordId, { status: s }); await load(); onChanged?.(); }
     catch (err) { toast('Update failed: ' + err.message, 'error'); }
+  };
+  const assign = async (v) => {
+    try { await api.crmUpdateRecord(recordId, { owner_user_id: v ? Number(v) : null }); await load(); onChanged?.(); toast(v ? 'Assigned' : 'Unassigned'); }
+    catch (err) { toast('Assign failed: ' + (err.message || ''), 'error'); }
   };
   const addNote = async () => {
     const body = noteText.trim(); if (!body) return;
@@ -789,6 +806,12 @@ function RecordDrawer({ recordId, onClose, onChanged }) {
                 style=${{ background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border)', color: 'var(--text)', padding: '5px 9px', borderRadius: '6px', fontSize: '12px' }}>
                 ${STATUSES.map(s => html`<option key=${s} value=${s}>${STATUS_META[s].label}</option>`)}
               </select>
+              ${members.length > 1 ? html`<select value=${rec.owner_user_id || ''} onChange=${e => assign(e.target.value)}
+                title="Assign this lead to a teammate"
+                style=${{ background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border)', color: 'var(--text)', padding: '5px 9px', borderRadius: '6px', fontSize: '12px' }}>
+                <option value="">Unassigned</option>
+                ${members.map(m => html`<option key=${m.id} value=${m.id}>${m.full_name || m.email}</option>`)}
+              </select>` : null}
               ${(rec.entity_type === 'company' ? rec.company_linkedin : rec.person_linkedin)
                 ? html`<a href=${rec.entity_type === 'company' ? rec.company_linkedin : rec.person_linkedin} target="_blank" rel="noopener" style=${{ fontSize: '11.5px', color: 'var(--accent-bright)' }}>LinkedIn ↗</a>` : null}
               ${rec.company_website ? html`<a href=${rec.company_website} target="_blank" rel="noopener" style=${{ fontSize: '11.5px', color: 'var(--accent-bright)' }}>Website ↗</a>` : null}

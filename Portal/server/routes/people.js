@@ -358,7 +358,7 @@ router.post('/:id/reveal', async (req, res, next) => {
         [id, actor]
       );
       await markRevealed(req.tenant?.id, 'person', id, actor);
-      await addRevealedToCrm(req.tenant?.id, 'person', [id], actor);
+      await addRevealedToCrm(req.tenant?.id, 'person', [id], actor, req.user?.id || null);
       return res.json({ revealed: true, charged: 0, unlimited: true, person: await personContact(id) });
     }
 
@@ -366,7 +366,7 @@ router.post('/:id/reveal', async (req, res, next) => {
     if (result.insufficient) {
       return res.status(402).json({ error: 'insufficient_credits', balance: result.balance });
     }
-    await addRevealedToCrm(req.tenant.id, 'person', [id], actor);
+    await addRevealedToCrm(req.tenant.id, 'person', [id], actor, req.user?.id || null);
     res.json({ ...result, person: await personContact(id) });
   } catch (err) { next(err); }
 });
@@ -386,11 +386,11 @@ router.post('/reveal-bulk', async (req, res, next) => {
         [ids.map(Number), actor]
       );
       await markRevealed(req.tenant?.id, 'person', ids, actor);
-      await addRevealedToCrm(req.tenant?.id, 'person', ids, actor);
+      await addRevealedToCrm(req.tenant?.id, 'person', ids, actor, req.user?.id || null);
       return res.json({ unlimited: true, revealed: ids.length, requested: ids.length });
     }
     const result = await revealBulk(req.tenant.id, 'person', ids, actor);
-    await addRevealedToCrm(req.tenant.id, 'person', ids, actor);
+    await addRevealedToCrm(req.tenant.id, 'person', ids, actor, req.user?.id || null);
     res.json(result);
   } catch (err) { next(err); }
 });

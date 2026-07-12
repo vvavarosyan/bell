@@ -69,6 +69,14 @@ router.get('/records', async (req, res, next) => {
       params.push('%' + req.query.q.trim().toLowerCase() + '%');
       where.push(`(lower(coalesce(c.name,'')) LIKE $${params.length} OR lower(coalesce(p.full_name,'')) LIKE $${params.length})`);
     }
+    // Owner filter (Phase 5): 'me' = my leads, 'unassigned' = no owner, or a
+    // teammate's user id. 'me' with no resolvable user just returns everything.
+    if (req.query.owner) {
+      const o = String(req.query.owner);
+      if (o === 'unassigned') where.push('r.owner_user_id IS NULL');
+      else if (o === 'me' && actorUserId(req)) { params.push(actorUserId(req)); where.push(`r.owner_user_id = $${params.length}`); }
+      else if (/^\d+$/.test(o)) { params.push(Number(o)); where.push(`r.owner_user_id = $${params.length}`); }
+    }
     const limit  = Math.min(Number(req.query.limit ?? 100), 500);
     const offset = Math.max(Number(req.query.offset ?? 0), 0);
     params.push(limit, offset);
@@ -172,6 +180,14 @@ router.patch('/records/:id', async (req, res, next) => {
       if (!RECORD_STATUSES.has(body.status)) return res.status(400).json({ error: 'invalid_status' });
       params.push(body.status); sets.push(`status = $${params.length}`);
     }
+    // Assignment (Phase 5): a new owner must be an active member of this tenant.
+    let newOwnerName = null;
+    if (body.owner_user_id) {
+      const m = await query(`SELECT full_name, email FROM users WHERE id=$1 AND tenant_id=$2 AND is_active=true`,
+        [Number(body.owner_user_id), tenantId(req)]);
+      if (!m.rows.length) return res.status(400).json({ error: 'invalid_owner', reason: 'That teammate isn’t on your team.' });
+      newOwnerName = m.rows[0].full_name || m.rows[0].email;
+    }
     if (body.owner_user_id !== undefined) { params.push(body.owner_user_id || null); sets.push(`owner_user_id = $${params.length}`); }
     if (body.archived !== undefined)      { params.push(!!body.archived);            sets.push(`archived = $${params.length}`); }
     if (!sets.length) return res.status(400).json({ error: 'nothing_to_update' });
@@ -184,6 +200,14 @@ router.patch('/records/:id', async (req, res, next) => {
       await logActivity(null, tenantId(req), id, 'status_change', {
         actorUserId: actorUserId(req), actorEmail: actorEmail(req),
         summary: `Status → ${body.status}`, payload: { from: cur.rows[0].status, to: body.status },
+      });
+    }
+    // Assignment change → its own timeline entry (Phase 5).
+    if (body.owner_user_id !== undefined && String(body.owner_user_id || '') !== String(cur.rows[0].owner_user_id || '')) {
+      await logActivity(null, tenantId(req), id, 'owner_change', {
+        actorUserId: actorUserId(req), actorEmail: actorEmail(req),
+        summary: body.owner_user_id ? `Assigned to ${newOwnerName}` : 'Unassigned',
+        payload: { from: cur.rows[0].owner_user_id, to: body.owner_user_id || null },
       });
     }
     res.json(r.rows[0]);

@@ -110,12 +110,14 @@ export async function logActivity(client, tenantId, recordId, type, { actorUserI
  * Bulk auto-add on reveal. Best-effort, never throws into the reveal flow.
  * `ids` is an array of canonical entity ids of `entityType`.
  */
-export async function addRevealedToCrm(tenantId, entityType, ids, addedBy) {
+export async function addRevealedToCrm(tenantId, entityType, ids, addedBy, ownerUserId = null) {
   if (!tenantId || !Array.isArray(ids) || !ids.length) return 0;
   let added = 0;
   for (const id of ids) {
     try {
-      const res = await ensureCrmRecord(null, tenantId, entityType, id, 'reveal', addedBy);
+      // Auto-assign the newly revealed lead to whoever revealed it (Phase 5) —
+      // only on create; ensureCrmRecord never reassigns an existing record.
+      const res = await ensureCrmRecord(null, tenantId, entityType, id, 'reveal', addedBy, ownerUserId);
       if (res.created) added++;
     } catch (e) {
       console.warn('[crm] auto-add on reveal failed', entityType, id, '—', e.message);
