@@ -79,6 +79,16 @@ t('a gap year between two reported figures is interpolated + flagged', () => {
   assert.equal(est[0].value_num, 150);        // linear midpoint
   assert.equal(est[0].estimated, true);
   assert.equal(est[0].source, 'estimate:interpolated');
+  // Reliability: an interpolated value is NEVER medium (amber) — it must read as
+  // low/grey + hollow so it can't be mistaken for a reported figure (Val 2026-07-12).
+  assert.equal(est[0].confidence, 'low');
+});
+t('new metric keys map to clean canonical labels (eps, registered/issued capital)', () => {
+  assert.equal(normalizeMetric('EPS').key, 'eps');
+  assert.equal(normalizeMetric('Earnings Per Share').key, 'eps');
+  assert.equal(normalizeMetric('Registered Capital').key, 'registered_capital');
+  assert.equal(normalizeMetric('Issued Share Capital').key, 'capital');
+  assert.equal(normalizeMetric('Authorised Capital').key, 'authorized_capital');
 });
 t('NEVER extrapolates beyond the reported range', () => {
   const entries = [

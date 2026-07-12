@@ -11,6 +11,8 @@
 const METRICS = [
   { key: 'revenue',            label: 'Revenue',            rx: /^(revenue|total revenue|turnover|sales|gross revenue)$/i },
   { key: 'net_profit',         label: 'Net profit',         rx: /^(net profit|net income|profit|profit for the (period|year)|net earnings)$/i },
+  { key: 'eps',                label: 'EPS',                rx: /^(eps|earnings per share|basic eps|diluted eps)$/i },
+  { key: 'dividend_per_share', label: 'Dividend / share',   rx: /^(dps|dividend per share)$/i },
   { key: 'gross_profit',       label: 'Gross profit',       rx: /^gross profit$/i },
   { key: 'operating_profit',   label: 'Operating profit',   rx: /^(operating profit|ebit|operating income)$/i },
   { key: 'ebitda',             label: 'EBITDA',             rx: /^ebitda$/i },
@@ -18,8 +20,9 @@ const METRICS = [
   { key: 'total_liabilities',  label: 'Total liabilities',  rx: /^total liabilities$/i },
   { key: 'equity',             label: "Shareholders' equity", rx: /^(equity|shareholders'? equity|total equity)$/i },
   { key: 'paid_up_capital',    label: 'Paid-up capital',    rx: /^(paid[_ -]?up capital|paid capital)$/i },
-  { key: 'authorized_capital', label: 'Authorized capital', rx: /^authoriz(e|)d capital$/i },
-  { key: 'capital',            label: 'Share capital',      rx: /^(capital|share capital)$/i },
+  { key: 'authorized_capital', label: 'Authorized capital', rx: /^authori[sz](e|)d (share )?capital$/i },
+  { key: 'registered_capital', label: 'Registered capital', rx: /^registered capital$/i },
+  { key: 'capital',            label: 'Share capital',      rx: /^(capital|share capital|issued (share )?capital)$/i },
   { key: 'market_cap',         label: 'Market cap',         rx: /^(market cap(italization)?|valuation)$/i },
   { key: 'funding_raised',     label: 'Funding raised',     rx: /^funding[_ ]?raised$/i },
   { key: 'employees',          label: 'Employees',          rx: /^employees?$/i },
@@ -130,7 +133,11 @@ export function interpolateAnnual(entries) {
         period: 'FY' + y, year: y,
         value_num: Math.round(v), value_text: null,
         currency: a.currency || b.currency || null,
-        confidence: 'medium', source: 'estimate:interpolated', estimated: true,
+        // Never 'medium' (amber reads as a real figure). An interpolated value
+        // is a number the source never stated — it renders low/grey + an "est."
+        // badge + a distinct hollow dot so a customer can never mistake it for
+        // reported data (Val 2026-07-12: users must never experience unreliable data).
+        confidence: 'low', source: 'estimate:interpolated', estimated: true,
       });
     }
   }

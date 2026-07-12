@@ -918,7 +918,11 @@ function IntelTab({ financials, shareholders, partnerships, tech = [] }) {
   };
   const srcChip = (s) => s ? html`<span style=${{ fontSize: '9.5px', color: 'var(--text-dim)' }}>${srcLabel(s)}</span>` : null;
   const confColor = (c) => c === 'high' ? '#6fcf97' : c === 'medium' ? '#f5c84c' : '#9ca5b9';
-  const confDot = (c) => html`<span title=${c + ' confidence'} style=${{ display: 'inline-block', width: '7px', height: '7px', borderRadius: '50%', background: confColor(c), marginLeft: '2px', verticalAlign: 'middle' }}></span>`;
+  // Reported figures get a filled dot; an ESTIMATE gets a hollow ring — a
+  // distinct mark so an interpolated value is never read as a reported number.
+  const confDot = (c, estimated) => estimated
+    ? html`<span title="estimated — not reported by the source" style=${{ display: 'inline-block', width: '7px', height: '7px', borderRadius: '50%', border: '1px solid #9ca5b9', background: 'transparent', marginLeft: '2px', verticalAlign: 'middle' }}></span>`
+    : html`<span title=${c + ' confidence'} style=${{ display: 'inline-block', width: '7px', height: '7px', borderRadius: '50%', background: confColor(c), marginLeft: '2px', verticalAlign: 'middle' }}></span>`;
   const fmtFin = (e) => (e.value_text || (e.value_num != null ? Number(e.value_num).toLocaleString() : '—')) + (e.currency ? ' ' + e.currency : '');
   const finRows = financials.reduce((n, g) => n + (g.entries ? g.entries.length : 0), 0);
 
@@ -929,8 +933,8 @@ function IntelTab({ financials, shareholders, partnerships, tech = [] }) {
         ${financials.map(g => html`<div key=${g.key} style=${{ padding: '8px 10px', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
           <div style=${{ fontSize: '12.5px', fontWeight: 700, color: 'var(--text)', marginBottom: '3px' }}>${g.label}</div>
           ${(g.entries || []).map((e, i) => html`<div key=${i} style=${{ display: 'flex', justifyContent: 'space-between', gap: '10px', fontSize: '12px', padding: '2px 0', color: 'var(--text-muted)' }}>
-            <span>${e.period !== '—' ? e.period : ''}${e.estimated ? html`<span style=${{ marginLeft: '6px', fontSize: '9px', color: 'var(--yellow, #f5c84c)', border: '1px solid var(--yellow, #f5c84c)', borderRadius: '4px', padding: '0 4px' }}>est.</span>` : null}</span>
-            <span style=${{ textAlign: 'right', color: 'var(--text)' }}>${fmtFin(e)} ${confDot(e.confidence)} ${srcChip(e.source)}</span>
+            <span>${e.period !== '—' ? e.period : ''}${e.estimated ? html`<span style=${{ marginLeft: '6px', fontSize: '9px', color: 'var(--text-dim)', border: '1px solid var(--text-dim)', borderRadius: '4px', padding: '0 4px' }}>est.</span>` : null}</span>
+            <span style=${{ textAlign: 'right', color: e.estimated ? 'var(--text-dim)' : 'var(--text)', fontStyle: e.estimated ? 'italic' : 'normal' }}>${e.estimated ? '~' : ''}${fmtFin(e)} ${confDot(e.confidence, e.estimated)} ${srcChip(e.source)}</span>
           </div>`)}
         </div>`)}
       </div>
