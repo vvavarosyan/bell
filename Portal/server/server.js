@@ -46,6 +46,7 @@ import signalsRouter           from './routes/signals.js';
 import openstatsRouter from './routes/openstats.js';
 import tendersRouter           from './routes/tenders.js';
 import realestateRouter        from './routes/realestate.js';
+import economicsRouter         from './routes/economics.js';
 import whatsappRouter          from './routes/whatsapp.js';
 import whatsappWebhookRouter   from './routes/whatsapp_webhook.js';
 import bellaRouter             from './routes/bella.js';
@@ -207,6 +208,7 @@ app.use('/api/imports',         ...feature, importsRouter);
 // Stats backs the app shell/header — signed in only, no subscription gate so an
 // unsubscribed user still gets a working frame before being routed to /subscribe.
 app.use('/api/stats',      requireAuth, statsRouter);
+app.use('/api/economics',  ...adminOnly, economicsRouter);
 // Credits — balance/ledger for any signed-in tenant; /adjust is platform_admin
 // (enforced inside the router). No subscription gate so the top-bar pill always loads.
 app.use('/api/credits',    requireAuth, creditsRouter);

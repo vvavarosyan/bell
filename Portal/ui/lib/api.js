@@ -420,6 +420,11 @@ export const api = {
   realEstateBuildingCategories: () => request('/api/real-estate/building-categories'),
   realEstateMap:          () => request('/api/real-estate/map'),
   realEstateParcels:      (q = {}) => request('/api/real-estate/parcels?' + new URLSearchParams(q)),
+  // ---- Economics (Phase 6 · admin) ----
+  economics:              () => request('/api/economics'),
+  economicsCosts:         () => request('/api/economics/costs'),
+  saveEconomicsCost:      (body) => request('/api/economics/costs', { method: 'POST', body: JSON.stringify(body) }),
+  deleteEconomicsCost:    (id) => request('/api/economics/costs/' + id, { method: 'DELETE' }),
   // ---- Tenders (Qatar public procurement) ----
   tenders:                (q = {}) => request('/api/tenders?' + new URLSearchParams(q)),
   tenderStats:            () => request('/api/tenders/stats'),
