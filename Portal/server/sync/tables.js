@@ -92,6 +92,10 @@ export const MIRROR_TABLES = [
   { name: 'gis_zones',                watermark: 'updated_at' },
   { name: 'gis_landmarks',            watermark: 'updated_at' },
   { name: 'real_estate_transactions', watermark: 'updated_at' },
+  // Full cadastre + land-use (~253k + ~190k). district_id/zone_id are soft refs.
+  // gis_scan_progress stays LOCAL-only (never mirrored) — it's scan bookkeeping.
+  { name: 'gis_cadastre_plots',       watermark: 'updated_at' },
+  { name: 'gis_landuse',              watermark: 'updated_at' },
 ];
 
 export const MIRROR_TABLE_NAMES = new Set(MIRROR_TABLES.map((t) => t.name));

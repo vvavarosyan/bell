@@ -91,6 +91,7 @@ function StatsView() {
       ${kpi('Avg price', Number(o.avg_sqm).toLocaleString() + ' /m²', 'QAR per square metre')}
       ${kpi('Buildings', Number(stats.buildings?.total || 0).toLocaleString(), (stats.buildings?.categories || 0) + ' categories')}
       ${kpi('Areas', Number(stats.geo?.districts || 0).toLocaleString() + ' districts', (stats.geo?.zones || 0) + ' zones · ' + (stats.geo?.municipalities || 0) + ' municipalities')}
+      ${stats.land?.plots ? kpi('Land parcels', Number(stats.land.plots).toLocaleString(), Number(stats.land.area_km2).toLocaleString() + ' km² of land') : null}
     </div>
 
     <div style=${{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '12px', marginBottom: '16px' }}>
@@ -120,8 +121,18 @@ function StatsView() {
           <span class="muted small" style=${{ width: '64px', textAlign: 'right', opacity: 0.7 }}>${Number(d.deals).toLocaleString()} deals</span>
         </div>`)}</div>`)}
 
+    ${stats.land?.landuse?.length ? html`
+      <div style=${{ height: '12px' }}></div>
+      ${card('Land use — how Qatar\'s land is designated', html`
+        <div>${stats.land.landuse.map((u) => html`
+          <div key=${u.use} style=${{ display: 'flex', alignItems: 'center', gap: '10px', padding: '4px 0' }}>
+            <span style=${{ width: '150px', flexShrink: 0, fontSize: '12px', color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>${u.use}</span>
+            <span class="muted small" style=${{ flex: 1 }}>${Number(u.areas).toLocaleString()} areas</span>
+            <span class="muted small" style=${{ width: '90px', textAlign: 'right' }}>${Number(u.area_km2).toLocaleString()} km²</span>
+          </div>`)}</div>`, 'Zoning as published by Qatar GIS; unrecognised codes shown verbatim')}` : null}
+
     <div class="muted small" style=${{ marginTop: '14px', lineHeight: 1.5 }}>
-      Every figure is a sum/average of values published in Qatar’s Weekly Real Estate Sales Bulletin — no estimates. Transaction parties are anonymized by the source and are never linked to companies.
+      Every figure is a sum/average of values published in Qatar’s Weekly Real Estate Sales Bulletin + Qatar GIS — no estimates. Transaction parties are anonymized by the source and are never linked to companies.
     </div>`;
 }
 

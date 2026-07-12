@@ -84,7 +84,20 @@ async function computeStats() {
            (SELECT count(*)::int FROM gis_districts)      AS districts,
            (SELECT count(*)::int FROM gis_zones)          AS zones`)).rows[0];
 
+  // Land inventory (from the full cadastre, once scanned). Guarded so it degrades
+  // to zeros before the cadastre scan has run.
+  let land = { plots: 0, area_km2: 0, landuse: [] };
+  try {
+    const c = (await query(`SELECT count(*)::int AS plots, round(sum(area_sqm)/1e6)::bigint AS area_km2 FROM gis_cadastre_plots`)).rows[0];
+    const lu = (await query(`
+      SELECT coalesce(zoning_label, zoning, '—') AS use, count(*)::int AS areas,
+             round(sum(area_sqm)/1e6)::bigint AS area_km2
+        FROM gis_landuse GROUP BY 1 ORDER BY areas DESC LIMIT 10`)).rows;
+    land = { plots: c.plots || 0, area_km2: Number(c.area_km2) || 0, landuse: lu };
+  } catch { /* parcel tables not present yet */ }
+
   return {
+    land,
     overall, byDistrict, monthly, byType,
     risers: movers.slice(0, 8),
     fallers: movers.slice(-8).reverse(),
