@@ -398,10 +398,15 @@ export function MapTab() {
         const geocoder = new MapboxGeocoder({
           accessToken: token, mapboxgl: window.mapboxgl,
           marker: { color: '#5b8cff' },
-          placeholder: 'Search companies & places…',
+          placeholder: 'Search companies, buildings & places…',
           countries: 'qa', bbox: [50.55, 24.40, 51.85, 26.30],
           proximity: { longitude: DOHA[0], latitude: DOHA[1] },
-          flyTo: { zoom: 13, speed: 1.4 },
+          // Include Mapbox POIs (establishments, landmarks, building names) +
+          // addresses + neighbourhoods, not just place names — so everything the
+          // basemap knows is searchable alongside Bell's own data (Val 2026-07-12).
+          types: 'poi,address,neighborhood,locality,place,district,region',
+          limit: 10,
+          flyTo: { zoom: 15, speed: 1.4 },
           localGeocoder: companyGeocoder,
         });
         map.addControl(geocoder, 'top-left');
