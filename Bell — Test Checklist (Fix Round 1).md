@@ -147,5 +147,50 @@ These were built earlier and you hadn't tested them yet. Worth a look:
 
 ---
 
+## H. Phase 4 — Signup & onboarding (new, live on app.bell.qa)
+
+**15. Guided onboarding with a % ring.** As a customer whose setup isn't
+finished, the top of the portal shows a **"Let's get you set up"** card with a
+circular **% meter** and steps (job title, Company & ICP, email branding, first
+reveal, CRM lead, first outreach).
+✅ Expect: each step has **"Do it →"** and **"✨ Bella does it"**; the ring fills
+as you complete steps; at 100% you get a one-time "🎉 all set up" and it goes away.
+(Your own account may already be past 100%, so it's hidden for you.)
+
+**16. "Bella does it for me."** Click "✨ Bella does it" on any step (needs Bella
+credits).
+✅ Expect: Bella opens already working on that step (e.g. writing your email
+branding, or asking about your company to fill the ICP).
+
+**17. Setup % inside Settings.** Open **Settings**.
+✅ Expect: a "You're X% set up · N steps left" bar at the top with an "✨ Ask
+Bella to finish" button — visible even after you've dismissed the top card.
+
+---
+
+## I. QID / Passport at signup — BUILT, but OFF until you switch it on
+
+Fully built and deployed, but **collecting IDs is switched off**, so today's
+signups are unchanged. Turn it on only once your lawyer has confirmed the basis.
+
+**To turn it on:**
+1. Double-click **`Enable ID Verification.command`** (in your Bell folder). It
+   generates an encryption key and prints step-by-step instructions.
+2. Follow them: add **BDI_KEY_PII** (the key) and **BDI_COLLECT_ID = 1** on
+   Railway, to BOTH the app.bell.qa and admin.bell.qa services (same key).
+3. New signups will then require a **Qatar ID** — or a **Passport number** if the
+   person/company is registering from outside Qatar.
+
+**What's protected:** the number is **encrypted** (never stored in plain text),
+shown only as the last 4 digits, and viewable in full only by an admin — and
+every admin reveal is **logged**. To view: admin.bell.qa → **Users** → open an
+account → each user shows their masked ID with a **Reveal** button.
+
+**To turn it off again:** set BDI_COLLECT_ID = 0. (Stored IDs stay safe.)
+
+*Reminder: consent + purpose wording goes in your Terms of Use.*
+
+---
+
 *If anything here doesn't match the "✅ expect", tell me the item number and what
 you saw, and I'll fix it in the next round.*
