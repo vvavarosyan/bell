@@ -43,6 +43,10 @@ const SHOWN_FIELDS = new Set([
   // (ref, closing date, winner, price, title, the description block):
   'limited', 'general', 'tender id', 'po number', 'bid closing date',
   'awarded to', 'price', 'tender description', 'scope of work description',
+  // Kahramaa detail rows already shown as the title, reference, status badge,
+  // the description block, or the "Closing date" line — the rest (department,
+  // purchase windows, fees, bid bond + validity, notes…) DO show under "As published".
+  'tender name', 'kahramaa tender number', 'status', 'description', 'submission closing date',
 ].map(fieldKey));
 
 function contractDuration(raw) {
@@ -100,9 +104,16 @@ export function TendersTab({ embedded = false } = {}) {
   }, []);
   useEffect(() => { loadSync(); }, [loadSync]);
 
-  // Debounced search
+  // Debounced search. A query spans EVERY status — a ref like "5797/2025" is
+  // usually a closed or awarded tender, and the default Open filter hid it
+  // (Val 2026-07-12). So the moment you type, the status filter is released to
+  // "All"; you can re-pick Open/Awarded afterwards to narrow within the results.
   useEffect(() => {
-    const t = setTimeout(() => { setOffset(0); setFilters((f) => ({ ...f, q: qInput.trim() })); }, 400);
+    const t = setTimeout(() => {
+      setOffset(0);
+      const q = qInput.trim();
+      setFilters((f) => ({ ...f, q, ...(q ? { status: '' } : {}) }));
+    }, 400);
     return () => clearTimeout(t);
   }, [qInput]);
 
@@ -188,8 +199,8 @@ export function TendersTab({ embedded = false } = {}) {
         ${chip(filters.status === 'awarded', `Awarded${statusCount('awarded') ? ' · ' + statusCount('awarded').toLocaleString() : ''}`, () => setFilter({ status: 'awarded' }), STATUS_META.awarded.color)}
         ${chip(filters.status === '', `All${allCount ? ' · ' + allCount.toLocaleString() : ''}`, () => setFilter({ status: '' }))}
         <span style=${{ flex: 1 }}></span>
-        <input value=${qInput} onInput=${(e) => setQInput(e.target.value)} placeholder="Search title, buyer, ref…"
-          style=${{ ...selectStyle, maxWidth: '230px', minWidth: '160px' }} />
+        <input value=${qInput} onInput=${(e) => setQInput(e.target.value)} placeholder="Search any detail — title, ref, buyer, winner…"
+          style=${{ ...selectStyle, maxWidth: '270px', minWidth: '160px' }} />
       </div>
       ${(facets.sources || []).length > 1 ? html`
       <div style=${{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center', marginBottom: '10px' }}>

@@ -39,6 +39,22 @@ const HISTORY_MAX = 30;       // messages replayed from the conversation
 import { createSSEFeeder } from './sse.js';
 export { createSSEFeeder };
 
+// Turn a raw Anthropic HTTP failure into something a non-developer can act on.
+// Val saw the bare 'HTTP 400: {"type":"error"...credit balance too low...}'
+// 2026-07-12 and couldn't tell it was HIS Anthropic console, not a Bell bug.
+export function friendlyAnthropicError(status, body) {
+  const b = String(body || '').toLowerCase();
+  if (status === 400 && b.includes('credit balance')) {
+    return 'Bella’s Anthropic account has run out of credit. Add credit at console.anthropic.com → Plans & Billing, then try again. (Bella runs on Anthropic’s API — this is that account’s balance, separate from your Bell subscription.)';
+  }
+  if (status === 401 || status === 403) {
+    return 'Bella’s Anthropic key was rejected. Re-run "Set Anthropic API Key.command" with a valid key, then try again.';
+  }
+  if (status === 429) return 'Bella is being rate-limited by Anthropic right now — wait a few seconds and try again.';
+  if (status === 500 || status === 503 || status === 529) return 'Anthropic is temporarily overloaded — please try again in a moment.';
+  return 'Anthropic HTTP ' + status + ': ' + String(body || '').slice(0, 200);
+}
+
 // ---------------------------------------------------------------------------
 // One streaming model call. Returns the full assistant content blocks,
 // stop_reason, and usage; forwards text deltas via onToken.
@@ -76,7 +92,9 @@ async function streamModelResponse({ apiKey, system, messages, signal, onToken }
   });
   if (!res.ok) {
     const body = await res.text().catch(() => '');
-    throw new Error('Anthropic HTTP ' + res.status + ': ' + body.slice(0, 300));
+    const e = new Error(friendlyAnthropicError(res.status, body));
+    e.friendly = true;   // already user-readable — the turn catch shows it as-is
+    throw e;
   }
 
   const blocks = [];
@@ -259,8 +277,19 @@ export async function runBellaTurn({ ctx, conversationId, userText, clientContex
   // step. The grant never outlives the turn and never covers tools the plan
   // didn't name. (Val's multi-action autonomy spec, 2026-07-08.)
   let grant = null;
+  // Fill-miss feedback (Val 2026-07-12: "she said it is done but it did not
+  // happen — she lied"). When a fill_field dispatch finds no matching field on
+  // screen, the client reports it back here with the fields that ARE present,
+  // so Bella corrects herself honestly and offers the right one (they said
+  // "position"; the form's field is "Job title").
+  const fillMissMatch = /^\[\[fill_missed:([\s\S]*?)\|\|([\s\S]*?)\]\]$/.exec(userText.trim());
   const actionMatch = /^\[\[action:(\d+):(approved|denied)\]\]$/.exec(userText.trim());
-  if (actionMatch) {
+  if (fillMissMatch) {
+    hidden = true;
+    const wanted = fillMissMatch[1].trim().slice(0, 80);
+    const available = fillMissMatch[2].trim().slice(0, 600);
+    effectiveText = `[System note: the value you tried to type into "${wanted}" did NOT land — there is no field with that label on the screen the user is viewing, so NOTHING was saved. Do not say it was done. Tell the user plainly it wasn't set. The fields that ARE on this screen: ${available || '(none detected)'}. If one of those is clearly what they meant (e.g. they said "position" and the form has "Job title"), offer to set that one and ask them to confirm; otherwise ask which field they mean. Never claim a field was filled when it wasn't.]`;
+  } else if (actionMatch) {
     hidden = true;
     const action = await store.getOwnedAction(tenantId, userId, Number(actionMatch[1]));
     if (!action) {
@@ -395,7 +424,9 @@ export async function runBellaTurn({ ctx, conversationId, userText, clientContex
   } catch (err) {
     if (err?.name === 'AbortError' && signal?.aborted) return;   // client left — nothing to report
     console.error('[bella] turn failed:', err.message);
-    send('error', { message: 'Bella hit a problem: ' + String(err.message || err).slice(0, 200) });
+    // Friendly errors (out of credit, bad key, overloaded) are already
+    // user-readable — show them verbatim instead of the raw HTTP dump.
+    send('error', { message: err?.friendly ? String(err.message) : 'Bella hit a problem: ' + String(err.message || err).slice(0, 200) });
   } finally {
     await store.addTokenUsage(tenantId, userId, totalIn, totalOut).catch(() => {});
     await store.touchConversation(convId).catch(() => {});

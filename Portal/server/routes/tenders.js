@@ -60,8 +60,15 @@ router.get('/', async (req, res, next) => {
     if (req.query.source) { params.push(String(req.query.source).toLowerCase()); conds.push(`source = $${params.length}`); }
     if (req.query.buyer)  { params.push(String(req.query.buyer)); conds.push(`buyer = $${params.length}`); }
     if (req.query.q) {
+      // "Find any detail" (Val 2026-07-12: searching "5797/2025" found nothing).
+      // Match the fast indexed columns AND the full published payload — raw::text
+      // covers the buyer's own ref, the Monaqasat/Kahramaa cross-reference number,
+      // department, the description and every "As published" field value. The
+      // tenders table is small (~27k rows) so the seq scan is well under 100ms.
       params.push('%' + String(req.query.q).replace(/[%_\\]/g, '') + '%');
-      conds.push(`(title ILIKE $${params.length} OR buyer ILIKE $${params.length} OR source_ref ILIKE $${params.length})`);
+      conds.push(`(title ILIKE $${params.length} OR buyer ILIKE $${params.length}
+        OR source_ref ILIKE $${params.length} OR category ILIKE $${params.length}
+        OR award_company_name ILIKE $${params.length} OR raw::text ILIKE $${params.length})`);
     }
     if (req.query.year && /^20\d{2}$/.test(String(req.query.year))) {
       params.push(Number(req.query.year));

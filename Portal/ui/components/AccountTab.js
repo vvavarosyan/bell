@@ -409,13 +409,37 @@ export function AccountTab() {
     email: html`
       <div class="sys-section">
         <h2>Email</h2>
-        <div class="sys-hint">Your sending identity and signature for emails sent from the CRM.</div>
+        <div class="sys-hint">Your sending identity and branding for emails sent from the CRM. The header sits at the top of every email and the footer at the bottom — so your outreach looks designed, not plain. Not sure what to write? Ask Bella to create a professional one for you.</div>
         <div class="sys-field"><label>Display name</label>
           <input class="sys-input" placeholder="Name shown on your emails" data-bella-fill="Display name" value=${p.display_name || ''} onInput=${e => setProfile('display_name', e.target.value)} /></div>
         <div class="sys-field full">
-          <label>Email signature</label>
-          <textarea class="sys-textarea" style=${{ minHeight: '130px' }} data-bella-fill="Email signature" value=${p.email_signature || ''} onInput=${e => setProfile('email_signature', e.target.value)}></textarea>
+          <label>Email header (HTML)</label>
+          <textarea class="sys-textarea" style=${{ minHeight: '90px', fontFamily: 'ui-monospace, monospace', fontSize: '12px' }} placeholder="e.g. <div style='font-size:18px;font-weight:700'>Acme Trading</div>" data-bella-fill="Email header" value=${p.email_header_html || ''} onInput=${e => setProfile('email_header_html', e.target.value)}></textarea>
+          <div class="sys-hint">Shown at the TOP of every email — a logo, your company name, or a colored banner.</div>
         </div>
+        <div class="sys-field full">
+          <label>Email signature</label>
+          <textarea class="sys-textarea" style=${{ minHeight: '110px' }} data-bella-fill="Email signature" value=${p.email_signature || ''} onInput=${e => setProfile('email_signature', e.target.value)}></textarea>
+          <div class="sys-hint">Signs off your message — your name, title, and contact details.</div>
+        </div>
+        <div class="sys-field full">
+          <label>Email footer (HTML)</label>
+          <textarea class="sys-textarea" style=${{ minHeight: '90px', fontFamily: 'ui-monospace, monospace', fontSize: '12px' }} placeholder="e.g. <div style='color:#888;font-size:12px'>Acme Trading · Doha, Qatar · acme.qa</div>" data-bella-fill="Email footer" value=${p.email_footer_html || ''} onInput=${e => setProfile('email_footer_html', e.target.value)}></textarea>
+          <div class="sys-hint">Shown at the BOTTOM of every email — company address, website, or a legal line.</div>
+        </div>
+        ${(p.email_header_html || p.email_footer_html || p.email_signature) ? html`
+          <div class="sys-field full">
+            <label>Preview</label>
+            <div style=${{ border: '1px solid var(--border)', borderRadius: '10px', overflow: 'hidden', background: '#ffffff', color: '#1a1a1a', maxWidth: '520px' }}>
+              ${p.email_header_html ? html`<div style=${{ padding: '14px 18px', borderBottom: '1px solid #eee' }} dangerouslySetInnerHTML=${{ __html: p.email_header_html }}></div>` : null}
+              <div style=${{ padding: '16px 18px', fontSize: '14px', lineHeight: 1.6 }}>
+                <div style=${{ color: '#555' }}>Hi Sara,</div>
+                <div style=${{ color: '#555', marginTop: '8px' }}>…your message to the prospect appears here…</div>
+                ${p.email_signature ? html`<div style=${{ marginTop: '14px', whiteSpace: 'pre-wrap', color: '#333' }} dangerouslySetInnerHTML=${{ __html: String(p.email_signature).replace(/\n/g, '<br>') }}></div>` : null}
+              </div>
+              ${p.email_footer_html ? html`<div style=${{ padding: '12px 18px', borderTop: '1px solid #eee' }} dangerouslySetInnerHTML=${{ __html: p.email_footer_html }}></div>` : null}
+            </div>
+          </div>` : null}
         <label class="sys-toggle" style=${{ borderTop: '1px solid var(--border)', borderBottom: 0 }}>
           <input type="checkbox" style=${cbStyle} checked=${data.preferences?.append_signature !== false} onChange=${e => setPref('append_signature', e.target.checked)} />
           <span><div class="t-title">Append signature to CRM emails</div><div class="t-desc">Automatically add your signature to messages you send.</div></span>

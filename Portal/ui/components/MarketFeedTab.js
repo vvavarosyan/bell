@@ -133,10 +133,9 @@ export function MarketFeedTab({ mode } = {}) {
 
   return html`
     <div class="page-fill">
-     <div class="page-scroll">
-     <div style=${{ display: 'flex', gap: '18px', alignItems: 'flex-start' }}>
-      <!-- Main column -->
-      <div style=${{ flex: 1, minWidth: 0 }}>
+     <div class="feed-split">
+      <!-- Main column (scrolls on its own) -->
+      <div class="feed-split-main">
 
         <!-- Scanning / live stats bar -->
         <div class="feed-scanbar">
@@ -229,8 +228,8 @@ export function MarketFeedTab({ mode } = {}) {
         </div>
       </div>
 
-      <!-- Trending sidebar -->
-      <aside class="feed-aside">
+      <!-- Trending sidebar (scrolls on its own) -->
+      <aside class="feed-aside feed-split-aside">
         <!-- Live intelligence — Bell-native pulse (replaced the old sources→Bell
              network; no external sources shown, lives on the right sidebar). -->
         <div class="feed-live-card">
@@ -290,7 +289,6 @@ export function MarketFeedTab({ mode } = {}) {
           ? html`<${ResearchReport} event=${ev} onClose=${() => setOpenedId(null)} />`
           : html`<${NewsDetail} event=${ev} onClose=${() => setOpenedId(null)} />`;
       })() : null}
-     </div>
     </div>
   `;
 }

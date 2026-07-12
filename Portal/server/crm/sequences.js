@@ -10,6 +10,7 @@
 
 import { query } from '../db.js';
 import { sendEmail, getFromAddress, inboundReplyTo } from '../lib/email.js';
+import { getEmailBrandingByEmail, renderBrandedEmail } from '../lib/email_branding.js';
 import { resolveSendIdentity, formatFrom } from '../lib/email_domains.js';
 import { checkDailyLimit } from '../lib/sendlimits.js';
 import { logActivity, markContacted, buildMergeVars, applyMerge } from '../lib/crm.js';
@@ -108,11 +109,17 @@ async function processEnrollment(enr) {
     return 'deferred';
   }
 
-  // Personalize {tokens} for this recipient, then send the step.
+  // Personalize {tokens} for this recipient, then send the step — wrapped in
+  // the enroller's email branding (header/footer/signature), same as a direct
+  // send (Val 2026-07-12).
   const vars = buildMergeVars(rec);
   const subject = applyMerge(step.subject, vars);
-  const bodyText = applyMerge(step.body, vars);
   const replyTo = enr.enrolled_by || null;
+  const branding = await getEmailBrandingByEmail(enr.enrolled_by);
+  branding.header = applyMerge(branding.header, vars);
+  branding.footer = applyMerge(branding.footer, vars);
+  branding.signature = applyMerge(branding.signature, vars);
+  const { html: bodyHtml, text: bodyText } = renderBrandedEmail({ bodyText: applyMerge(step.body, vars), branding });
   const ins = await query(
     `INSERT INTO crm_emails (tenant_id, record_id, direction, to_email, reply_to, subject, body_text, status, sent_by)
      VALUES ($1,$2,'out',$3,$4,$5,$6,'queued',$7) RETURNING id`,
@@ -124,7 +131,7 @@ async function processEnrollment(enr) {
   try {
     try { from = formatFrom(await resolveSendIdentity(enr.tenant_id)); } catch { from = null; }
     from = from || await getFromAddress();
-    const res = await sendEmail({ from, to, replyTo: effReplyTo, subject, text: bodyText });
+    const res = await sendEmail({ from, to, replyTo: effReplyTo, subject, html: bodyHtml || undefined, text: bodyText });
     await query(`UPDATE crm_emails SET status='sent', provider_message_id=$2, from_email=$3, reply_to=$4, sent_at=now() WHERE id=$1`,
       [emailId, res.id, from, effReplyTo]);
   } catch (e) {

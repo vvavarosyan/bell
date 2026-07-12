@@ -13,7 +13,7 @@ import { html } from './lib/html.js';
 import { api } from './lib/api.js';
 import { Sidebar, NAV_IDS } from './components/Sidebar.js';
 import { currentRoute, navigateTo } from './lib/router.js';
-import { bellaFillField, stashPending, BELLA_ACTION_EVENT } from './lib/bellaBus.js';
+import { bellaFillField, stashPending, BELLA_ACTION_EVENT, BELLA_FILL_RESULT_EVENT, visibleFillLabels } from './lib/bellaBus.js';
 import { toast } from './lib/toast.js';
 import { ComingSoon } from './components/ComingSoon.js';
 import { CompaniesTab, ArchivedCompaniesTab } from './components/CompaniesTab.js';
@@ -210,7 +210,16 @@ function App({ initialUser, initialTenant, mode }) {
             const attempt = (i) => setTimeout(() => {
               if (bellaFillField(a)) return;
               if (i + 1 < retries.length) attempt(i + 1);
-              else toast(`Bella couldn't find the "${String(a.field || '').slice(0, 40)}" field on this screen — nothing was typed.`, 'error');
+              else {
+                toast(`Bella couldn't find the "${String(a.field || '').slice(0, 40)}" field on this screen — nothing was typed.`, 'error');
+                // Tell Bella the truth (+ which fields ARE here) so she corrects
+                // herself instead of claiming success (Val 2026-07-12).
+                try {
+                  window.dispatchEvent(new CustomEvent(BELLA_FILL_RESULT_EVENT, {
+                    detail: { field: String(a.field || ''), ok: false, available: visibleFillLabels() },
+                  }));
+                } catch { /* ignore */ }
+              }
             }, retries[i]);
             attempt(0);
             break;

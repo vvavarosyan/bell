@@ -9,7 +9,8 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { html } from '../lib/html.js';
 import { api } from '../lib/api.js';
 import { currentRoute, navigateTo } from '../lib/router.js';
-import { emitBellaAction, stashPending, fireToolEffects } from '../lib/bellaBus.js';
+import { emitBellaAction, stashPending, fireToolEffects,
+  BELLA_CONV_EVENT, getActiveConversation, setActiveConversation, BELLA_FILL_RESULT_EVENT } from '../lib/bellaBus.js';
 import { BellaApprovals, fireApprovalsChanged, APPROVALS_EVENT } from './BellaApprovals.js';
 
 const SUGGESTIONS = [
@@ -104,8 +105,12 @@ export function BellaChat({ onClose }) {
   const convIdRef = useRef(null);  // avoids stale closures (new convs get their id mid-turn)
   const lastIdRef = useRef(0);     // newest server message id we've applied
   const syncSeqRef = useRef(0);
+  const sendRef = useRef(null);    // always the latest send() (for async callers)
+  const fillMissRef = useRef({ fields: [], available: [], timer: null });
   useEffect(() => { busyRef.current = busy; }, [busy]);
-  useEffect(() => { convIdRef.current = convId; }, [convId]);
+  // Mirror the id into the ref AND the shared session store, so voice continues
+  // the same thread and a mid-session reopen resumes it (Val 2026-07-12).
+  useEffect(() => { convIdRef.current = convId; if (convId != null) setActiveConversation(convId); }, [convId]);
 
   const refreshConvs = useCallback(async () => {
     try { const r = await api.bellaConversations(); setConvs(r.conversations || []); return r.conversations || []; } catch { return []; }
@@ -157,12 +162,29 @@ export function BellaChat({ onClose }) {
     } catch { /* ignore */ }
   }, []);
 
-  // On open: load conversations and auto-open the latest one (Val's #4).
+  // On open: resume the session's active conversation if there is one and it's
+  // still fresh; otherwise START A NEW CHAT (Val 2026-07-12: "every new
+  // discussion must be a separate chat, unless it's within the same session").
+  // Past discussions stay in History; a fresh visit / long idle opens blank.
   useEffect(() => {
     (async () => {
       const list = await refreshConvs();
-      if (list.length) openConversation(list[0].id);
+      const active = getActiveConversation();
+      if (active != null && list.some((c) => c.id === active)) openConversation(active);
+      else newChat();
     })();
+  }, []);   // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Voice (or another tab) started/continued a thread → adopt it so the voice
+  // turns show here as chat history. Ignored while a turn is streaming.
+  useEffect(() => {
+    const on = (e) => {
+      const id = e?.detail?.id;
+      if (id == null || busyRef.current || id === convIdRef.current) return;
+      openConversation(id);
+    };
+    window.addEventListener(BELLA_CONV_EVENT, on);
+    return () => window.removeEventListener(BELLA_CONV_EVENT, on);
   }, []);   // eslint-disable-line react-hooks/exhaustive-deps
 
   // Idle poll — picks up overnight/scheduled results while the panel is open.
@@ -188,6 +210,33 @@ export function BellaChat({ onClose }) {
     return () => window.removeEventListener(APPROVALS_EVENT, on);
   }, [syncFromServer]);
 
+  // A fill_field that MISSED (no such field on screen) → once the turn is idle,
+  // tell Bella the truth plus the fields that ARE present, so she corrects
+  // herself and offers the right one instead of claiming success (Val's #4).
+  // Debounced so several misses in one turn become one honest correction.
+  useEffect(() => {
+    const flush = () => {
+      const buf = fillMissRef.current;
+      buf.timer = null;
+      if (!buf.fields.length) return;
+      if (busyRef.current) { buf.timer = setTimeout(flush, 1500); return; }   // wait for the turn to finish
+      const fields = Array.from(new Set(buf.fields)).slice(0, 6).join(', ');
+      const available = Array.from(new Set(buf.available)).slice(0, 24).join(', ');
+      buf.fields = []; buf.available = [];
+      try { sendRef.current?.(`[[fill_missed:${fields}||${available}]]`, { hidden: true }); } catch { /* ignore */ }
+    };
+    const on = (e) => {
+      const d = e?.detail; if (!d || d.ok) return;
+      const buf = fillMissRef.current;
+      if (d.field) buf.fields.push(String(d.field));
+      for (const l of (d.available || [])) buf.available.push(String(l));
+      if (buf.timer) clearTimeout(buf.timer);
+      buf.timer = setTimeout(flush, 1200);
+    };
+    window.addEventListener(BELLA_FILL_RESULT_EVENT, on);
+    return () => { window.removeEventListener(BELLA_FILL_RESULT_EVENT, on); if (fillMissRef.current.timer) clearTimeout(fillMissRef.current.timer); };
+  }, []);   // eslint-disable-line react-hooks/exhaustive-deps
+
   // Abort an in-flight stream if the panel unmounts mid-answer.
   useEffect(() => () => { try { streamRef.current?.abort(); } catch { /* ignore */ } }, []);
 
@@ -202,7 +251,9 @@ export function BellaChat({ onClose }) {
     } catch { /* ignore */ }
   };
 
-  const newChat = () => { if (!busy) { setConvId(null); setMsgs([]); setShowList(false); lastIdRef.current = 0; } };
+  // "New" starts a fresh discussion — clear the shared active id too, so voice
+  // starts its next turn in this new thread rather than the old one.
+  const newChat = () => { if (!busy) { setConvId(null); setMsgs([]); setShowList(false); lastIdRef.current = 0; setActiveConversation(null); } };
 
   const removeConversation = async (id, ev) => {
     ev.stopPropagation();
@@ -341,6 +392,10 @@ export function BellaChat({ onClose }) {
       setTimeout(() => { if (convIdRef.current && !busyRef.current) syncFromServer(convIdRef.current, { force: true }); }, 400);
     }
   };
+
+  // Keep the ref pointed at the latest send() so async callers (the fill-miss
+  // feedback) use the CURRENT conversation id, not a stale first-render closure.
+  useEffect(() => { sendRef.current = send; });
 
   const onKeyDown = (e) => {
     if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); send(); }

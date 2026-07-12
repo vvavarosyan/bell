@@ -63,7 +63,6 @@ export function SignalsTab() {
   const [inMarketIcp, setInMarketIcp] = useState(false);
   const [openTenders, setOpenTenders] = useState([]);
   const [tenderTotal, setTenderTotal] = useState(0);   // true total tenders Bell tracks (for the Tenders chip)
-  const cardRefs = useRef({});
   const scoreColor = (n) => (n >= 60 ? '#6fcf97' : n >= 35 ? '#f5c84c' : '#9ca5b9');
 
   const load = useCallback(async ({ silent = false } = {}) => {
@@ -181,12 +180,6 @@ export function SignalsTab() {
     return [...rows, ...t].sort((a, b) => new Date(b.occurred_at) - new Date(a.occurred_at));
   }, [rows, tenderSignals, kind, scope, windowKey]);
 
-  const pick = (id) => {
-    setSelectedId(id);
-    const el = cardRefs.current[id];
-    if (el && el.scrollIntoView) el.scrollIntoView({ behavior: 'smooth', block: 'center' });
-  };
-
   const chip = (on, label, onClick, color) => html`
     <button onClick=${onClick} style=${{
       background: on ? (color ? color + '22' : 'var(--accent)') : 'var(--bg-elev-2, rgba(255,255,255,0.04))',
@@ -264,11 +257,18 @@ export function SignalsTab() {
               const sel = selectedId === s.id;
               // Val 2026-07-04: a blip lights up as the rotating sweep crosses its
               // angle, then fades — reappearing on the next rotation. The sweep is
-              // 7s/rev and starts at +x, so the cross time = (angle/360)*7s.
+              // 7s/rev and its bright edge starts along +x (screen angle 0).
+              // The blip sits at screen angle (thetaDeg − 90°) — blipXY places it
+              // with cos/sin of (angle − π/2). So the sweep's edge reaches it at
+              // ((thetaDeg − 90) mod 360)/360 × 7s. Using thetaDeg alone lit the
+              // blip 90° (1.75s) LATE — the lag Val reported 2026-07-12; the −90
+              // offset lands the flash exactly on the crossing.
               const thetaDeg = meta.sector * SECTOR_DEG + 8 + (hash(s.id) % Math.max(8, SECTOR_DEG - 16));
-              const begin = ((thetaDeg / 360) * 7).toFixed(2) + 's';
+              const begin = ((((thetaDeg - 90) % 360 + 360) % 360) / 360 * 7).toFixed(2) + 's';
+              // Blips are display-only (Val 2026-07-12: "unlink them on the UI") —
+              // no click target; the stream list below is where signals are opened.
               return html`
-                <g key=${s.id} onClick=${() => pick(s.id)} style=${{ cursor: 'pointer' }}>
+                <g key=${s.id} style=${{ pointerEvents: 'none' }}>
                   ${sel ? html`<circle cx=${x} cy=${y} r="9" fill="none" stroke=${meta.color} stroke-width="1.4" />` : null}
                   <circle cx=${x} cy=${y} r="4" fill=${meta.color} opacity="0">
                     <animate attributeName="opacity" begin=${begin} dur="7s" values="1;0.9;0.12;0" keyTimes="0;0.12;0.55;1" repeatCount="indefinite" />
@@ -283,7 +283,7 @@ export function SignalsTab() {
           </svg>
           <div class="muted small" style=${{ marginTop: '8px', textAlign: 'center' }}>
             ${loading ? 'Sweeping the market…' : displayRows.length
-              ? `${displayRows.length} signals in the last ${WINDOWS.find(([k]) => k === windowKey)?.[1]} — click a blip to inspect`
+              ? `${displayRows.length} signals in the last ${WINDOWS.find(([k]) => k === windowKey)?.[1]} — see the stream below to inspect`
               : 'The radar is warming up — signals appear as Bell detects market movement.'}
           </div>
 
@@ -313,7 +313,7 @@ export function SignalsTab() {
               const meta = KIND_META[s.kind] || KIND_META.news_event;
               const sel = selectedId === s.id;
               return html`
-                <div key=${s.id} ref=${(el) => { cardRefs.current[s.id] = el; }}
+                <div key=${s.id}
                   onClick=${() => setSelectedId(s.id)}
                   style=${{ border: '1px solid ' + (sel ? meta.color : 'var(--border)'), borderRadius: '12px', background: 'var(--bg-elev)', padding: '12px 14px', marginBottom: '10px', cursor: 'pointer', transition: 'border-color .15s' }}>
                   <div style=${{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '5px', flexWrap: 'wrap' }}>

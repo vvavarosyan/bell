@@ -80,7 +80,12 @@ export function kmTenderToRow(r) {
   const source_ref = clean(r.Number, 120);
   const title = clean(r.Title, 400);
   if (!source_ref || !title) return null;
-  const status = kmStatus(r.Status);
+  let status = kmStatus(r.Status);
+  // Kahramaa's Status field lags reality — tenders closed years ago still say
+  // "Open" (Val hit this live 2026-07-12). The source's OWN closing date is
+  // the truth: a passed deadline cannot be open for bidding.
+  const closes = parseAspNetDate(r.EndDate) || parseFormattedDate(r.FormattedEndDate);
+  if (status === 'open' && closes && closes < new Date().toISOString()) status = 'closed';
   return {
     source: 'kahramaa',
     source_ref,
@@ -91,8 +96,10 @@ export function kmTenderToRow(r) {
     value_amount: null,                       // the list shows no contract value
     currency: 'QAR',
     published_at: parseAspNetDate(r.StartDate) || parseFormattedDate(r.FormattedStartDate),
-    deadline_at: parseAspNetDate(r.EndDate) || parseFormattedDate(r.FormattedEndDate),
-    url: REFERER,
+    deadline_at: closes,
+    // Deep link to the tender's own Details page (the id the enricher uses
+    // too) — a re-scan's url overwrite then never regresses to the list page.
+    url: clean(r.Id, 20) ? `https://www.km.qa/Business/Pages/TenderDetails.aspx?ItemId=${clean(r.Id, 20)}` : REFERER,
     raw: {
       monaqasat_number: clean(r.MonaqasatNumber, 60),
       department: clean(r.Department, 120),

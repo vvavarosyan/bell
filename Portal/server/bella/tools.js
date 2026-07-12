@@ -125,8 +125,37 @@ const COMPANY_DETAIL_KEYS = [
   'id', 'name', 'legal_name', 'city', 'address', 'industry', 'industries',
   'status_normalized', 'website', 'email', 'phone', 'linkedin_url',
   'employee_count', 'founded_year', 'description', 'bell_score',
-  'people_count', 'people_locked', 'is_revealed',
+  // Google Business signals — real personalization fuel (rating + review volume).
+  'gmaps_rating', 'gmaps_reviews_count',
 ];
+
+// Assemble get_company / open_company output. The company detail endpoint nests
+// the company row under `payload.company` (with partnerships / tech / financials
+// / people alongside) — reading the TOP level got almost nothing, so Bella had
+// no real facts to personalize with (Val 2026-07-12). This surfaces the company
+// PLUS the non-PDPPL context that makes outreach specific. People + shareholders
+// (which may name board members / signatories) are PDPPL-sensitive and stay OUT
+// per CLAUDE.md 2.7 — wire those only with Val's say-so.
+function companyDetailOut(payload) {
+  const c = (payload && payload.company) || payload || {};
+  const out = pick(c, COMPANY_DETAIL_KEYS);
+  out.people_count  = payload?.people_count ?? c.people_count ?? null;
+  out.people_locked = payload?.people_locked ?? true;
+  out.is_revealed   = c.is_revealed ?? payload?.is_revealed ?? false;
+  if (Array.isArray(payload?.contacts)) {
+    out.contacts = payload.contacts.slice(0, 10).map((cc) => pick(cc, ['type', 'value', 'label', 'is_primary']));
+  }
+  if (Array.isArray(payload?.partnerships) && payload.partnerships.length) {
+    out.partnerships = payload.partnerships.slice(0, 12).map((p) => pick(p, ['partner_name', 'relationship', 'description', 'since']));
+  }
+  if (Array.isArray(payload?.tech) && payload.tech.length) {
+    out.tech = payload.tech.slice(0, 25).map((t) => pick(t, ['tech', 'category']));
+  }
+  if (Array.isArray(payload?.financials) && payload.financials.length) {
+    out.financials = payload.financials.slice(0, 12).map((f) => pick(f, ['metric', 'value_text', 'value_num', 'currency', 'period', 'as_of']));
+  }
+  return out;
+}
 const JOB_KEYS = ['id', 'title', 'company_name', 'company_id', 'location_text', 'employment_type', 'workplace_type', 'seniority_level', 'posted_at', 'effective_active'];
 const CRM_ROW_KEYS = ['id', 'entity_type', 'entity_id', 'status', 'company_name', 'company_city', 'company_industry', 'person_name', 'owner_email', 'last_activity_at'];
 
@@ -197,7 +226,7 @@ export const TOOLS = [
   {
     definition: {
       name: 'get_company',
-      description: 'Full profile of one company by id: identity, industry tags, contacts (masked unless revealed), people count (people details are restricted for customer accounts), enrichment score.',
+      description: 'Full profile of one company by id — everything you need to PERSONALIZE outreach: identity, industry tags, description, website, Google review rating + volume, partnerships, technographics, financials, contacts (masked unless revealed), people count (people details restricted for customer accounts), enrichment score. Call this before drafting an email so the message references THIS company specifically.',
       input_schema: {
         type: 'object',
         properties: { id: { type: 'integer', description: 'Company id from search_companies.' } },
@@ -206,11 +235,7 @@ export const TOOLS = [
     },
     async execute(args, ctx) {
       const { payload } = await internalCall(companiesRouter, 'GET', '/' + Number(args.id), ctx, {});
-      const out = pick(payload || {}, COMPANY_DETAIL_KEYS);
-      if (Array.isArray(payload?.contacts)) {
-        out.contacts = payload.contacts.slice(0, 10).map((c) => pick(c, ['type', 'value', 'label', 'is_primary']));
-      }
-      return out;
+      return companyDetailOut(payload);
     },
     summarize: (args, result) => result?.name ? `opened ${result.name}` : `company #${args.id}`,
   },
@@ -699,6 +724,64 @@ export const TOOLS = [
 
   {
     definition: {
+      name: 'get_email_setup',
+      description: "Read the user's email branding — display name, header, footer, signature — so you know whether outreach is ready to look professional. If header/footer/signature are empty, SUGGEST setting them up before sending (offer to create a professional set with update_email_branding). Call this before drafting or sending an email.",
+      input_schema: { type: 'object', properties: {} },
+    },
+    async execute(_args, ctx) {
+      const { status, payload } = await internalCall(accountRouter, 'GET', '/', ctx, {});
+      const r = asResult(status, payload);
+      if (r.error) return r;
+      const p = payload.profile || {};
+      const has = (v) => !!String(v || '').trim();
+      const ready = has(p.email_header_html) || has(p.email_footer_html) || has(p.email_signature);
+      return {
+        display_name: p.display_name || null,
+        has_header: has(p.email_header_html), has_footer: has(p.email_footer_html), has_signature: has(p.email_signature),
+        header: String(p.email_header_html || '').slice(0, 1200) || null,
+        footer: String(p.email_footer_html || '').slice(0, 1200) || null,
+        signature: String(p.email_signature || '').slice(0, 1200) || null,
+        ready,
+        note: ready
+          ? 'Branding is set — every outgoing email is wrapped with this header/footer/signature.'
+          : 'No email branding yet. Before sending, suggest creating a professional header, footer and signature (update_email_branding) so the email does not look plain.',
+      };
+    },
+    summarize: (_a, r) => r?.error ? 'failed' : (r?.ready ? 'branding ready' : 'branding not set up'),
+  },
+
+  {
+    approval: 'act',
+    definition: {
+      name: 'update_email_branding',
+      description: "Set the user's email branding — header (top of every email), footer (bottom), signature, and/or display name — that wraps every email they send. Use clean, email-safe inline-styled HTML for header/footer (no <script>, no external stylesheet/font). Make it professional and on-brand for their company. After saving, tell them to review it in Settings → Email.",
+      input_schema: {
+        type: 'object',
+        properties: {
+          display_name:      { type: 'string', description: 'Name shown on their emails.' },
+          email_header_html: { type: 'string', description: 'HTML at the TOP of every email (logo / company name / colored banner).' },
+          email_footer_html: { type: 'string', description: 'HTML at the BOTTOM (company address, website, legal line).' },
+          email_signature:   { type: 'string', description: 'Sign-off — name, title, contact details. Plain text or simple HTML.' },
+        },
+      },
+    },
+    describe: (args) => `Set email branding: ${['display_name', 'email_header_html', 'email_footer_html', 'email_signature'].filter((k) => k in args).join(', ') || '(none)'}`,
+    async execute(args, ctx) {
+      const profile = {};
+      for (const k of ['display_name', 'email_header_html', 'email_footer_html', 'email_signature']) {
+        if (typeof args[k] === 'string') profile[k] = args[k].slice(0, 8000);
+      }
+      if (!Object.keys(profile).length) return { error: 'nothing to update' };
+      const { status, payload } = await internalCall(accountRouter, 'PATCH', '/', ctx, { body: { profile } });
+      const r = asResult(status, payload);
+      return r.error ? r : { updated: Object.keys(profile), note: 'Saved. Ask the user to review it in Settings → Email.' };
+    },
+    summarize: (_a, r) => r?.error ? 'failed' : 'email branding saved',
+    uiAction: () => ({ type: 'settings_section', id: 'email' }),   // show them Settings → Email
+  },
+
+  {
+    definition: {
       name: 'search_datasets',
       description: 'Search the Deep Data section (Qatar open-data datasets) by keyword.',
       input_schema: {
@@ -914,7 +997,7 @@ export const TOOLS = [
     approval: 'always',
     definition: {
       name: 'send_email',
-      description: "Send an email to a CRM record's contact via the workspace's sending identity. Personalization tokens like {company} are supported. ALWAYS gets user approval. Honor the user's email-style preferences when writing.",
+      description: "Send an email to a CRM record's contact via the workspace's sending identity. ALWAYS gets user approval. BEFORE drafting: (1) call get_email_setup — if the user has no header/footer/signature yet, suggest setting it up first (update_email_branding) so the email doesn't look plain; the branding wraps the message automatically, so do NOT paste a signature/footer into the body. (2) call get_company for the recipient's company and weave in SPECIFICS — what they do, industry, city, Google reviews, partnerships, tech they run, recent news/signals — so it reads personally and earns a reply; never send a generic template. Personalization tokens like {company} are also supported.",
       input_schema: {
         type: 'object',
         properties: {
@@ -1286,7 +1369,7 @@ export const TOOLS = [
       }
       if (!id) return { error: 'no matching company — try search_companies first' };
       const { payload } = await internalCall(companiesRouter, 'GET', '/' + id, ctx, {});
-      const out = pick(payload || {}, COMPANY_DETAIL_KEYS);
+      const out = companyDetailOut(payload);
       out._resolved_id = id;
       return out;
     },

@@ -352,7 +352,19 @@ html, body {
 .feed-company-chip:hover { background: var(--accent, #3b82f6); color: #fff; }
 .feed-loadmore { align-self: center; margin: 8px 0 16px; padding: 8px 22px; border-radius: 8px; border: 1px solid var(--border); background: transparent; color: var(--text-muted); cursor: pointer; }
 
-.feed-aside { width: 240px; flex-shrink: 0; border-left: 1px solid var(--border); padding-left: 16px; position: sticky; top: 0; }
+/* Market Feed two-pane scroll (Val 2026-07-12: the content and the right
+   sidebar must scroll INDEPENDENTLY — before, seeing the bottom of the sidebar
+   meant scrolling the whole feed to the end). Each column owns its overflow and
+   fills the page height; the parent clips so neither column scrolls the page. */
+.feed-split       { flex: 1; min-height: 0; display: flex; gap: 18px; align-items: stretch; padding: 18px 22px; overflow: hidden; }
+.feed-split-main  { flex: 1; min-width: 0; height: 100%; overflow-y: auto; }
+.feed-split-aside { flex: 0 0 240px; height: 100%; overflow-y: auto; }
+/* Narrow screens: fall back to one scroller so nothing is cut off. */
+@media (max-width: 880px) {
+  .feed-split       { flex-direction: column; overflow-y: auto; padding: 14px 16px; }
+  .feed-split-main, .feed-split-aside { height: auto; overflow-y: visible; flex: 0 0 auto; }
+}
+.feed-aside { width: 240px; flex-shrink: 0; border-left: 1px solid var(--border); padding-left: 16px; }
 .feed-aside-title { font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; color: var(--text-dim); margin-bottom: 10px; }
 .feed-trend-row { display: flex; align-items: center; justify-content: space-between; gap: 8px; width: 100%; padding: 7px 8px; border-radius: 7px; border: none; background: transparent; color: var(--text); cursor: pointer; text-align: left; }
 .feed-trend-row:hover { background: rgba(255,255,255,.04); }

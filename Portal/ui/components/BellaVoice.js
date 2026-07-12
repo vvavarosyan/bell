@@ -16,7 +16,8 @@ import { html } from '../lib/html.js';
 import { api } from '../lib/api.js';
 import { toast } from '../lib/toast.js';
 import { currentRoute, navigateTo } from '../lib/router.js';
-import { emitBellaAction, stashPending, fireToolEffects } from '../lib/bellaBus.js';
+import { emitBellaAction, stashPending, fireToolEffects,
+  BELLA_CONV_EVENT, getActiveConversation, setActiveConversation } from '../lib/bellaBus.js';
 import { fireApprovalsChanged } from './BellaApprovals.js';
 import { cutSpeechSegment, segmentAll } from '../lib/speech.js';
 
@@ -64,11 +65,15 @@ export function BellaVoice({ onClose, onOpenChat }) {
   }, []);
   useEffect(() => () => cleanup(), [cleanup]);
 
-  // Continue Bella's latest conversation (chat↔voice share the thread).
+  // Chat ↔ voice share ONE thread via the session store, so voice turns land in
+  // the conversation the chat panel shows (Val 2026-07-12). A fresh visit has no
+  // active id → the first voice turn opens a new conversation, matching the
+  // new-chat policy. If chat switches/creates a thread, adopt it here.
   useEffect(() => {
-    (async () => {
-      try { const r = await api.bellaConversations(); convIdRef.current = r.conversations?.[0]?.id || null; } catch { /* ignore */ }
-    })();
+    convIdRef.current = getActiveConversation();
+    const on = (e) => { convIdRef.current = e?.detail?.id ?? null; };
+    window.addEventListener(BELLA_CONV_EVENT, on);
+    return () => window.removeEventListener(BELLA_CONV_EVENT, on);
   }, []);
 
   // While voice is active, CHAT replies are spoken too (Val 2026-07-03: after
@@ -200,7 +205,9 @@ export function BellaVoice({ onClose, onOpenChat }) {
       const stream = await api.bellaChat(
         { conversation_id: convIdRef.current, message: text, context: { section: currentRoute().tab, voice: true } },
         {
-          onMeta: (m) => { if (m.conversation_id) convIdRef.current = m.conversation_id; },
+          // Persist + broadcast the thread id so the chat panel adopts it and
+          // the voice turns appear there as history (Val 2026-07-12).
+          onMeta: (m) => { if (m.conversation_id) { convIdRef.current = m.conversation_id; setActiveConversation(m.conversation_id); } },
           onToken: (d) => { finalText += d.t || ''; feedSpeech(d.t || ''); },
           onTool: (t) => { if (t.status === 'done') fireToolEffects(t.name); },   // voice writes refresh open tabs too
           onNavigate: (n) => {

@@ -8,6 +8,7 @@
 
 import { runTenderScan } from '../tenders/scrape.js';
 import { pushTendersToProd } from '../tenders/push_prod.js';
+import { enrichKahramaaDetails, pendingKahramaaDetailCount } from '../tenders/enrich_kahramaa.js';
 
 (async () => {
   console.log('Bell — Kahramaa Tender Scan');
@@ -29,6 +30,17 @@ import { pushTendersToProd } from '../tenders/push_prod.js';
       console.log('  ' + s.source_ref + '  ' + String(s.title || '').slice(0, 66));
       console.log('  Status: ' + s.status + (s.award_company_name ? ('  ·  Winner: ' + s.award_company_name) : ''));
     }
+    // Per-tender Details pages (department, purchase windows, bid bond +
+    // validity, full description, notes — everything the source publishes,
+    // captured verbatim). Also corrects status + the true submission deadline.
+    // Plain fetch, resumable; first run covers the archive (~6 min).
+    const pending = await pendingKahramaaDetailCount();
+    if (pending > 0) {
+      console.log('\n' + pending.toLocaleString() + ' tender detail page(s) to fetch…');
+      const d = await enrichKahramaaDetails({ onProgress: (m) => console.log(m) });
+      console.log('  ' + d.enriched.toLocaleString() + ' detailed · ' + d.failed + ' will retry next run');
+    }
+
     if ((r.scraped || 0) === 0) {
       console.log('\n⚠ Nothing scraped. km.qa may be temporarily unreachable — try again shortly.');
     } else {

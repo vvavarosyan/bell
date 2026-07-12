@@ -17,6 +17,12 @@ const PROFILE_COLS = [
 const EXTRA_PROFILE = [
   'department', 'mobile', 'bio', 'twitter_url', 'website_url',
   'booking_link', 'email_signature',
+  // display_name (the name shown on emails) is edited in Settings → Email but
+  // was never whitelisted here, so it silently didn't save — fixed 2026-07-12.
+  'display_name',
+  // Email branding (Val 2026-07-12): a header + footer wrapped around every
+  // outgoing email so they don't look plain. HTML, editable here or by Bella.
+  'email_header_html', 'email_footer_html',
 ];
 
 function defaultNotifications() {

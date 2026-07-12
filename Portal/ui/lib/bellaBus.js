@@ -45,6 +45,38 @@ export function emitBellaAction(action) {
   try { window.dispatchEvent(new CustomEvent(BELLA_ACTION_EVENT, { detail: action })); } catch { /* ignore */ }
 }
 
+// ── Shared "active Bella conversation" (chat ↔ voice) ────────────────────────
+// Chat and voice are separate components but must share ONE thread, or a voice
+// turn lands in a conversation the chat panel never shows (Val 2026-07-12:
+// "voice communication did not store as chat"). The same store also drives the
+// new-chat policy: a FRESH visit starts a new discussion, while several
+// conversations WITHIN a session stay resumable. sessionStorage scopes "this
+// session" (cleared when the tab closes); the staleness window means a long
+// idle gap in the same tab also opens fresh.
+export const BELLA_CONV_EVENT = 'bdi:bella-conversation';
+export const BELLA_CONV_STALE_MS = 60 * 60 * 1000;   // 60 min idle → a new visit is a new chat
+const CONV_KEY = 'bdi_bella_active_conv';
+
+/** Record the session's active conversation and tell the other surface. */
+export function setActiveConversation(id, { broadcast = true } = {}) {
+  try {
+    if (id == null) window.sessionStorage.removeItem(CONV_KEY);
+    else window.sessionStorage.setItem(CONV_KEY, JSON.stringify({ id, ts: Date.now() }));
+  } catch { /* private mode / storage disabled — event still fires */ }
+  if (broadcast) { try { window.dispatchEvent(new CustomEvent(BELLA_CONV_EVENT, { detail: { id: id ?? null } })); } catch { /* ignore */ } }
+}
+
+/** The session's active conversation id, or null if none / gone stale. */
+export function getActiveConversation(staleMs = BELLA_CONV_STALE_MS) {
+  try {
+    const raw = window.sessionStorage.getItem(CONV_KEY);
+    if (!raw) return null;
+    const { id, ts } = JSON.parse(raw);
+    if (id == null || (Date.now() - Number(ts)) > staleMs) return null;
+    return id;
+  } catch { return null; }
+}
+
 // Set a React-controlled input's value the way a user typing would, so React's
 // onChange fires and component state actually updates. (Plain `el.value = x` is
 // invisible to React's synthetic event system.)
@@ -110,6 +142,40 @@ export function findFillTarget(hint) {
     if (score > bestScore) { bestScore = score; best = el; }
   }
   return bestScore >= 20 ? best : null;
+}
+
+// Fired after a fill attempt so the chat can tell Bella the truth when a fill
+// MISSED (no field by that label on screen) — see BellaChat + brain.js.
+export const BELLA_FILL_RESULT_EVENT = 'bdi:bella-fill-result';
+
+/** A human label for a field: its data-bella-fill key, associated <label>,
+ *  placeholder, or aria-label — whichever is cleanest (NOT normalized). */
+function humanFieldLabel(el) {
+  const dbf = el.getAttribute && el.getAttribute('data-bella-fill');
+  if (dbf) return dbf.trim();
+  if (el.id) {
+    try { const l = document.querySelector('label[for="' + (window.CSS && CSS.escape ? CSS.escape(el.id) : el.id) + '"]'); if (l && l.textContent) return l.textContent.trim(); } catch { /* ignore */ }
+  }
+  const wrap = el.closest && el.closest('label');
+  if (wrap && wrap.textContent) return wrap.textContent.trim();
+  return (el.getAttribute && (el.getAttribute('placeholder') || el.getAttribute('aria-label'))) || '';
+}
+
+/** The labels of the fillable fields currently on screen, so Bella can offer
+ *  the real one when the user names a field that doesn't exist. */
+export function visibleFillLabels(max = 24) {
+  try {
+    const els = Array.from(document.querySelectorAll('[data-bella-fill], input, textarea, select')).filter(isVisible);
+    const seen = new Set(); const out = [];
+    for (const el of els) {
+      let t = humanFieldLabel(el).replace(/[[\]|]/g, ' ').replace(/\s+/g, ' ').trim();
+      if (t.length > 48) t = t.slice(0, 48);
+      const key = t.toLowerCase();
+      if (t && !seen.has(key)) { seen.add(key); out.push(t); }
+      if (out.length >= max) break;
+    }
+    return out;
+  } catch { return []; }
 }
 
 const TRUTHY = new Set(['true', 'yes', 'on', '1', 'checked', 'enable', 'enabled']);
