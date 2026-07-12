@@ -102,7 +102,7 @@ export function JobsTab({ mode = 'local-admin' } = {}) {
       <button onClick=${load}>Refresh</button>
     </div>
 
-    ${showFilters ? html`<div class="bdi-filter-anchor">
+    ${showFilters ? html`<div class="bdi-filter-inline">
       <div class="bdi-filter-drop">
         <div class="bdi-filter-head"><strong>Filters</strong><span class="spacer"></span>
           <button class="bdi-filter-clear" onClick=${() => { setType(''); setWorkplace(''); setSeniority(''); setPostedWithin(''); setActiveFilter(''); setOffset(0); }}>Clear all</button>

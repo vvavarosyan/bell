@@ -221,7 +221,7 @@ export function PeopleTab({ mode = 'local-admin' } = {}) {
       </button>
     </div>
 
-    ${showFilters ? html`<div class="bdi-filter-anchor">
+    ${showFilters ? html`<div class="bdi-filter-inline">
       <div class="bdi-filter-drop">
         <div class="bdi-filter-head"><strong>Filters</strong><span class="spacer"></span>
           <button class="bdi-filter-clear" onClick=${() => { setCompany(''); setSource(''); setEmployment(''); setEmailStatus(''); setAddedAfter(''); setAddedBefore(''); setOffset(0); }}>Clear all</button>

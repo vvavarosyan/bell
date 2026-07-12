@@ -1996,6 +1996,11 @@ a.contact-icon.on { cursor: pointer; text-decoration: none; position: relative; 
 /* Anchored inside .grid-pane: floats above the rows only and stops at the 420px
    drawer, so opening it does NOT push the rows or the drawer down. */
 .bdi-filter-anchor { position: absolute; top: 0; left: 0; right: 420px; z-index: 30; max-height: 100%; display: flex; }
+/* In-flow variant for the list layouts (People / Jobs / CRM) that lack the
+   Companies grid's positioned parent — the panel sits below the toolbar
+   instead of floating to the top (Val 2026-07-12). */
+.bdi-filter-inline { position: relative; display: flex; margin-bottom: 14px; max-width: 760px; }
+.bdi-filter-inline .bdi-filter-drop { border: 1px solid var(--border); border-radius: 10px; max-height: none; box-shadow: 0 10px 26px rgba(0,0,0,.35); }
 .bdi-filter-drop {
   flex: 1; min-width: 0;
   animation: bdiFilterDrop .16s ease;

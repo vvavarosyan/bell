@@ -61,7 +61,8 @@ export function CrmTab() {
   const [newEntity, setNewEntity] = useState(null);   // null=closed; {kind,name,…}=open
   const [savingEntity, setSavingEntity] = useState(false);
   const [openedId, setOpenedId] = useState(null);
-  const [view, setView] = useState('records');   // records | pipeline | sequences
+  const [view, setView] = useState('records');   // records | pipeline | sequences | timeline
+  const [showFilters, setShowFilters] = useState(false);   // filters panel (Val 2026-07-12, like the rest of the app)
   const [selected, setSelected] = useState(() => new Set());
   const [segments, setSegments] = useState([]);
   const [seqList, setSeqList] = useState([]);
@@ -217,13 +218,15 @@ export function CrmTab() {
     catch (err) { toast('Delete failed: ' + err.message, 'error'); }
   };
 
+  const crmFilterCount = (revealedOnly ? 1 : 0) + (status ? 1 : 0) + (owner ? 1 : 0);
+
   return html`
     <div class="page-fill">
       <div class="page-scroll">
-      <!-- View toggle: Records | Pipeline | Sequences -->
-      <div style=${{ display: 'inline-flex', gap: '4px', marginBottom: '14px' }}>
+      <!-- Primary view tabs: Records | Pipeline | Sequences | Timeline -->
+      <div class="seg" style=${{ marginBottom: '14px' }}>
         ${[['records', 'Records'], ['pipeline', 'Pipeline'], ['sequences', 'Sequences'], ['timeline', 'Timeline']].map(([k, lbl]) => html`
-          <button key=${k} class=${'toolbar-toggle' + (view === k ? ' accent' : '')}
+          <button key=${k} class=${'seg-btn' + (view === k ? ' active' : '')}
             onClick=${() => { setView(k); setOpenedId(null); }}>${lbl}</button>`)}
       </div>
 
@@ -231,29 +234,18 @@ export function CrmTab() {
         : view === 'pipeline' ? html`<${PipelineView} />`
         : view === 'timeline' ? html`<${TimelineView} />`
         : html`
-      <!-- Toolbar -->
-      <div style=${{ display: 'flex', gap: '8px', alignItems: 'center', marginBottom: '14px', flexWrap: 'wrap' }}>
-        <div style=${{ display: 'inline-flex', gap: '4px' }}>
-          ${[['company', 'Companies'], ['person', 'People']].map(([k, lbl]) => html`
-            <button key=${k}
-              class=${'toolbar-toggle' + (entityType === k ? ' accent' : '')}
-              onClick=${() => { setEntityType(k); setOpenedId(null); }}>${lbl}</button>`)}
+      <!-- Toolbar: Show (Companies/People) · Filters · Search · actions -->
+      <div style=${{ display: 'flex', gap: '10px', alignItems: 'center', marginBottom: '14px', flexWrap: 'wrap' }}>
+        <div class="filt-group">
+          <span class="filt-label">Show</span>
+          <div class="seg">
+            ${[['company', 'Companies'], ['person', 'People']].map(([k, lbl]) => html`
+              <button key=${k} class=${'seg-btn' + (entityType === k ? ' active' : '')}
+                onClick=${() => { setEntityType(k); setOpenedId(null); }}>${lbl}</button>`)}
+          </div>
         </div>
-        <button class=${'toolbar-toggle' + (revealedOnly ? ' accent' : '')} onClick=${() => setRevealedOnly(v => !v)}
-          title="Show only entities added by revealing them">Revealed</button>
-        <select value=${status} onChange=${e => setStatus(e.target.value)}
-          style=${{ background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border)', color: 'var(--text)', padding: '6px 10px', borderRadius: '6px', fontSize: '12px' }}>
-          <option value="">All statuses</option>
-          ${STATUSES.map(s => html`<option key=${s} value=${s}>${STATUS_META[s].label}</option>`)}
-        </select>
-        ${members.length > 1 ? html`<select value=${owner} onChange=${e => setOwner(e.target.value)}
-          title="Filter by who owns the lead"
-          style=${{ background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border)', color: 'var(--text)', padding: '6px 10px', borderRadius: '6px', fontSize: '12px' }}>
-          <option value="">All owners</option>
-          <option value="me">My leads</option>
-          <option value="unassigned">Unassigned</option>
-          ${members.map(m => html`<option key=${m.id} value=${m.id}>${m.full_name || m.email}</option>`)}
-        </select>` : null}
+        <button class=${'toolbar-toggle' + (crmFilterCount > 0 || showFilters ? ' accent' : '')} onClick=${() => setShowFilters(v => !v)}
+          title="Filters — status, owner, revealed-only" style=${{ whiteSpace: 'nowrap' }}>☰ Filters${crmFilterCount > 0 ? ` · ${crmFilterCount}` : ''}</button>
         <input type="text" placeholder="Search…" value=${q}
           onChange=${e => setQ(e.target.value)}
           style=${{ background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border)', color: 'var(--text)', padding: '6px 10px', borderRadius: '6px', fontSize: '12px', minWidth: '180px' }} />
@@ -278,6 +270,31 @@ export function CrmTab() {
                 ${exporting ? 'Exporting…' : 'Export CSV'}</button>`}
         <button class="toolbar-toggle" onClick=${() => load()}>Refresh</button>
       </div>
+
+      ${showFilters ? html`<div class="bdi-filter-inline">
+        <div class="bdi-filter-drop">
+          <div class="bdi-filter-head"><strong>Filters</strong><span class="spacer"></span>
+            <button class="bdi-filter-clear" onClick=${() => { setRevealedOnly(false); setStatus(''); setOwner(''); }}>Clear all</button>
+            <button class="bdi-filter-x" onClick=${() => setShowFilters(false)} title="Close">✕</button>
+          </div>
+          <div class="bdi-filter-body"><div class="bdi-filter-grid">
+            <div class="bdi-filter-sec"><div class="bdi-filter-label">Status</div>
+              <select class="bdi-filter-input" value=${status} onChange=${e => setStatus(e.target.value)}>
+                <option value="">All statuses</option>
+                ${STATUSES.map(s => html`<option key=${s} value=${s}>${STATUS_META[s].label}</option>`)}
+              </select></div>
+            ${members.length > 1 ? html`<div class="bdi-filter-sec"><div class="bdi-filter-label">Owner</div>
+              <select class="bdi-filter-input" value=${owner} onChange=${e => setOwner(e.target.value)}>
+                <option value="">All owners</option><option value="me">My leads</option><option value="unassigned">Unassigned</option>
+                ${members.map(m => html`<option key=${m.id} value=${m.id}>${m.full_name || m.email}</option>`)}
+              </select></div>` : null}
+            <div class="bdi-filter-sec"><div class="bdi-filter-label">Source</div>
+              <label style=${{ display: 'flex', alignItems: 'center', gap: '7px', fontSize: '12.5px', cursor: 'pointer', color: 'var(--text)' }}>
+                <input type="checkbox" checked=${revealedOnly} onChange=${() => setRevealedOnly(v => !v)} style=${{ cursor: 'pointer' }} /> Revealed only
+              </label></div>
+          </div></div>
+        </div>
+      </div>` : null}
 
       ${showImport ? html`<${ImportPanel} onClose=${() => setShowImport(false)} onImported=${() => load()} />` : null}
 
