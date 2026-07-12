@@ -5,6 +5,7 @@
 
 import { Router } from 'express';
 import { query } from '../db.js';
+import { encryptPII, normalizeId, idLast4, piiConfigured } from '../lib/pii.js';
 
 const router = Router();
 
@@ -41,7 +42,7 @@ function defaultPreferences() {
 router.get('/', async (req, res, next) => {
   try {
     const r = await query(
-      `SELECT ${PROFILE_COLS.join(', ')}, email, role, extra_fields FROM users WHERE id = $1`,
+      `SELECT ${PROFILE_COLS.join(', ')}, email, role, extra_fields, id_type, id_last4, id_collected_at FROM users WHERE id = $1`,
       [req.user.id],
     );
     const u = r.rows[0] || {};
@@ -56,6 +57,8 @@ router.get('/', async (req, res, next) => {
       },
       notifications: { ...defaultNotifications(), ...(extra.notifications || {}) },
       preferences:   { ...defaultPreferences(),   ...(extra.preferences   || {}) },
+      // Verification ID: only the type + masked last-4 ever leave the server.
+      id: { provided: !!u.id_collected_at, type: u.id_type || null, last4: u.id_last4 || null },
     });
   } catch (err) { next(err); }
 });
@@ -83,6 +86,26 @@ router.patch('/', async (req, res, next) => {
     await query(`UPDATE users SET ${sets.join(', ')} WHERE id = $${i}`, vals);
 
     res.json({ ok: true });
+  } catch (err) { next(err); }
+});
+
+// POST /api/account/verify-id — store the registrant's national ID (QID) or, for
+// a company/person expanding INTO Qatar, their Passport number, FOR VERIFICATION.
+// The number is encrypted at rest (AES-256-GCM); only a masked last-4 comes back.
+// Gated by BDI_COLLECT_ID (off by default) AND a configured encryption key, so it
+// stays inert until the lawful basis is confirmed. Consent/purpose live in the
+// Terms of Use (Val 2026-07-12).
+router.post('/verify-id', async (req, res, next) => {
+  try {
+    if (String(process.env.BDI_COLLECT_ID || '') !== '1') return res.status(404).json({ error: 'id_collection_disabled' });
+    if (!(await piiConfigured())) return res.status(503).json({ error: 'not_configured', reason: 'ID verification isn’t set up on this deployment yet.' });
+    const norm = normalizeId(req.body?.id_type, req.body?.id_value);
+    if (!norm.ok) return res.status(400).json({ error: 'invalid_id', reason: norm.reason });
+    const enc = await encryptPII(norm.value);
+    await query(
+      `UPDATE users SET id_type = $2, id_value_enc = $3, id_last4 = $4, id_collected_at = now(), updated_at = now() WHERE id = $1`,
+      [req.user.id, norm.type, enc, idLast4(norm.value)]);
+    res.json({ ok: true, type: norm.type, last4: idLast4(norm.value) });
   } catch (err) { next(err); }
 });
 

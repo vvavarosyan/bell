@@ -138,6 +138,7 @@ export const api = {
   statsOverview:          () => request('/api/stats/overview'),
   adminUsers:             (q = '') => request('/api/admin/users' + (q ? '?' + new URLSearchParams({ q }) : '')),
   adminUser:              (id) => request('/api/admin/users/' + id),
+  adminRevealId:          (id, userId) => request('/api/admin/users/' + id + '/reveal-id?user_id=' + userId),
   adminUserCredits:       (id, delta, note) => request(`/api/admin/users/${id}/credits`, { method: 'POST', body: JSON.stringify({ delta, note }) }),
   adminUserSuspend:       (id, suspend) => request(`/api/admin/users/${id}/suspend`, { method: 'POST', body: JSON.stringify({ suspend }) }),
   adminUserPlan:          (id, plan) => request(`/api/admin/users/${id}/plan`, { method: 'POST', body: JSON.stringify({ plan }) }),

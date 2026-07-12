@@ -62,6 +62,20 @@
           </div>
           <div class="auth-field"><label>Work email</label><input class="auth-input" id="su-email" type="email" autocomplete="email" required /></div>
           <div class="auth-field"><label>Password</label><input class="auth-input" id="su-password" type="password" autocomplete="new-password" required /></div>
+          <!-- Verification ID (shown only when the deployment enables it). QID for
+               Qatar; Passport for a company/person expanding into Qatar. -->
+          <div id="su-id-wrap" class="auth-hidden">
+            <div class="auth-field"><label>Verification</label>
+              <select class="auth-input" id="su-id-type">
+                <option value="qid">Qatar ID (QID)</option>
+                <option value="passport">Passport number (registering from outside Qatar)</option>
+              </select>
+            </div>
+            <div class="auth-field">
+              <input class="auth-input" id="su-id-value" autocomplete="off" placeholder="Your 11-digit QID" />
+              <div id="su-id-hint" style="font-size:12px;color:var(--text-muted);margin-top:5px">Used only to verify your account. See our Terms of Use.</div>
+            </div>
+          </div>
           <!-- Clerk Smart CAPTCHA renders here when bot protection is on -->
           <div id="clerk-captcha"></div>
           <button class="auth-btn" id="su-submit" type="submit">Create account</button>
@@ -96,12 +110,17 @@
       const clerkErr = (e) => (e && (e.errors?.[0]?.longMessage || e.errors?.[0]?.message)) || e?.message || 'Something went wrong. Please try again.';
       const go = (url) => window.location.replace(url);
       const AFTER = '/subscribe';   // Bell has no free tier — subscribe right after sign-up
+      let pendingId = null;         // { id_type, id_value } captured at sign-up, stored after auth
+      let collectId = false;        // deployment collects a verification ID?
 
       let mode;
       try { mode = await (await fetch('/api/auth/mode')).json(); }
       catch { $('boot').textContent = 'Could not reach the server. Please refresh.'; return; }
       if (mode.mode === 'local-admin' || !mode.auth_required) return go('/');
       if (!mode.publishable_key) { $('boot').textContent = 'Sign-up not configured (CLERK_PUBLISHABLE_KEY missing).'; return; }
+
+      // Does this deployment collect a verification ID at signup? (QID / Passport)
+      try { const c = await (await fetch('/api/signup-config')).json(); collectId = !!c.collect_id; } catch { /* default off */ }
 
       const s = document.createElement('script');
       s.async = true; s.crossOrigin = 'anonymous';
@@ -113,6 +132,13 @@
           await window.Clerk.load();
           if (window.Clerk.user) return go('/');
           hide('boot'); show('view-signup');
+          if (collectId) {
+            show('su-id-wrap');
+            $('su-id-type').addEventListener('change', () => {
+              const qid = $('su-id-type').value === 'qid';
+              $('su-id-value').placeholder = qid ? 'Your 11-digit QID' : 'Your passport number';
+            });
+          }
         } catch (e) { $('boot').textContent = clerkErr(e); }
       };
       document.head.appendChild(s);
@@ -124,7 +150,22 @@
       };
 
       const finish = async (res) => {
-        if (res && res.status === 'complete') { await window.Clerk.setActive({ session: res.createdSessionId }); go(AFTER); return true; }
+        if (res && res.status === 'complete') {
+          await window.Clerk.setActive({ session: res.createdSessionId });
+          // Store the verification ID (encrypted server-side) before leaving.
+          // Best-effort — the account already exists, so never strand the user.
+          if (pendingId) {
+            try {
+              const token = await window.Clerk.session.getToken();
+              await fetch('/api/account/verify-id', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', Authorization: 'Bearer ' + token },
+                body: JSON.stringify(pendingId),
+              });
+            } catch (e) { console.warn('id submit failed', e); }
+          }
+          go(AFTER); return true;
+        }
         return false;
       };
 
@@ -133,6 +174,16 @@
         ev.preventDefault(); hide('err-signup');
         const btn = $('su-submit'); btn.disabled = true; btn.textContent = 'Creating…';
         try {
+          // Verification ID is required when the deployment collects it.
+          if (collectId) {
+            const idType = $('su-id-type').value;
+            const idValue = $('su-id-value').value.trim();
+            if (!idValue) {
+              showErr('err-signup', 'Please enter your ' + (idType === 'qid' ? 'Qatar ID' : 'passport number') + '.');
+              btn.disabled = false; btn.textContent = 'Create account'; return;
+            }
+            pendingId = { id_type: idType, id_value: idValue };
+          }
           const params = { emailAddress: $('su-email').value.trim(), password: $('su-password').value };
           if ($('su-first').value.trim()) params.firstName = $('su-first').value.trim();
           if ($('su-last').value.trim()) params.lastName = $('su-last').value.trim();

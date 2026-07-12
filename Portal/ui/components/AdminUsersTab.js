@@ -73,6 +73,12 @@ function UserDrawer({ tenantId, plans, onClose, onChanged }) {
   const [msgB, setMsgB] = useState('');
   const [msgEmail, setMsgEmail] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [revealedIds, setRevealedIds] = useState({});   // userId → decrypted ID (admin reveal)
+
+  const revealId = async (userId) => {
+    try { const r = await api.adminRevealId(tenantId, userId); setRevealedIds((m) => ({ ...m, [userId]: r.value })); }
+    catch (e) { toast('Reveal failed: ' + (e.message || ''), 'error'); }
+  };
 
   const load = async () => {
     setLoading(true);
@@ -175,6 +181,11 @@ function UserDrawer({ tenantId, plans, onClose, onChanged }) {
             <div style=${lbl}>Users (${data.users.length})</div>
             ${data.users.map((u) => html`<div key=${u.id} style=${{ display: 'flex', alignItems: 'center', gap: '8px', padding: '6px 0', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
               <span style=${{ flex: 1, fontSize: '12.5px' }}>${u.full_name || u.email}<span class="muted small"> · ${u.email}</span></span>
+              ${u.id_collected_at ? html`
+                <span class="muted small" style=${{ fontSize: '10.5px', fontFamily: revealedIds[u.id] ? 'ui-monospace, monospace' : 'inherit' }}>
+                  ${u.id_type === 'qid' ? 'QID' : 'Passport'} ${revealedIds[u.id] ? revealedIds[u.id] : '••••' + (u.id_last4 || '')}
+                </span>
+                ${!revealedIds[u.id] ? html`<button title="Decrypt for verification (logged)" onClick=${() => revealId(u.id)} style=${{ background: 'transparent', border: '1px solid var(--border)', color: 'var(--text-muted)', borderRadius: '5px', padding: '2px 7px', fontSize: '10.5px', cursor: 'pointer' }}>Reveal</button>` : null}` : null}
               <span class="muted small">${u.role}</span>${!u.is_active ? html`<span style=${{ color: 'rgb(232 142 168)', fontSize: '10.5px' }}>suspended</span>` : null}
             </div>`)}
 

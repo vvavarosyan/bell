@@ -22,6 +22,7 @@ import { fileURLToPath } from 'url';
 import { pingDatabase } from './db.js';
 import { runPendingMigrations } from './migrate.js';
 import { emailProviderConfigured } from './lib/email.js';
+import { piiConfigured } from './lib/pii.js';
 
 import companiesRouter         from './routes/companies.js';
 import peopleRouter            from './routes/people.js';
@@ -133,6 +134,15 @@ app.get('/api/health', async (req, res) => {
   } catch (err) {
     res.status(500).json({ ok: false, db: 'down', error: err.message });
   }
+});
+
+// PUBLIC signup config (no auth — the sign-up page is pre-authentication).
+// Tells the form whether to collect a verification ID (QID / Passport). ON only
+// when BDI_COLLECT_ID=1 AND an encryption key is configured, so a half-set-up
+// deployment never asks for an ID it can't securely store (Val 2026-07-12).
+app.get('/api/signup-config', async (_req, res) => {
+  const collect_id = String(process.env.BDI_COLLECT_ID || '') === '1' && await piiConfigured().catch(() => false);
+  res.json({ collect_id });
 });
 
 // ---------------------------------------------------------------------------

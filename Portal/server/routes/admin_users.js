@@ -8,6 +8,7 @@ import { query } from '../db.js';
 import { adminAdjust } from '../lib/credits.js';
 import { notifyTenant } from '../lib/notifications.js';
 import { PLANS, planById } from '../config/plans.js';
+import { decryptPII } from '../lib/pii.js';
 
 const router = Router();
 
@@ -59,7 +60,8 @@ router.get('/:id', async (req, res, next) => {
       query(`SELECT id, name, slug, plan, stripe_customer_id, subscription_status,
                     plan_renewed_at, plan_expires_at, credit_balance, is_active, created_at
                FROM tenants WHERE id = $1`, [id]),
-      query(`SELECT id, email, full_name, role, is_active, created_at FROM users WHERE tenant_id = $1 ORDER BY created_at ASC`, [id]),
+      query(`SELECT id, email, full_name, role, is_active, created_at,
+                    id_type, id_last4, id_collected_at FROM users WHERE tenant_id = $1 ORDER BY created_at ASC`, [id]),
       query(`SELECT delta, reason, balance_after, actor, created_at FROM credit_ledger WHERE tenant_id = $1 ORDER BY created_at DESC LIMIT 40`, [id]),
       query(`SELECT count(*)::int AS n FROM tenant_reveals WHERE tenant_id = $1`, [id]).catch(() => ({ rows: [{ n: 0 }] })),
       query(`SELECT actor_email, action, detail, created_at FROM admin_audit_log WHERE target_tenant_id = $1 ORDER BY created_at DESC LIMIT 30`, [id]).catch(() => ({ rows: [] })),
@@ -146,6 +148,25 @@ router.delete('/:id', async (req, res, next) => {
     await audit(req, null, 'delete_account', { tenant_id: id, name: t.rows[0].name });
     await query(`DELETE FROM tenants WHERE id = $1`, [id]);
     res.json({ ok: true, deleted: t.rows[0].name });
+  } catch (err) { next(err); }
+});
+
+// GET /api/admin/users/:id/reveal-id?user_id=N — decrypt a registrant's
+// verification ID (QID / Passport) for a platform_admin to check. EVERY reveal
+// is written to the audit log (who saw whose ID, when). platform_admin only.
+router.get('/:id/reveal-id', async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    const userId = Number(req.query.user_id);
+    if (!Number.isFinite(id) || !Number.isFinite(userId)) return res.status(400).json({ error: 'invalid_id' });
+    const r = await query(`SELECT id_type, id_value_enc, id_last4 FROM users WHERE id = $1 AND tenant_id = $2`, [userId, id]);
+    const u = r.rows[0];
+    if (!u || !u.id_value_enc) return res.status(404).json({ error: 'no_id_on_file' });
+    let value;
+    try { value = await decryptPII(u.id_value_enc); }
+    catch { return res.status(503).json({ error: 'decrypt_failed', reason: 'Encryption key unavailable on this deployment.' }); }
+    await audit(req, id, 'id_reveal', { user_id: userId, id_type: u.id_type, last4: u.id_last4 });
+    res.json({ type: u.id_type, value });
   } catch (err) { next(err); }
 });
 
