@@ -5,7 +5,7 @@ import { useState, useEffect, useRef } from 'react';
 import { html } from '../lib/html.js';
 import { api } from '../lib/api.js';
 import { toast } from '../lib/toast.js';
-import { BELLA_ACTION_EVENT, takePending } from '../lib/bellaBus.js';
+import { BELLA_ACTION_EVENT, takePending, openBella } from '../lib/bellaBus.js';
 
 const SECTIONS = [
   { id: 'profile',       label: 'Profile' },
@@ -38,6 +38,21 @@ export function AccountTab() {
   useEffect(() => { (async () => {
     try { setData(await api.getAccount()); } catch { setData({ profile: {}, notifications: {}, preferences: {} }); }
   })(); }, []);
+
+  // Setup progress (Phase 4): a compact "% set up" strip at the top of Settings,
+  // so the meter is visible even after the top onboarding card is dismissed.
+  // Refetches when Bella / the forms write. Best-effort; hidden if unavailable.
+  const [setup, setSetup] = useState(null);
+  useEffect(() => {
+    const loadSetup = async () => { try { setSetup(await api.onboarding()); } catch { setSetup(null); } };
+    loadSetup();
+    window.addEventListener('bdi:icp-changed', loadSetup);
+    window.addEventListener('bdi:account-changed', loadSetup);
+    return () => {
+      window.removeEventListener('bdi:icp-changed', loadSetup);
+      window.removeEventListener('bdi:account-changed', loadSetup);
+    };
+  }, []);
 
   // Bella integration (all hooks above the early return — Rules of Hooks):
   //  • 'settings_section' ui-action switches the visible sub-page (live when
@@ -570,6 +585,28 @@ export function AccountTab() {
     security: html`<${SecurityPanel} />`,
   };
 
+  // Compact setup meter shown atop the settings body while setup is incomplete.
+  const setupStrip = (setup && Array.isArray(setup.items) && setup.items.length && !setup.complete) ? (() => {
+    const pct = Math.max(0, Math.min(100, setup.percent || 0));
+    const left = setup.items.filter((i) => !i.done).length;
+    return html`
+      <div style=${{ display: 'flex', alignItems: 'center', gap: '12px', padding: '11px 14px', marginBottom: '14px',
+        border: '1px solid var(--border)', borderRadius: '10px', background: 'var(--bg-elev, rgba(255,255,255,0.03))' }}>
+        <div style=${{ flex: 1, minWidth: 0 }}>
+          <div style=${{ fontSize: '12.5px', fontWeight: 600, color: 'var(--text)', marginBottom: '6px' }}>
+            You’re ${pct}% set up${left ? ` · ${left} step${left === 1 ? '' : 's'} left` : ''}
+          </div>
+          <div style=${{ height: '6px', borderRadius: '999px', background: 'var(--bg-elev-2, rgba(255,255,255,0.06))', overflow: 'hidden' }}>
+            <div style=${{ width: pct + '%', height: '100%', background: 'var(--accent-bright, #57b894)', transition: 'width .5s ease' }}></div>
+          </div>
+        </div>
+        <button onClick=${() => openBella('Help me finish setting up my account — walk me through the remaining setup steps and do what you can for me.')}
+          style=${{ background: 'transparent', border: '1px solid var(--accent, #5b8cff)', color: 'var(--accent-bright, #a5c3ff)', borderRadius: '7px', padding: '6px 12px', fontSize: '12px', fontWeight: 600, cursor: 'pointer', whiteSpace: 'nowrap', flex: '0 0 auto' }}>
+          ✨ Ask Bella to finish
+        </button>
+      </div>`;
+  })() : null;
+
   return html`
     <div class="sys-page">
       <div class="settings-rail">
@@ -578,7 +615,7 @@ export function AccountTab() {
           <button key=${s.id} class=${'settings-rail-item' + (section === s.id ? ' active' : '')}
             onClick=${() => setSection(s.id)}>${s.label}</button>`)}
       </div>
-      <div class="sys-body">${PAGES[section]}</div>
+      <div class="sys-body">${setupStrip}${PAGES[section]}</div>
     </div>`;
 }
 

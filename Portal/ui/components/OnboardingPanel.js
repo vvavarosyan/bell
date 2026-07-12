@@ -44,12 +44,20 @@ const dot = (ok) => ({
 export function OnboardingPanel({ mode = 'local-admin' } = {}) {
   const [data, setData] = useState(null);
   const [hidden, setHidden] = useState(false);
+  const [celebrate, setCelebrate] = useState(false);
 
   const load = useCallback(async () => {
     try {
       const r = await api.onboarding();
-      if (!r || r.dismissed || r.complete) { setHidden(true); return; }
-      setData(r);
+      if (!r || r.dismissed) { setHidden(true); return; }
+      // Just crossed 100% → show a one-time "all set" moment, then quietly mark
+      // it dismissed so it never nags again.
+      if (r.complete) {
+        setData(r); setCelebrate(true);
+        try { await api.dismissOnboarding(); } catch { /* ignore */ }
+        return;
+      }
+      setCelebrate(false); setData(r);
     } catch { setHidden(true); }   // fail-safe — never block the portal
   }, []);
 
@@ -82,6 +90,26 @@ export function OnboardingPanel({ mode = 'local-admin' } = {}) {
     try { await api.dismissOnboarding(); } catch { /* ignore */ }
   };
 
+  // One-time celebration when the last step is done.
+  if (celebrate) {
+    return html`
+      <div class="onboarding-card" style=${CARD}>
+        <div style=${{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          <div style=${{ fontSize: '22px', flex: '0 0 auto' }}>🎉</div>
+          <div style=${{ flex: 1, minWidth: 0 }}>
+            <div style=${{ fontWeight: 700, fontSize: '14px', color: 'var(--text, #eee)' }}>You’re all set up — nice work!</div>
+            <div style=${{ fontSize: '12px', color: 'var(--text-muted, #9aa)' }}>Everything’s configured. Bella’s ready whenever you need her.</div>
+          </div>
+          <button onClick=${() => setHidden(true)} style=${GO}>Let’s go →</button>
+        </div>
+      </div>`;
+  }
+
+  // Encouraging line that shifts as they progress.
+  const subline = percent >= 80 ? 'Almost there — just a step or two left.'
+    : percent >= 40 ? 'Great start — keep going.'
+    : 'Finish these to get the most out of Bell. Bella can do any of them for you.';
+
   // "Do it →": jump to the step's screen. For a Settings sub-page, tell
   // AccountTab which section to open (live if it's already the tab, else stash
   // so it applies on mount) — the same mechanism Bella's navigate uses.
@@ -108,7 +136,7 @@ export function OnboardingPanel({ mode = 'local-admin' } = {}) {
         </svg>
         <div style=${{ flex: 1, minWidth: 0 }}>
           <div style=${{ fontWeight: 700, fontSize: '14px', color: 'var(--text, #eee)' }}>👋 Let’s get you set up</div>
-          <div style=${{ fontSize: '12px', color: 'var(--text-muted, #9aa)' }}>${doneN} of ${items.length} done — finish these to get the most out of Bell. Bella can do any of them for you.</div>
+          <div style=${{ fontSize: '12px', color: 'var(--text-muted, #9aa)' }}>${doneN} of ${items.length} done — ${subline}</div>
         </div>
         <button onClick=${dismiss} style=${DISMISS} title="Hide this guide">Dismiss ✕</button>
       </div>
