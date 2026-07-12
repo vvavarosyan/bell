@@ -83,6 +83,15 @@ export const MIRROR_TABLES = [
   // Mirrored like tenders; prod regenerates the 'disclosure' signals from these
   // rows. company_id is a soft ref (no FK), so ordering doesn't matter.
   { name: 'qse_disclosures',      watermark: 'updated_at' },
+  // Qatar GIS + Real Estate (scraped via "Run Qatar GIS Scan.command"). Mirrored
+  // by id like everything else. gis_landmarks.company_id + the RE tables carry no
+  // FK to companies (soft refs), so table ordering doesn't matter; od_record_id
+  // is provenance only (od_records is local-only and never mirrored).
+  { name: 'gis_municipalities',       watermark: 'updated_at' },
+  { name: 'gis_districts',            watermark: 'updated_at' },
+  { name: 'gis_zones',                watermark: 'updated_at' },
+  { name: 'gis_landmarks',            watermark: 'updated_at' },
+  { name: 'real_estate_transactions', watermark: 'updated_at' },
 ];
 
 export const MIRROR_TABLE_NAMES = new Set(MIRROR_TABLES.map((t) => t.name));
