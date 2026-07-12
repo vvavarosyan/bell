@@ -131,8 +131,22 @@ router.get('/buildings', async (req, res, next) => {
     const offset = Math.max(0, Number(req.query.offset) || 0);
     const where = ['ename IS NOT NULL'];
     const params = [];
-    const q = (req.query.q || '').trim().toLowerCase();
-    if (q) { params.push('%' + q + '%'); where.push(`(lower(ename) LIKE $${params.length} OR lower(coalesce(district_ename,'')) LIKE $${params.length} OR lower(coalesce(street_ename,'')) LIKE $${params.length})`); }
+    const q = (req.query.q || '').trim();
+    if (q) {
+      params.push('%' + q.toLowerCase() + '%');
+      const p = params.length;
+      // Searchable across every text attribute — name (EN + AR), district (EN +
+      // AR), street, category + subcategory — and by number (zone / building /
+      // PO box) when the query is numeric. "Everything searchable" (Val).
+      const conds = [
+        `lower(ename) LIKE $${p}`, `lower(coalesce(aname,'')) LIKE $${p}`,
+        `lower(coalesce(district_ename,'')) LIKE $${p}`, `lower(coalesce(district_aname,'')) LIKE $${p}`,
+        `lower(coalesce(street_ename,'')) LIKE $${p}`, `lower(coalesce(street_aname,'')) LIKE $${p}`,
+        `lower(coalesce(category,'')) LIKE $${p}`, `lower(coalesce(subcategory_name,'')) LIKE $${p}`,
+      ];
+      if (/^\d+$/.test(q)) { const n = Number(q); conds.push(`zone_no = ${n}`, `building_no = ${n}`, `pobox_no = ${n}`); }
+      where.push('(' + conds.join(' OR ') + ')');
+    }
     if (req.query.category) { params.push(String(req.query.category)); where.push(`category = $${params.length}`); }
     if (req.query.district) { params.push('%' + String(req.query.district).toLowerCase() + '%'); where.push(`lower(coalesce(district_ename,'')) LIKE $${params.length}`); }
     const whereSql = 'WHERE ' + where.join(' AND ');
