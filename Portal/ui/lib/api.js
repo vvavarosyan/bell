@@ -413,6 +413,12 @@ export const api = {
   signalStats:            () => request('/api/signals/stats'),
   signalsMap:             () => request('/api/signals/map'),
   signalsInMarket:        (q = {}) => request('/api/signals/in-market?' + new URLSearchParams(q)),
+  // ---- Real Estate (Qatar GIS + property market) ----
+  realEstateStats:        () => request('/api/real-estate/stats'),
+  realEstateTx:           (q = {}) => request('/api/real-estate/transactions?' + new URLSearchParams(q)),
+  realEstateBuildings:    (q = {}) => request('/api/real-estate/buildings?' + new URLSearchParams(q)),
+  realEstateBuildingCategories: () => request('/api/real-estate/building-categories'),
+  realEstateMap:          () => request('/api/real-estate/map'),
   // ---- Tenders (Qatar public procurement) ----
   tenders:                (q = {}) => request('/api/tenders?' + new URLSearchParams(q)),
   tenderStats:            () => request('/api/tenders/stats'),

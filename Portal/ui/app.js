@@ -30,6 +30,7 @@ import { AdminUsersTab } from './components/AdminUsersTab.js';
 import { ResearchTab }   from './components/ResearchTab.js';
 import { ResearchApprovalsTab } from './components/ResearchApprovalsTab.js';
 import { DeepDataTab }   from './components/DeepDataTab.js';
+import { RealEstateTab } from './components/RealEstateTab.js';
 import { SyncTab }       from './components/SyncTab.js';
 import { MarketFeedTab } from './components/MarketFeedTab.js';
 import { SignalsTab } from './components/SignalsTab.js';
@@ -96,6 +97,7 @@ const VIEWS = {
   'harvest-history': { Component: HarvestHistoryTab },
   'announcements': { Component: AnnouncementsTab },
   'email-templates': { Component: EmailTemplatesTab },
+  'real-estate': { Component: RealEstateTab },
   'deep-data':   { Component: DeepDataTab },
   'sync':        { Component: SyncTab },
   // Archived is reachable via deep-link/sidebar too
@@ -103,7 +105,7 @@ const VIEWS = {
 };
 
 const LABELS = {
-  'companies': 'Companies', 'people': 'People', 'jobs': 'Jobs',
+  'companies': 'Companies', 'people': 'People', 'jobs': 'Jobs', 'real-estate': 'Real Estate',
   'sources': 'Sources', 'settings': 'System Config', 'archived': 'Archived',
   'billing': 'Billing', 'account': 'Settings',
   'market-feed': 'Market Feed',
