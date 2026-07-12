@@ -110,6 +110,8 @@ export function CompaniesTab({ archivedMode: initialArchived = false, mode = 'lo
       if (f.ageMin) params.founded_max = thisYear - Number(f.ageMin);
       if (f.ageMax) params.founded_min = thisYear - Number(f.ageMax);
       if (f.scoreMin)   params.score_min   = f.scoreMin;
+      if (f.capitalMinQar) params.capital_min_qar = f.capitalMinQar;
+      if (f.capitalMaxQar) params.capital_max_qar = f.capitalMaxQar;
       if (f.website === 'has')  params.has_website = '1';
       else if (f.website === 'none') params.has_website = '0';
       if (f.hasEmail)    params.has_email    = '1';
@@ -567,8 +569,10 @@ function buildChips(f, setFilters, setOffset) {
   for (const v of f.sources)    out.push(chipEl('source: ' + v, rmFromArr('sources', v)));
   for (const v of f.empBuckets) out.push(chipEl(v + ' emp', rmFromArr('empBuckets', v)));
   if (String(f.city).trim()) out.push(chipEl('city: ' + f.city, clearKey('city', '')));
-  if (f.foundedMin) out.push(chipEl('founded ≥ ' + f.foundedMin, clearKey('foundedMin', '')));
-  if (f.foundedMax) out.push(chipEl('founded ≤ ' + f.foundedMax, clearKey('foundedMax', '')));
+  if (f.ageMin) out.push(chipEl('age ≥ ' + f.ageMin + 'y', clearKey('ageMin', '')));
+  if (f.ageMax) out.push(chipEl('age ≤ ' + f.ageMax + 'y', clearKey('ageMax', '')));
+  if (f.capitalMinQar) out.push(chipEl('capital ≥ QAR ' + Number(f.capitalMinQar).toLocaleString(), clearKey('capitalMinQar', '')));
+  if (f.capitalMaxQar) out.push(chipEl('capital ≤ QAR ' + Number(f.capitalMaxQar).toLocaleString(), clearKey('capitalMaxQar', '')));
   if (f.scoreMin)   out.push(chipEl('score ≥ ' + f.scoreMin, clearKey('scoreMin', '')));
   for (const [k, label] of [['hasWebsite', 'has website'], ['hasEmail', 'has email'], ['hasPhone', 'has phone'], ['hasLinkedin', 'has LinkedIn'], ['hasPeople', 'has people']]) {
     if (f[k]) out.push(chipEl(label, clearKey(k, false)));

@@ -3,6 +3,7 @@
 import { Router } from 'express';
 import { query } from '../db.js';
 import { consolidateFinancials } from '../lib/financials.js';
+import { qarCaseSql } from '../lib/fx.js';
 import {
   listCompanyContacts, loadCompanyContactsByIds,
   upsertContact, setPrimaryContact, deleteContact,
@@ -236,6 +237,25 @@ router.get('/', async (req, res, next) => {
     }
     if (req.query.founded_min) { params.push(Number(req.query.founded_min)); where.push(`companies.founded_year >= $${params.length}`); }
     if (req.query.founded_max) { params.push(Number(req.query.founded_max)); where.push(`companies.founded_year <= $${params.length}`); }
+
+    // Capital filter, normalized to QAR (Val 2026-07-12). Matches companies with
+    // ANY capital figure (authorised / issued / paid-up / registered share
+    // capital) whose QAR-equivalent falls in range. Foreign currencies are
+    // converted via lib/fx.js (USD at the fixed peg; EUR/GBP approximate);
+    // unknown currencies convert to NULL and are excluded — never guessed.
+    const capMin = req.query.capital_min_qar, capMax = req.query.capital_max_qar;
+    if ((capMin != null && capMin !== '') || (capMax != null && capMax !== '')) {
+      const qar = qarCaseSql('cf.value_num', 'cf.currency');
+      const conds = [
+        'cf.company_id = companies.id',
+        `cf.metric IN ('authorized_capital','capital','paid_up_capital','registered_capital')`,
+        'cf.value_num IS NOT NULL',
+        `${qar} IS NOT NULL`,
+      ];
+      if (capMin != null && capMin !== '') { params.push(Number(capMin)); conds.push(`${qar} >= $${params.length}`); }
+      if (capMax != null && capMax !== '') { params.push(Number(capMax)); conds.push(`${qar} <= $${params.length}`); }
+      where.push(`EXISTS (SELECT 1 FROM company_financials cf WHERE ${conds.join(' AND ')})`);
+    }
     if (req.query.score_min)   { params.push(Number(req.query.score_min));   where.push(`companies.bell_score >= $${params.length}`); }
     // data-completeness toggles
     if (req.query.has_website  === '1') where.push(`companies.website IS NOT NULL AND btrim(companies.website::text) <> ''`);
