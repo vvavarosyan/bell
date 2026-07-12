@@ -194,9 +194,11 @@ router.get('/building-categories', async (req, res, next) => {
 router.get('/map', async (req, res, next) => {
   try {
     const buildings = (await query(`
-      SELECT id, ename, category, latitude AS lat, longitude AS lng, district_ename
-        FROM gis_landmarks
-       WHERE latitude IS NOT NULL AND longitude IS NOT NULL
+      SELECT l.id, l.ename, l.category, l.subcategory_name, l.latitude AS lat, l.longitude AS lng,
+             l.district_ename, l.street_ename, l.zone_no, l.phone, l.company_id, c.name AS company_name
+        FROM gis_landmarks l
+        LEFT JOIN companies c ON c.id = l.company_id
+       WHERE l.latitude IS NOT NULL AND l.longitude IS NOT NULL
        LIMIT 8000`)).rows;
     const districts = (await query(`
       SELECT d.ename, d.centroid_lat AS lat, d.centroid_lng AS lng,

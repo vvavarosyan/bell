@@ -218,16 +218,19 @@ async function showNetwork(map, companyId, origin) {
 // --- Real Estate layers (consolidated onto the main Map, Val 2026-07-12) -----
 // District price heat + buildings (loaded once), and land parcels drawn live
 // from Qatar GIS for the current viewport only (we never store 253k polygons).
-let reDataLoading = false;
+let reDataLoading = false, reDataLoaded = false;
+let reBuildingsData = [];   // building features, kept for the map search box
 async function loadREData(map) {
-  if (reDataLoading || !map.getSource('re-districts')) return;
+  if (reDataLoading || reDataLoaded || !map.getSource('re-districts')) return;
   reDataLoading = true;
   try {
     const d = await api.realEstateMap();
     const districts = { type: 'FeatureCollection', features: (d.districts || []).filter((x) => x.lat != null && x.avg_sqm != null).map((x) => ({ type: 'Feature', geometry: { type: 'Point', coordinates: [Number(x.lng), Number(x.lat)] }, properties: { ename: x.ename, deals: x.deals || 0, avg_sqm: x.avg_sqm || 0 } })) };
-    const buildings = { type: 'FeatureCollection', features: (d.buildings || []).filter((x) => x.lat != null).map((x) => ({ type: 'Feature', geometry: { type: 'Point', coordinates: [Number(x.lng), Number(x.lat)] }, properties: { ename: x.ename, category: x.category || '' } })) };
+    const buildings = { type: 'FeatureCollection', features: (d.buildings || []).filter((x) => x.lat != null).map((x) => ({ type: 'Feature', geometry: { type: 'Point', coordinates: [Number(x.lng), Number(x.lat)] }, properties: { ename: x.ename || '', category: x.subcategory_name || x.category || '', district: x.district_ename || '', street: x.street_ename || '', zone_no: x.zone_no ?? '', phone: x.phone || '', company_id: x.company_id ?? '', company_name: x.company_name || '' } })) };
     if (map.getSource('re-districts')) map.getSource('re-districts').setData(districts);
     if (map.getSource('re-buildings')) map.getSource('re-buildings').setData(buildings);
+    reBuildingsData = buildings.features;
+    reDataLoaded = true;
   } catch { /* keep empty */ } finally { reDataLoading = false; }
 }
 let parcelFetchSeq = 0;
@@ -372,18 +375,25 @@ export function MapTab() {
         const companyGeocoder = (q) => {
           const ql = String(q || '').trim().toLowerCase();
           if (ql.length < 2) return [];
-          return (geoDataRef.current?.features || [])
+          const companies = (geoDataRef.current?.features || [])
             .filter((f) => String(f.properties.name || '').toLowerCase().includes(ql))
-            .slice(0, 6)
+            .slice(0, 5)
             .map((f) => ({
-              type: 'Feature',
-              geometry: f.geometry,
-              center: f.geometry.coordinates,
+              type: 'Feature', geometry: f.geometry, center: f.geometry.coordinates,
               place_name: `● ${f.properties.name}${f.properties.city ? ' — ' + f.properties.city : ''}`,
-              place_type: ['place'],
-              text: f.properties.name,
-              properties: f.properties,
+              place_type: ['place'], text: f.properties.name, properties: f.properties,
             }));
+          // Buildings (GIS landmarks) are searchable on the map too, by name,
+          // district or street.
+          const buildings = reBuildingsData
+            .filter((f) => { const p = f.properties; return String(p.ename || '').toLowerCase().includes(ql) || String(p.district || '').toLowerCase().includes(ql) || String(p.street || '').toLowerCase().includes(ql); })
+            .slice(0, 5)
+            .map((f) => ({
+              type: 'Feature', geometry: f.geometry, center: f.geometry.coordinates,
+              place_name: `🏢 ${f.properties.ename}${f.properties.district ? ' — ' + f.properties.district : ''}`,
+              place_type: ['poi'], text: f.properties.ename, properties: f.properties,
+            }));
+          return [...companies, ...buildings].slice(0, 8);
         };
         const geocoder = new MapboxGeocoder({
           accessToken: token, mapboxgl: window.mapboxgl,
@@ -592,7 +602,35 @@ export function MapTab() {
             new mapboxgl.Popup({ offset: 6 }).setLngLat(e.lngLat)
               .setHTML(`<div style="font:600 12px system-ui;color:#111">Parcel ${p.PIN || ''}</div>${p.PDAREA ? `<div style="font:11px system-ui;color:#333">${Number(p.PDAREA).toLocaleString()} m²</div>` : ''}`).addTo(map);
           });
+          // Buildings are clickable: name, category, address, phone + linked company.
+          map.on('click', 're-buildings', (e) => {
+            const f = e.features[0]; if (!f) return;
+            const p = f.properties || {};
+            const el = document.createElement('div');
+            el.style.cssText = 'font:12px system-ui;max-width:250px;line-height:1.5';
+            const esc = (s) => String(s || '').replace(/[<>&]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c]));
+            const addr = [p.street, p.district].filter(Boolean).map(esc).join(' · ') + (p.zone_no ? ` · Zone ${esc(p.zone_no)}` : '');
+            el.innerHTML = `${p.category ? `<div style="text-transform:uppercase;font-size:9px;letter-spacing:.06em;font-weight:700;color:#3b64c4">${esc(p.category)}</div>` : ''}`
+              + `<div style="font-weight:600;margin:2px 0 4px;color:#111">${esc(p.ename) || 'Building'}</div>`
+              + `${addr ? `<div style="color:#333">${addr}</div>` : ''}`
+              + `${p.phone ? `<div style="color:#333">☎ ${esc(p.phone)}</div>` : ''}`;
+            if (p.company_id) {
+              const btn = document.createElement('button');
+              btn.textContent = '🏢 ' + (p.company_name || 'Open company') + ' →';
+              btn.style.cssText = 'margin-top:6px;background:none;border:none;padding:0;color:#2f9e57;font-size:12px;font-weight:600;cursor:pointer';
+              btn.onclick = () => navigateTo('companies', Number(p.company_id));
+              el.appendChild(btn);
+            }
+            new mapboxgl.Popup({ offset: 8 }).setLngLat(f.geometry.coordinates).setDOMContent(el).addTo(map);
+          });
+          ['re-districts', 're-parcels-fill', 're-buildings'].forEach((layer) => {
+            map.on('mouseenter', layer, () => { map.getCanvas().style.cursor = 'pointer'; });
+            map.on('mouseleave', layer, () => { map.getCanvas().style.cursor = ''; });
+          });
           map.on('moveend', () => { if (showParcelsRef.current) fetchParcels(map); });
+          // Eager-load RE districts + buildings so they're searchable + instant to
+          // toggle (layers stay hidden until switched on).
+          loadREData(map);
 
           map.on('click', 'signal-points', (e) => {
             const f = e.features[0]; if (!f) return;
