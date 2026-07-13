@@ -7,7 +7,8 @@
 // changes). A few minutes per source. Publishes to the live site.
 
 import { query } from '../db.js';
-import { crawlSource, knowledgeTablesReady } from '../knowledge/crawl.js';
+import { crawlSource, knowledgeTablesReady, backfillEntities } from '../knowledge/crawl.js';
+import { crawlAlmeezan } from '../knowledge/crawl_almeezan.js';
 import { pushGisToProd } from '../gis/ingest_gis.js';   // generic mirror push
 
 (async () => {
@@ -23,15 +24,24 @@ import { pushGisToProd } from '../gis/ingest_gis.js';   // generic mirror push
     console.log(`Crawling ${sources.length} source(s)…\n`);
     const totals = { fetched: 0, new: 0, changed: 0, same: 0, errors: 0 };
     for (const src of sources) {
-      const s = await crawlSource(src, { onProgress: (m) => console.log('  ' + m) });
-      console.log(`  ✓ ${src.name}: ${s.fetched} pages · ${s.new} new · ${s.changed} changed · ${s.errors} errors`);
+      const crawler = src.crawl_method === 'almeezan' ? crawlAlmeezan : crawlSource;
+      const s = await crawler(src, { onProgress: (m) => console.log('  ' + m) });
+      const extra = src.crawl_method === 'almeezan'
+        ? ` · ${s.skipped || 0} non-law ids · ${s.done ? 'full archive walked ✓' : 'cursor ' + s.cursor + ' (re-run to continue)'}`
+        : '';
+      console.log(`  ✓ ${src.name}: ${s.fetched} pages · ${s.new} new · ${s.changed} changed · ${s.errors} errors${extra}`);
       for (const k of Object.keys(totals)) totals[k] += s[k] || 0;
     }
 
+    // Entity extraction for any page that predates it (idempotent).
+    const filled = await backfillEntities({ onProgress: (m) => console.log('  ' + m) });
+    if (filled) console.log(`  entities extracted for ${filled} older page(s)`);
+
     const pages = (await query(`SELECT count(*)::int n FROM knowledge_pages`)).rows[0].n;
+    const withEnt = (await query(`SELECT count(*)::int n FROM knowledge_pages WHERE entities IS NOT NULL AND entities <> '{}'::jsonb`)).rows[0].n;
     const recent = (await query(`SELECT title, kind, source_name FROM knowledge_changes ORDER BY detected_at DESC LIMIT 6`)).rows;
     console.log('\n── Knowledge ─────────────────────────────');
-    console.log('  Pages learned (total):  ' + pages.toLocaleString());
+    console.log('  Pages learned (total):  ' + pages.toLocaleString() + '  (' + withEnt.toLocaleString() + ' carry extracted laws/bodies)');
     console.log('  This run:  ' + totals.new + ' new · ' + totals.changed + ' changed · ' + totals.fetched + ' fetched');
     if (recent.length) { console.log('  Latest changes:'); for (const c of recent) console.log(`    [${c.kind}] ${(c.title || '').slice(0, 50)} · ${c.source_name}`); }
 
