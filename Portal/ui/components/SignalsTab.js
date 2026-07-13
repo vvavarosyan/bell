@@ -17,21 +17,21 @@ import { Pagination } from './Pagination.js';
 import { BELLA_ACTION_EVENT, takePending, stashPending } from '../lib/bellaBus.js';
 
 const KIND_META = {
-  tender:         { label: 'Tenders',        color: '#eab308', sector: 0 },
-  hiring:         { label: 'Hiring',         color: '#22c55e', sector: 1 },
-  expansion:      { label: 'Expansion',      color: '#f97316', sector: 2 },
-  newly_licensed: { label: 'Newly licensed', color: '#5b8cff', sector: 3 },
-  partnership:    { label: 'Partnerships',   color: '#14b8a6', sector: 4 },
-  leadership:     { label: 'Leadership',     color: '#a855f7', sector: 5 },
-  disclosure:     { label: 'Disclosures',    color: '#06b6d4', sector: 6 },
-  news_event:     { label: 'In the news',    color: '#94a3b8', sector: 7 },
+  tender:         { label: 'Tenders',        short: 'Tenders',     color: '#eab308', sector: 0 },
+  hiring:         { label: 'Hiring',         short: 'Hiring',      color: '#22c55e', sector: 1 },
+  expansion:      { label: 'Expansion',      short: 'Expansion',   color: '#f97316', sector: 2 },
+  newly_licensed: { label: 'Newly licensed', short: 'Licensed',    color: '#5b8cff', sector: 3 },
+  partnership:    { label: 'Partnerships',   short: 'Partners',    color: '#14b8a6', sector: 4 },
+  leadership:     { label: 'Leadership',     short: 'Leadership',  color: '#a855f7', sector: 5 },
+  disclosure:     { label: 'Disclosures',    short: 'Disclosures', color: '#06b6d4', sector: 6 },
+  news_event:     { label: 'In the news',    short: 'News',        color: '#94a3b8', sector: 7 },
 };
 const KINDS = Object.keys(KIND_META);
 const SECTOR_DEG = 360 / KINDS.length;   // radar sector width (adapts to kind count)
 const WINDOWS = [['24h', '24h'], ['3d', '3 days'], ['7d', '7 days'], ['14d', '14 days']];
 const WINDOW_MS = { '24h': 864e5, '3d': 3 * 864e5, '7d': 7 * 864e5, '14d': 14 * 864e5 };
 
-const S = 420, C = S / 2, R_MIN = 34, R_MAX = 194;
+const S = 480, C = S / 2, R_MIN = 32, R_MAX = 168;   // bigger margin (S−R_MAX) so rim labels never clip
 
 function timeAgo(iso) {
   const s = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000);
@@ -233,7 +233,7 @@ export function SignalsTab() {
       <div style=${{ display: 'flex', gap: '20px', alignItems: 'flex-start', flexWrap: 'wrap' }}>
 
         <!-- RADAR (right sidebar, compact) -->
-        <div style=${{ order: 2, flex: '0 0 300px', minWidth: '250px', position: 'sticky', top: '4px', border: '1px solid var(--border)', borderRadius: '14px', background: 'var(--bg-elev)', padding: '14px' }}>
+        <div style=${{ order: 2, flex: '0 0 330px', minWidth: '280px', position: 'sticky', top: '4px', border: '1px solid var(--border)', borderRadius: '14px', background: 'var(--bg-elev)', padding: '14px' }}>
           <svg viewBox=${`0 0 ${S} ${S}`} style=${{ width: '100%', height: 'auto', display: 'block' }} role="img" aria-label="Signals radar">
             <defs>
               <linearGradient id="bdiSweep" x1="0" y1="0" x2="1" y2="0">
@@ -250,9 +250,10 @@ export function SignalsTab() {
             })}
             ${KINDS.map((k) => {
               const mid = (KIND_META[k].sector * SECTOR_DEG + SECTOR_DEG / 2 - 90) * Math.PI / 180;
-              const lr = R_MAX + 14;
-              return html`<text key=${'lbl' + k} x=${C + lr * Math.cos(mid)} y=${C + lr * Math.sin(mid) + 3}
-                text-anchor="middle" font-size="9" fill=${KIND_META[k].color} opacity="0.9">${KIND_META[k].label.toUpperCase()}</text>`;
+              const lr = R_MAX + 22;
+              return html`<text key=${'lbl' + k} x=${C + lr * Math.cos(mid)} y=${C + lr * Math.sin(mid) + 5}
+                text-anchor="middle" font-size="16" font-weight="700" letter-spacing="0.3"
+                fill=${KIND_META[k].color}>${(KIND_META[k].short || KIND_META[k].label).toUpperCase()}</text>`;
             })}
 
             <!-- rotating sweep -->
@@ -289,8 +290,8 @@ export function SignalsTab() {
             })}
 
             <circle cx=${C} cy=${C} r="4" fill="#5b8cff" />
-            <text x=${C} y=${C + 16} text-anchor="middle" font-size="8.5" fill="var(--text-dim, #9ca5b9)">NOW</text>
-            <text x=${C + R_MAX - 4} y=${C + 12} text-anchor="end" font-size="8" fill="var(--text-dim, #9ca5b9)">${WINDOWS.find(([k]) => k === windowKey)?.[1]} ago</text>
+            <text x=${C} y=${C + 20} text-anchor="middle" font-size="12" font-weight="600" fill="var(--text-dim, #9ca5b9)">NOW</text>
+            <text x=${C + R_MAX - 4} y=${C + 15} text-anchor="end" font-size="12" fill="var(--text-dim, #9ca5b9)">${WINDOWS.find(([k]) => k === windowKey)?.[1]} ago</text>
           </svg>
           <div class="muted small" style=${{ marginTop: '8px', textAlign: 'center' }}>
             ${loading ? 'Sweeping the market…' : total
