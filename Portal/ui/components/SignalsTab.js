@@ -65,6 +65,7 @@ export function SignalsTab() {
   const [inMarket, setInMarket] = useState([]);
   const [inMarketIcp, setInMarketIcp] = useState(false);
   const [tenderTotal, setTenderTotal] = useState(0);   // true total tenders Bell tracks (for the Tenders chip)
+  const [openTenders, setOpenTenders] = useState([]);  // recent OPEN tenders → plotted as radar blips
   const scoreColor = (n) => (n >= 60 ? '#6fcf97' : n >= 35 ? '#f5c84c' : '#9ca5b9');
 
   const STREAM = 30;
@@ -105,8 +106,15 @@ export function SignalsTab() {
     const loadT = () => api.tenders({ limit: 1 })
       .then((r) => { if (!dead) setTenderTotal(r.total || 0); })
       .catch(() => {});
-    loadT();
-    const t = setInterval(loadT, 300_000);
+    // Recent OPEN tenders → radar blips. Sourced from the tenders table (mirrored
+    // to prod + present locally), so tender points show on BOTH environments —
+    // unlike tender *signals*, which are prod-only and dated by publish date so
+    // they fall outside the tight radar window.
+    const loadOpen = () => api.tenders({ status: 'open', limit: 30 })
+      .then((r) => { if (!dead) setOpenTenders((r.rows || []).map((t) => ({ id: t.id, kind: 'tender', occurred_at: t.published_at || t.deadline_at || t.created_at, title: t.title, buyer: t.buyer, _tender: true }))); })
+      .catch(() => {});
+    loadT(); loadOpen();
+    const t = setInterval(() => { loadT(); loadOpen(); }, 300_000);
     return () => { dead = true; clearInterval(t); };
   }, []);
 
@@ -166,6 +174,10 @@ export function SignalsTab() {
   // server-paginated and windowed. Tenders themselves are reachable in full via
   // the Tenders pill (they also surface here as 'tender' opportunity signals).
   const displayRows = kind === 'tender' ? [] : rows;
+  // Radar blips: in "All types", plot recent OPEN tenders (from the tenders table)
+  // as their own yellow points alongside the other signal kinds, so tenders are
+  // actually visible on the radar. A specific-kind view shows only that kind.
+  const radarBlips = kind === '' ? [...rows.filter((s) => s.kind !== 'tender'), ...openTenders] : displayRows;
 
   // Snap to page 1 whenever the filters change (server re-paginates).
   useEffect(() => { setStreamPage(0); }, [kind, scope, windowKey]);
@@ -250,7 +262,7 @@ export function SignalsTab() {
             </g>
 
             <!-- blips -->
-            ${displayRows.map((s) => {
+            ${radarBlips.map((s) => {
               const { x, y } = blipXY(s, windowKey);
               const meta = KIND_META[s.kind] || KIND_META.news_event;
               const sel = selectedId === s.id;
@@ -267,7 +279,7 @@ export function SignalsTab() {
               // Blips are display-only (Val 2026-07-12: "unlink them on the UI") —
               // no click target; the stream list below is where signals are opened.
               return html`
-                <g key=${s.id} style=${{ pointerEvents: 'none' }}>
+                <g key=${(s._tender ? 't' : 's') + s.id} style=${{ pointerEvents: 'none' }}>
                   ${sel ? html`<circle cx=${x} cy=${y} r="9" fill="none" stroke=${meta.color} stroke-width="1.4" />` : null}
                   <circle cx=${x} cy=${y} r="4" fill=${meta.color} opacity="0">
                     <animate attributeName="opacity" begin=${begin} dur="7s" values="1;0.9;0.12;0" keyTimes="0;0.12;0.55;1" repeatCount="indefinite" />
@@ -283,7 +295,9 @@ export function SignalsTab() {
           <div class="muted small" style=${{ marginTop: '8px', textAlign: 'center' }}>
             ${loading ? 'Sweeping the market…' : total
               ? `${total.toLocaleString()} signal${total === 1 ? '' : 's'} in the last ${WINDOWS.find(([k]) => k === windowKey)?.[1]} — see the stream below to inspect`
-              : 'The radar is warming up — signals appear as Bell detects market movement.'}
+              : kind === '' && openTenders.length
+                ? `${openTenders.length} open tender${openTenders.length === 1 ? '' : 's'} on the radar — other signals appear as Bell detects market movement.`
+                : 'The radar is warming up — signals appear as Bell detects market movement.'}
           </div>
 
           ${inMarket.length ? html`
