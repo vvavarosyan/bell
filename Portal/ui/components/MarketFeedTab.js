@@ -10,6 +10,7 @@ import { toast } from '../lib/toast.js';
 import { navigateTo } from '../lib/router.js';
 import { FeedSourcesNetwork } from './FeedSourcesNetwork.js';
 import { MarketPulse } from './MarketPulse.js';
+import { KnowledgeTab } from './KnowledgeTab.js';
 import { Pagination } from './Pagination.js';
 
 const CATEGORIES = [
@@ -74,6 +75,7 @@ export function MarketFeedTab({ mode } = {}) {
 
   const PAGE = 30;
   const load = useCallback(async () => {
+    if (kind === 'knowledge') { setLoading(false); return; }   // Qatar Knowledge tab renders its own view, not the feed
     setLoading(true);
     try {
       const r = await api.feed({ ...filterParams(), limit: PAGE, offset });
@@ -165,7 +167,7 @@ export function MarketFeedTab({ mode } = {}) {
         <!-- Primary switch: News / Research / New companies -->
         <div class="feed-tablabel"><span class="feed-cats-label">View</span></div>
         <div class="feed-tabs">
-          ${[['', 'All'], ['news', 'News'], ['research', 'Research'], ['company_registered', 'New companies']].map(([val, label]) => {
+          ${[['', 'All'], ['news', 'News'], ['research', 'Research'], ['company_registered', 'New companies'], ['knowledge', 'Qatar Knowledge']].map(([val, label]) => {
             const kc = stats?.kind_counts || {};
             const n = val === '' ? (stats?.total_events ?? null) : (kc[val] ?? null);
             return html`
@@ -176,6 +178,7 @@ export function MarketFeedTab({ mode } = {}) {
           })}
         </div>
 
+        ${kind === 'knowledge' ? html`<${KnowledgeTab} embedded=${true} />` : html`
         <!-- Secondary: topic categories -->
         <div class="feed-filters">
           <span class="feed-cats-label">Topic</span>
@@ -227,7 +230,7 @@ export function MarketFeedTab({ mode } = {}) {
             })}
           ${!loading && total > PAGE ? html`
             <div class="feed-pager"><${Pagination} total=${total} limit=${PAGE} offset=${offset} onChange=${setOffset} /></div>` : null}
-        </div>
+        </div>`}
       </div>
 
       <!-- Trending sidebar (scrolls on its own) -->

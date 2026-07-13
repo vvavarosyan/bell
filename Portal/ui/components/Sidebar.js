@@ -28,7 +28,6 @@ export const NAV_SECTIONS = [
       { id: 'people',     label: 'People',    icon: 'people',    placeholder: false, visibility: 'all' },
       { id: 'jobs',       label: 'Jobs',      icon: 'briefcase', placeholder: false, visibility: 'all' },
       { id: 'real-estate', label: 'Real Estate', icon: 'building', placeholder: false, visibility: 'all' },
-      { id: 'knowledge',  label: 'Qatar Knowledge', icon: 'book', placeholder: false, visibility: 'all' },
       { id: 'deep-data',  label: 'Deep Data', icon: 'database',  placeholder: false, visibility: 'all' },
     ],
   },

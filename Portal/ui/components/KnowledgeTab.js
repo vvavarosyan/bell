@@ -31,7 +31,7 @@ function kpi(label, value, sub) {
     </div>`;
 }
 
-export function KnowledgeTab() {
+export function KnowledgeTab({ embedded = false } = {}) {
   const [view, setView] = useState('browse');
   const [stats, setStats] = useState(null);
   const [sources, setSources] = useState([]);
@@ -66,12 +66,14 @@ export function KnowledgeTab() {
 
   const empty = stats && stats.empty;
 
-  return html`
-    <div class="page-fill"><div class="page-scroll">
-      <div style=${{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap', padding: '4px 0 12px' }}>
+  const body = html`
+    <div>
+      ${embedded
+        ? html`<div class="muted small" style=${{ padding: '2px 0 12px' }}>Qatar's political system, ministries, key people and laws — from official government sources, cited.</div>`
+        : html`<div style=${{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap', padding: '4px 0 12px' }}>
         <h2 style=${{ margin: 0, fontSize: '17px' }}>Qatar Knowledge</h2>
         <span class="muted small">Qatar's political system, ministries, key people and laws — from official government sources, cited.</span>
-      </div>
+      </div>`}
 
       <div style=${{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '10px', marginBottom: '14px' }}>
         ${kpi('Pages learned', stats ? (stats.pages || 0).toLocaleString() : '…', 'official sources')}
@@ -127,7 +129,8 @@ export function KnowledgeTab() {
       `}
 
       ${openId ? html`<${PageDrawer} id=${openId} onClose=${() => setOpenId(null)} />` : null}
-    </div></div>`;
+    </div>`;
+  return embedded ? body : html`<div class="page-fill"><div class="page-scroll">${body}</div></div>`;
 }
 
 // "Recent updates" — what the periodic re-crawl found NEW or CHANGED. This is the
