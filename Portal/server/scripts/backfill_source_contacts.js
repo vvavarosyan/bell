@@ -25,7 +25,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { normalizePhone } from '../lib/dataquality.js';
+import { normalizePhone, isFakePerson } from '../lib/dataquality.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const BATCH = 500;
@@ -83,6 +83,7 @@ async function run() {
       for (const [key, title, seniority, orgLevel] of PERSON_FIELDS) {
         const name = String(x[key] || '').trim();
         if (!name || !/[a-z]/i.test(name) || name.length < 3) continue;
+        if (isFakePerson({ name })) continue;   // "Required - OWNER NAME" etc. are blank-field labels, not people
         R.people++;
         if (R.samples.length < 30) R.samples.push(`${title.padEnd(7)} ${trunc(name, 26).padEnd(26)} ${trunc(c.name)}`);
         if (apply) {

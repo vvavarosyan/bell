@@ -429,7 +429,7 @@ router.get('/:id', async (req, res, next) => {
                pc.title, pc.seniority_level, pc.org_chart_level, pc.is_current
         FROM person_companies pc
         JOIN people p ON p.id = pc.person_id
-        WHERE pc.company_id = $1
+        WHERE pc.company_id = $1 AND COALESCE(p.archived, false) = false
         ORDER BY pc.org_chart_level NULLS LAST, p.full_name
         LIMIT 200
       `, [id]),

@@ -14,6 +14,7 @@ import fs from 'fs/promises';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import { query } from '../db.js';
+import { isFakePerson } from '../lib/dataquality.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const SERVER_DIR = path.dirname(path.dirname(__filename));
@@ -60,6 +61,7 @@ export async function ingestMadeInQatarOwners(jobProgress) {
     const eid  = nz(c.entry_id);
     const full = nz(c.owner);
     if (!full || !eid) { skipped++; continue; }
+    if (isFakePerson({ name: full })) { skipped++; continue; }   // blank-field placeholder, not a person
     const { first, last } = splitName(full);
 
     const extra = {

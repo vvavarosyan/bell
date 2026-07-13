@@ -370,8 +370,38 @@ const FAKE_EMPLOYER_RX = new RegExp(`@\\s*${_BRAND}\\b|(?:\\bat\\s+|\\bof\\s+)${
 // Business / service words that mean a "name" field isn't a real person.
 const NON_PERSON_NAME_RX = /\b(google|meta|facebook|microsoft|apple|amazon|marketing|certified|platform|solutions?|services?|digital|agency|adwords|seo|technolog\w*|software|consult\w*|advertis\w*|holding|enterprises?)\b/i;
 
-const PLACEHOLDER_NAME = /\b(john|jane)\s+doe\b|lorem\s+ipsum|your\s+name\b|first\s*name|last\s*name|team\s+member\b|full\s+name\b|sample\s+(name|person)/i;
+// Includes registry/directory form-field placeholders (QCCI: "Required - OWNER
+// NAME", "Required - CONTACT PERSON", "OWNER NAME") — these are blank-field labels,
+// never real people. All additions are phrases that never occur in a real name.
+const PLACEHOLDER_NAME = /\b(john|jane)\s+doe\b|lorem\s+ipsum|your\s+name\b|first\s*name|last\s*name|team\s+member\b|full\s+name\b|sample\s+(name|person)|\brequired\b|owner\s*name|contact\s*person|company\s*name|not\s+available|to\s+be\s+(updated|advised|confirmed|filled)|\btbd\b/i;
 export function isPlaceholderName(name) { return PLACEHOLDER_NAME.test(String(name || '')); }
+
+// ── Junk / obfuscated emails ────────────────────────────────────────────────
+// Cloudflare "email protection" hides the address as XOR-encoded hex behind a
+// /cdn-cgi/l/email-protection#<hex> link. The first byte is the XOR key. Returns
+// the real email, or null if it can't be decoded to a plausible address.
+export function decodeCloudflareEmail(value) {
+  const s = String(value || '');
+  const m = s.match(/email-protection#?([0-9a-fA-F]{6,})/) || (/^[0-9a-fA-F]{6,}$/.test(s) ? [null, s] : null);
+  if (!m) return null;
+  const hex = m[1];
+  const key = parseInt(hex.slice(0, 2), 16);
+  let out = '';
+  for (let i = 2; i < hex.length; i += 2) out += String.fromCharCode(parseInt(hex.slice(i, i + 2), 16) ^ key);
+  return /^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(out) ? out.toLowerCase() : null;
+}
+
+// A stored "email" that isn't a real address (Cloudflare link, obfuscation
+// placeholder, an image/script path, or plainly malformed). Cleanup + ingest use
+// this to reject junk; decodeCloudflareEmail can often recover the real one first.
+export function isJunkEmail(value) {
+  const s = String(value || '').trim().toLowerCase();
+  if (!s) return true;
+  if (s.includes('/cdn-cgi/') || s.includes('email-protection')) return true;
+  if (/\[email\s*protected\]|\[protected\]|javascript:|data:/.test(s)) return true;
+  if (/\.(png|jpe?g|gif|svg|webp|js|css)(\?|$)/.test(s)) return true;
+  return !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(s);   // must be a syntactically valid address
+}
 
 /** True for a website-template / placeholder "person" that isn't a real employee. */
 export function isFakePerson({ name = '', title = '', headline = '' } = {}) {

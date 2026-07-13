@@ -7,6 +7,7 @@
 //   - Enrichment stages (2, 3.5, 5, 6) → record every discovered email/phone
 
 import { query, withTransaction } from '../db.js';
+import { decodeCloudflareEmail } from './dataquality.js';
 
 // ---------------------------------------------------------------------------
 // Normalizers
@@ -15,7 +16,12 @@ import { query, withTransaction } from '../db.js';
 /** Lower-case, trim, strip leading/trailing whitespace. Returns null if blank. */
 export function normalizeEmail(raw) {
   if (raw === null || raw === undefined) return null;
-  const s = String(raw).trim().toLowerCase();
+  let s = String(raw).trim();
+  // Recover Cloudflare-obfuscated addresses (/cdn-cgi/l/email-protection#<hex>) —
+  // a website scraper otherwise stores the raw link as an "email". Decode to the
+  // real address, or reject if it can't be decoded to a valid one.
+  if (/cdn-cgi|email-protection/i.test(s)) { const d = decodeCloudflareEmail(s); return d && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(d) ? d : null; }
+  s = s.toLowerCase();
   if (!s) return null;
   // Very loose RFC-5322ish sniff. We don't reject odd-looking ones — just refuse
   // anything missing an @ or a TLD.
@@ -55,6 +61,7 @@ const EMAIL_BLOCKLIST = [
   /@email\.(com|test)$/i, /^test@test/i,
   /^no[-_.]?reply@/i,    // we DO want noreply addresses sometimes; comment out if too aggressive
   /\.png$|\.jpg$|\.gif$|\.svg$|\.webp$/i,  // image filenames mistakenly parsed
+  /cdn-cgi|email-protection|\[email.{0,3}protected\]/i,  // Cloudflare obfuscation link, not an address
 ];
 
 /** Returns true if the email is suspicious and should be skipped. */
