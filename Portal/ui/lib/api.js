@@ -425,6 +425,7 @@ export const api = {
   knowledgeStats:         () => request('/api/knowledge/stats'),
   knowledgeSources:       () => request('/api/knowledge/sources'),
   knowledgeChanges:       (q = {}) => request('/api/knowledge/changes?' + new URLSearchParams(q)),
+  knowledgeNewLaws:       (q = {}) => request('/api/knowledge/new-laws?' + new URLSearchParams(q)),
   knowledgePages:         (q = {}) => request('/api/knowledge/pages?' + new URLSearchParams(q)),
   knowledgePage:          (id) => request('/api/knowledge/pages/' + id),
   // ---- Economics (Phase 6 · admin) ----

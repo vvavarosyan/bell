@@ -126,9 +126,25 @@ export async function crawlAlmeezan(source, { onProgress = () => {} } = {}) {
     await sleep(400);   // polite — one connection
   }
   // Reached the ceiling → wrap for the next re-crawl cycle; else save where we stopped.
-  await saveCursor(source, id > to ? from : id);
+  const wrapped = id > to;
+  await saveCursor(source, wrapped ? from : id);
+  // FIRST full pass over the whole archive complete → stamp the Gazette baseline
+  // ONCE. This is the boundary that makes the "new legislation" feed honest: every
+  // law found during the initial multi-run archive crawl is a first-time DISCOVERY,
+  // not a Gazette event. Only a law that appears on a LATER wrap pass (detected_at
+  // after this timestamp) is genuinely new legislation. (Transient failures pause
+  // the cursor rather than skip, so real laws aren't discovered late and mislabeled.)
+  if (wrapped && !cfg.gazette_baseline_at) {
+    await query(
+      `UPDATE knowledge_sources
+          SET config = jsonb_set(coalesce(config,'{}'::jsonb), '{gazette_baseline_at}', to_jsonb(now()::text)),
+              updated_at = now()
+        WHERE id = $1`,
+      [source.id]);
+    stats.gazette_baseline_set = true;
+  }
   await query(`UPDATE knowledge_sources SET last_crawled_at = now(), updated_at = now() WHERE id = $1`, [source.id]);
-  stats.cursor = id > to ? from : id;
-  stats.done = id > to;
+  stats.cursor = wrapped ? from : id;
+  stats.done = wrapped;
   return stats;
 }

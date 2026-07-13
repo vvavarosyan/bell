@@ -559,6 +559,30 @@ export const TOOLS = [
 
   {
     definition: {
+      name: 'get_new_laws',
+      description: "Newly-published Qatar laws and decrees — the Official Gazette feed from Al Meezan (the authoritative legal portal). Use when the user asks what's new in Qatar law/regulation, recent legislation, or new decrees. Returns only GENUINELY new laws (published after Bell finished reading the full legal archive), newest first, each with its source url + published date. If it returns none, say there's no new legislation recorded yet — never invent a law (Rule 2.1).",
+      input_schema: { type: 'object', properties: { limit: { type: 'integer', description: '1-20 (default 10)' } } },
+    },
+    async execute(args) {
+      const limit = Math.min(Math.max(Number(args.limit) || 10, 1), 20);
+      const r = await query(
+        `SELECT c.title, c.url, c.source_name, c.detected_at
+           FROM knowledge_changes c
+           JOIN knowledge_sources s ON s.name = c.source_name
+          WHERE c.kind = 'new'
+            AND s.category = 'laws'
+            AND s.config->>'gazette_baseline_at' IS NOT NULL
+            AND c.detected_at > (s.config->>'gazette_baseline_at')::timestamptz
+          ORDER BY c.detected_at DESC LIMIT ${limit}`,
+      ).catch((e) => (/knowledge_changes|knowledge_sources/.test(e.message) ? { rows: [] } : Promise.reject(e)));
+      if (!r.rows.length) return { laws: [], note: 'No new legislation recorded yet (Bell may still be reading the archive baseline). Do not invent a law.' };
+      return { laws: r.rows.map((x) => ({ title: x.title, source: x.source_name, url: x.url, published_at: x.detected_at })) };
+    },
+    summarize: (_a, r) => `${(r?.laws || []).length} new laws`,
+  },
+
+  {
+    definition: {
       name: 'get_data_stats',
       description: 'Platform-wide data statistics: total/active companies, people count, jobs, deep-data datasets.',
       input_schema: { type: 'object', properties: {} },

@@ -78,6 +78,41 @@ router.get('/changes', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+// ---- Official Gazette: newly-published legislation ---------------------------
+// The earliest authoritative feed of NEW Qatar laws. A law only qualifies once its
+// source has passed its baseline (config.gazette_baseline_at — set when Al Meezan's
+// first full archive walk completes) AND the change was detected after that moment.
+// Before the baseline, gazette_baseline_at is NULL, the comparison is NULL, and the
+// feed is correctly empty — we never call the whole archive "new" (Rule 2.1).
+router.get('/new-laws', async (req, res, next) => {
+  try {
+    if (!(await tablesReady())) return res.json({ rows: [], baseline: false });
+    const limit = Math.min(Math.max(Number(req.query.limit) || 30, 1), 100);
+    // Is any laws source past baseline yet? (drives an honest empty-state message)
+    const baseline = (await query(
+      `SELECT count(*)::int n FROM knowledge_sources
+        WHERE category = 'laws' AND config->>'gazette_baseline_at' IS NOT NULL`)).rows[0].n > 0;
+    const rows = (await query(
+      `SELECT c.title, c.url, c.source_name, c.detected_at, p.id AS page_id
+         FROM knowledge_changes c
+         JOIN knowledge_sources s ON s.name = c.source_name
+         LEFT JOIN knowledge_pages p ON p.url = c.url AND p.active
+        WHERE c.kind = 'new'
+          AND s.category = 'laws'
+          AND s.config->>'gazette_baseline_at' IS NOT NULL
+          AND c.detected_at > (s.config->>'gazette_baseline_at')::timestamptz
+        ORDER BY c.detected_at DESC
+        LIMIT ${limit}`)).rows;
+    res.json({
+      baseline,
+      rows: rows.map((r) => ({
+        title: r.title, url: r.url, source: r.source_name,
+        page_id: r.page_id || null, published_at: r.detected_at,
+      })),
+    });
+  } catch (err) { next(err); }
+});
+
 // ---- Browse / search pages ---------------------------------------------------
 router.get('/pages', async (req, res, next) => {
   try {

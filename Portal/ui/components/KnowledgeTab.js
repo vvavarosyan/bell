@@ -86,11 +86,13 @@ export function KnowledgeTab({ embedded = false } = {}) {
         <span class="filt-label">View</span>
         <div class="seg">
           <button class=${'seg-btn' + (view === 'browse' ? ' active' : '')} onClick=${() => setView('browse')}>Browse</button>
+          <button class=${'seg-btn' + (view === 'gazette' ? ' active' : '')} onClick=${() => setView('gazette')}>New legislation</button>
           <button class=${'seg-btn' + (view === 'updates' ? ' active' : '')} onClick=${() => setView('updates')}>Recent updates</button>
         </div>
       </div>
 
-      ${view === 'updates' ? html`<${ChangesView} empty=${empty} />` : html`
+      ${view === 'gazette' ? html`<${GazetteView} empty=${empty} onOpen=${setOpenId} />`
+        : view === 'updates' ? html`<${ChangesView} empty=${empty} />` : html`
       <div class="filt-bar">
         <input class="bdi-filter-input" type="text" placeholder="Search Qatar laws, ministries, the constitution, officials…"
           value=${q} onInput=${(e) => setQ(e.target.value)} style=${{ minWidth: '260px', flex: '1 1 260px' }} />
@@ -165,6 +167,48 @@ function ChangesView({ empty }) {
               ${c.url ? html`<a href=${c.url} target="_blank" rel="noopener noreferrer" style=${{ color: 'var(--text)', textDecoration: 'none' }}>${c.title || '(untitled)'}</a>` : (c.title || '(untitled)')}
             </div>
             <div class="muted small">${c.source_name || '—'} · ${fmtDate(c.detected_at)}</div>
+          </div>
+        </div>`;
+      })}
+    </div>`;
+}
+
+// "New legislation" — Qatar's Official Gazette feed. The earliest authoritative
+// list of NEW laws/decrees. A law appears here only once Bell has finished reading
+// the whole legal archive (the baseline) and then sees a genuinely new law on a
+// later pass — so we never mislabel the archive itself as "new" (Rule 2.1). Titles
+// open the full law inside Bell when we hold the page; otherwise link to Al Meezan.
+function GazetteView({ empty, onOpen }) {
+  const [rows, setRows] = useState([]);
+  const [baseline, setBaseline] = useState(true);
+  const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    let dead = false;
+    api.knowledgeNewLaws({ limit: 50 })
+      .then((r) => { if (!dead) { setRows(r.rows || []); setBaseline(r.baseline !== false); setLoading(false); } })
+      .catch(() => { if (!dead) setLoading(false); });
+    return () => { dead = true; };
+  }, []);
+  if (empty) return html`<div class="empty" style=${{ lineHeight: 1.6 }}>Nothing learned yet — run <b>“Run Qatar Knowledge Scan.command”</b> to populate the legal archive first.</div>`;
+  if (loading) return html`<div class="empty">Loading new legislation…</div>`;
+  if (!baseline) return html`<div class="empty" style=${{ lineHeight: 1.6 }}>
+    <div style=${{ fontSize: '15px', color: 'var(--text)', marginBottom: '4px' }}>Reading the full legal archive…</div>
+    Bell is still working through Qatar's law archive on Al Meezan. Once that first full pass finishes, newly-published laws appear here — the earliest authoritative feed of new Qatar legislation.</div>`;
+  if (!rows.length) return html`<div class="empty" style=${{ lineHeight: 1.6 }}>No new legislation since Bell finished reading the archive. New laws and decrees appear here as Al Meezan publishes them.</div>`;
+  return html`
+    <div class="muted small" style=${{ margin: '2px 0 8px' }}>Newly-published Qatar laws and decrees, newest first — straight from the Al Meezan legal portal.</div>
+    <div style=${{ display: 'flex', flexDirection: 'column', gap: '7px' }}>
+      ${rows.map((c, i) => {
+        const rtl = isArabic(c.title);
+        return html`<div key=${i} style=${{ border: '1px solid var(--border)', borderRadius: '10px', background: 'var(--bg-elev)', padding: '10px 13px', display: 'flex', alignItems: 'baseline', gap: '9px' }}>
+          <span style=${{ fontSize: '10.5px', fontWeight: 600, color: 'rgba(80,200,120,0.95)', border: '1px solid var(--border)', borderRadius: '6px', padding: '1px 7px', whiteSpace: 'nowrap' }}>New law</span>
+          <div style=${{ flex: 1, minWidth: 0 }}>
+            <div dir=${rtl ? 'rtl' : 'ltr'} style=${{ fontSize: '13px', color: 'var(--text)' }}>
+              ${c.page_id
+                ? html`<a onClick=${() => onOpen && onOpen(c.page_id)} style=${{ color: 'var(--text)', cursor: 'pointer', textDecoration: 'none', borderBottom: '1px dotted var(--border)' }}>${c.title || '(untitled)'}</a>`
+                : c.url ? html`<a href=${c.url} target="_blank" rel="noopener noreferrer" style=${{ color: 'var(--text)', textDecoration: 'none' }}>${c.title || '(untitled)'}</a>` : (c.title || '(untitled)')}
+            </div>
+            <div class="muted small">${c.source || 'Al Meezan'} · published ${fmtDate(c.published_at)}</div>
           </div>
         </div>`;
       })}
