@@ -81,6 +81,7 @@ export async function listCompanyContacts(companyId) {
            is_primary, is_verified, verified_at, created_at, updated_at
     FROM company_contacts
     WHERE company_id = $1
+      AND coalesce((extra_fields->>'hidden_conflict')::boolean, false) = false
     ORDER BY is_primary DESC, type, created_at ASC
   `, [companyId]);
   return r.rows;
