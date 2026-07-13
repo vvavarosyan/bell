@@ -420,6 +420,12 @@ export const api = {
   realEstateBuildingCategories: () => request('/api/real-estate/building-categories'),
   realEstateMap:          () => request('/api/real-estate/map'),
   realEstateParcels:      (q = {}) => request('/api/real-estate/parcels?' + new URLSearchParams(q)),
+  // ---- Qatar Knowledge (Phase 6 · official Qatar sources + laws) ----
+  knowledgeStats:         () => request('/api/knowledge/stats'),
+  knowledgeSources:       () => request('/api/knowledge/sources'),
+  knowledgeChanges:       (q = {}) => request('/api/knowledge/changes?' + new URLSearchParams(q)),
+  knowledgePages:         (q = {}) => request('/api/knowledge/pages?' + new URLSearchParams(q)),
+  knowledgePage:          (id) => request('/api/knowledge/pages/' + id),
   // ---- Economics (Phase 6 · admin) ----
   economics:              () => request('/api/economics'),
   economicsCosts:         () => request('/api/economics/costs'),

@@ -171,6 +171,11 @@ t('yields real text from a WebForms page (was 0 before the fix)', () => {
   const { text } = extractContent(lawHtml);
   assert.ok(text.length > 500, `expected >500 chars, got ${text.length}`);
 });
+t('decodes HEX html entities (&#xD; &#x2019;) — no raw entities left', () => {
+  const { text } = extractContent('<body><main><p>Qatar at a Glance &#xD;Qatar National Vision 2030 and Qatar&#x2019;s foreign policy is strong and clear today.</p></main></body>');
+  assert.ok(!/&#x/i.test(text), `raw hex entity remained: ${text}`);
+  assert.ok(/Vision 2030/.test(text) && /foreign policy/.test(text));
+});
 
 // ── extractLinks: per-source options ──────────────────────────────────────────
 console.log('\nextractLinks — per-source options:');

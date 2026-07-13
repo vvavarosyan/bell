@@ -19,8 +19,12 @@ const lawUrl = (id) => `${HOST}/LawPage.aspx?id=${id}&language=en`;
 
 const decode = (s) => String(s || '')
   .replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
-  .replace(/&quot;/g, '"').replace(/&#39;|&rsquo;|&lsquo;/g, "'").replace(/&ndash;|&mdash;/g, '-')
-  .replace(/&[a-z]+;|&#\d+;/gi, ' ');
+  .replace(/&quot;/g, '"')
+  .replace(/&#0*39;|&#x0*27;|&rsquo;|&lsquo;|&#x0*201[89];/gi, "'")
+  .replace(/&ldquo;|&rdquo;|&#x0*201[cd];/gi, '"')
+  .replace(/&ndash;|&mdash;|&#x0*201[34];/gi, '-')
+  .replace(/&#x0*d;|&#x0*a;|&#0*13;|&#0*10;/gi, ' ')
+  .replace(/&[a-z]+;|&#x?[0-9a-f]+;/gi, ' ');
 
 // Clean the law title out of Al Meezan's site title:
 //   "Al Meezan - Qatary Legal Portal | Legislations | Law No. 10 of 1987 …"

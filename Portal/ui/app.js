@@ -31,6 +31,7 @@ import { ResearchTab }   from './components/ResearchTab.js';
 import { ResearchApprovalsTab } from './components/ResearchApprovalsTab.js';
 import { DeepDataTab }   from './components/DeepDataTab.js';
 import { RealEstateTab } from './components/RealEstateTab.js';
+import { KnowledgeTab } from './components/KnowledgeTab.js';
 import { EconomicsTab } from './components/EconomicsTab.js';
 import { SyncTab }       from './components/SyncTab.js';
 import { MarketFeedTab } from './components/MarketFeedTab.js';
@@ -100,6 +101,7 @@ const VIEWS = {
   'announcements': { Component: AnnouncementsTab },
   'email-templates': { Component: EmailTemplatesTab },
   'real-estate': { Component: RealEstateTab },
+  'knowledge':   { Component: KnowledgeTab },
   'deep-data':   { Component: DeepDataTab },
   'sync':        { Component: SyncTab },
   // Archived is reachable via deep-link/sidebar too
@@ -108,6 +110,7 @@ const VIEWS = {
 
 const LABELS = {
   'companies': 'Companies', 'people': 'People', 'jobs': 'Jobs', 'real-estate': 'Real Estate',
+  'knowledge': 'Qatar Knowledge',
   'sources': 'Sources', 'settings': 'System Config', 'archived': 'Archived',
   'billing': 'Billing', 'account': 'Settings',
   'market-feed': 'Market Feed',

@@ -32,8 +32,12 @@ const DROP_TAGS = /<(script|style|nav|header|footer|svg|noscript|iframe)[\s\S]*?
 const DROP_CONTROLS = /<(select|button|textarea|option)[\s\S]*?<\/\1>|<input\b[^>]*>/gi;
 const decode = (s) => String(s || '')
   .replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
-  .replace(/&quot;/g, '"').replace(/&#39;|&rsquo;|&lsquo;/g, "'").replace(/&ndash;|&mdash;/g, '-')
-  .replace(/&[a-z]+;|&#\d+;/gi, ' ');
+  .replace(/&quot;/g, '"')
+  .replace(/&#0*39;|&#x0*27;|&rsquo;|&lsquo;|&#x0*201[89];/gi, "'")   // apostrophes (incl. hex &#x2019;)
+  .replace(/&ldquo;|&rdquo;|&#x0*201[cd];/gi, '"')                    // curly quotes
+  .replace(/&ndash;|&mdash;|&#x0*201[34];/gi, '-')                    // en/em dash
+  .replace(/&#x0*d;|&#x0*a;|&#0*13;|&#0*10;/gi, ' ')                  // CR/LF entities → space
+  .replace(/&[a-z]+;|&#x?[0-9a-f]+;/gi, ' ');                         // any remaining named/numeric → space
 
 const stripHostWww = (host) => String(host || '').replace(/^www\./i, '').toLowerCase();
 
