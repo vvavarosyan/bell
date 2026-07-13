@@ -118,15 +118,27 @@ export function extractBodies(text) {
 
 // ── amounts (Qatari Riyals) ───────────────────────────────────────────────────
 // Decimal is INSIDE each capture group so `value` and the verbatim `text` keep the
-// fraction — a fee of "QAR 1,000.50" must not be stored as 1000 (Rule 2.1).
-const AMOUNT_RE = /\b(?:QAR|QR|﷼)\s?([\d,]{1,12}(?:\.\d+)?)\b|\b([\d,]{1,12}(?:\.\d+)?)\s?(?:Qatari Riyals?|Riyals?|QR|QAR)\b/gi;
+// fraction — a fee of "QAR 1,000.50" must not be stored as 1000 (Rule 2.1). A trailing
+// MAGNITUDE word (million/billion/…) is captured too: "QAR 8.9 billion" was being
+// stored as the misleading "QAR 8.9". The verbatim text keeps the word AND value is
+// scaled by it (arithmetic on the stated figure, not a guess).
+const MAGWORD = '(thousand|million|billion|trillion|mn|bn|مليون|مليار|ألف|تريليون)';
+const AMOUNT_RE = new RegExp(
+  `\\b(?:QAR|QR|﷼)\\s?([\\d,]{1,15}(?:\\.\\d+)?)(?:\\s?${MAGWORD})?` +
+  `|\\b([\\d,]{1,15}(?:\\.\\d+)?)(?:\\s?${MAGWORD})?\\s?(?:Qatari Riyals?|Riyals?|QR|QAR)\\b`,
+  'gi');
+const MAG_MULT = { thousand: 1e3, million: 1e6, billion: 1e9, trillion: 1e12, mn: 1e6, bn: 1e9, 'ألف': 1e3, 'مليون': 1e6, 'مليار': 1e9, 'تريليون': 1e12 };
 
 export function extractAmounts(text) {
   const out = [];
   for (const m of text.matchAll(AMOUNT_RE)) {
-    const digits = (m[1] || m[2] || '').replace(/,/g, '');
-    if (!digits || digits.replace(/\./g, '').length > 12) continue;
-    out.push({ text: m[0].replace(/\s+/g, ' ').trim(), value: Number(digits), proof: proofAround(text, m.index, m[0].length) });
+    const digits = (m[1] || m[3] || '').replace(/,/g, '');
+    if (!digits || digits.replace(/\./g, '').length > 15) continue;
+    const mag = (m[2] || m[4] || '').toLowerCase();
+    let value = Number(digits);
+    if (mag && MAG_MULT[mag]) value *= MAG_MULT[mag];
+    if (!Number.isFinite(value) || value <= 0) continue;   // drop 0.00 / meaningless amounts
+    out.push({ text: m[0].replace(/\s+/g, ' ').trim(), value, proof: proofAround(text, m.index, m[0].length) });
   }
   return uniqBy(out, (x) => x.text.toLowerCase() + x.value, 30);
 }
@@ -136,8 +148,12 @@ export function extractAmounts(text) {
 // reference; NEVER used for outreach until lawyer sign-off (§2.7).
 const HONORIFIC = '(?:His Highness|Her Highness|H\\.H\\.|His Excellency|Her Excellency|H\\.E\\.|Sheikh|Sheikha|Dr\\.|Mr\\.|Ms\\.|Eng\\.)';
 const NAMEPART = "[A-Z][A-Za-z'\\-]+";
+// NAMEPART must come BEFORE the bare "Al" in the alternation, else "Al-Thani" (one
+// hyphenated token) matches the literal "Al" and strands "-Thani" — which truncated
+// ~51% of extracted names at the family prefix, incl. the Amir's. NAMEPART already
+// matches "Al" and "Al-Thani", so the lowercase particles are all that stay explicit.
 const OFFICIAL_RE = new RegExp(
-  `\\b${HONORIFIC}(?:\\s+${HONORIFIC})?\\s+(${NAMEPART}(?:\\s+(?:bin|bint|Al|Al-|el|${NAMEPART})){1,6})`,
+  `\\b${HONORIFIC}(?:\\s+${HONORIFIC})?\\s+(${NAMEPART}(?:\\s+(?:bin|bint|el|${NAMEPART})){1,6})`,
   'g');
 
 // Generic place / institution / headline words. If the captured name contains any
@@ -146,17 +162,24 @@ const OFFICIAL_RE = new RegExp(
 // Patronizes The Opening") — reject it rather than fabricate a person (Rule 2.1).
 const NOT_A_NAME = /\b(?:Mosque|Grand|Street|Road|Tower|Hospital|Airport|Stadium|Park|Bridge|Centre|Center|City|Medical|University|College|School|Museum|Palace|Hotel|Company|Corporation|Authority|Ministry|Committee|Council|Department|Building|Complex|Station|Port|Terminal|Highway|Avenue|District|Zone|Hall|Institute|Foundation|Bank|Housing|Fund|Stadium|Opening|Ceremony|Session|Forum|Summit|Meeting|Conference|Patroni[sz]e[sd]?|Inaugurate[sd]?|Attend(?:s|ed)?|Receive[sd]?|Launch(?:e[sd])?|Meets?|Of|And|For|The|In|At|On|To)\b/;
 
+// A name with no delimiter often runs straight into the next heading in plain-text
+// ("… Al-Hammadi Academic Qualifications"). Trim these known section/heading words
+// (and everything after) off the TAIL — trim, not reject, so we keep the real name.
+const NAME_STOP_SUFFIX = /\s+(?:Academic|Qualifications?|Biography|Profile|Career|Education|Experience|Overview|Contact|Details|Information|News|Home|Menu|Search|Speech|Statement|Message|Vision|Mission|Awards?|Achievements?|Assumed|Has|Was|Is|Will|Under|During|Minister|Prime|Deputy|Chairman|President|Director|Secretary)\b[\s\S]*$/;
+
 export function extractOfficials(text) {
   const raw = [];
   for (const m of text.matchAll(OFFICIAL_RE)) {
     // Validate the captured NAME group (m[1]), not the honorific-prefixed whole match.
-    const name = (m[1] || '').replace(/\s+/g, ' ').trim();
+    const name = (m[1] || '').replace(/\s+/g, ' ').replace(NAME_STOP_SUFFIX, '').trim();
     if (!name || NOT_A_NAME.test(name)) continue;
     // Require a genuine Arabic name particle (bin/bint/al/el) or an "Al <Surname>"
     // family marker. A lone honorific + capitalised word is not proof of a person;
     // Rule 2.1 says err toward NOT claiming one.
     if (!/\b(?:bin|bint|al|el)\b/i.test(name) && !/\bAl[- ][A-Z]/.test(name)) continue;
-    const full = m[0].replace(/\s+/g, ' ').trim();
+    // Rebuild the full "<honorific> <name>" with the trimmed name (honorific = m[0] up to m[1]).
+    const hono = m[0].slice(0, m[0].length - (m[1] || '').length);
+    const full = (hono + name).replace(/\s+/g, ' ').trim();
     raw.push({ name: full, sensitive: true, proof: proofAround(text, m.index, m[0].length) });
   }
   // Drop truncated duplicates: the same person captured with fewer name tokens.

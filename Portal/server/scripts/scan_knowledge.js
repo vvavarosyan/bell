@@ -7,7 +7,7 @@
 // changes). A few minutes per source. Publishes to the live site.
 
 import { query } from '../db.js';
-import { crawlSource, knowledgeTablesReady, backfillEntities } from '../knowledge/crawl.js';
+import { crawlSource, knowledgeTablesReady, backfillEntities, relabelLanguages } from '../knowledge/crawl.js';
 import { crawlAlmeezan } from '../knowledge/crawl_almeezan.js';
 import { pushGisToProd } from '../gis/ingest_gis.js';   // generic mirror push
 
@@ -36,6 +36,11 @@ import { pushGisToProd } from '../gis/ingest_gis.js';   // generic mirror push
     // Entity extraction for any page that predates it (idempotent).
     const filled = await backfillEntities({ onProgress: (m) => console.log('  ' + m) });
     if (filled) console.log(`  entities extracted for ${filled} older page(s)`);
+
+    // Re-detect language for pages labelled before the Arabic-vs-Latin ratio fix
+    // (notably ~1,750 Arabic Al Meezan laws stored as English). Idempotent SQL pass.
+    const relang = await relabelLanguages();
+    if (relang) console.log(`  language corrected for ${relang} page(s)`);
 
     const pages = (await query(`SELECT count(*)::int n FROM knowledge_pages`)).rows[0].n;
     const withEnt = (await query(`SELECT count(*)::int n FROM knowledge_pages WHERE entities IS NOT NULL AND entities <> '{}'::jsonb`)).rows[0].n;

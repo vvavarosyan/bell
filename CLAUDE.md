@@ -153,7 +153,7 @@ Portal/
     routes/         express routers
     scripts/        one‑shot + diagnostic scripts run by .command files
     tests/          node test files (run with plain `node`)
-  migrations/       NNN_name.sql, applied in order at Portal boot. Latest = 088.
+  migrations/       NNN_name.sql, applied in order at Portal boot. Latest = 090.
   ui/components/    React 18 (esm.sh import map) + htm tagged templates. No build step.
 Data/Companies/1. Data Gathering/Directories/   MOCI, QFC, QFZ, QSTP scrapers (Python)
 *.command                                        Val's entry points

@@ -105,11 +105,56 @@ async function fetchHtml(url, { insecure = false, tries = 3 } = {}) {
   throw new Error(last || 'fetch failed');
 }
 
-// Clean readable text + title from a page's HTML.
-export function extractContent(html) {
-  const titleM = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
-  const h1M = html.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i);
-  const title = decode((h1M ? h1M[1] : (titleM ? titleM[1] : '')).replace(/<[^>]+>/g, '')).replace(/\s+/g, ' ').trim();
+// Words that, together with the source's own name, mark a candidate as the SITE
+// name rather than a page title (so "The Shura Council State of Qatar" is rejected).
+const GENERIC_TITLE_WORDS = new Set(['the', 'of', 'state', 'qatar', 'portal', 'official', 'home', 'welcome', 'to', 'and', 'a', 'an', 'for', 'en', 'ar', 'website', 'gov']);
+const titleCase = (s) => String(s || '').replace(/\s+/g, ' ').trim().replace(/\b\w/g, (m) => m.toUpperCase());
+const humanizeSlug = (url) => {
+  try {
+    const seg = new URL(url).pathname.split('/').filter(Boolean).pop() || '';
+    return titleCase(seg.replace(/\.(aspx|html?|php)$/i, '').replace(/[-_]+/g, ' '));
+  } catch { return ''; }
+};
+// A candidate is the site name if ALL its words come from the source name + generic set.
+function isSiteName(cand, sourceName) {
+  const norm = (s) => String(s || '').toLowerCase().replace(/[^a-z؀-ۿ\s]/g, ' ').split(/\s+/).filter(Boolean);
+  const c = norm(cand);
+  if (!c.length) return true;
+  const site = new Set([...norm(sourceName), ...GENERIC_TITLE_WORDS]);
+  return c.every((w) => site.has(w));
+}
+// Pick the best real page title. Many Qatar portals put the site name in <h1> and the
+// page-specific title in the FIRST <title> segment (GTA "taxes-info | GTA"), an
+// og:title (QFC), or only in the URL slug (Shura). We reject site-name and error-shell
+// candidates (using the source's own name) and fall through to the humanised slug.
+export function pickTitle(html, url = '', sourceName = '') {
+  const clean = (s) => decode(String(s || '').replace(/<[^>]+>/g, '')).replace(/\s+/g, ' ').trim();
+  const errish = (s) => !s || /\berror\b|خطأ/i.test(s);
+  const og = clean((html.match(/<meta[^>]+property=["']og:title["'][^>]*content=["']([^"']+)/i) || html.match(/<meta[^>]+content=["']([^"']+)["'][^>]*property=["']og:title/i) || [])[1]);
+  const raw = clean((html.match(/<title[^>]*>([\s\S]*?)<\/title>/i) || [])[1]);
+  const h1 = clean((html.match(/<h1[^>]*>([\s\S]*?)<\/h1>/i) || [])[1]);
+  const h2 = clean((html.match(/<h2[^>]*>([\s\S]*?)<\/h2>/i) || [])[1]);
+  const segs = raw.split(/\s+[|»·–—]\s+|\s+-\s+/).map((s) => s.trim()).filter(Boolean);
+  // The page-specific part of <title>: its first segment when there's a "Page | Site"
+  // separator, else the WHOLE <title> (SharePoint leaf pages are often just "Who We Are").
+  const firstSeg = segs.length > 1 ? segs[0] : raw;
+  const slug = humanizeSlug(url);
+  // Title-case a candidate that is a lowercase slug/word ("laws", "taxes-info") but
+  // leave a real phrase that already has capitals ("What is Qatar…") or Arabic alone.
+  const maybeHumanize = (s) => (/^[a-z0-9][a-z0-9 _-]*$/.test(s) ? titleCase(s.replace(/[-_]+/g, ' ')) : s);
+  // SharePoint often renders the title twice ("Who We Are Who We Are") — collapse it.
+  const dedupePhrase = (s) => s.replace(/^(.{2,}?)\s+\1$/i, '$1').trim();
+  for (const c of [og, firstSeg, h1, h2]) {
+    if (c && !errish(c) && !isSiteName(c, sourceName)) return dedupePhrase(maybeHumanize(c));
+  }
+  if (slug && !errish(slug)) return slug;
+  return (raw && !errish(raw)) ? raw : slug;
+}
+
+// Clean readable text + title from a page's HTML. Pass {url, sourceName} for the best
+// title (see pickTitle); the bare call still works for callers that don't have them.
+export function extractContent(html, { url = '', sourceName = '' } = {}) {
+  const title = pickTitle(html, url, sourceName);
   // Prefer <main> / <article> if present, else <body>.
   let body = html;
   const mainM = html.match(/<(main|article)[^>]*>([\s\S]*?)<\/\1>/i);
@@ -148,7 +193,46 @@ export function extractLinks(html, baseUrl, prefix, opts = {}) {
   return [...out];
 }
 
-const detectLang = (text) => (/[؀-ۿ]/.test(text) && !/[a-z]{4}/i.test(text.slice(0, 400)) ? 'ar' : 'en');
+// Language by DOMINANCE, not presence: the old rule flipped any page with a 4-letter
+// Latin run in the first 400 chars to 'en', which mislabeled ~1,750 Arabic Al Meezan
+// laws (their pages carry a little Latin site-chrome) as English. Compare the Arabic
+// vs Latin letter COUNT over a generous sample instead.
+export const detectLang = (text) => {
+  const sample = String(text || '').slice(0, 3000);
+  const ar = (sample.match(/[؀-ۿ]/g) || []).length;
+  const la = (sample.match(/[A-Za-z]/g) || []).length;
+  return ar > la ? 'ar' : 'en';
+};
+
+// A soft-404 / error shell: the server answered 200 but the page is a not-found or
+// access-denied placeholder (Sitecore/SharePoint sites do this). We must never store
+// one as knowledge (Rule 2.1 — a "404 Page" leaked in from Amiri Diwan). Just as
+// important: we must NEVER drop a REAL page whose title merely CONTAINS an error word
+// or a number like 404 — a Qatar law "Decision No. 404 of 2015" or a list "404 results
+// found" is real content. So the title rules are anchored to the WHOLE title (the
+// title IS the error page), never a leading substring; there is no bare-"404" rule.
+// The body rule only fires on a short page dominated by a not-found message.
+export function isErrorShell(title, text) {
+  const t = String(title || '').trim();
+  // The entire title is an HTTP status line: "404", "404 Page", "403 Forbidden",
+  // "500 Internal Server Error". A trailing word is allowed ONLY from the status set,
+  // so "404 results found" / "406 of the Civil Code" do NOT match.
+  if (/^(40\d|41\d|50\d)(\s*[-–—:|]?\s*(page|error|not\s*found|forbidden|unauthori[sz]ed|bad\s*request|internal\s*server\s*error|service\s*unavailable))?\.?\s*$/i.test(t)) return true;
+  if (/^error\s*[-–—:|]?\s*(40\d|41\d|50\d)\b/i.test(t)) return true;                 // "Error 404"
+  // The entire title IS a standalone not-found / denied phrase (anchored to $, so
+  // "Forbidden Weapons Import Law" and "Not Found Property Records Act" are kept).
+  if (/^(page not found|not found|the (web\s?)?page (cannot|can['’]?t|could not|couldn['’]?t) be found|access denied|not authori[sz]ed|unauthori[sz]ed|forbidden|bad request|service unavailable|error)\s*$/i.test(t)) return true;
+  // Short page whose BODY is a not-found message. The SUBJECT must be the PAGE/URL
+  // itself ("the page", "the requested url", "page you requested") — never a bare
+  // "document"/"content"/"right", so a real legal clause like "the right does not
+  // exist prior to registration" is kept (Rule 2.1 — never drop a real page).
+  const body = String(text || '');
+  if (body.length < 700 &&
+      /\b(this (web\s?)?page|the (web\s?)?page|the requested (url|page|content)|page (you (requested|were looking for|are looking for)|that you requested))\b[\s\S]{0,40}\b(cannot be found|could not be found|couldn['’]?t be found|can['’]?t be found|was not found|does not exist|is no longer available|is not available)\b/i.test(body)) return true;
+  // Lorem-ipsum placeholder text is not real knowledge (a MoPH page shipped with it).
+  if (/\blorem ipsum dolor\b/i.test(body)) return true;
+  return false;
+}
 
 // Upsert one page (+ entities); returns 'new' | 'changed' | 'same'.
 export async function upsertPage(source, url, title, text) {
@@ -172,7 +256,19 @@ export async function upsertPage(source, url, title, text) {
     return 'new';
   }
   if (existing.content_hash === hash) {
-    await query(`UPDATE knowledge_pages SET fetched_at = now() WHERE id = $1`, [existing.id]);
+    // Content unchanged — but REFRESH derived fields (title/lang/entities) in case the
+    // extractor improved since the last crawl. This is not a content change: no
+    // changed_at bump, no change-feed row. updated_at advances only when a derived
+    // field actually changed, so the prod mirror re-syncs the correction and nothing
+    // else. (We already wrote fetched_at every 'same' page, so this adds no writes.)
+    const tsSame = `setweight(to_tsvector('simple', coalesce($2,'')),'A') || setweight(to_tsvector('simple', coalesce(content,'')),'B')`;
+    await query(
+      `UPDATE knowledge_pages
+          SET title=$2, lang=$3, entities=$4::jsonb, word_count=$5, ts=${tsSame}, fetched_at=now(),
+              updated_at = CASE WHEN title IS DISTINCT FROM $2 OR lang IS DISTINCT FROM $3
+                                OR entities IS DISTINCT FROM $4::jsonb THEN now() ELSE updated_at END
+        WHERE id=$1`,
+      [existing.id, title, lang, entJson, wc]);
     return 'same';
   }
   // UPDATE: its OWN param list (no url) — title=$2, content=$3 → tsUpd references
@@ -211,12 +307,15 @@ export async function crawlSource(source, { onProgress = () => {} } = {}) {
     let html;
     try { html = await fetchHtml(url, { insecure }); } catch { stats.errors++; continue; }
     if (!html) continue;
-    const { title, text } = extractContent(html);
-    if (text && text.length > 200) {
+    const { title, text } = extractContent(html, { url, sourceName: source.name });
+    const shell = isErrorShell(title, text);
+    if (text && text.length > 200 && !shell) {
       try { const r = await upsertPage(source, url, title, text); stats[r]++; } catch { stats.errors++; }
-    }
+    } else if (shell) { stats.skipped = (stats.skipped || 0) + 1; }
     stats.fetched++;
-    for (const link of extractLinks(html, url, prefix, linkOpts)) if (!seen.has(link) && queue.length + stats.fetched < maxPages * 3) queue.push(link);
+    // Don't harvest links from a not-found shell — its links are only nav chrome,
+    // already reachable from real pages; following them just wastes the page budget.
+    if (!shell) for (const link of extractLinks(html, url, prefix, linkOpts)) if (!seen.has(link) && queue.length + stats.fetched < maxPages * 3) queue.push(link);
     if (stats.fetched % 10 === 0) onProgress(`${source.name}: ${stats.fetched} pages (${stats.new} new, ${stats.changed} changed)`);
     await sleep(400);   // polite
   }
@@ -227,6 +326,28 @@ export async function crawlSource(source, { onProgress = () => {} } = {}) {
 export async function knowledgeTablesReady() {
   try { return !!(await query(`SELECT to_regclass('public.knowledge_pages') AS t`)).rows[0].t; }
   catch { return false; }
+}
+
+// Re-detect language for ALL stored pages using the same Arabic-vs-Latin dominance
+// rule as detectLang(), in ONE SQL pass (no content pulled into JS on the 8 GB Mac).
+// This corrects pages labelled before the ratio fix — notably ~1,750 Arabic Al Meezan
+// laws stored as 'en' whose id-walk would otherwise only relabel them slowly. Only
+// rows whose label actually changes are written (so the prod mirror re-syncs just
+// those). Idempotent. Returns #relabelled.
+export async function relabelLanguages() {
+  const r = await query(`
+    UPDATE knowledge_pages p
+       SET lang = d.newlang, updated_at = now()
+      FROM (
+        SELECT id,
+               CASE WHEN char_length(regexp_replace(left(content, 3000), '[^؀-ۿ]', '', 'g'))
+                       > char_length(regexp_replace(left(content, 3000), '[^A-Za-z]', '', 'g'))
+                    THEN 'ar' ELSE 'en' END AS newlang
+          FROM knowledge_pages
+         WHERE content IS NOT NULL
+      ) d
+     WHERE p.id = d.id AND p.lang IS DISTINCT FROM d.newlang`);
+  return r.rowCount || 0;
 }
 
 // Compute entities for pages that don't have them yet (e.g. crawled before entity
