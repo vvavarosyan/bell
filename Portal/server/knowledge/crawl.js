@@ -160,11 +160,12 @@ export async function upsertPage(source, url, title, text) {
   const ent = extractEntities(`${title || ''}\n${text}`);
   const entJson = JSON.stringify(ent || {});   // {} (not NULL) so the backfill never re-scans it
   const existing = (await query(`SELECT id, content_hash FROM knowledge_pages WHERE url = $1`, [url])).rows[0];
-  const tsExpr = `setweight(to_tsvector('simple', coalesce($3,'')),'A') || setweight(to_tsvector('simple', coalesce($4,'')),'B')`;
+  // INSERT: title=$3, content=$4 → tsIns references $3/$4.
+  const tsIns = `setweight(to_tsvector('simple', coalesce($3,'')),'A') || setweight(to_tsvector('simple', coalesce($4,'')),'B')`;
   if (!existing) {
     const r = await query(
       `INSERT INTO knowledge_pages (source_id, url, title, content, content_hash, lang, word_count, entities, ts, changed_at)
-       VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb, ${tsExpr}, now()) RETURNING id`,
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8::jsonb, ${tsIns}, now()) RETURNING id`,
       [source.id, url, title, text, hash, lang, wc, entJson]);
     await query(`INSERT INTO knowledge_changes (page_id, url, title, source_name, kind) VALUES ($1,$2,$3,$4,'new')`,
       [r.rows[0].id, url, title, source.name]);
@@ -174,10 +175,14 @@ export async function upsertPage(source, url, title, text) {
     await query(`UPDATE knowledge_pages SET fetched_at = now() WHERE id = $1`, [existing.id]);
     return 'same';
   }
+  // UPDATE: its OWN param list (no url) — title=$2, content=$3 → tsUpd references
+  // $2/$3. Postgres rejects an unused parameter ("could not determine data type
+  // of parameter $N"), so every placeholder here is referenced.
+  const tsUpd = `setweight(to_tsvector('simple', coalesce($2,'')),'A') || setweight(to_tsvector('simple', coalesce($3,'')),'B')`;
   await query(
-    `UPDATE knowledge_pages SET title=$3, content=$4, content_hash=$5, lang=$6, word_count=$7, entities=$8::jsonb,
-       ts = ${tsExpr}, fetched_at = now(), changed_at = now(), updated_at = now() WHERE id=$1`,
-    [existing.id, url, title, text, hash, lang, wc, entJson]);
+    `UPDATE knowledge_pages SET title=$2, content=$3, content_hash=$4, lang=$5, word_count=$6, entities=$7::jsonb,
+       ts = ${tsUpd}, fetched_at = now(), changed_at = now(), updated_at = now() WHERE id=$1`,
+    [existing.id, title, text, hash, lang, wc, entJson]);
   await query(`INSERT INTO knowledge_changes (page_id, url, title, source_name, kind) VALUES ($1,$2,$3,$4,'changed')`,
     [existing.id, url, title, source.name]);
   return 'changed';
