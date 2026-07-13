@@ -32,6 +32,7 @@ function kpi(label, value, sub) {
 }
 
 export function KnowledgeTab() {
+  const [view, setView] = useState('browse');
   const [stats, setStats] = useState(null);
   const [sources, setSources] = useState([]);
   const [q, setQ] = useState('');
@@ -49,6 +50,7 @@ export function KnowledgeTab() {
   }, []);
 
   const load = useCallback(async () => {
+    if (view !== 'browse') return;
     setLoading(true);
     try {
       const params = { limit: PAGE, offset };
@@ -58,12 +60,11 @@ export function KnowledgeTab() {
       const r = await api.knowledgePages(params);
       setRows(r.rows || []); setTotal(r.total || 0);
     } catch { setRows([]); setTotal(0); } finally { setLoading(false); }
-  }, [q, source, lang, offset]);
+  }, [view, q, source, lang, offset]);
   useEffect(() => { load(); }, [load]);
   useEffect(() => { setOffset(0); }, [q, source, lang]);
 
   const empty = stats && stats.empty;
-  const catOf = (id) => (sources.find((s) => s.id === id) || {}).category;
 
   return html`
     <div class="page-fill"><div class="page-scroll">
@@ -79,6 +80,15 @@ export function KnowledgeTab() {
         ${kpi('Pages with entities', stats ? (stats.with_entities || 0).toLocaleString() : '…', 'laws · bodies · fees')}
       </div>
 
+      <div class="filt-bar">
+        <span class="filt-label">View</span>
+        <div class="seg">
+          <button class=${'seg-btn' + (view === 'browse' ? ' active' : '')} onClick=${() => setView('browse')}>Browse</button>
+          <button class=${'seg-btn' + (view === 'updates' ? ' active' : '')} onClick=${() => setView('updates')}>Recent updates</button>
+        </div>
+      </div>
+
+      ${view === 'updates' ? html`<${ChangesView} empty=${empty} />` : html`
       <div class="filt-bar">
         <input class="bdi-filter-input" type="text" placeholder="Search Qatar laws, ministries, the constitution, officials…"
           value=${q} onInput=${(e) => setQ(e.target.value)} style=${{ minWidth: '260px', flex: '1 1 260px' }} />
@@ -114,9 +124,48 @@ export function KnowledgeTab() {
           <div class="feed-pager" style=${{ marginTop: '12px' }}>
             <${Pagination} total=${total} limit=${PAGE} offset=${offset} onChange=${setOffset} />
           </div>`}
+      `}
 
       ${openId ? html`<${PageDrawer} id=${openId} onClose=${() => setOpenId(null)} />` : null}
     </div></div>`;
+}
+
+// "Recent updates" — what the periodic re-crawl found NEW or CHANGED. This is the
+// change-tracking Val asked for (know when a law/regulation/page changes), scoped
+// to the Qatar Knowledge section (not the global signals feed, which the initial
+// baseline crawl would flood).
+function ChangesView({ empty }) {
+  const [rows, setRows] = useState([]);
+  const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    let dead = false;
+    api.knowledgeChanges({ limit: 50 }).then((r) => { if (!dead) { setRows(r.rows || []); setLoading(false); } }).catch(() => { if (!dead) setLoading(false); });
+    return () => { dead = true; };
+  }, []);
+  const badge = (kind) => {
+    const map = { new: ['New', 'rgba(80,200,120,0.9)'], changed: ['Updated', 'rgba(90,150,255,0.9)'], removed: ['Removed', 'rgba(240,120,120,0.9)'] };
+    const [label, color] = map[kind] || [kind, 'var(--muted)'];
+    return html`<span style=${{ fontSize: '10.5px', fontWeight: 600, color, border: '1px solid var(--border)', borderRadius: '6px', padding: '1px 7px' }}>${label}</span>`;
+  };
+  if (empty) return html`<div class="empty" style=${{ lineHeight: 1.6 }}>Nothing learned yet — run <b>“Run Qatar Knowledge Scan.command”</b> to populate the knowledge base.</div>`;
+  if (loading) return html`<div class="empty">Loading recent updates…</div>`;
+  if (!rows.length) return html`<div class="empty">No changes recorded yet. Each scan flags what's new or changed here.</div>`;
+  return html`
+    <div class="muted small" style=${{ margin: '2px 0 8px' }}>What the last scans found new or changed, newest first.</div>
+    <div style=${{ display: 'flex', flexDirection: 'column', gap: '7px' }}>
+      ${rows.map((c, i) => {
+        const rtl = isArabic(c.title);
+        return html`<div key=${i} style=${{ border: '1px solid var(--border)', borderRadius: '10px', background: 'var(--bg-elev)', padding: '10px 13px', display: 'flex', alignItems: 'baseline', gap: '9px' }}>
+          ${badge(c.kind)}
+          <div style=${{ flex: 1, minWidth: 0 }}>
+            <div dir=${rtl ? 'rtl' : 'ltr'} style=${{ fontSize: '13px', color: 'var(--text)', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              ${c.url ? html`<a href=${c.url} target="_blank" rel="noopener noreferrer" style=${{ color: 'var(--text)', textDecoration: 'none' }}>${c.title || '(untitled)'}</a>` : (c.title || '(untitled)')}
+            </div>
+            <div class="muted small">${c.source_name || '—'} · ${fmtDate(c.detected_at)}</div>
+          </div>
+        </div>`;
+      })}
+    </div>`;
 }
 
 function Row({ r, onOpen }) {
