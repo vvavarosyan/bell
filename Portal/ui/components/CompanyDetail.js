@@ -448,26 +448,45 @@ export function CompanyDetail({ companyId, onMutated, onDeleted, canHardDelete =
           border: '1px solid rgba(91,140,255,0.32)',
           borderRadius: '10px',
         }}>
-          <div style=${{ fontSize: '12.5px', fontWeight: 700, color: 'rgb(91 140 255)', marginBottom: '4px' }}>
-            Needs your decision
-          </div>
-          <div style=${{ fontSize: '12px', color: 'var(--text-muted)', lineHeight: 1.5, marginBottom: '10px' }}>
-            This company ${c.review_reason ? `disappeared from ${REVIEW_REASON_LABEL(c.review_reason)}` : 'disappeared from a source'} in the latest upload. It was NOT changed automatically — decide what to do:
-          </div>
-          <div style=${{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
-            <button
-              class="linkbtn"
-              style=${{ padding:'5px 12px', borderRadius:'6px', background:'rgb(91 140 255)', border:'1px solid rgb(91 140 255)', color:'#fff', fontSize:'11.5px', fontWeight:600 }}
-              title="Keep this company as-is. It stays active and won't be flagged again."
-              onClick=${async () => {
-                try { await api.keepCompany(c.id); toast('Kept — review cleared'); reload(); onMutated?.(); }
-                catch (err) { toast('Keep failed: ' + err.message, 'error'); }
-              }}
-            >Keep as-is</button>
-            <span style=${{ fontSize:'11px', color:'var(--text-dim)', alignSelf:'center' }}>
-              …or use <strong>Archive</strong> / <strong>Delete permanently</strong> above.
-            </span>
-          </div>
+          ${c.website_conflict ? html`
+            <div style=${{ fontSize: '12.5px', fontWeight: 700, color: 'rgb(91 140 255)', marginBottom: '4px' }}>
+              Website hidden — possible wrong match
+            </div>
+            <div style=${{ fontSize: '12px', color: 'var(--text-muted)', lineHeight: 1.5, marginBottom: '10px' }}>
+              Bell hid this company's website${c.website_conflict.website ? html` (<b>${c.website_conflict.website}</b>)` : ''} + its scraped emails/tech because the domain <b>${c.website_conflict.domain}</b> appears to belong to <b>“${c.website_conflict.belongs_to || 'another company'}”</b>. If that site really is ${c.name}'s, restore it:
+            </div>
+            <div style=${{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+              <button class="linkbtn"
+                style=${{ padding:'5px 12px', borderRadius:'6px', background:'rgb(91 140 255)', border:'1px solid rgb(91 140 255)', color:'#fff', fontSize:'11.5px', fontWeight:600 }}
+                title="Restore the website + its emails/contacts and clear the flag."
+                onClick=${async () => {
+                  try { await api.restoreWebsite(c.id); toast('Website restored'); reload(); onMutated?.(); }
+                  catch (err) { toast('Restore failed: ' + err.message, 'error'); }
+                }}
+              >This is correct — restore website</button>
+              <span style=${{ fontSize:'11px', color:'var(--text-dim)', alignSelf:'center' }}>…or leave it hidden.</span>
+            </div>
+          ` : html`
+            <div style=${{ fontSize: '12.5px', fontWeight: 700, color: 'rgb(91 140 255)', marginBottom: '4px' }}>
+              Needs your decision
+            </div>
+            <div style=${{ fontSize: '12px', color: 'var(--text-muted)', lineHeight: 1.5, marginBottom: '10px' }}>
+              This company ${c.review_reason ? `disappeared from ${REVIEW_REASON_LABEL(c.review_reason)}` : 'disappeared from a source'} in the latest upload. It was NOT changed automatically — decide what to do:
+            </div>
+            <div style=${{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+              <button class="linkbtn"
+                style=${{ padding:'5px 12px', borderRadius:'6px', background:'rgb(91 140 255)', border:'1px solid rgb(91 140 255)', color:'#fff', fontSize:'11.5px', fontWeight:600 }}
+                title="Keep this company as-is. It stays active and won't be flagged again."
+                onClick=${async () => {
+                  try { await api.keepCompany(c.id); toast('Kept — review cleared'); reload(); onMutated?.(); }
+                  catch (err) { toast('Keep failed: ' + err.message, 'error'); }
+                }}
+              >Keep as-is</button>
+              <span style=${{ fontSize:'11px', color:'var(--text-dim)', alignSelf:'center' }}>
+                …or use <strong>Archive</strong> / <strong>Delete permanently</strong> above.
+              </span>
+            </div>
+          `}
         </div>
       ` : null}
 
@@ -590,9 +609,12 @@ function CompanyTab({ company, extra, similar, relationships, contacts, onReload
             ${g.fields.map(([k, lbl]) => {
               const meta = COMPANY_FIELD_META[k] || {};
               const locked = needsReveal && ((k === 'email' && company.email_locked) || (k === 'phone' && company.phone_locked));
+              // Honest labelling: an industry Bell inferred from the name/website (not
+              // registry-stated) is tagged "derived" so it's never taken as official.
+              const label = (k === 'industry' && company.industry_derived) ? lbl + ' · derived' : lbl;
               return html`<${EditableKv}
                 key=${k}
-                label=${lbl}
+                label=${label}
                 field=${k}
                 value=${company[k]}
                 type=${meta.type || 'text'}

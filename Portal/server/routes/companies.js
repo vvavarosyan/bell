@@ -448,10 +448,16 @@ router.get('/:id', async (req, res, next) => {
     ]);
     if (!company.rows.length) return res.status(404).json({ error: 'not_found' });
     const row = company.rows[0];
+    const efSnapshot = row.extra_fields || {};   // capture before masking may strip it
     row.contacts = contacts;             // gate company + its contacts together
     await maskCompanies(req, [row]);
     const maskedContacts = row.contacts;
     delete row.contacts;
+    // Honest labelling: mark a DERIVED (inferred) industry so the UI can tag it as
+    // "derived" vs a registry-stated one; expose the website-conflict quarantine to
+    // admins (for the "restore website" action).
+    row.industry_derived = efSnapshot.industry_derived || null;
+    if (MODE === 'local-admin' || req.user?.role === 'platform_admin') row.website_conflict = efSnapshot.website_conflict || null;
 
     // Drawer People tab. PEOPLE PUBLIC LOCKDOWN (Val 2026-07-02): customers get
     // only the COUNT (the UI shows a banner); full rows stay for platform_admin.
@@ -741,6 +747,32 @@ router.post('/:id/reset-enrichment', async (req, res, next) => {
     );
     await recomputeBellScoreForCompany(id);   // data shrank → rescore live
     res.json({ ok: true, company_id: id, ...summary });
+  } catch (err) { next(err); }
+});
+
+// POST /api/companies/:id/restore-website — undo a wrong-website flag when an admin
+// confirms the flagged site IS this company's. Restores website + email + un-hides
+// the quarantined contacts + clears the review flag. Tech re-populates on the next
+// enrich (website + tech stages were re-queued when it was flagged).
+router.post('/:id/restore-website', async (req, res, next) => {
+  try {
+    if (MODE === 'user') return res.status(403).json({ error: 'not_allowed_on_user_portal' });
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) return res.status(400).json({ error: 'invalid_id' });
+    const r = (await query(`SELECT extra_fields FROM companies WHERE id = $1`, [id])).rows[0];
+    if (!r) return res.status(404).json({ error: 'not_found' });
+    const wc = (r.extra_fields || {}).website_conflict;
+    if (!wc) return res.status(400).json({ error: 'no_conflict' });
+    await query(
+      `UPDATE companies SET website = $2, email = COALESCE(email, $3),
+         needs_review = false, review_reason = NULL,
+         extra_fields = (coalesce(extra_fields,'{}'::jsonb) - 'website_conflict') || jsonb_build_object('website_restored_at', to_jsonb($4::text)),
+         updated_at = now()
+       WHERE id = $1`,
+      [id, wc.website || null, wc.email || null, new Date().toISOString()]);
+    const conIds = (wc.contacts || []).map((c) => c.id).filter(Boolean);
+    if (conIds.length) await query(`UPDATE company_contacts SET extra_fields = coalesce(extra_fields,'{}'::jsonb) - 'hidden_conflict', updated_at = now() WHERE id = ANY($1::bigint[])`, [conIds]);
+    res.json({ ok: true, company_id: id, website: wc.website });
   } catch (err) { next(err); }
 });
 

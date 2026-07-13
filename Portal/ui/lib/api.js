@@ -167,6 +167,7 @@ export const api = {
   archiveCompany:         (id, archived) => request(`/api/companies/${id}/archive`, { method: 'POST', body: JSON.stringify({ archived }) }),
   deleteCompany:          (id) => request('/api/companies/' + id, { method: 'DELETE' }),
   keepCompany:            (id) => request(`/api/companies/${id}/keep`, { method: 'POST', body: '{}' }),
+  restoreWebsite:         (id) => request(`/api/companies/${id}/restore-website`, { method: 'POST', body: '{}' }),
   // Research approval queue (local engine only)
   researchCandidates:     (params = {}) => request('/api/research-candidates?' + new URLSearchParams(params)),
   approveCandidate:       (id) => request(`/api/research-candidates/${id}/approve`, { method: 'POST', body: '{}' }),
