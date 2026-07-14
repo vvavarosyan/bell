@@ -414,6 +414,28 @@ export const TOOLS = [
 
   {
     definition: {
+      name: 'get_buyers',
+      description: "WHO'S BUYING — Qatar entities actively procuring right now, ranked by fit to the user's ICP and urgency (soonest tender deadline). Each buyer shows how many OPEN tenders, which industries they're procuring in (their line of business), when the soonest one closes, and whether it matches the user's ICP. Use for 'who's buying in my space?', 'who should I reach out to?', or any buyer-intent question. icp=true ranks by the user's ICP industries.",
+      input_schema: {
+        type: 'object',
+        properties: {
+          icp:   { type: 'boolean', description: "true = only buyers procuring in the user's ICP industries, ranked by fit" },
+          limit: { type: 'integer', description: '1-40 (default 15)' },
+        },
+      },
+    },
+    async execute(args, ctx) {
+      const { payload } = await internalCall(tendersRouter, 'GET', '/buyers', ctx, {
+        query: { ...(args.icp === true ? { icp: '1' } : {}), limit: Math.min(Math.max(Number(args.limit) || 15, 1), 40) },
+      });
+      if (payload?.icp_missing) return { buyers: [], note: 'The user has no ICP target industries set yet — suggest filling the ICP in Settings → Company & ICP.' };
+      return { total: payload?.total ?? null, buyers: (payload?.rows || []).map((b) => pick(b, ['buyer', 'open_count', 'soonest_deadline', 'industries', 'matched_industries', 'icp_match', 'sources'])) };
+    },
+    summarize: (args, r) => `${(r?.buyers || []).length} active buyers${args.icp ? ' · ICP' : ''}`,
+  },
+
+  {
+    definition: {
       name: 'get_disclosures',
       description: 'Qatar Stock Exchange disclosures for the ~54 listed companies: financial results, dividends, board changes, AGMs, buybacks, plus exchange market notices. The freshest official corporate events in Qatar. Filter by category, ticker symbol, or free-text q.',
       input_schema: {

@@ -91,6 +91,56 @@ router.get('/', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+// GET /api/tenders/buyers — "Who's buying": procuring entities ranked by ICP fit,
+// urgency (soonest deadline) and open-tender count. This is the buyer-intent wedge —
+// it reframes tenders from a bid list into "who is actively buying in YOUR line of
+// business, and act on it." Pure aggregation over the indexed buyer + industries[]
+// columns (no fragile buyer→company resolution; most Qatar tender buyers are public
+// agencies not in the commercial registry anyway).
+router.get('/buyers', async (req, res, next) => {
+  try {
+    const limit = Math.min(Math.max(Number(req.query.limit) || 40, 1), 200);
+    const offset = Math.max(Number(req.query.offset) || 0, 0);
+    let icp = [];
+    if (req.query.icp === '1') {
+      icp = await icpIndustries(req);
+      if (!icp.length) return res.json({ rows: [], total: 0, icp: [], icp_missing: true });
+    }
+    const r = await query(
+      `WITH open_t AS (
+         SELECT id, buyer, deadline_at, published_at, source, industries
+           FROM tenders
+          WHERE status = 'open' AND buyer IS NOT NULL AND btrim(buyer) <> ''
+       ),
+       agg AS (
+         SELECT o.buyer,
+                count(DISTINCT o.id)::int AS open_count,
+                min(o.deadline_at) FILTER (WHERE o.deadline_at > now()) AS soonest_deadline,
+                max(o.published_at) AS latest_published,
+                array_remove(array_agg(DISTINCT ind), NULL) AS industries,
+                array_remove(array_agg(DISTINCT o.source), NULL) AS sources
+           FROM open_t o
+           LEFT JOIN LATERAL unnest(coalesce(o.industries, '{}'::text[])) AS ind ON true
+          GROUP BY o.buyer
+       )
+       SELECT buyer, open_count, soonest_deadline, latest_published, industries, sources,
+              (industries && $1::text[]) AS icp_match,
+              count(*) OVER ()::int AS total
+         FROM agg
+        WHERE ($1::text[] = '{}'::text[] OR industries && $1::text[])
+        ORDER BY (industries && $1::text[]) DESC, soonest_deadline ASC NULLS LAST, open_count DESC
+        LIMIT $2 OFFSET $3`,
+      [icp, limit, offset]);
+    const icpSet = new Set(icp.map((x) => String(x).toLowerCase()));
+    const rows = r.rows.map(({ total, ...b }) => ({
+      ...b,
+      // which of the buyer's lines of business match the tenant's ICP (for the label)
+      matched_industries: icpSet.size ? (b.industries || []).filter((i) => icpSet.has(String(i).toLowerCase())) : [],
+    }));
+    res.json({ rows, total: r.rows[0]?.total || 0, icp, limit, offset });
+  } catch (err) { next(err); }
+});
+
 router.get('/stats', async (_req, res, next) => {
   try {
     const r = await query(`

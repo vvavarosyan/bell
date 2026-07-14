@@ -212,6 +212,9 @@ export function SignalsTab() {
         <span class="filt-label">Type</span>
         <div class="pilltabs">
           <button class=${'pilltab' + (kind === '' ? ' active' : '')} onClick=${() => setKind('')}>All types</button>
+          <button class=${'pilltab pilltab-db' + (kind === 'buyers' ? ' active' : '')}
+            title="Who is actively procuring in your line of business, ranked by ICP fit and urgency"
+            onClick=${() => setKind(kind === 'buyers' ? '' : 'buyers')}>Who’s buying</button>
           ${KINDS.map((k) => html`<button key=${k}
             class=${'pilltab' + (k === 'tender' ? ' pilltab-db' : '') + (kind === k ? ' active' : '')}
             onClick=${() => setKind(kind === k ? '' : k)}>${KIND_META[k].label}${counts[k] ? html`<span class="ct">${counts[k].toLocaleString()}</span>` : ''}</button>`)}
@@ -229,7 +232,8 @@ export function SignalsTab() {
           and Bell scores every signal against it.
         </div>` : null}
 
-      ${kind === 'tender' ? html`<${TendersTab} embedded=${true} />` : html`
+      ${kind === 'buyers' ? html`<${BuyersView} scope=${scope} />`
+        : kind === 'tender' ? html`<${TendersTab} embedded=${true} />` : html`
       <div style=${{ display: 'flex', gap: '20px', alignItems: 'flex-start', flexWrap: 'wrap' }}>
 
         <!-- RADAR (right sidebar, compact) -->
@@ -365,4 +369,120 @@ export function SignalsTab() {
         </div>
       </div>`}
     </div></div>`;
+}
+
+// "Who's buying" — the buyer-intent wedge. Qatar entities actively procuring, ranked
+// by ICP fit × urgency × open-tender count (server aggregates over tenders.industries[]
+// + buyer). Turns tenders from a bid list into "who is buying in YOUR space — act."
+// Hooks precede any return (hook-order rule).
+function BuyersView({ scope }) {
+  const [rows, setRows] = useState([]);
+  const [icpList, setIcpList] = useState([]);
+  const [icpMissing, setIcpMissing] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [openBuyer, setOpenBuyer] = useState(null);
+
+  useEffect(() => {
+    let dead = false;
+    setLoading(true);
+    api.tenderBuyers({ icp: scope === 'icp' ? 1 : 0, limit: 80 })
+      .then((r) => { if (!dead) { setRows(r.rows || []); setIcpList(r.icp || []); setIcpMissing(!!r.icp_missing); setLoading(false); } })
+      .catch(() => { if (!dead) setLoading(false); });
+    return () => { dead = true; };
+  }, [scope]);
+
+  const daysTo = (d) => { if (!d) return null; return Math.ceil((new Date(d) - Date.now()) / 86400000); };
+  const urgency = (d) => {
+    const n = daysTo(d);
+    if (n == null) return { t: 'no deadline', c: 'var(--text-muted)' };
+    if (n <= 0) return { t: 'closing today', c: 'var(--red, #e8776b)' };
+    if (n <= 2) return { t: `closes in ${n}d`, c: 'var(--red, #e8776b)' };
+    if (n <= 7) return { t: `closes in ${n}d`, c: 'var(--amber, #d9ab54)' };
+    return { t: `closes in ${n}d`, c: 'var(--text-muted)' };
+  };
+
+  if (scope === 'icp' && icpMissing) {
+    return html`<div class="empty" style=${{ lineHeight: 1.6 }}>“For you” needs your ideal-customer profile. Set your target industries in <b>Settings → Company & ICP</b> and Bell ranks every buyer by fit.</div>`;
+  }
+  if (loading) return html`<div class="empty">Finding who’s buying…</div>`;
+  if (!rows.length) return html`<div class="empty">No active buyers${scope === 'icp' ? ' in your line of business' : ''} right now.</div>`;
+
+  return html`<div>
+    <div class="muted small" style=${{ margin: '0 0 12px' }}>
+      ${scope === 'icp'
+        ? html`Qatar entities with open tenders in <b>your line of business</b> — ranked by fit and urgency. Act before the deadline.`
+        : html`Qatar entities actively procuring right now — most urgent first. Switch to <b>For you</b> to rank by your ICP.`}
+    </div>
+    <div style=${{ display: 'flex', flexDirection: 'column', gap: '9px' }}>
+      ${rows.map((b) => {
+        const u = urgency(b.soonest_deadline);
+        const matched = b.matched_industries || [];
+        const inds = matched.length ? matched : (b.industries || []).slice(0, 3);
+        return html`<div key=${b.buyer} onClick=${() => setOpenBuyer(b)}
+          style=${{ border: '1px solid var(--border)', borderRadius: '12px', background: 'var(--bg-elev)', padding: '13px 15px', cursor: 'pointer', display: 'flex', gap: '12px', alignItems: 'center' }}>
+          <div style=${{ flex: 1, minWidth: 0 }}>
+            <div style=${{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+              <span style=${{ fontSize: '14.5px', fontWeight: 700, color: 'var(--text)' }}>${b.buyer}</span>
+              ${b.icp_match ? html`<span style=${{ fontSize: '10px', fontWeight: 700, letterSpacing: '.04em', textTransform: 'uppercase', color: '#fff', background: 'var(--accent)', borderRadius: '4px', padding: '1px 7px' }}>ICP match</span>` : null}
+            </div>
+            <div class="muted small" style=${{ marginTop: '4px' }}>
+              Procuring in ${inds.length ? inds.map((i, k) => html`<span key=${i} style=${{ color: matched.includes(i) ? 'var(--accent-bright, #a5c3ff)' : 'var(--text-muted)' }}>${i}${k < inds.length - 1 ? ', ' : ''}</span>`) : '—'}
+            </div>
+          </div>
+          <div style=${{ textAlign: 'right', flexShrink: 0 }}>
+            <div style=${{ fontSize: '18px', fontWeight: 700, color: 'var(--text)', fontVariantNumeric: 'tabular-nums' }}>${b.open_count}</div>
+            <div class="muted small">open tender${b.open_count === 1 ? '' : 's'}</div>
+            <div style=${{ fontSize: '11.5px', fontWeight: 600, color: u.c, marginTop: '2px' }}>${u.t}</div>
+          </div>
+        </div>`;
+      })}
+    </div>
+    ${openBuyer ? html`<${BuyerDrawer} buyer=${openBuyer} icpList=${icpList} onClose=${() => setOpenBuyer(null)} />` : null}
+  </div>`;
+}
+
+// Drill-in: a buyer's open tenders (what they're actually buying), ICP-highlighted.
+function BuyerDrawer({ buyer, icpList, onClose }) {
+  const [tenders, setTenders] = useState([]);
+  const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    let dead = false;
+    api.tenders({ buyer: buyer.buyer, status: 'open', limit: 60 })
+      .then((r) => { if (!dead) { setTenders(r.rows || []); setLoading(false); } })
+      .catch(() => { if (!dead) setLoading(false); });
+    return () => { dead = true; };
+  }, [buyer]);
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+  const fmt = (d) => (d ? new Date(d).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) : '—');
+  const icpSet = new Set((icpList || []).map((x) => String(x).toLowerCase()));
+  return html`<div onClick=${onClose} style=${{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 60 }}>
+    <div onClick=${(e) => e.stopPropagation()} style=${{ position: 'absolute', top: 0, right: 0, bottom: 0, width: 'min(560px, 94vw)', background: 'var(--bg)', borderLeft: '1px solid var(--border)', display: 'flex', flexDirection: 'column', boxShadow: '-8px 0 30px rgba(0,0,0,0.35)' }}>
+      <div style=${{ padding: '16px 18px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'flex-start', gap: '10px' }}>
+        <div style=${{ flex: 1, minWidth: 0 }}>
+          <div class="muted small" style=${{ textTransform: 'uppercase', letterSpacing: '.06em' }}>Who’s buying</div>
+          <div style=${{ fontSize: '17px', fontWeight: 700, color: 'var(--text)', marginTop: '3px' }}>${buyer.buyer}</div>
+          <div class="muted small" style=${{ marginTop: '3px' }}>${buyer.open_count} open tender${buyer.open_count === 1 ? '' : 's'} · what they’re buying now</div>
+        </div>
+        <button class="btn btn-ghost" onClick=${onClose} style=${{ flex: '0 0 auto' }}>✕</button>
+      </div>
+      <div style=${{ flex: 1, overflowY: 'auto', padding: '14px 18px' }}>
+        ${loading ? html`<div class="empty">Loading tenders…</div>`
+          : !tenders.length ? html`<div class="empty">No open tenders right now.</div>`
+          : html`<div style=${{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+            ${tenders.map((t) => html`<div key=${t.id} style=${{ border: '1px solid var(--border)', borderRadius: '10px', background: 'var(--bg-elev)', padding: '10px 13px' }}>
+              <div style=${{ fontSize: '13.5px', fontWeight: 600, color: 'var(--text)', lineHeight: 1.35 }}>${t.title}</div>
+              <div style=${{ display: 'flex', gap: '6px', flexWrap: 'wrap', marginTop: '6px', alignItems: 'center' }}>
+                ${(t.industries || []).slice(0, 4).map((i) => html`<span key=${i} style=${{ fontSize: '10.5px', color: icpSet.has(String(i).toLowerCase()) ? 'var(--accent-bright, #a5c3ff)' : 'var(--text-muted)', border: '1px solid var(--border)', borderRadius: '5px', padding: '1px 7px' }}>${i}</span>`)}
+                <span style=${{ flex: 1 }}></span>
+                ${t.deadline_at ? html`<span class="muted small" style=${{ whiteSpace: 'nowrap' }}>closes ${fmt(t.deadline_at)}</span>` : null}
+              </div>
+            </div>`)}
+          </div>`}
+      </div>
+    </div>
+  </div>`;
 }

@@ -445,6 +445,7 @@ export const api = {
   deleteEconomicsCost:    (id) => request('/api/economics/costs/' + id, { method: 'DELETE' }),
   // ---- Tenders (Qatar public procurement) ----
   tenders:                (q = {}) => request('/api/tenders?' + new URLSearchParams(q)),
+  tenderBuyers:           (q = {}) => request('/api/tenders/buyers?' + new URLSearchParams(q)),
   tenderStats:            () => request('/api/tenders/stats'),
   tenderFacets:           () => request('/api/tenders/facets'),
   tenderSyncStatus:       () => request('/api/tenders/sync-status'),
