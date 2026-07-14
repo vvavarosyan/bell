@@ -931,6 +931,161 @@ router.delete('/segments/:id', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+// ── Saved lists ─────────────────────────────────────────────────────────────
+// Curated, hand-picked lists a tenant builds while browsing — FREE (no reveal/
+// credit), unlike the reveal→CRM path. This is the switching-cost lock-in: customer-
+// authored workspace data. Tenant-scoped throughout.
+
+router.get('/lists', async (req, res, next) => {
+  try {
+    const r = await query(
+      `SELECT l.id, l.name, l.color, l.created_at, l.updated_at,
+              count(m.id)::int AS member_count,
+              count(m.id) FILTER (WHERE m.entity_type='company')::int AS company_count,
+              count(m.id) FILTER (WHERE m.entity_type='person')::int  AS person_count
+         FROM crm_lists l LEFT JOIN crm_list_members m ON m.list_id = l.id
+        WHERE l.tenant_id = $1
+        GROUP BY l.id ORDER BY l.updated_at DESC, l.name`,
+      [tenantId(req)]);
+    res.json({ rows: r.rows });
+  } catch (err) { next(err); }
+});
+
+router.post('/lists', async (req, res, next) => {
+  try {
+    const name = String(req.body?.name || '').trim();
+    if (!name) return res.status(400).json({ error: 'name_required' });
+    if (name.length > 120) return res.status(400).json({ error: 'name_too_long' });
+    const color = req.body?.color ? String(req.body.color).slice(0, 16) : null;
+    const r = await query(
+      `INSERT INTO crm_lists (tenant_id, name, color, created_by_user_id)
+       VALUES ($1,$2,$3,$4) RETURNING id, name, color, created_at, updated_at`,
+      [tenantId(req), name, color, actorUserId(req)]);
+    res.json({ ...r.rows[0], member_count: 0, company_count: 0, person_count: 0 });
+  } catch (err) { next(err); }
+});
+
+router.patch('/lists/:id', async (req, res, next) => {
+  try {
+    const sets = ['updated_at = now()']; const params = [];
+    if (req.body?.name != null) {
+      const n = String(req.body.name).trim();
+      if (!n) return res.status(400).json({ error: 'name_required' });
+      params.push(n); sets.push(`name = $${params.length}`);
+    }
+    if (req.body?.color !== undefined) {
+      params.push(req.body.color ? String(req.body.color).slice(0, 16) : null);
+      sets.push(`color = $${params.length}`);
+    }
+    params.push(Number(req.params.id)); const idP = params.length;
+    params.push(tenantId(req)); const tP = params.length;
+    const r = await query(`UPDATE crm_lists SET ${sets.join(', ')} WHERE id=$${idP} AND tenant_id=$${tP} RETURNING id, name, color, updated_at`, params);
+    if (!r.rows.length) return res.status(404).json({ error: 'not_found' });
+    res.json(r.rows[0]);
+  } catch (err) { next(err); }
+});
+
+router.delete('/lists/:id', async (req, res, next) => {
+  try {
+    const r = await query(`DELETE FROM crm_lists WHERE id=$1 AND tenant_id=$2 RETURNING id`, [Number(req.params.id), tenantId(req)]);
+    if (!r.rows.length) return res.status(404).json({ error: 'not_found' });
+    res.json({ deleted: r.rows[0].id });   // members cascade via FK
+  } catch (err) { next(err); }
+});
+
+// List + its members (joined to canonical company/person identity for display).
+router.get('/lists/:id', async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    const meta = (await query(`SELECT id, name, color, created_at, updated_at FROM crm_lists WHERE id=$1 AND tenant_id=$2`, [id, tenantId(req)])).rows[0];
+    if (!meta) return res.status(404).json({ error: 'not_found' });
+    const members = (await query(
+      `SELECT m.id AS member_id, m.entity_type, m.entity_id, m.added_at,
+              c.name AS company_name, c.bin, c.industry, c.city, c.website, c.archived AS company_archived,
+              p.full_name AS person_name, p.headline
+         FROM crm_list_members m
+         LEFT JOIN companies c ON m.entity_type='company' AND c.id = m.entity_id
+         LEFT JOIN people    p ON m.entity_type='person'  AND p.id = m.entity_id
+        WHERE m.list_id=$1 AND m.tenant_id=$2
+        ORDER BY m.added_at DESC`,
+      [id, tenantId(req)])).rows;
+    res.json({ ...meta, members });
+  } catch (err) { next(err); }
+});
+
+// Add one/many entities to a list (idempotent). Body: {entity_type, entity_ids:[]} or {entity_id}.
+router.post('/lists/:id/members', async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    const owns = (await query(`SELECT 1 FROM crm_lists WHERE id=$1 AND tenant_id=$2`, [id, tenantId(req)])).rows[0];
+    if (!owns) return res.status(404).json({ error: 'not_found' });
+    const entityType = req.body?.entity_type === 'person' ? 'person' : 'company';
+    const ids = Array.isArray(req.body?.entity_ids)
+      ? req.body.entity_ids.map(Number).filter(Number.isFinite)
+      : (Number.isFinite(Number(req.body?.entity_id)) ? [Number(req.body.entity_id)] : []);
+    if (!ids.length) return res.status(400).json({ error: 'no_entities' });
+    if (ids.length > 2000) return res.status(400).json({ error: 'too_many' });
+    const r = await query(
+      `INSERT INTO crm_list_members (list_id, tenant_id, entity_type, entity_id, added_by_user_id)
+       SELECT $1, $2, $3, x, $5 FROM unnest($4::bigint[]) AS x
+       ON CONFLICT (list_id, entity_type, entity_id) DO NOTHING
+       RETURNING entity_id`,
+      [id, tenantId(req), entityType, ids, actorUserId(req)]);
+    await query(`UPDATE crm_lists SET updated_at=now() WHERE id=$1 AND tenant_id=$2`, [id, tenantId(req)]);
+    res.json({ added: r.rowCount, requested: ids.length });
+  } catch (err) { next(err); }
+});
+
+// Remove one/many entities from a list. Body: {entity_type, entity_ids:[]} or {entity_id}.
+router.delete('/lists/:id/members', async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    const entityType = req.body?.entity_type === 'person' ? 'person' : 'company';
+    const ids = Array.isArray(req.body?.entity_ids)
+      ? req.body.entity_ids.map(Number).filter(Number.isFinite)
+      : (Number.isFinite(Number(req.body?.entity_id)) ? [Number(req.body.entity_id)] : []);
+    if (!ids.length) return res.status(400).json({ error: 'no_entities' });
+    const r = await query(
+      `DELETE FROM crm_list_members WHERE list_id=$1 AND tenant_id=$2 AND entity_type=$3 AND entity_id = ANY($4::bigint[]) RETURNING entity_id`,
+      [id, tenantId(req), entityType, ids]);
+    res.json({ removed: r.rowCount });
+  } catch (err) { next(err); }
+});
+
+// Which of the tenant's lists already contain a given entity (drives the Save popover ticks).
+router.get('/list-memberships', async (req, res, next) => {
+  try {
+    const entityType = req.query.entity_type === 'person' ? 'person' : 'company';
+    const entityId = Number(req.query.entity_id);
+    if (!Number.isFinite(entityId)) return res.status(400).json({ error: 'entity_id_required' });
+    const r = await query(
+      `SELECT list_id FROM crm_list_members WHERE tenant_id=$1 AND entity_type=$2 AND entity_id=$3`,
+      [tenantId(req), entityType, entityId]);
+    res.json({ list_ids: r.rows.map((x) => x.list_id) });
+  } catch (err) { next(err); }
+});
+
+// Export a list's companies to CSV (identity/public fields only — no reveal-gated contacts).
+router.get('/lists/:id/export.csv', async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    const meta = (await query(`SELECT name FROM crm_lists WHERE id=$1 AND tenant_id=$2`, [id, tenantId(req)])).rows[0];
+    if (!meta) return res.status(404).json({ error: 'not_found' });
+    const rows = (await query(
+      `SELECT c.name, c.bin, c.primary_registration_no, c.industry, c.city, c.website, m.added_at
+         FROM crm_list_members m JOIN companies c ON m.entity_type='company' AND c.id=m.entity_id
+        WHERE m.list_id=$1 AND m.tenant_id=$2 ORDER BY m.added_at DESC`,
+      [id, tenantId(req)])).rows;
+    const esc = (v) => { const s = v == null ? '' : String(v); return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s; };
+    const header = ['Name', 'BIN', 'Registration #', 'Industry', 'City', 'Website', 'Added'];
+    const body = rows.map((r) => [r.name, r.bin, r.primary_registration_no, r.industry, r.city, r.website,
+      r.added_at ? new Date(r.added_at).toISOString().slice(0, 10) : ''].map(esc).join(','));
+    res.setHeader('Content-Type', 'text/csv; charset=utf-8');
+    res.setHeader('Content-Disposition', `attachment; filename="${String(meta.name).replace(/[^a-z0-9]+/gi, '_').slice(0, 60) || 'list'}.csv"`);
+    res.send('﻿' + [header.join(','), ...body].join('\n'));   // BOM so Excel reads UTF-8
+  } catch (err) { next(err); }
+});
+
 // GET /api/crm/stats — header counts for the CRM tab
 router.get('/stats', async (req, res, next) => {
   try {

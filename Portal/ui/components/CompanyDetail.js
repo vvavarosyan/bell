@@ -13,6 +13,7 @@ import { SearchProofBlock } from './SearchProof.js';
 import { RequestDetailsBox } from './RequestDetailsBox.js';
 import { CompanyLogo } from './CompanyLogo.js';
 import { SourceBadge, FreshnessStamp } from './SourceBadge.js';
+import { SaveToList } from './SaveToList.js';
 import { ContactsList } from './ContactsList.js';
 import { EditableKv } from './EditableKv.js';
 import { PeopleLockedBanner } from './PeopleLockedBanner.js';
@@ -391,6 +392,9 @@ export function CompanyDetail({ companyId, onMutated, onDeleted, canHardDelete =
             ${c.needs_review ? html`<span class="pill" style=${{borderColor:'rgb(91 140 255)',color:'rgb(91 140 255)'}} title="Disappeared from a source — needs an admin decision">needs review</span>` : null}
           </div>
           ${sources.length ? html`<${FreshnessStamp} sources=${sources} style=${{ marginTop: '5px' }} />` : null}
+        </div>
+        <div style=${{ alignSelf: 'flex-start', flexShrink: 0 }}>
+          <${SaveToList} entityId=${c.id} entityType="company" />
         </div>
         <div style=${{gap:'6px', alignSelf:'flex-start', flexShrink: 0, display: isLocalEngine ? 'flex' : 'none'}}>
           <button

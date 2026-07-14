@@ -36,6 +36,7 @@ import { SyncTab }       from './components/SyncTab.js';
 import { MarketFeedTab } from './components/MarketFeedTab.js';
 import { SignalsTab } from './components/SignalsTab.js';
 import { CrmTab }        from './components/CrmTab.js';
+import { ListsTab }      from './components/ListsTab.js';
 import { BillingTab }    from './components/BillingTab.js';
 import { AccountTab }    from './components/AccountTab.js';
 import { DetailRequestsTab } from './components/DetailRequestsTab.js';
@@ -74,6 +75,7 @@ const VIEWS = {
   'market-feed': { Component: MarketFeedTab },
   'signals':     { Component: SignalsTab },
   'crm':         { Component: CrmTab },
+  'lists':       { Component: ListsTab },
   'team':        { Component: TeamTab },
   'companies':   { Component: CompaniesTab },
   'people':      { Component: PeopleTab },
@@ -120,6 +122,7 @@ const LABELS = {
   'deep-data': 'Deep Data',
   'sync': 'Sync to Bell.qa',
   'crm': 'CRM',
+  'lists': 'Saved Lists',
   'research': 'Research',
   'approvals': 'Research Approvals',
   'detail-requests': 'Detail Requests',
