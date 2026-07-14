@@ -1568,6 +1568,7 @@ a.contact-icon.on { cursor: pointer; text-decoration: none; position: relative; 
 .detail-head {
   display: flex; align-items: center; gap: 12px;
   flex-wrap: wrap;                /* let the admin buttons drop below rather than squeeze the name */
+  position: relative;             /* anchor the top-right Save button */
   padding: 12px 14px;
   border-bottom: 1px solid var(--border);
   background: var(--bg-elev-2);
