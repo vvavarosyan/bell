@@ -390,11 +390,9 @@ export function CompanyDetail({ companyId, onMutated, onDeleted, canHardDelete =
             <span class=${'pill ' + (c.is_active ? 'active' : 'inactive')}>${c.status_normalized || (c.is_active ? 'active' : 'inactive')}</span>
             ${c.archived ? html`<span class="pill" style=${{borderColor:'var(--amber)',color:'var(--amber)'}} title=${'Archived' + (c.archive_reason ? ' · ' + (ARCHIVE_REASON_LABEL[c.archive_reason] || c.archive_reason) : '')}>archived${c.archive_reason ? ' · ' + (ARCHIVE_REASON_LABEL[c.archive_reason] || c.archive_reason) : ''}</span>` : null}
             ${c.needs_review ? html`<span class="pill" style=${{borderColor:'rgb(91 140 255)',color:'rgb(91 140 255)'}} title="Disappeared from a source — needs an admin decision">needs review</span>` : null}
+            <span style=${{ marginLeft: 'auto' }}><${SaveToList} entityId=${c.id} entityType="company" compact=${true} /></span>
           </div>
           ${sources.length ? html`<${FreshnessStamp} sources=${sources} style=${{ marginTop: '5px' }} />` : null}
-        </div>
-        <div style=${{ alignSelf: 'flex-start', flexShrink: 0 }}>
-          <${SaveToList} entityId=${c.id} entityType="company" />
         </div>
         <div style=${{gap:'6px', alignSelf:'flex-start', flexShrink: 0, display: isLocalEngine ? 'flex' : 'none'}}>
           <button

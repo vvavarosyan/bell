@@ -35,7 +35,6 @@ export const NAV_SECTIONS = [
     label: 'Workspace',
     items: [
       // Operational surfaces — visible to tenant members + above
-      { id: 'lists',       label: 'Saved Lists', icon: 'bookmark', placeholder: false, visibility: ['platform_admin','owner','admin','lead','member','viewer'] },
       { id: 'crm',         label: 'CRM',         icon: 'crm',      placeholder: false, visibility: ['platform_admin','owner','admin','lead','member','viewer'] },
       { id: 'research',    label: 'Research',    icon: 'research', placeholder: false, visibility: ['platform_admin','owner','admin','lead','member','viewer'] },
       { id: 'team',        label: 'Team',        icon: 'team',     placeholder: false, visibility: ['platform_admin','owner','admin','lead','member','viewer'] },

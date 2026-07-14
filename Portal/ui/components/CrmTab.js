@@ -9,6 +9,7 @@ import { toast } from '../lib/toast.js';
 import { navigateTo } from '../lib/router.js';
 import { ImportPanel } from './ImportPanel.js';
 import { DatapointsPanel } from './DatapointsPanel.js';
+import { ListsTab } from './ListsTab.js';
 
 // Flat per-export row cap (matches the server's MAX_EXPORT_ROWS). More than this
 // is pulled as successive non-overlapping batches.
@@ -225,12 +226,13 @@ export function CrmTab() {
       <div class="page-scroll">
       <!-- Primary view tabs: Records | Pipeline | Sequences | Timeline -->
       <div class="seg" style=${{ marginBottom: '14px' }}>
-        ${[['records', 'Records'], ['pipeline', 'Pipeline'], ['sequences', 'Sequences'], ['timeline', 'Timeline']].map(([k, lbl]) => html`
+        ${[['records', 'Records'], ['lists', 'Lists'], ['pipeline', 'Pipeline'], ['sequences', 'Sequences'], ['timeline', 'Timeline']].map(([k, lbl]) => html`
           <button key=${k} class=${'seg-btn' + (view === k ? ' active' : '')}
             onClick=${() => { setView(k); setOpenedId(null); }}>${lbl}</button>`)}
       </div>
 
-      ${view === 'sequences' ? html`<${SequencesView} />`
+      ${view === 'lists' ? html`<${ListsTab} embedded=${true} />`
+        : view === 'sequences' ? html`<${SequencesView} />`
         : view === 'pipeline' ? html`<${PipelineView} />`
         : view === 'timeline' ? html`<${TimelineView} />`
         : html`

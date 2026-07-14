@@ -10,7 +10,7 @@ import { navigateTo } from '../lib/router.js';
 
 const fmtDate = (d) => (d ? new Date(d).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }) : '—');
 
-export function ListsTab() {
+export function ListsTab({ embedded = false } = {}) {
   const [lists, setLists] = useState([]);
   const [loading, setLoading] = useState(true);
   const [openId, setOpenId] = useState(null);
@@ -52,7 +52,7 @@ export function ListsTab() {
           </div>`)}
         </div>`}
     </div>`;
-  return html`<div class="page-fill"><div class="page-scroll">${body}</div></div>`;
+  return embedded ? body : html`<div class="page-fill"><div class="page-scroll">${body}</div></div>`;
 }
 
 function ListDetail({ id, onBack, onChanged }) {
