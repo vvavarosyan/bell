@@ -12,6 +12,7 @@ import { html } from '../lib/html.js';
 import { api } from '../lib/api.js';
 import { BELLA_ACTION_EVENT, takePending } from '../lib/bellaBus.js';
 import { navigateTo } from '../lib/router.js';
+import { FreshnessStamp } from './SourceBadge.js';
 
 const PAGE = 30;
 const STATUS_META = {
@@ -293,7 +294,8 @@ export function TendersTab({ embedded = false } = {}) {
               <span class="muted" style=${{ flex: '0 0 130px' }}>${label}</span><span style=${{ flex: 1, color: 'var(--text)' }}>${val}</span></div>`;
             return html`
               <div style=${{ fontSize: '15px', fontWeight: 700, color: 'var(--text)', lineHeight: 1.35, marginBottom: '12px' }}>${detail.title}</div>
-              ${detail.source_ref ? html`<div class="muted small" style=${{ marginBottom: '12px' }}>Reference #${detail.source_ref}${raw.entity_ref ? ' · buyer ref ' + raw.entity_ref : ''}</div>` : null}
+              ${detail.source_ref ? html`<div class="muted small" style=${{ marginBottom: '8px' }}>Reference #${detail.source_ref}${raw.entity_ref ? ' · buyer ref ' + raw.entity_ref : ''}</div>` : null}
+              <${FreshnessStamp} sourceName=${srcLabel(detail.source)} date=${detail.published_at || detail.awarded_at} dateLabel="published" fallbackLabel="Qatar's official tender portal" style=${{ marginBottom: '12px' }} />
               ${raw.kahramaa ? html`
                 <div style=${{ fontSize: '12px', border: '1px solid var(--border)', borderRadius: '8px', padding: '8px 10px', margin: '0 0 14px', background: 'var(--bg-elev, rgba(255,255,255,0.02))' }}>
                   <b>Published on both portals</b> — Monaqasat and Kahramaa (ref ${raw.kahramaa.source_ref})

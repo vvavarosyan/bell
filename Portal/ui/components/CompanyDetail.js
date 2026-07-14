@@ -12,7 +12,7 @@ import { ContactIcons } from './ContactIcons.js';
 import { SearchProofBlock } from './SearchProof.js';
 import { RequestDetailsBox } from './RequestDetailsBox.js';
 import { CompanyLogo } from './CompanyLogo.js';
-import { SourceBadge } from './SourceBadge.js';
+import { SourceBadge, FreshnessStamp } from './SourceBadge.js';
 import { ContactsList } from './ContactsList.js';
 import { EditableKv } from './EditableKv.js';
 import { PeopleLockedBanner } from './PeopleLockedBanner.js';
@@ -390,6 +390,7 @@ export function CompanyDetail({ companyId, onMutated, onDeleted, canHardDelete =
             ${c.archived ? html`<span class="pill" style=${{borderColor:'var(--amber)',color:'var(--amber)'}} title=${'Archived' + (c.archive_reason ? ' · ' + (ARCHIVE_REASON_LABEL[c.archive_reason] || c.archive_reason) : '')}>archived${c.archive_reason ? ' · ' + (ARCHIVE_REASON_LABEL[c.archive_reason] || c.archive_reason) : ''}</span>` : null}
             ${c.needs_review ? html`<span class="pill" style=${{borderColor:'rgb(91 140 255)',color:'rgb(91 140 255)'}} title="Disappeared from a source — needs an admin decision">needs review</span>` : null}
           </div>
+          ${sources.length ? html`<${FreshnessStamp} sources=${sources} style=${{ marginTop: '5px' }} />` : null}
         </div>
         <div style=${{gap:'6px', alignSelf:'flex-start', flexShrink: 0, display: isLocalEngine ? 'flex' : 'none'}}>
           <button
