@@ -1,7 +1,7 @@
 // Persistent side detail panel — 3 tabs: Company, People, Legal.
 // All fields a company can possibly have are surfaced across these three tabs.
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { html } from '../lib/html.js';
 import { api } from '../lib/api.js';
 import { toast } from '../lib/toast.js';
@@ -516,6 +516,73 @@ export function CompanyDetail({ companyId, onMutated, onDeleted, canHardDelete =
   `;
 }
 
+// Your notes on a company — add one straight from the detail, no "add to CRM first".
+// Backed by crm_notes (unified with the CRM); the first note transparently creates a
+// free manual CRM record. Team-visible. Hooks precede any return.
+function CompanyNotes({ companyId }) {
+  const [notes, setNotes] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [draft, setDraft] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [editId, setEditId] = useState(null);
+  const [editText, setEditText] = useState('');
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    try { const r = await api.entityNotes(companyId, 'company'); setNotes(r.rows || []); }
+    catch { /* silent — notes are optional */ } finally { setLoading(false); }
+  }, [companyId]);
+  useEffect(() => { load(); }, [load]);
+
+  const add = async () => {
+    const b = draft.trim(); if (!b || saving) return;
+    setSaving(true);
+    try { await api.addEntityNote(companyId, b, 'company'); setDraft(''); toast('Note added'); load(); }
+    catch (e) { toast(e.message, 'error'); } finally { setSaving(false); }
+  };
+  const saveEdit = async (id) => {
+    const b = editText.trim(); if (!b) return;
+    try { await api.crmUpdateNote(id, b); setEditId(null); toast('Note updated'); load(); }
+    catch (e) { toast(e.message, 'error'); }
+  };
+  const remove = async (id) => {
+    if (!window.confirm('Delete this note?')) return;
+    try { await api.crmDeleteNote(id); toast('Note deleted'); load(); } catch (e) { toast(e.message, 'error'); }
+  };
+  const fmt = (d) => (d ? new Date(d).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) : '');
+
+  return html`
+    <section class="group">
+      <h3>Your notes${notes.length ? ` (${notes.length})` : ''}</h3>
+      <div style=${{ display: 'flex', gap: '8px', marginBottom: notes.length ? '10px' : '0' }}>
+        <textarea value=${draft} onInput=${(e) => setDraft(e.target.value)} placeholder="Add a note about this company…" rows=${2}
+          onKeyDown=${(e) => { if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) add(); }}
+          style=${{ flex: 1, resize: 'vertical', minHeight: '38px', padding: '8px 10px', borderRadius: '8px', border: '1px solid var(--border)', background: 'var(--bg-elev)', color: 'var(--text)', fontSize: '13px', fontFamily: 'inherit' }} />
+        <button class="btn btn-primary" onClick=${add} disabled=${saving || !draft.trim()} style=${{ alignSelf: 'flex-start' }}>Add</button>
+      </div>
+      ${loading ? null : notes.length === 0 ? null : html`
+        <div style=${{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+          ${notes.map((n) => html`<div key=${n.id} style=${{ border: '1px solid var(--border)', borderRadius: '8px', background: 'var(--bg-elev)', padding: '9px 11px' }}>
+            ${editId === n.id
+              ? html`<div style=${{ display: 'flex', gap: '6px' }}>
+                  <textarea value=${editText} onInput=${(e) => setEditText(e.target.value)} rows=${2} style=${{ flex: 1, resize: 'vertical', padding: '6px 8px', borderRadius: '6px', border: '1px solid var(--border)', background: 'var(--bg)', color: 'var(--text)', fontSize: '13px', fontFamily: 'inherit' }} />
+                  <button class="btn btn-secondary" onClick=${() => saveEdit(n.id)} style=${{ alignSelf: 'flex-start' }}>Save</button>
+                  <button class="btn btn-ghost" onClick=${() => setEditId(null)} style=${{ alignSelf: 'flex-start' }}>✕</button>
+                </div>`
+              : html`<div>
+                  <div style=${{ fontSize: '13px', color: 'var(--text)', whiteSpace: 'pre-wrap', lineHeight: 1.5 }}>${n.body}</div>
+                  <div style=${{ display: 'flex', alignItems: 'center', gap: '10px', marginTop: '5px' }}>
+                    <span class="muted small">${[n.author_email, fmt(n.created_at)].filter(Boolean).join(' · ')}</span>
+                    <span style=${{ flex: 1 }}></span>
+                    <button class="linkbtn" onClick=${() => { setEditId(n.id); setEditText(n.body); }} style=${{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '11.5px' }}>Edit</button>
+                    <button class="linkbtn" onClick=${() => remove(n.id)} style=${{ background: 'transparent', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', fontSize: '11.5px' }}>Delete</button>
+                  </div>
+                </div>`}
+          </div>`)}
+        </div>`}
+    </section>`;
+}
+
 function CompanyTab({ company, extra, similar, relationships, contacts, onReload, needsReveal = false, onReveal, isUser = false, isLocalEngine = false }) {
   const saveField = async (field, value) => {
     try {
@@ -606,6 +673,7 @@ function CompanyTab({ company, extra, similar, relationships, contacts, onReload
 
   return html`
     <div class="overview">
+      <${CompanyNotes} companyId=${company.id} />
       ${isUser && !needsReveal ? html`<${RequestDetailsBox} companyId=${company.id} />` : null}
       ${groups.map(g => html`
         <section class="group" key=${g.label}>

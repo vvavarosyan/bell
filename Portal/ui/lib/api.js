@@ -354,6 +354,8 @@ export const api = {
   crmAddDatapoint:        (id, field, value, label) => request(`/api/crm/records/${id}/datapoints`, { method: 'POST', body: JSON.stringify({ field, value, label }) }),
   crmDeleteDatapoint:     (dpId) => request('/api/crm/datapoints/' + dpId, { method: 'DELETE' }),
   crmAddNote:             (id, body) => request(`/api/crm/records/${id}/notes`, { method: 'POST', body: JSON.stringify({ body }) }),
+  entityNotes:            (entity_id, entity_type = 'company') => request('/api/crm/entity-notes?' + new URLSearchParams({ entity_id, entity_type })),
+  addEntityNote:          (entity_id, body, entity_type = 'company') => request('/api/crm/entity-notes', { method: 'POST', body: JSON.stringify({ entity_id, entity_type, body }) }),
   crmUpdateNote:          (id, body) => request('/api/crm/notes/' + id, { method: 'PATCH', body: JSON.stringify({ body }) }),
   crmDeleteNote:          (id) => request('/api/crm/notes/' + id, { method: 'DELETE' }),
   crmAddTask:             (id, body) => request(`/api/crm/records/${id}/tasks`, { method: 'POST', body: JSON.stringify(body) }),

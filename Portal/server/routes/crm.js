@@ -336,6 +336,45 @@ router.delete('/notes/:id', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+// ── Entity notes ─────────────────────────────────────────────────────────────
+// Note a company/person WITHOUT a "add to CRM first" step. A note anchors to the
+// entity's crm_record; if the entity isn't in the CRM yet, we transparently create a
+// free manual record so the note persists and shows on BOTH the company detail and the
+// CRM (unified — the same crm_notes the record drawer uses). Edit/delete reuse
+// PATCH/DELETE /notes/:id (tenant-scoped).
+router.get('/entity-notes', async (req, res, next) => {
+  try {
+    const entityType = req.query.entity_type === 'person' ? 'person' : 'company';
+    const entityId = Number(req.query.entity_id);
+    if (!Number.isFinite(entityId)) return res.status(400).json({ error: 'entity_id_required' });
+    const rec = (await query(`SELECT id FROM crm_records WHERE tenant_id=$1 AND entity_type=$2 AND entity_id=$3`,
+      [tenantId(req), entityType, entityId])).rows[0];
+    if (!rec) return res.json({ rows: [], record_id: null });
+    const notes = (await query(
+      `SELECT id, author_email, body, created_at, updated_at FROM crm_notes
+        WHERE record_id=$1 AND tenant_id=$2 ORDER BY created_at DESC`, [rec.id, tenantId(req)])).rows;
+    res.json({ rows: notes, record_id: rec.id });
+  } catch (err) { next(err); }
+});
+
+router.post('/entity-notes', async (req, res, next) => {
+  try {
+    const entityType = req.body?.entity_type === 'person' ? 'person' : 'company';
+    const entityId = Number(req.body?.entity_id);
+    const body = String(req.body?.body || '').trim();
+    if (!Number.isFinite(entityId)) return res.status(400).json({ error: 'entity_id_required' });
+    if (!body) return res.status(400).json({ error: 'empty_note' });
+    const { id: recordId } = await ensureCrmRecord(null, tenantId(req), entityType, entityId, 'manual', actorEmail(req), actorUserId(req));
+    if (!recordId) return res.status(500).json({ error: 'record_failed' });
+    const r = await query(
+      `INSERT INTO crm_notes (tenant_id, record_id, author_user_id, author_email, body)
+       VALUES ($1,$2,$3,$4,$5) RETURNING id, author_email, body, created_at`,
+      [tenantId(req), recordId, actorUserId(req), actorEmail(req), body]);
+    await logActivity(null, tenantId(req), recordId, 'note', { actorUserId: actorUserId(req), actorEmail: actorEmail(req), summary: body.slice(0, 140) });
+    res.json({ ...r.rows[0], record_id: recordId });
+  } catch (err) { next(err); }
+});
+
 // POST /api/crm/records/:id/tasks  { title, description?, due_at?, assignee_user_id? }
 router.post('/records/:id/tasks', async (req, res, next) => {
   try {
