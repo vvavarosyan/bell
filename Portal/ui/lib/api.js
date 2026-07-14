@@ -446,6 +446,7 @@ export const api = {
   // ---- Tenders (Qatar public procurement) ----
   tenders:                (q = {}) => request('/api/tenders?' + new URLSearchParams(q)),
   tenderBuyers:           (q = {}) => request('/api/tenders/buyers?' + new URLSearchParams(q)),
+  tenderAwards:           (q = {}) => request('/api/tenders/awards?' + new URLSearchParams(q)),
   tenderStats:            () => request('/api/tenders/stats'),
   tenderFacets:           () => request('/api/tenders/facets'),
   tenderSyncStatus:       () => request('/api/tenders/sync-status'),

@@ -141,6 +141,40 @@ router.get('/buyers', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+// GET /api/tenders/awards — "Who won what": recent contract awards with the winning
+// company, value, ICV score and (Ashghal) the full bidder table — competitive award
+// intelligence rivals charge for and don't link to a company graph. Only sources that
+// publish a real winner (Monaqasat hides the winner and its "value" is a bid bond).
+router.get('/awards', async (req, res, next) => {
+  try {
+    const limit = Math.min(Math.max(Number(req.query.limit) || 30, 1), 100);
+    const offset = Math.max(Number(req.query.offset) || 0, 0);
+    const params = [];
+    const conds = [`status = 'awarded'`, `source IN ('ashghal','qatarenergy','kahramaa')`,
+      `award_company_name IS NOT NULL`, `btrim(award_company_name) <> ''`];
+    if (req.query.icp === '1') {
+      const icp = await icpIndustries(req);
+      if (!icp.length) return res.json({ rows: [], total: 0, icp_missing: true });
+      params.push(icp); conds.push(`industries && $${params.length}::text[]`);
+    }
+    if (req.query.source) { params.push(String(req.query.source).toLowerCase()); conds.push(`source = $${params.length}`); }
+    const where = 'WHERE ' + conds.join(' AND ');
+    const totalR = await query(`SELECT count(*)::int n FROM tenders ${where}`, params);
+    params.push(limit); const lim = params.length;
+    params.push(offset); const off = params.length;
+    const rowsR = await query(
+      `SELECT id, source, title, buyer, award_company_name, award_company_id, value_amount, awarded_at,
+              industries, primary_industry,
+              nullif(raw->>'bidder_count', '')::int AS bidder_count,
+              (raw->'bidders'->0->>'icv')          AS winner_icv
+         FROM tenders ${where}
+        ORDER BY awarded_at DESC NULLS LAST, value_amount DESC NULLS LAST, id DESC
+        LIMIT $${lim} OFFSET $${off}`,
+      params);
+    res.json({ rows: rowsR.rows, total: totalR.rows[0].n, limit, offset });
+  } catch (err) { next(err); }
+});
+
 router.get('/stats', async (_req, res, next) => {
   try {
     const r = await query(`

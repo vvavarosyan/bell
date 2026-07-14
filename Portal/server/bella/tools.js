@@ -436,6 +436,29 @@ export const TOOLS = [
 
   {
     definition: {
+      name: 'get_awards',
+      description: "WHO WON — recent Qatar contract awards (Ashghal, QatarEnergy, Kahramaa) with the WINNING company, contract value, ICV score and bidder count. A recent winner is an active vendor with fresh budget (buyer intent for their own supply chain). Use for 'who won [x]', 'recent awards', 'who's winning contracts in my industry', competitive/win-loss questions. icp=true = only awards in the user's ICP industries. (Monaqasat hides winners so it's excluded.)",
+      input_schema: {
+        type: 'object',
+        properties: {
+          icp:    { type: 'boolean', description: "true = only awards in the user's ICP industries" },
+          source: { type: 'string', description: 'ashghal | qatarenergy | kahramaa' },
+          limit:  { type: 'integer', description: '1-25 (default 12)' },
+        },
+      },
+    },
+    async execute(args, ctx) {
+      const { payload } = await internalCall(tendersRouter, 'GET', '/awards', ctx, {
+        query: { ...(args.icp === true ? { icp: '1' } : {}), source: args.source, limit: Math.min(Math.max(Number(args.limit) || 12, 1), 25) },
+      });
+      if (payload?.icp_missing) return { awards: [], note: 'The user has no ICP target industries set yet — suggest filling the ICP in Settings → Company & ICP.' };
+      return { total: payload?.total ?? null, awards: (payload?.rows || []).map((a) => pick(a, ['id', 'source', 'title', 'buyer', 'award_company_name', 'award_company_id', 'value_amount', 'winner_icv', 'bidder_count', 'awarded_at', 'industries'])) };
+    },
+    summarize: (args, r) => `${(r?.awards || []).length} awards${args.icp ? ' · ICP' : ''}`,
+  },
+
+  {
+    definition: {
       name: 'get_disclosures',
       description: 'Qatar Stock Exchange disclosures for the ~54 listed companies: financial results, dividends, board changes, AGMs, buybacks, plus exchange market notices. The freshest official corporate events in Qatar. Filter by category, ticker symbol, or free-text q.',
       input_schema: {

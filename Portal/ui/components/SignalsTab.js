@@ -215,6 +215,9 @@ export function SignalsTab() {
           <button class=${'pilltab pilltab-db' + (kind === 'buyers' ? ' active' : '')}
             title="Who is actively procuring in your line of business, ranked by ICP fit and urgency"
             onClick=${() => setKind(kind === 'buyers' ? '' : 'buyers')}>Who’s buying</button>
+          <button class=${'pilltab pilltab-db' + (kind === 'awards' ? ' active' : '')}
+            title="Who won which Qatar contracts — winner, value, ICV score and the full bidder list"
+            onClick=${() => setKind(kind === 'awards' ? '' : 'awards')}>Who won</button>
           ${KINDS.map((k) => html`<button key=${k}
             class=${'pilltab' + (k === 'tender' ? ' pilltab-db' : '') + (kind === k ? ' active' : '')}
             onClick=${() => setKind(kind === k ? '' : k)}>${KIND_META[k].label}${counts[k] ? html`<span class="ct">${counts[k].toLocaleString()}</span>` : ''}</button>`)}
@@ -233,6 +236,7 @@ export function SignalsTab() {
         </div>` : null}
 
       ${kind === 'buyers' ? html`<${BuyersView} scope=${scope} />`
+        : kind === 'awards' ? html`<${AwardsView} scope=${scope} />`
         : kind === 'tender' ? html`<${TendersTab} embedded=${true} />` : html`
       <div style=${{ display: 'flex', gap: '20px', alignItems: 'flex-start', flexWrap: 'wrap' }}>
 
@@ -482,6 +486,129 @@ function BuyerDrawer({ buyer, icpList, onClose }) {
               </div>
             </div>`)}
           </div>`}
+      </div>
+    </div>
+  </div>`;
+}
+
+// "Who won" — award / winner intelligence. Recent Qatar contract awards with the
+// winning company, value, ICV score and (Ashghal) the full bidder table — data rivals
+// charge for and don't link to a company. A recent winner is an active vendor with
+// fresh budget: buyer intent for their own supply chain. Hooks precede any return.
+function AwardsView({ scope }) {
+  const [rows, setRows] = useState([]);
+  const [icpMissing, setIcpMissing] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [openId, setOpenId] = useState(null);
+  useEffect(() => {
+    let dead = false;
+    setLoading(true);
+    api.tenderAwards({ icp: scope === 'icp' ? 1 : 0, limit: 60 })
+      .then((r) => { if (!dead) { setRows(r.rows || []); setIcpMissing(!!r.icp_missing); setLoading(false); } })
+      .catch(() => { if (!dead) setLoading(false); });
+    return () => { dead = true; };
+  }, [scope]);
+  const fmtQar = (v) => {
+    const n = Number(v); if (!Number.isFinite(n) || n <= 0) return null;
+    if (n >= 1e9) return 'QAR ' + (n / 1e9).toFixed(1) + 'B';
+    if (n >= 1e6) return 'QAR ' + (n / 1e6).toFixed(1) + 'M';
+    if (n >= 1e3) return 'QAR ' + Math.round(n / 1e3) + 'K';
+    return 'QAR ' + n.toLocaleString();
+  };
+  const fmtDate = (d) => (d ? new Date(d).toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' }) : '');
+  const SRC = { ashghal: 'Ashghal', qatarenergy: 'QatarEnergy', kahramaa: 'Kahramaa' };
+
+  if (scope === 'icp' && icpMissing) return html`<div class="empty" style=${{ lineHeight: 1.6 }}>“For you” needs your ICP. Set your target industries in <b>Settings → Company & ICP</b> to see awards in your line of business.</div>`;
+  if (loading) return html`<div class="empty">Loading contract awards…</div>`;
+  if (!rows.length) return html`<div class="empty">No contract awards${scope === 'icp' ? ' in your line of business' : ''} yet.</div>`;
+
+  return html`<div>
+    <div class="muted small" style=${{ margin: '0 0 12px' }}>
+      Who won which Qatar contracts — winner, value and (Ashghal) the full bidder list with ICV scores. A recent winner has fresh budget: an active vendor to sell into.
+    </div>
+    <div style=${{ display: 'flex', flexDirection: 'column', gap: '9px' }}>
+      ${rows.map((a) => {
+        const amt = fmtQar(a.value_amount);
+        return html`<div key=${a.id} onClick=${() => setOpenId(a.id)}
+          style=${{ border: '1px solid var(--border)', borderRadius: '12px', background: 'var(--bg-elev)', padding: '13px 15px', cursor: 'pointer' }}>
+          <div style=${{ display: 'flex', alignItems: 'baseline', gap: '8px', flexWrap: 'wrap' }}>
+            <span style=${{ fontSize: '14.5px', fontWeight: 700, color: 'var(--text)' }}>${a.award_company_name}</span>
+            ${amt ? html`<span style=${{ fontSize: '13px', fontWeight: 700, color: 'var(--accent-bright, #a5c3ff)', fontVariantNumeric: 'tabular-nums' }}>${amt}</span>` : null}
+            ${a.winner_icv ? html`<span style=${{ fontSize: '10.5px', fontWeight: 700, color: 'var(--text)', border: '1px solid var(--border)', borderRadius: '5px', padding: '1px 7px' }}>ICV ${a.winner_icv}</span>` : null}
+          </div>
+          <div class="muted small" style=${{ marginTop: '4px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>${a.title}</div>
+          <div class="muted small" style=${{ marginTop: '5px' }}>
+            🏛 ${a.buyer || SRC[a.source] || a.source} · awarded ${fmtDate(a.awarded_at)}${a.bidder_count ? ` · ${a.bidder_count} bidders` : ''}
+          </div>
+        </div>`;
+      })}
+    </div>
+    ${openId ? html`<${AwardDrawer} id=${openId} onClose=${() => setOpenId(null)} />` : null}
+  </div>`;
+}
+
+// Drill-in: the full bidder table (rank · company · ICV · price · winner) — Ashghal's
+// unique competitive intel. Winner links to the company record.
+function AwardDrawer({ id, onClose }) {
+  const [t, setT] = useState(null);
+  const [loading, setLoading] = useState(true);
+  useEffect(() => {
+    let dead = false;
+    api.tenderItem(id).then((d) => { if (!dead) { setT((d && d.tender) ? d.tender : d); setLoading(false); } }).catch(() => { if (!dead) setLoading(false); });
+    return () => { dead = true; };
+  }, [id]);
+  useEffect(() => {
+    const onKey = (e) => { if (e.key === 'Escape') onClose(); };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [onClose]);
+  const fmtQar = (v) => { const n = Number(v); if (!Number.isFinite(n) || n <= 0) return '—'; return 'QAR ' + n.toLocaleString(); };
+  const raw = (t && t.raw) || {};
+  const bidders = Array.isArray(raw.bidders) ? raw.bidders : [];
+  return html`<div onClick=${onClose} style=${{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 60 }}>
+    <div onClick=${(e) => e.stopPropagation()} style=${{ position: 'absolute', top: 0, right: 0, bottom: 0, width: 'min(600px, 95vw)', background: 'var(--bg)', borderLeft: '1px solid var(--border)', display: 'flex', flexDirection: 'column', boxShadow: '-8px 0 30px rgba(0,0,0,0.35)' }}>
+      <div style=${{ padding: '16px 18px', borderBottom: '1px solid var(--border)', display: 'flex', gap: '10px', alignItems: 'flex-start' }}>
+        <div style=${{ flex: 1, minWidth: 0 }}>
+          <div class="muted small" style=${{ textTransform: 'uppercase', letterSpacing: '.06em' }}>Contract award</div>
+          <div style=${{ fontSize: '15.5px', fontWeight: 700, color: 'var(--text)', marginTop: '3px', lineHeight: 1.35 }}>${t ? t.title : 'Loading…'}</div>
+          ${t ? html`<div class="muted small" style=${{ marginTop: '4px' }}>🏛 ${t.buyer || t.source}${t.awarded_at ? ' · awarded ' + new Date(t.awarded_at).toLocaleDateString() : ''}</div>` : null}
+        </div>
+        <button class="btn btn-ghost" onClick=${onClose} style=${{ flex: '0 0 auto' }}>✕</button>
+      </div>
+      <div style=${{ flex: 1, overflowY: 'auto', padding: '16px 18px' }}>
+        ${loading ? html`<div class="empty">Loading…</div>` : !t ? html`<div class="empty">Could not load this award.</div>` : html`
+          <div style=${{ border: '1px solid var(--accent)', borderRadius: '10px', background: 'rgba(91,140,255,0.08)', padding: '12px 14px', marginBottom: '16px' }}>
+            <div class="muted small" style=${{ textTransform: 'uppercase', letterSpacing: '.05em' }}>Winner</div>
+            <div style=${{ display: 'flex', alignItems: 'baseline', gap: '10px', flexWrap: 'wrap', marginTop: '3px' }}>
+              ${t.award_company_id
+                ? html`<a onClick=${() => navigateTo('companies', t.award_company_id)} style=${{ fontSize: '16px', fontWeight: 700, color: 'var(--accent-bright, #a5c3ff)', cursor: 'pointer', textDecoration: 'none' }}>${t.award_company_name} ↗</a>`
+                : html`<span style=${{ fontSize: '16px', fontWeight: 700, color: 'var(--text)' }}>${t.award_company_name}</span>`}
+              ${t.value_amount ? html`<span style=${{ fontSize: '14px', fontWeight: 700, color: 'var(--text)', fontVariantNumeric: 'tabular-nums' }}>${fmtQar(t.value_amount)}</span>` : null}
+            </div>
+            ${t.award_company_id ? html`<div class="muted small" style=${{ marginTop: '4px' }}>In Bell’s graph — click to open the company and ☆ Save it.</div>` : null}
+          </div>
+          ${bidders.length ? html`
+            <div class="filt-label" style=${{ marginBottom: '8px' }}>All bidders · ${bidders.length}</div>
+            <div style=${{ overflowX: 'auto' }}>
+              <table style=${{ width: '100%', borderCollapse: 'collapse', fontSize: '12.5px' }}>
+                <thead><tr style=${{ textAlign: 'left', color: 'var(--text-muted)' }}>
+                  <th style=${{ padding: '6px 8px', fontWeight: 600 }}>#</th>
+                  <th style=${{ padding: '6px 8px', fontWeight: 600 }}>Company</th>
+                  <th style=${{ padding: '6px 8px', fontWeight: 600, textAlign: 'right' }}>ICV</th>
+                  <th style=${{ padding: '6px 8px', fontWeight: 600, textAlign: 'right' }}>Price</th>
+                </tr></thead>
+                <tbody>
+                  ${bidders.map((b, i) => html`<tr key=${i} style=${{ borderTop: '1px solid var(--border)', background: b.winner ? 'rgba(91,140,255,0.06)' : 'transparent' }}>
+                    <td style=${{ padding: '7px 8px', color: 'var(--text-muted)' }}>${b.rank || (i + 1)}</td>
+                    <td style=${{ padding: '7px 8px', color: 'var(--text)', fontWeight: b.winner ? 700 : 400 }}>${b.name}${b.winner ? ' ✓' : ''}</td>
+                    <td style=${{ padding: '7px 8px', textAlign: 'right', color: 'var(--text)', fontVariantNumeric: 'tabular-nums' }}>${b.icv || '—'}</td>
+                    <td style=${{ padding: '7px 8px', textAlign: 'right', color: 'var(--text)', fontVariantNumeric: 'tabular-nums' }}>${(b.winner_price || b.accepted_price) ? fmtQar(b.winner_price || b.accepted_price) : '—'}</td>
+                  </tr>`)}
+                </tbody>
+              </table>
+            </div>`
+            : html`<div class="muted small">This source publishes the winner + value only (no bidder breakdown).</div>`}
+        `}
       </div>
     </div>
   </div>`;
