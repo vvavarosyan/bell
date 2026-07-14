@@ -28,7 +28,11 @@ const LIST_COLS = `
   award_company_name, award_company_id, value_amount, currency, url,
   published_at, deadline_at, awarded_at,
   industries, primary_industry,
-  (source <> 'monaqasat' OR jsonb_exists(raw, 'activities')) AS has_detail`;
+  (source <> 'monaqasat' OR jsonb_exists(raw, 'activities')) AS has_detail,
+  -- Ashghal publishes the bid bond only as a source string ("180,000 Q.R.") in raw,
+  -- never in value_amount. Extract the digits so the card can show it. Monaqasat/awards
+  -- carry value_amount directly, so this stays a fallback (never overrides value_amount).
+  nullif(regexp_replace(coalesce(raw->>'tender_bond',''), '[^0-9]', '', 'g'), '')::bigint AS bond_amount`;
 
 // The tenant's ICP target industries, or [] when the profile is unset.
 async function icpIndustries(req) {

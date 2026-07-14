@@ -27,6 +27,19 @@ const SOURCE_LABEL = { monaqasat: 'Monaqasat', ashghal: 'Ashghal', qatarenergy: 
 
 function fmtDate(iso) { if (!iso) return '—'; try { return new Date(iso).toLocaleDateString(undefined, { year: 'numeric', month: 'short', day: 'numeric' }); } catch { return '—'; } }
 function fmtVal(n, cur) { if (n == null) return null; const v = Number(n); if (!Number.isFinite(v) || v <= 0) return null; return (cur || 'QAR') + ' ' + v.toLocaleString(); }
+// Money that may arrive as a number (Monaqasat value_amount) OR as a source-published
+// string (Ashghal "275,000 Q.R.", "1,500 Q.R. Buy Tender Document(s)"). We normalise to
+// "QAR <grouped-number>" when a number is embedded, else show the source text verbatim
+// (never drop a real published value — Rule 2.1). Returns null only when truly empty.
+function fmtMoney(v, cur) {
+  if (v == null) return null;
+  if (typeof v === 'number') return fmtVal(v, cur);
+  const s = String(v).trim();
+  if (!s || s === '-' || s === '—') return null;
+  const m = s.match(/\d[\d,]*(?:\.\d+)?/);
+  if (m) { const num = Number(m[0].replace(/,/g, '')); if (Number.isFinite(num) && num > 0) return (cur || 'QAR') + ' ' + num.toLocaleString(); }
+  return s;
+}
 const srcLabel = (s) => SOURCE_LABEL[s] || (s ? s[0].toUpperCase() + s.slice(1) : '—');
 
 // Monaqasat prints Contract Duration as a bare number with NO unit ("3"), so we
@@ -263,7 +276,14 @@ export function TendersTab({ embedded = false } = {}) {
               ${t.buyer ? html`<span>🏛 ${t.buyer}</span>` : null}
               <span>${t.status === 'awarded' ? 'Awarded' : 'Published'} ${fmtDate(t.awarded_at || t.published_at)}</span>
               ${t.status === 'open' && t.deadline_at ? html`<span>Closes ${fmtDate(t.deadline_at)}</span>` : null}
-              ${fmtVal(t.value_amount, t.currency) ? html`<span>${fmtVal(t.value_amount, t.currency)}</span>` : null}
+              ${(() => {
+                // Monaqasat's amount is always the bid bond (it hides contract value); Ashghal/
+                // QatarEnergy/Kahramaa awards carry the real contract value. Label honestly so a
+                // bond is never shown as if it were the deal size (Rule 2.1).
+                const awarded = t.status === 'awarded' && t.source !== 'monaqasat';
+                const s = fmtVal(t.value_amount != null ? t.value_amount : t.bond_amount, t.currency);
+                return s ? html`<span>${awarded ? 'Awarded' : 'Bond'} ${s}</span>` : null;
+              })()}
               ${t.award_company_id ? html`<span style=${{ color: 'var(--accent-bright, #a5c3ff)' }}>↳ linked company</span>` : null}
             </div>
           </div>`)}
@@ -309,10 +329,16 @@ export function TendersTab({ embedded = false } = {}) {
               ${line('Sector', raw.sector)}
               ${line(detail.status === 'awarded' ? 'Awarded' : 'Published', fmtDate(detail.awarded_at || detail.published_at))}
               ${line('Closing date', detail.deadline_at ? fmtDate(detail.deadline_at) : null)}
-              ${line('Tender bond', fmtVal(raw.tender_bond, 'QAR'))}
-              ${line('Documents value', fmtVal(raw.documents_value, 'QAR'))}
+              ${line('Category', raw.category && raw.category !== '-' ? raw.category : null)}
+              <!-- Bond only: for Monaqasat value_amount IS the bid bond, so it's a safe fallback;
+                   for award sources value_amount is the CONTRACT value and must never be labelled
+                   "Tender bond" (Rule 2.1) — it shows on its own "Awarded value" line below. -->
+              ${line('Tender bond', fmtMoney(raw.tender_bond != null ? raw.tender_bond : (detail.source === 'monaqasat' ? detail.value_amount : null), detail.currency || 'QAR'))}
+              ${line('Document fees', fmtMoney(raw.document_fees != null ? raw.document_fees : raw.documents_value, 'QAR'))}
+              ${line('Issuing date', raw.issuing_date || null)}
               ${line('Contract duration', contractDuration(raw))}
               ${line('Procurement contact', raw.contact_email ? html`<a href=${'mailto:' + raw.contact_email} style=${{ color: 'var(--accent-bright, #a5c3ff)' }}>${raw.contact_email}</a>` : null)}
+              ${detail.status === 'awarded' && detail.source !== 'monaqasat' ? line('Awarded value', fmtVal(detail.value_amount, detail.currency)) : null}
               ${detail.award_company_name ? line('Awarded to', detail.award_company_id
                 ? html`<button onClick=${() => navigateTo('companies', detail.award_company_id)} style=${{ background: 'transparent', border: 'none', padding: 0, color: 'var(--accent-bright, #a5c3ff)', fontSize: '12.5px', fontWeight: 600, cursor: 'pointer' }}>${detail.award_company_name} →</button>`
                 : detail.award_company_name) : null}

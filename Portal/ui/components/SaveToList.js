@@ -27,6 +27,13 @@ export function SaveToList({ entityId, entityType = 'company', compact = false, 
     } catch (e) { toast(e.message, 'error'); } finally { setLoading(false); }
   }, [entityId, entityType]);
 
+  // Reflect the saved state on the button as soon as the company opens (not only after
+  // the popover is opened) — so a saved company reads "★ Saved" while browsing.
+  useEffect(() => {
+    let dead = false;
+    api.listMemberships(entityId, entityType).then((mem) => { if (!dead) setMemberOf(new Set(mem.list_ids || [])); }).catch(() => {});
+    return () => { dead = true; };
+  }, [entityId, entityType]);
   useEffect(() => { if (open) load(); }, [open, load]);
   useEffect(() => {
     if (!open) return undefined;
@@ -75,7 +82,7 @@ export function SaveToList({ entityId, entityType = 'company', compact = false, 
 
   return html`<div ref=${ref} style=${{ position: 'relative', display: 'inline-block' }}>
     <button onClick=${() => setOpen((o) => !o)} title="Save to a list" style=${btn}>
-      <span aria-hidden="true">${savedCount ? '★' : '☆'}</span>${compact && savedCount ? '' : html`<span>${savedCount ? (savedCount > 1 ? `Saved · ${savedCount}` : 'Saved') : 'Save'}</span>`}
+      <span aria-hidden="true">${savedCount ? '★' : '☆'}</span>${compact && !savedCount ? '' : html`<span>${savedCount ? (savedCount > 1 ? `Saved · ${savedCount}` : 'Saved') : 'Save'}</span>`}
     </button>
     ${open ? html`<div style=${{ position: 'absolute', top: 'calc(100% + 6px)', right: 0, zIndex: 70, width: '264px',
         background: 'var(--bg-elev-2)', border: '1px solid var(--border)', borderRadius: '10px', boxShadow: '0 12px 34px rgba(0,0,0,0.45)', padding: '10px' }}>
