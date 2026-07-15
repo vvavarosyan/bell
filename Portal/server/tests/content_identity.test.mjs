@@ -76,6 +76,28 @@ test('ok even when company name appears via the DOC generic case is a SKIP, neve
   assert.notEqual(r.verdict, 'content-conflict');
 });
 
+// FALSE-POSITIVE GUARD (the Global Pure / OVHcloud case Val caught): a re-fetch that hits
+// a hosting/parking placeholder must SKIP — a transient outage is not proof the stored
+// (correct) data is wrong.
+test('skip: OVHcloud/hosting placeholder page → never flagged (Global Pure Trading)', () => {
+  const r = contentIdentity({ name: 'Global Pure Trading QFZ LLC' }, {
+    ok: true, url: 'https://globalpuretrading.com/en/',
+    meta: { title: 'OVHcloud', ogSiteName: 'OVHcloud', description: '' },
+    text: 'Your website will be available very soon. This website is hosted by OVHcloud.',
+  });
+  assert.equal(r.verdict, 'skip', JSON.stringify(r));
+  assert.notEqual(r.verdict, 'content-conflict');
+});
+
+test('skip: generic "coming soon" / under construction placeholder → never flagged', () => {
+  const r = contentIdentity({ name: 'Some Distinctive Brandname Co' }, {
+    ok: true, url: 'https://example-brand.com',
+    meta: { title: 'Coming Soon', ogSiteName: null, description: 'Website under construction' },
+    text: 'Our website is coming soon. Under construction. Check back later.',
+  });
+  assert.equal(r.verdict, 'skip', JSON.stringify(r));
+});
+
 test('skip: unrendered/empty shell page → never flagged', () => {
   const r = contentIdentity(QF_ENDOWMENT, { ok: true, meta: {}, text: '' });
   assert.equal(r.verdict, 'skip', JSON.stringify(r));

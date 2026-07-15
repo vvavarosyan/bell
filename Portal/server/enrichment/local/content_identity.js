@@ -22,6 +22,19 @@ import { distinctiveTokens, shareDistinctive, hostSlug } from './website_conflic
 // <title> brand separators — "Contact — Acme", "Acme | Home", "Page › Brand".
 const TITLE_SPLIT = /\s*[|·•>»‹›–—:]\s*|\s-\s/;
 
+// A page whose TITLE/site-name IS a hosting provider, or whose content is a parking /
+// coming-soon / server-default placeholder, has NO real company content. That proves
+// nothing about whether Bell's stored data is wrong — it's usually a transient outage or
+// a not-yet-launched domain of an otherwise-correct site (e.g. globalpuretrading.com
+// briefly serving OVHcloud's default). We SKIP these — never quarantine on a placeholder.
+const HOSTING_BRAND_RX = /\b(ovhcloud|ovh|godaddy|namecheap|bluehost|hostgator|siteground|hostinger|ionos|dreamhost|hostpapa|inmotion|namesilo|register\.com|domain\.com|cpanel|plesk|litespeed)\b/i;
+const PARKING_RX = /\b(domain (?:is |may be )?(?:for sale|parked)|parked (?:free )?domain|buy this domain|this (?:web ?site|domain) (?:is|may be)? ?(?:for sale|coming soon|under construction|under maintenance)|(?:website|site|store|page) coming soon|coming soon\b|under construction|default (?:web ?)?page|welcome to nginx|apache2? (?:ubuntu )?default|it works!|account (?:has been )?suspended|future home of|error 404|404 not found)\b/i;
+function isPlaceholderPage(meta, blob) {
+  const hi = ((meta.title || '') + ' ' + (meta.ogSiteName || '')).toLowerCase().trim();
+  if (hi && HOSTING_BRAND_RX.test(hi)) return true;   // the page's own title IS a host → default page
+  return PARKING_RX.test(blob);
+}
+
 // Brand-name candidates, most reliable first: og:site_name, then the title's end/start
 // segments (the brand usually sits at one end of a "<page> — <brand>" title).
 function brandCandidates(meta) {
@@ -56,6 +69,11 @@ export function contentIdentity(company, page) {
   const blob = ' ' + parts.toLowerCase().replace(/[^a-z0-9]+/g, ' ').replace(/\s+/g, ' ').trim() + ' ';
   const compact = blob.replace(/\s+/g, '');
   if (compact.length < 40) return { verdict: 'skip', reason: 'empty_or_shell' };
+
+  // Hosting/parking/placeholder page (e.g. an OVHcloud default) → can't judge; leave the
+  // stored data alone. Must come BEFORE the brand logic so "OVHcloud" isn't read as a
+  // rival brand.
+  if (isPlaceholderPage(meta, blob)) return { verdict: 'skip', reason: 'placeholder_or_parked' };
 
   const D = distinctiveTokens(name);                       // ≥4-char, non-generic
   if (D.size === 0) return { verdict: 'skip', reason: 'name_all_generic' };
