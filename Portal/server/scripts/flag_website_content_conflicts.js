@@ -91,10 +91,12 @@ async function markChecked(id) {
       ORDER BY id${LIMIT ? ` LIMIT ${LIMIT}` : ''}`)).rows;
 
   console.log(`Candidates to re-check: ${rows.length}${LIMIT ? ` (limited to ${LIMIT})` : ''}\n`);
+  const PREVIEW_N = (() => { const i = process.argv.indexOf('--sample'); return i > -1 ? Number(process.argv[i + 1]) || 120 : 120; })();
   if (!apply) {
-    console.log('DRY-RUN re-fetches a small sample so you can see what would be flagged, then stops.');
+    console.log(`DRY-RUN re-fetches a ${PREVIEW_N}-site sample so you can see what WOULD be flagged, then stops.`);
+    console.log('Genuine wrong-content is rare — few or zero flags here is good (it means the data is mostly correct).\n');
   }
-  const sample = apply ? rows : rows.slice(0, 40);
+  const sample = apply ? rows : rows.slice(0, PREVIEW_N);
 
   let checked = 0, flagged = 0, techRemoved = 0;
   for (const c of sample) {
@@ -114,7 +116,7 @@ async function markChecked(id) {
   }
 
   console.log(`\n→ ${apply ? 'Checked' : 'Sampled'} ${checked} · flagged ${flagged}${apply ? ` · removed ${techRemoved} wrong tech rows` : ''}.`);
-  if (!apply) console.log('\nPreview only (40-site sample). Review, then run "Apply Website-Content Conflict.command" (pause the always-on engine first).');
+  if (!apply) console.log(`\nPreview only (${PREVIEW_N}-site sample). Review, then run "Apply Website-Content Conflict.command" (pause the always-on engine first).`);
   else console.log('  Logo/description/tech/website-contacts hidden from customers (kept in admin under website_content_conflict). Website itself kept.');
   process.exit(0);
 })().catch((e) => { console.error('Stopped:', e.message); process.exit(1); });
