@@ -28,11 +28,21 @@ export function SaveToList({ entityId, entityType = 'company', compact = false, 
   }, [entityId, entityType]);
 
   // Reflect the saved state on the button as soon as the company opens (not only after
-  // the popover is opened) — so a saved company reads "★ Saved" while browsing.
+  // the popover is opened) — so a saved company reads "★ Saved" while browsing, and we
+  // know WHICH lists it's in (names) for the tooltip + popover summary before any click.
+  // Also re-sync on the app-wide 'bdi:lists-changed' event (e.g. after a bulk save from the
+  // Companies bulk-bar) so an already-open drawer's star updates without a reopen.
   useEffect(() => {
-    let dead = false;
-    api.listMemberships(entityId, entityType).then((mem) => { if (!dead) setMemberOf(new Set(mem.list_ids || [])); }).catch(() => {});
-    return () => { dead = true; };
+    let alive = true;
+    const fetchState = () => {
+      Promise.all([api.lists(), api.listMemberships(entityId, entityType)])
+        .then(([ls, mem]) => { if (alive) { setLists(ls.rows || []); setMemberOf(new Set(mem.list_ids || [])); } })
+        .catch(() => {});
+    };
+    fetchState();
+    const onLists = () => fetchState();
+    window.addEventListener('bdi:lists-changed', onLists);
+    return () => { alive = false; window.removeEventListener('bdi:lists-changed', onLists); };
   }, [entityId, entityType]);
   useEffect(() => { if (open) load(); }, [open, load]);
   useEffect(() => {
@@ -48,11 +58,13 @@ export function SaveToList({ entityId, entityType = 'company', compact = false, 
     const inList = memberOf.has(list.id);
     setBusy(true);
     try {
-      if (inList) { await api.listRemoveMembers(list.id, [entityId], entityType); memberOf.delete(list.id); toast(`Removed from “${list.name}”`); }
-      else { await api.listAddMembers(list.id, [entityId], entityType); memberOf.add(list.id); toast(`Saved to “${list.name}”`); }
-      setMemberOf(new Set(memberOf));
+      const next = new Set(memberOf);   // copy first — never mutate state in place
+      if (inList) { await api.listRemoveMembers(list.id, [entityId], entityType); next.delete(list.id); toast(`Removed from “${list.name}”`); }
+      else { await api.listAddMembers(list.id, [entityId], entityType); next.add(list.id); toast(`Saved to “${list.name}”`); }
+      setMemberOf(next);
       setLists((ls) => ls.map((l) => (l.id === list.id ? { ...l, member_count: (l.member_count || 0) + (inList ? -1 : 1) } : l)));
       onChanged?.();
+      try { window.dispatchEvent(new Event('bdi:lists-changed')); } catch { /* no-op */ }
     } catch (e) { toast(e.message, 'error'); } finally { setBusy(false); }
   };
 
@@ -71,6 +83,11 @@ export function SaveToList({ entityId, entityType = 'company', compact = false, 
   };
 
   const savedCount = memberOf.size;
+  const memberLists = lists.filter((l) => memberOf.has(l.id));          // the lists this entity is IN (with names)
+  const memberNames = memberLists.map((l) => l.name).join(', ');
+  const btnTitle = savedCount
+    ? (memberNames ? `Already in: ${memberNames} — click to add to more or remove` : 'Saved — click to manage lists')
+    : 'Save to a list';
   const btn = {
     display: 'inline-flex', alignItems: 'center', gap: '5px',
     padding: compact ? '3px 8px' : '5px 11px', borderRadius: '6px',
@@ -81,12 +98,18 @@ export function SaveToList({ entityId, entityType = 'company', compact = false, 
   const rowHover = (e, on) => { e.currentTarget.style.background = on ? 'var(--bg-elev)' : 'transparent'; };
 
   return html`<div ref=${ref} style=${{ position: 'relative', display: 'inline-block' }}>
-    <button onClick=${() => setOpen((o) => !o)} title="Save to a list" style=${btn}>
+    <button onClick=${() => setOpen((o) => !o)} title=${btnTitle} style=${btn}>
       <span aria-hidden="true">${savedCount ? '★' : '☆'}</span>${compact && !savedCount ? '' : html`<span>${savedCount ? (savedCount > 1 ? `Saved · ${savedCount}` : 'Saved') : 'Save'}</span>`}
     </button>
     ${open ? html`<div style=${{ position: 'absolute', top: 'calc(100% + 6px)', right: 0, zIndex: 70, width: '264px',
         background: 'var(--bg-elev-2)', border: '1px solid var(--border)', borderRadius: '10px', boxShadow: '0 12px 34px rgba(0,0,0,0.45)', padding: '10px' }}>
       <div class="filt-label" style=${{ marginBottom: '8px' }}>Save to list</div>
+      ${memberLists.length ? html`<div style=${{ marginBottom: '9px', paddingBottom: '9px', borderBottom: '1px solid var(--border)' }}>
+        <div class="muted small" style=${{ marginBottom: '5px' }}>Already in ${memberLists.length} list${memberLists.length > 1 ? 's' : ''} — tick more below to add, untick to remove</div>
+        <div style=${{ display: 'flex', gap: '5px', flexWrap: 'wrap' }}>
+          ${memberLists.map((l) => html`<span key=${l.id} title=${l.name} style=${{ fontSize: '11px', fontWeight: 600, borderRadius: '999px', padding: '2px 9px', color: '#fff', background: 'var(--accent)', whiteSpace: 'nowrap', maxWidth: '100%', overflow: 'hidden', textOverflow: 'ellipsis' }}>★ ${l.name}</span>`)}
+        </div>
+      </div>` : null}
       ${loading ? html`<div class="muted small" style=${{ padding: '8px 2px' }}>Loading…</div>`
         : html`<div style=${{ maxHeight: '230px', overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: '1px' }}>
           ${lists.length === 0 ? html`<div class="muted small" style=${{ padding: '2px 2px 8px' }}>No lists yet — create your first below.</div>`

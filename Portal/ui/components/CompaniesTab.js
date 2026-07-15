@@ -14,6 +14,7 @@ import { SourceRecordsLine } from './SourceRecordsLine.js';
 import { ContactIcons } from './ContactIcons.js';
 import { BellScore } from './BellScore.js';
 import { CompanyFilters, EMPTY_FILTERS, countActiveFilters } from './CompanyFilters.js';
+import { BulkSaveToList } from './BulkSaveToList.js';
 
 const STATUS_OPTIONS = ['', 'active', 'inactive', 'suspended', 'withdrawn', 'in_liquidation', 'frozen', 'deregistered', 'not_licensed', 'unknown'];
 const SOURCE_OPTIONS = ['', 'QFC', 'QFZ', 'MOCI', 'QSTP', 'QSE', 'QCCI', 'MoPH', 'Tasmu', 'CRA', 'MadeInQatar', 'QFCRA'];
@@ -433,6 +434,7 @@ export function CompaniesTab({ archivedMode: initialArchived = false, mode = 'lo
             <button class="accent" onClick=${() => runEnrich({ mode: 'stage', stage: 9 })} title=${STAGE_INFO[9]?.desc}>${STAGE_INFO[9].short} ▶</button>
           ` : null}
         ` : null}
+        <${BulkSaveToList} entityIds=${[...selected]} entityType="company" />
         <button class="accent" onClick=${runBulkReveal} title="Reveal contact details · 1 credit each (already-revealed are free)">Reveal contacts ▶</button>
         <button onClick=${clearSelection}>Clear</button>
       </div>
