@@ -457,7 +457,10 @@ router.get('/:id', async (req, res, next) => {
     // "derived" vs a registry-stated one; expose the website-conflict quarantine to
     // admins (for the "restore website" action).
     row.industry_derived = efSnapshot.industry_derived || null;
-    if (MODE === 'local-admin' || req.user?.role === 'platform_admin') row.website_conflict = efSnapshot.website_conflict || null;
+    if (MODE === 'local-admin' || req.user?.role === 'platform_admin') {
+      row.website_conflict = efSnapshot.website_conflict || null;
+      row.website_content_conflict = efSnapshot.website_content_conflict || null;
+    }
 
     // Drawer People tab. PEOPLE PUBLIC LOCKDOWN (Val 2026-07-02): customers get
     // only the COUNT (the UI shows a banner); full rows stay for platform_admin.
@@ -773,6 +776,35 @@ router.post('/:id/restore-website', async (req, res, next) => {
     const conIds = (wc.contacts || []).map((c) => c.id).filter(Boolean);
     if (conIds.length) await query(`UPDATE company_contacts SET extra_fields = coalesce(extra_fields,'{}'::jsonb) - 'hidden_conflict', updated_at = now() WHERE id = ANY($1::bigint[])`, [conIds]);
     res.json({ ok: true, company_id: id, website: wc.website });
+  } catch (err) { next(err); }
+});
+
+// POST /api/companies/:id/restore-website-content — undo a wrong-CONTENT flag when an
+// admin confirms the served page IS this company's after all. Restores the snapshotted
+// logo/description, un-hides the website-harvested contacts, clears the flag. (Tech
+// re-populates on the next enrich.) The website itself was never removed.
+router.post('/:id/restore-website-content', async (req, res, next) => {
+  try {
+    if (MODE === 'user') return res.status(403).json({ error: 'not_allowed_on_user_portal' });
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) return res.status(400).json({ error: 'invalid_id' });
+    const r = (await query(`SELECT extra_fields FROM companies WHERE id = $1`, [id])).rows[0];
+    if (!r) return res.status(404).json({ error: 'not_found' });
+    const wcc = (r.extra_fields || {}).website_content_conflict;
+    if (!wcc) return res.status(400).json({ error: 'no_conflict' });
+    const restore = {};
+    if (wcc.logo_url) restore.website_logo_url = wcc.logo_url;
+    if (wcc.description) restore.website_description = wcc.description;
+    await query(
+      `UPDATE companies SET
+         needs_review = false, review_reason = NULL,
+         extra_fields = ((coalesce(extra_fields,'{}'::jsonb) - 'website_content_conflict') || $2::jsonb
+                        || jsonb_build_object('website_content_restored_at', to_jsonb($3::text))),
+         updated_at = now()
+       WHERE id = $1`,
+      [id, JSON.stringify(restore), new Date().toISOString()]);
+    await query(`UPDATE company_contacts SET extra_fields = coalesce(extra_fields,'{}'::jsonb) - 'hidden_conflict', updated_at = now() WHERE company_id = $1 AND source = 'stage7-website'`, [id]);
+    res.json({ ok: true, company_id: id });
   } catch (err) { next(err); }
 });
 

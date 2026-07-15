@@ -134,6 +134,14 @@ export async function enrichCompany(company) {
   const url = toUrl(company.website);
   if (!url) { await markStage12(company.id, 'no_data', { stage12_skip: 'no-website' }); return { status: 'no_data', tech: 0 }; }
 
+  // Content-identity guard: if the website was flagged as a DIFFERENT brand's content
+  // (by the harvester or the cleanup .command), do NOT fingerprint it — the detected
+  // tech would belong to the wrong company (e.g. the "Smart Evolution" WordPress site
+  // sitting on foundationendowment.com). Rule 2.1: better no tech than wrong tech.
+  const flagged = company.extra_fields?.website_content_conflict
+    || (await query(`SELECT 1 FROM companies WHERE id=$1 AND extra_fields ? 'website_content_conflict'`, [company.id])).rows.length;
+  if (flagged) { await markStage12(company.id, 'no_data', { stage12_skip: 'website_content_conflict' }); return { status: 'no_data', tech: 0 }; }
+
   TS.scanned++;
   const page = await getPage(url);
   if (!page) { await markStage12(company.id, 'no_data', { stage12_skip: 'unreachable' }); return { status: 'no_data', tech: 0 }; }

@@ -471,6 +471,24 @@ export function CompanyDetail({ companyId, onMutated, onDeleted, canHardDelete =
               >This is correct — restore website</button>
               <span style=${{ fontSize:'11px', color:'var(--text-dim)', alignSelf:'center' }}>…or leave it hidden.</span>
             </div>
+          ` : c.website_content_conflict ? html`
+            <div style=${{ fontSize: '12.5px', fontWeight: 700, color: 'rgb(91 140 255)', marginBottom: '4px' }}>
+              Website content looks like a different company
+            </div>
+            <div style=${{ fontSize: '12px', color: 'var(--text-muted)', lineHeight: 1.5, marginBottom: '10px' }}>
+              The domain <b>${(c.website || '').replace(/^https?:\/\/(www\.)?/i, '').replace(/\/.*$/, '')}</b> matches ${c.name}, but the page it serves reads as <b>“${c.website_content_conflict.brand || 'another brand'}”</b>${c.website_content_conflict.evidence ? html` (${c.website_content_conflict.evidence})` : ''}. Bell kept the website but hid the scraped logo / description / tech${c.website_content_conflict.tech?.length ? ` (${c.website_content_conflict.tech.length} tech)` : ''} + website contacts. If that page really is ${c.name}'s, restore them:
+            </div>
+            <div style=${{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+              <button class="linkbtn"
+                style=${{ padding:'5px 12px', borderRadius:'6px', background:'rgb(91 140 255)', border:'1px solid rgb(91 140 255)', color:'#fff', fontSize:'11.5px', fontWeight:600 }}
+                title="Restore the hidden logo/description + un-hide the website contacts, and clear the flag."
+                onClick=${async () => {
+                  try { await api.restoreWebsiteContent(c.id); toast('Website content restored'); reload(); onMutated?.(); }
+                  catch (err) { toast('Restore failed: ' + err.message, 'error'); }
+                }}
+              >This is correct — restore content</button>
+              <span style=${{ fontSize:'11px', color:'var(--text-dim)', alignSelf:'center' }}>…or leave it hidden.</span>
+            </div>
           ` : html`
             <div style=${{ fontSize: '12.5px', fontWeight: 700, color: 'rgb(91 140 255)', marginBottom: '4px' }}>
               Needs your decision

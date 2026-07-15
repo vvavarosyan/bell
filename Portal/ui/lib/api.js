@@ -168,6 +168,7 @@ export const api = {
   deleteCompany:          (id) => request('/api/companies/' + id, { method: 'DELETE' }),
   keepCompany:            (id) => request(`/api/companies/${id}/keep`, { method: 'POST', body: '{}' }),
   restoreWebsite:         (id) => request(`/api/companies/${id}/restore-website`, { method: 'POST', body: '{}' }),
+  restoreWebsiteContent:  (id) => request(`/api/companies/${id}/restore-website-content`, { method: 'POST', body: '{}' }),
   // Research approval queue (local engine only)
   researchCandidates:     (params = {}) => request('/api/research-candidates?' + new URLSearchParams(params)),
   approveCandidate:       (id) => request(`/api/research-candidates/${id}/approve`, { method: 'POST', body: '{}' }),

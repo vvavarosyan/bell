@@ -28,6 +28,7 @@ import { fetchPage, toRootUrl, sameHost, hostOf, pool } from './http.js';
 import { renderPage, rendererAvailable, closeRenderer } from './render.js';
 import { recordReject } from './rejects.js';
 import { recordSearch } from './ledger.js';
+import { contentIdentity } from './content_identity.js';
 import {
   findEmails, findPhones, findSocials, preferOwnEmails,
   guessAddress, extractTeam, extractPartners, pickLogo,
@@ -195,6 +196,30 @@ export async function enrichCompany(company) {
   const industry = inferIndustry(`${homeMeta.title || ''} ${description || ''} ${keywords || ''} ${allText.slice(0, 4000)}`);
   const foundedYear = extractFoundedYear(allText);
 
+  // Content-identity guard (Rule 2.1): a RIGHT domain can serve the WRONG company
+  // (e.g. foundationendowment.com — matches "Qatar Foundation Endowment" — actually
+  // serving a "Smart Evolution" tech blog). If the page's content clearly belongs to a
+  // DIFFERENT brand and never mentions this company, store NOTHING derived from it and
+  // flag for admin review. We keep the website itself (the domain matches the name; only
+  // the content is wrong — a parked/hijacked/rebranded page), never wiping it.
+  const idv = contentIdentity(company, { meta: homeMeta, text: allText, ok: home.ok });
+  if (idv.verdict === 'content-conflict') {
+    await flagWebsiteContentConflict(company.id, idv, home.finalUrl);
+    for (const e of rawEmails.slice(0, 40)) {
+      await recordReject(company.id, 'harvester', 'email', e, `website content is a different company (${idv.brand})`);
+    }
+    const summary = {
+      stage7_scraped_at: new Date().toISOString(),
+      stage7_pages: pages.map(p => ({ url: p.url, kind: p.kind })),
+      stage7_rendered: renderMode,
+      stage7_content_conflict: { brand: idv.brand, matched: idv.matched, evidence: idv.evidence },
+      stage7_found: { emails: 0, phones: 0, socials: 0, people: 0, partners: 0 },
+    };
+    await markStage(company.id, 'done', summary);
+    await recomputeBellScoreForCompany(company.id);
+    return { status: 'done', usd: 0, scraped_pages: pages.map(p => p.url), note: `website content conflict: ${idv.brand}`, found: summary.stage7_found };
+  }
+
   // Team people only from team/about pages (least noisy).
   const teamPages = pages.filter(p => p.kind === 'team' || p.kind === 'about');
   const team = teamPages.length
@@ -297,6 +322,28 @@ function dedupeByName(rows) {
 }
 
 /** Only set address / website logo / description when the column is currently empty. */
+// Record that a company's website served a DIFFERENT brand's content. Stamps a
+// verbatim, provenance-carrying flag into extra_fields and raises needs_review so the
+// admin drawer surfaces it. Non-destructive: keeps the website + any prior data; the
+// separate cleanup .command is what quarantines already-stored wrong artifacts.
+async function flagWebsiteContentConflict(companyId, idv, url) {
+  const flag = {
+    brand: idv.brand || null,
+    matched: idv.matched || null,
+    evidence: idv.evidence || null,
+    url: url || null,
+    flagged_at: new Date().toISOString(),
+  };
+  await query(
+    `UPDATE companies
+        SET extra_fields = extra_fields || jsonb_build_object('website_content_conflict', $2::jsonb),
+            needs_review = TRUE,
+            review_reason = $3
+      WHERE id = $1`,
+    [companyId, JSON.stringify(flag), `Website content appears to be a different company (${idv.brand || 'unknown brand'}) — logo/description not stored`],
+  );
+}
+
 async function fillCompanyBlanks(companyId, { address, logo, description, industry, foundedYear, keywords }) {
   if (address) {
     await query(
