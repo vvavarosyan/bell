@@ -45,9 +45,23 @@ const DOC_PAGE = {
 };
 
 test('content-conflict: foundationendowment serves Smart Evolution → flagged', () => {
-  const r = contentIdentity(QF_ENDOWMENT, QF_PAGE);
+  const r = contentIdentity(QF_ENDOWMENT, { ...QF_PAGE, url: 'https://www.foundationendowment.com/' });
   assert.equal(r.verdict, 'content-conflict', JSON.stringify(r));
   assert.match(r.brand, /smart evolution/i);
+});
+
+// FALSE-POSITIVE GUARD (the Rimads/Avey case Val caught in Preview): a company operating
+// under a PRODUCT brand on its OWN domain must NOT be flagged. "Rimads QSTP-LLC" runs
+// avey.ai, branded "Avey" — legal name absent, but the domain (avey) IS the content brand.
+test('ok: company under a product brand on its own domain (Rimads → avey.ai) → not flagged', () => {
+  const r = contentIdentity({ name: 'Rimads QSTP-LLC' }, {
+    ok: true, url: 'https://avey.ai',
+    meta: { title: 'Avey — Empowering health through AI', ogSiteName: 'Avey',
+      description: 'Avey is a tech company that aims to empower health through the endless possibilities of AI.' },
+    text: 'Avey is a tech company that aims to empower health through the endless possibilities of AI. support@avey.ai',
+  });
+  assert.equal(r.verdict, 'ok', JSON.stringify(r));
+  assert.notEqual(r.verdict, 'content-conflict');
 });
 
 test('ok: Doha Clinic Hospital on its own site → name present, not flagged', () => {

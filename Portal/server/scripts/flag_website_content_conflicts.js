@@ -101,7 +101,7 @@ async function markChecked(id) {
     try {
       const home = await loadHome(c.website);
       if (!home || !home.ok) { if (apply) await markChecked(c.id); continue; }
-      const idv = contentIdentity({ name: c.name }, { meta: home.meta, text: home.text, ok: home.ok });
+      const idv = contentIdentity({ name: c.name }, { meta: home.meta, text: home.text, ok: home.ok, url: home.finalUrl });
       checked++;
       if (idv.verdict === 'content-conflict') {
         flagged++;

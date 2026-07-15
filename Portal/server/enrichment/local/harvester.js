@@ -202,7 +202,7 @@ export async function enrichCompany(company) {
   // DIFFERENT brand and never mentions this company, store NOTHING derived from it and
   // flag for admin review. We keep the website itself (the domain matches the name; only
   // the content is wrong — a parked/hijacked/rebranded page), never wiping it.
-  const idv = contentIdentity(company, { meta: homeMeta, text: allText, ok: home.ok });
+  const idv = contentIdentity(company, { meta: homeMeta, text: allText, ok: home.ok, url: home.finalUrl });
   if (idv.verdict === 'content-conflict') {
     await flagWebsiteContentConflict(company.id, idv, home.finalUrl);
     for (const e of rawEmails.slice(0, 40)) {

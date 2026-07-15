@@ -17,7 +17,7 @@
 //                      or name absent but no clear other brand).
 
 import { significantTokens, nameSlugs, GENERIC_WORDS } from './finder.js';
-import { distinctiveTokens, shareDistinctive } from './website_conflict.js';
+import { distinctiveTokens, shareDistinctive, hostSlug } from './website_conflict.js';
 
 // <title> brand separators — "Contact — Acme", "Acme | Home", "Page › Brand".
 const TITLE_SPLIT = /\s*[|·•>»‹›–—:]\s*|\s-\s/;
@@ -67,7 +67,21 @@ export function contentIdentity(company, page) {
     || slugs.some((s) => compact.includes(s));
   if (present) return { verdict: 'ok', reason: 'name_present' };
 
-  // Name absent → require a positive DIFFERENT brand in the high-signal fields.
+  // Company legal name absent — but is the page coherently branded to ITS OWN DOMAIN?
+  // A company often runs its site under a PRODUCT/TRADING name, not its legal name:
+  // "Rimads QSTP-LLC" operates avey.ai, branded "Avey" (domain = content). That is a
+  // real own-brand site, NOT foreign content. We only treat the page as wrong when the
+  // content brand disagrees with the DOMAIN too (parked/hijacked/rebranded — e.g.
+  // foundationendowment.com serving "Smart Evolution", where the domain slug never
+  // appears in its own content). website_conflict.js separately handles a domain that
+  // belongs to a DIFFERENT registered company.
+  const domainSlug = hostSlug(page.url || page.finalUrl || '');
+  if (domainSlug && domainSlug.length >= 4 && compact.includes(domainSlug)) {
+    return { verdict: 'ok', reason: 'domain_brand_present' };
+  }
+
+  // Name absent AND the domain-brand is absent from its own content → require a positive
+  // DIFFERENT brand in the high-signal fields to call it a conflict.
   for (const label of brandCandidates(meta)) {
     if (shareDistinctive(name, label)) continue;           // same brand family → not foreign
     const toks = foreignTokens(label, D);
