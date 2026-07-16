@@ -98,6 +98,46 @@ test('skip: generic "coming soon" / under construction placeholder → never fla
   assert.equal(r.verdict, 'skip', JSON.stringify(r));
 });
 
+// ── REGRESSION: every false positive from Val's live Apply run (2026-07-16) ──────────
+// The bar for all of these is simply "NOT content-conflict" — i.e. Bell must not hide a
+// correct company's data. 'ok' and 'skip' are both acceptable; only a flag is a failure.
+const notFlagged = (label, company, url, meta, text) => {
+  test(`no false flag: ${label}`, () => {
+    const r = contentIdentity({ name: company }, { ok: true, url, meta, text });
+    assert.notEqual(r.verdict, 'content-conflict', `${label} → ${JSON.stringify(r)}`);
+  });
+};
+
+// Accent folding — the company's OWN name was in the title, but stripping non-[a-z0-9]
+// turned "stratèze" into "strat ze" so it never matched.
+notFlagged('Stratèze LLC on strateze.com (accented own name)', 'Strateze LLC', 'https://www.strateze.com/en',
+  { title: 'Stratèze — SaaS Management Solutions | Micro-Systems & Systems-Expert' },
+  'Stratèze propose des solutions de gestion SaaS.');
+notFlagged('Wärtsilä (accented own name)', 'Wartsila doha', 'https://www.wartsila.com',
+  { title: 'Wärtsilä - The global leader in innovative technologies', ogSiteName: 'Wärtsilä' },
+  'Wärtsilä is the global leader in innovative technologies.');
+// Title TAGLINES are not brands — this was the single biggest false-positive class.
+notFlagged('Gannett Fleming tagline', 'GANNETT FLEMING', 'https://www.gannettfleming.com',
+  { title: 'Ingenuity That Shapes Lives', ogSiteName: null }, 'Ingenuity that shapes lives. Engineering firm.');
+notFlagged('Consolidated Contractors tagline', 'Consolidated Contractors Group S.A.', 'https://www.ccc.gr',
+  { title: 'Building Legacies, Honoring Values', ogSiteName: null }, 'Building legacies honoring values since 1952.');
+notFlagged('Servicio tagline', 'Servicio LLC', 'https://servicio.qa',
+  { title: '- We delivered the excellence', ogSiteName: null }, 'We delivered the excellence in facility management.');
+// HTML entity in the company's own name.
+notFlagged("Engier&#39;s entity", 'Qatar Engieers Trading And Contracting', 'https://qatarengieers.com',
+  { title: 'Engier&#39;s', ogSiteName: null }, "Engier&#39;s trading and contracting in Doha.");
+// Parked / expired / blocked / template pages prove nothing.
+notFlagged('Website Expired', 'Asia for Marble & Granite', 'https://asiamarble.qa',
+  { title: 'Website Expired' }, 'This website has expired. Contact the administrator.');
+notFlagged('ConnectYourDomain Error', 'SANDRA BEAUTY TRADING', 'https://sandrabeauty.qa',
+  { title: 'ConnectYourDomain Error' }, 'ConnectYourDomain Error. Domain not connected.');
+notFlagged('"My Website" default', 'Q AL SABA TRADING AND CONTRACTING', 'https://qalsaba.com',
+  { title: 'My Website' }, 'My Website. Welcome home about us contact services page.');
+notFlagged('ThemeForest template', 'qatar executive', 'https://qatarexecutive.qa',
+  { title: 'ThemeForest' }, 'ThemeForest premium website templates and themes here.');
+notFlagged('Not Acceptable (blocked)', 'One Thousand And One LLC', 'https://www.onethousandone.com',
+  { title: 'Not Acceptable!' }, 'Not Acceptable! An appropriate representation could not be found.');
+
 test('skip: unrendered/empty shell page → never flagged', () => {
   const r = contentIdentity(QF_ENDOWMENT, { ok: true, meta: {}, text: '' });
   assert.equal(r.verdict, 'skip', JSON.stringify(r));

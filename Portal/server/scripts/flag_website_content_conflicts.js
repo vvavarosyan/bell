@@ -24,6 +24,7 @@ import { renderPage, rendererAvailable } from '../enrichment/local/render.js';
 import { contentIdentity } from '../enrichment/local/content_identity.js';
 
 const apply = process.argv.includes('--apply');
+const recheckOnly = process.argv.includes('--recheck');   // only re-examine existing flags
 const LIMIT = (() => { const i = process.argv.indexOf('--limit'); return i > -1 ? Number(process.argv[i + 1]) || 0 : 0; })();
 const trunc = (s, n = 34) => { s = String(s || ''); return s.length > n ? s.slice(0, n) + '…' : s; };
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -72,6 +73,59 @@ async function quarantine(id, idv, home) {
   return { tech: tech.length };
 }
 
+// Undo a flag: put the snapshotted logo/description back, un-hide the website contacts,
+// clear the review flag. Mirrors POST /companies/:id/restore-website-content.
+async function restoreOne(id, wcc) {
+  const back = {};
+  if (wcc?.logo_url) back.website_logo_url = wcc.logo_url;
+  if (wcc?.description) back.website_description = wcc.description;
+  await query(
+    `UPDATE companies SET
+        needs_review = false, review_reason = NULL,
+        extra_fields = ((coalesce(extra_fields,'{}'::jsonb) - 'website_content_conflict' - 'website_content_checked_at') || $2::jsonb),
+        updated_at = now()
+      WHERE id = $1`,
+    [id, JSON.stringify(back)]);
+  await query(
+    `UPDATE company_contacts SET extra_fields = coalesce(extra_fields,'{}'::jsonb) - 'hidden_conflict', updated_at = now()
+      WHERE company_id = $1 AND source = 'stage7-website'`, [id]);
+}
+
+// RE-CHECK EVERY ALREADY-FLAGGED COMPANY with the CURRENT classifier and RESTORE the ones
+// that no longer qualify. This exists because a flagged row is excluded from the candidate
+// query, so simply re-running could never undo a bad flag — and the 2026-07-16 run produced
+// real false positives (accented names like "Stratèze"/"Wärtsilä", title TAGLINES such as
+// Gannett Fleming's "Ingenuity That Shapes Lives", HTML entities, and parked/expired pages).
+// The classifier has since been tightened; this pass is how those companies get their data
+// back automatically instead of Val clicking restore 47 times.
+async function recheckFlagged(applyMode) {
+  const rows = (await query(
+    `SELECT id, name, website, extra_fields->'website_content_conflict' AS wcc
+       FROM companies WHERE extra_fields ? 'website_content_conflict' ORDER BY id`)).rows;
+  if (!rows.length) return { checked: 0, restored: 0, kept: 0 };
+  console.log(`Re-checking ${rows.length} previously-flagged compan${rows.length === 1 ? 'y' : 'ies'} with the current rules…\n`);
+  let restored = 0, kept = 0;
+  for (const c of rows) {
+    try {
+      const home = await loadHome(c.website);
+      const idv = home && home.ok
+        ? contentIdentity({ name: c.name }, { meta: home.meta, text: home.text, ok: home.ok, url: home.finalUrl })
+        : { verdict: 'skip', reason: 'unreachable' };
+      if (idv.verdict === 'content-conflict') {
+        kept++;
+        console.log(`  KEEP FLAG  ${trunc(c.name).padEnd(36)} → "${trunc(idv.brand || '?', 24)}"`);
+      } else {
+        restored++;
+        console.log(`  RESTORE    ${trunc(c.name).padEnd(36)} (${idv.reason}) — data given back`);
+        if (applyMode) await restoreOne(c.id, c.wcc || {});
+      }
+      await sleep(700);
+    } catch (e) { console.log(`  [err] co#${c.id}: ${e.message}`); }
+  }
+  console.log(`\n→ ${applyMode ? 'Restored' : 'Would restore'} ${restored} · kept ${kept} genuine.\n`);
+  return { checked: rows.length, restored, kept };
+}
+
 async function markChecked(id) {
   await query(`UPDATE companies SET extra_fields = coalesce(extra_fields,'{}'::jsonb) || jsonb_build_object('website_content_checked_at', $2::text) WHERE id=$1`,
     [id, new Date().toISOString()]);
@@ -79,6 +133,12 @@ async function markChecked(id) {
 
 (async () => {
   console.log(`Bell — flag wrong-CONTENT websites  (${apply ? 'APPLY — writing' : 'DRY-RUN — preview only'})\n`);
+
+  // STEP 1 — always re-examine what we already flagged, and hand back anything the current
+  // (stricter) rules clear. Self-correcting: a rule improvement automatically un-does the
+  // bad flags it used to cause, rather than leaving a customer's data hidden for good.
+  await recheckFlagged(apply);
+  if (recheckOnly) { console.log('Re-check only (--recheck) — no new companies were scanned.'); process.exit(0); }
   // Candidates: harvested companies that stored a website logo/description and haven't
   // been content-checked since their last harvest.
   const rows = (await query(
