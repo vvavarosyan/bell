@@ -12,6 +12,7 @@ import { html } from '../lib/html.js';
 import { api } from '../lib/api.js';
 import { toast } from '../lib/toast.js';
 import { DatasetDetail } from './DatasetDetail.js';
+import { BELLA_ACTION_EVENT, takePending } from '../lib/bellaBus.js';
 
 const PAGE_SIZE = 60;
 
@@ -62,6 +63,23 @@ export function DeepDataTab({ mode = 'local-admin' } = {}) {
 
   useEffect(() => { loadStats(); }, [loadStats]);
   useEffect(() => { loadRows(); }, [loadRows]);
+
+  // Bella opens a dataset drawer here (Val 2026-07-15: "she must be able to open the deep
+  // data drawer … currently she has a trouble opening the drawer"). She stashes a
+  // show_dataset action just before navigating here (picked up on mount) and fires it live
+  // when we're already mounted — the same pattern the Companies/Tenders grids use. The
+  // drawer keys on the dataset_id SLUG, which is exactly what the action carries.
+  useEffect(() => {
+    const apply = (a) => {
+      if (!a || a.type !== 'show_dataset' || !a.dataset_id) return;
+      if (a.q) { setQ(a.q); setOffset(0); }
+      setOpenedId(a.dataset_id);
+    };
+    apply(takePending('show_dataset'));
+    const onAction = (e) => { if (e.detail && e.detail.type === 'show_dataset') apply(e.detail); };
+    window.addEventListener(BELLA_ACTION_EVENT, onAction);
+    return () => window.removeEventListener(BELLA_ACTION_EVENT, onAction);
+  }, []);
 
   // Background poll every 8s so users see the catalog grow during seed and
   // see status flip from running→done after manual refresh.

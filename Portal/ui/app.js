@@ -206,6 +206,11 @@ function App({ initialUser, initialTenant, mode }) {
           case 'show_signals':
             if (currentRoute().tab !== 'signals') { stashPending(a); navigateTo('signals'); }
             break;
+          // Open a dataset's drawer on the user's screen (DeepDataTab keys its drawer on
+          // the dataset_id SLUG). Same stash-then-navigate dance as the grids above.
+          case 'show_dataset':
+            if (currentRoute().tab !== 'deep-data') { stashPending(a); navigateTo('deep-data'); }
+            break;
           case 'fill_field': {
             // The target view may be mid-navigation or still fetching its data
             // (the ICP form loads on first open) — retry on a backoff before

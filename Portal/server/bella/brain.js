@@ -30,6 +30,12 @@ const MAX_TOKENS  = 2048;
 const MAX_ROUNDS  = 6;        // model-call rounds per user turn (tool loop bound)
 const HISTORY_MAX = 60;       // hard fetch cap; store.js quantises it to a cacheable window
 
+// A spoken/typed approval. Anchored ^…$ ON PURPOSE: the ENTIRE message must be the
+// affirmative. "approved" approves; "ok but fix the subject first" or "that was approved
+// last week" must NOT — approvals gate real sends and real money, so we only accept an
+// unambiguous, complete affirmative and never infer one from a longer sentence.
+const AFFIRM_RX = /^\s*(ok(ay)?\s+)?(approved?|approve\s+it|yes[,\s]*approve(\s+it)?|go\s+ahead|do\s+it|send\s+it|confirm(ed)?|yes[,\s]*(please\s+)?(do\s+it|go\s+ahead|send\s+it))\s*[.!]*\s*$/i;
+
 // ---------------------------------------------------------------------------
 // SSE parser lives in ./sse.js (zero-import module shared with the marketing
 // brain, which must never pull this file's db-reaching import chain).
@@ -296,16 +302,59 @@ export async function runBellaTurn({ ctx, conversationId, userText, clientContex
       effectiveText = '[System note: the referenced action no longer exists. Tell the user briefly.]';
     } else if (actionMatch[2] === 'approved') {
       if (action.tool === 'propose_plan') {
-        let args = action.args;
-        if (typeof args === 'string') { try { args = JSON.parse(args); } catch { args = {}; } }
-        grant = buildPlanGrant(args, (name) => !!getTool(name));
-        effectiveText = planApprovedNote(action.id, args);
+        // SAFETY (Rule: an approval must be real). Only a plan the approve ROUTE actually
+        // ran may mint a grant. That route is the one-shot gate (routes/bella.js: status
+        // !== 'proposed' → 409) and leaves the row 'done'; this path had NO status check at
+        // all, so a replayed — or forged, or DENIED — '[[action:N:approved]]' marker minted
+        // a fresh per-tool budget for gated tools (send_email, enroll_in_sequence…).
+        // 'done' = approved+executed here. 'proposed' = never approved. 'denied'/'error' =
+        // must never authorise anything.
+        if (action.status !== 'done') {
+          effectiveText = `[System note: action #${action.id} is "${action.status}" — it is NOT an approved plan, so nothing has been authorised. Do NOT execute any of its steps and do not claim you did. Tell the user the approval isn't valid and ask them to approve again if they still want it.]`;
+        } else {
+          let args = action.args;
+          if (typeof args === 'string') { try { args = JSON.parse(args); } catch { args = {}; } }
+          grant = buildPlanGrant(args, (name) => !!getTool(name));
+          effectiveText = planApprovedNote(action.id, args);
+        }
+      } else if (action.status === 'denied') {
+        // Never narrate a denied action as if it ran.
+        effectiveText = `[System note: action #${action.id} (${action.tool}) was DENIED — it did NOT run. Acknowledge briefly; do not retry unless they ask.]`;
       } else {
         effectiveText = `[System note: the user APPROVED your proposed ${action.tool} (action #${action.id}) and it has been executed. Result: ${action.result_summary || action.status}. Tell the user the outcome, then continue helping.]`;
       }
     } else {
       effectiveText = `[System note: the user DENIED your proposed ${action.tool} (action #${action.id}). Acknowledge briefly; do not retry unless they ask.]`;
     }
+  } else if (!hidden && AFFIRM_RX.test(userText || '')) {
+    // SPOKEN / TYPED APPROVAL (Val 2026-07-15: "user can just say approved, not necessary
+    // for user to click approve"). Deliberately STRICT and deterministic — approvals gate
+    // real money and real sends, so we never let the model infer one:
+    //   • the WHOLE message must be an unambiguous affirmative (AFFIRM_RX), not a sentence
+    //     that merely contains "ok" ("ok, but change the subject first" must NOT send);
+    //   • there must be exactly ONE pending action — with several we refuse and ask which;
+    //   • the same one-shot gate as the Approve button applies (only 'proposed' runs, so a
+    //     second "approved" cannot re-fire it).
+    const pending = (await store.listActions(tenantId, userId, 20).catch(() => []))
+      .filter((a) => a.status === 'proposed');
+    if (pending.length === 1) {
+      const a = pending[0];
+      let args = a.args;
+      if (typeof args === 'string') { try { args = JSON.parse(args); } catch { args = {}; } }
+      if (a.tool === 'propose_plan') {
+        grant = buildPlanGrant(args, (name) => !!getTool(name));
+        await store.setActionStatus(a.id, 'done', 'approved by voice/chat').catch(() => {});
+        effectiveText = planApprovedNote(a.id, args);
+      } else {
+        const { result, summary, isError } = await executeTool(a.tool, args, { ...ctx, conversationId: convId });
+        await store.setActionStatus(a.id, isError ? 'error' : 'done', summary, Number(result?.charged) || 0).catch(() => {});
+        effectiveText = `[System note: the user said "${String(userText).trim().slice(0, 40)}" — that is their approval for the pending ${a.tool} (action #${a.id}), which has now been ${isError ? 'ATTEMPTED and FAILED' : 'executed'}. Result: ${summary}. Tell them the outcome plainly; do not claim success if it failed.]`;
+      }
+      send('approval', { action_id: a.id, tool: a.tool, decided: 'approved' });   // client resyncs the inbox
+    } else if (pending.length > 1) {
+      effectiveText = `[System note: the user said something approving, but ${pending.length} actions are pending: ${pending.map((p) => `#${p.id} ${p.tool}`).join(', ')}. Do NOT act. Ask which one they mean.]\n${userText}`;
+    }
+    // 0 pending → leave the message alone; she just answers normally.
   }
 
   // Per-turn context rides in the user message (NOT the system prompt — that

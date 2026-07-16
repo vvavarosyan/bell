@@ -943,7 +943,7 @@ export const TOOLS = [
   {
     definition: {
       name: 'search_datasets',
-      description: 'Search the Deep Data section (Qatar open-data datasets) by keyword.',
+      description: "Search the Deep Data section (Qatar open-data datasets) by keyword. Each result's `dataset_id` is the SLUG you pass to get_dataset_records / show_dataset. `rows_we_hold` is how many rows Bell actually has (use this); `publisher_record_count` is the publisher's own figure and is often 0 even when Bell holds rows — never say a dataset is empty based on it.",
       input_schema: {
         type: 'object',
         properties: { q: { type: 'string' }, limit: { type: 'integer', description: '1–20 (default 10).' } },
@@ -955,7 +955,21 @@ export const TOOLS = [
       });
       const r = asResult(status, payload);
       if (r.error) return r;
-      return { total: payload.total ?? 0, datasets: (payload.rows || []).map((d) => pick(d, ['id', 'title', 'name', 'theme', 'publisher', 'records_count', 'updated_at'])) };
+      // Surface the SLUG (dataset_id) — the rows route keys on it. The old pick list
+      // returned the numeric PK `id` (which 404s the rows route) plus three keys the route
+      // never selects (name/records_count/updated_at), so she had no usable identity.
+      return {
+        total: payload.total ?? 0,
+        datasets: (payload.rows || []).map((d) => ({
+          dataset_id: d.dataset_id,
+          title: d.title,
+          theme: d.theme,
+          publisher: d.publisher,
+          rows_we_hold: d.our_last_record_count ?? 0,
+          publisher_record_count: d.record_count ?? 0,
+          source_modified_at: d.source_modified_at,
+        })),
+      };
     },
     summarize: (args, r) => `${r?.total ?? 0} datasets${args.q ? ` for "${args.q}"` : ''}`,
   },
@@ -963,25 +977,58 @@ export const TOOLS = [
   {
     definition: {
       name: 'get_dataset_records',
-      description: 'Read rows from one Deep Data dataset (id from search_datasets), optional keyword filter.',
+      description: "Read rows from one Deep Data dataset. `dataset_id` is the SLUG from search_datasets (e.g. \"health-statistics-quantity-of-imported-food-…\"), NOT a number. Optional keyword filter.",
       input_schema: {
         type: 'object',
         properties: {
-          dataset_id: { type: 'integer' }, q: { type: 'string' },
+          dataset_id: { type: 'string', description: 'The dataset_id SLUG from search_datasets — a string, never a number.' },
+          q: { type: 'string' },
           limit: { type: 'integer', description: '1–10 (default 5 — rows can be wide).' },
         },
         required: ['dataset_id'],
       },
     },
     async execute(args, ctx) {
-      const { status, payload } = await internalCall(openDataRouter, 'GET', `/datasets/${Number(args.dataset_id)}/records`, ctx, {
+      // The rows route keys on the TEXT slug (od_datasets.dataset_id), not the numeric PK.
+      // This used to send Number(dataset_id) → a guaranteed 404 for every dataset.
+      const slug = String(args.dataset_id || '').trim();
+      if (!slug) return { error: 'dataset_id_required', reason: 'Pass the dataset_id slug from search_datasets.' };
+      const { status, payload } = await internalCall(openDataRouter, 'GET', `/datasets/${encodeURIComponent(slug)}/records`, ctx, {
         query: { q: args.q, limit: Math.min(Math.max(Number(args.limit) || 5, 1), 10) },
       });
       const r = asResult(status, payload);
-      if (r.error) return r;
+      if (r.error) {
+        return status === 404
+          ? { error: 'not_found', reason: `No dataset with slug "${slug}". Use the dataset_id from search_datasets (a slug, not a number).` }
+          : r;
+      }
       return { total: payload.total ?? 0, records: (payload.rows || payload.records || []).slice(0, 10) };
     },
-    summarize: (args, r) => `${r?.total ?? 0} records in dataset #${args.dataset_id}`,
+    summarize: (args, r) => `${r?.total ?? 0} records in "${String(args.dataset_id || '').slice(0, 40)}"`,
+  },
+
+  {
+    definition: {
+      name: 'show_dataset',
+      description: "OPEN a Deep Data dataset's drawer in the app — the real detail panel, in front of the user, so they can see the rows themselves. Use whenever they say 'show me / pull it up / open that dataset'. Pass the dataset_id SLUG from search_datasets. Pair with get_dataset_records when you also need to read the rows yourself to answer.",
+      input_schema: {
+        type: 'object',
+        properties: {
+          dataset_id: { type: 'string', description: 'The dataset_id SLUG from search_datasets.' },
+          q: { type: 'string', description: 'Optional keyword to also filter the Deep Data list behind the drawer.' },
+        },
+        required: ['dataset_id'],
+      },
+    },
+    async execute(args) {
+      const slug = String(args.dataset_id || '').trim();
+      if (!slug) return { error: 'dataset_id_required', reason: 'Pass the dataset_id slug from search_datasets.' };
+      return { ok: true, opened: 'dataset', dataset_id: slug, q: args.q || '' };
+    },
+    summarize: (args) => `opening dataset "${String(args.dataset_id || '').slice(0, 40)}"`,
+    uiAction: (args, result) => (result && !result.error
+      ? { type: 'show_dataset', dataset_id: result.dataset_id, q: result.q }
+      : null),
   },
 
   // ==========================================================================

@@ -15,7 +15,33 @@ import { extractLawRefs } from './entities.js';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 const HOST = 'https://www.almeezan.qa';
-const lawUrl = (id) => `${HOST}/LawPage.aspx?id=${id}&language=en`;
+// Al Meezan publishes OLDER laws in English, but everything from ~2015 on is ARABIC-ONLY:
+// the English URL still returns HTTP 200 with a ~64KB page whose <title> is empty, so
+// cleanTitle() → '' → isLawPage() → false → the law was silently dropped (stats.skipped++).
+// That is exactly why Qatar's PDPPL (Law 13/2016, id 7121) was missing from the KB — Val
+// asked Bella about it and she knew nothing. Verified live 2026-07-15:
+//   id 7121 &language=en → title '' (portal shell) → rejected
+//   id 7121 &language=ar → 'قانون رقم (13) لسنة 2016 بشأن حماية خصوصية البيانات الشخصية' → accepted
+// So: try English first (unchanged for the laws that have it), then fall back to Arabic.
+const lawUrl = (id, lang = 'en') => `${HOST}/LawPage.aspx?id=${id}&language=${lang}`;
+const articlesUrl = (sectionId, lawId, lang) => `${HOST}/LawArticles.aspx?LawTreeSectionID=${sectionId}&lawId=${lawId}&language=${lang}`;
+const LANGS = ['en', 'ar'];
+const MAX_SECTIONS = 40;   // per law — bounds a runaway page; PDPPL has 8
+
+// A LawPage lists its chapters as LawArticles links. The LawPage body itself is only the
+// PREAMBLE ("We, Tamim bin Hamad Al Thani, having perused…") — the ARTICLES (what the law
+// actually requires) live behind these links. Storing only the preamble is why every one
+// of the 4,565 laws already in the KB averages ~99 words and Bella can never quote one.
+export function articleSectionIds(html, lawId) {
+  const out = [];
+  const seen = new Set();
+  for (const m of String(html || '').matchAll(/LawArticles\.aspx\?LawTreeSectionID=(\d+)&(?:amp;)?lawId=(\d+)/gi)) {
+    if (Number(m[2]) !== Number(lawId)) continue;
+    const sid = Number(m[1]);
+    if (!seen.has(sid)) { seen.add(sid); out.push(sid); }
+  }
+  return out;
+}
 
 const decode = (s) => String(s || '')
   .replace(/&nbsp;/g, ' ').replace(/&amp;/g, '&').replace(/&lt;/g, '<').replace(/&gt;/g, '>')
@@ -32,7 +58,10 @@ const decode = (s) => String(s || '')
 export function cleanTitle(html) {
   const m = html.match(/<title[^>]*>([\s\S]*?)<\/title>/i);
   let t = decode((m ? m[1] : '').replace(/<[^>]+>/g, '')).replace(/\s+/g, ' ').trim();
-  t = t.replace(/^.*?\|\s*Legislations\s*\|\s*/i, '').trim();   // drop the portal prefix if present
+  // Drop the portal prefix in EITHER language — the Arabic pages read
+  // "الميزان | البوابة القانونية القطرية | التشريعات | قانون رقم (13) لسنة 2016 …", and
+  // leaving that chrome on the title pollutes both search ranking and the KB display.
+  t = t.replace(/^.*?\|\s*(?:Legislations|التشريعات)\s*\|\s*/i, '').trim();
   return t;
 }
 
@@ -99,8 +128,19 @@ export async function crawlAlmeezan(source, { onProgress = () => {} } = {}) {
   const stats = { fetched: 0, new: 0, changed: 0, same: 0, errors: 0, skipped: 0 };
   let probed = 0;
   while (id <= to && probed < perRun) {
-    const url = lawUrl(id);
-    const r = await fetchLaw(url);
+    // Try English, then Arabic. English is the only language for many older laws; Arabic is
+    // the ONLY language for ~2015-onward laws (incl. PDPPL). Stop at the first that
+    // validates as a real law, so we add a second fetch only where English yields nothing.
+    let url = null, r = null, lang = null;
+    for (const L of LANGS) {
+      const u = lawUrl(id, L);
+      const resp = await fetchLaw(u);
+      if (resp && resp.transient) { r = resp; url = u; break; }          // handled below
+      if (resp && resp.html && isLawPage(cleanTitle(resp.html), lawBody(resp.html))) {
+        url = u; r = resp; lang = L; break;                              // a real law in this language
+      }
+      if (!r) { r = resp; url = u; }                                     // remember the first response
+    }
     probed++;
     if (r && r.transient) {
       // Retries exhausted on a transient failure — do NOT advance past a possibly
@@ -116,7 +156,22 @@ export async function crawlAlmeezan(source, { onProgress = () => {} } = {}) {
       const title = cleanTitle(r.html);
       const text = lawBody(r.html);
       if (isLawPage(title, text)) {
-        try { const k = await upsertPage(source, url, title, text); stats[k]++; stats.fetched++; }
+        // The LawPage body is only the PREAMBLE. Pull each chapter's ARTICLES so the stored
+        // law is the actual legal text Bella can quote — not just "We, Tamim bin Hamad Al
+        // Thani, having perused…". Verified live: PDPPL has 8 sections, ~2.7k chars each.
+        let full = text;
+        const sections = articleSectionIds(r.html, id).slice(0, MAX_SECTIONS);
+        for (const sid of sections) {
+          const ar = await fetchLaw(articlesUrl(sid, id, lang || 'en'));
+          if (ar && ar.html) {
+            const at = lawBody(ar.html);
+            // Only append real article text; never pad the record with a shell (Rule 2.1).
+            if (at && at.length > 120 && !full.includes(at)) full += '\n\n' + at;
+          }
+          await sleep(250);   // polite — one connection
+        }
+        if (sections.length) stats.articles = (stats.articles || 0) + sections.length;
+        try { const k = await upsertPage(source, url, title, full); stats[k]++; stats.fetched++; }
         catch { stats.errors++; }
       } else stats.skipped++;
     } else if (r && r.error) stats.errors++;   // definitive error (too large / bad url) — skip
