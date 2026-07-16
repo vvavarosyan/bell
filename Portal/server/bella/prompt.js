@@ -59,8 +59,16 @@ export function buildSystem(user, tenant, prefs = {}) {
     lines.push(`- How they want their emails written: ${String(prefs.email_style).trim().slice(0, 500)}`);
   }
   lines.push(`- Their approval preference: ${prefs.approval_mode === 'auto' ? 'you may act without asking, but sends/enrollments still need their Approve click' : 'always propose actions for approval first'}`);
+  // Both system blocks get the 1-hour cache TTL (GA — verified 2026-07-15, no beta header
+  // needed). Block 1 (PERSONA + CORE_FACTS, ~2.2k tok) is byte-identical for every user and
+  // every conversation, so a 1h entry is shared across all traffic; block 2 is the small
+  // per-user context. At the default 5m these were re-written at 1.25x after every pause in
+  // the conversation — the exact rhythm of a human chat. The history breakpoint (brain.js)
+  // deliberately stays at 5m: it is per-conversation and short-lived, so 2x writes on it
+  // would not pay back. 1h entries must precede 5m ones in the prefix — tools → system →
+  // messages already satisfies that.
   return [
-    { type: 'text', text: PERSONA + '\n\n' + CORE_FACTS, cache_control: { type: 'ephemeral' } },
-    { type: 'text', text: lines.join('\n'), cache_control: { type: 'ephemeral' } },
+    { type: 'text', text: PERSONA + '\n\n' + CORE_FACTS, cache_control: { type: 'ephemeral', ttl: '1h' } },
+    { type: 'text', text: lines.join('\n'), cache_control: { type: 'ephemeral', ttl: '1h' } },
   ];
 }

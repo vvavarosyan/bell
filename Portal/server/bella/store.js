@@ -87,23 +87,36 @@ export async function listMessagesForUi(conversationId, limit = 200) {
   return r.rows;
 }
 
-// Long tool results are clipped on replay: the model saw the full result live;
-// on later turns a truncated echo keeps context useful without token bloat.
-const REPLAY_CLIP = 2000;
+// ONE cap for a tool result, applied ONCE when it is SENT to the model (brain.js) and
+// then stored verbatim. Replay MUST be byte-identical to what was sent.
+//
+// Why this matters (the single biggest cost bug, found 2026-07-15): prompt caching is a
+// PREFIX BYTE MATCH. We used to send a result at 12,000 chars but replay it clipped to
+// 2,000. From the first clipped tool_result onward, turn N+1's prefix stopped matching
+// turn N's cache entry — so the entire rest of the history was re-billed at full price
+// AND (because the history breakpoint sits at the end) re-WRITTEN at 1.25x, every single
+// turn. Bella is tool-heavy, so nearly every turn paid it.
+//
+// Counter-intuitive but measured: clipping on replay COSTS money. A 12k tool result read
+// from cache is cheaper than the same result clipped to 2k but uncached. So: clip once,
+// at send time, and never rewrite the bytes afterwards.
+export const TOOL_RESULT_CLIP = 4000;
 
-function clipBlock(block) {
-  if (block && block.type === 'tool_result' && typeof block.content === 'string' && block.content.length > REPLAY_CLIP) {
-    return { ...block, content: block.content.slice(0, REPLAY_CLIP) + ' …(truncated)' };
-  }
-  return block;
-}
+// QUANTISED history window. A per-message sliding window (always "the last 30") changes
+// the FRONT of the messages array on every single turn — and prompt caching is a prefix
+// match, so the whole replayed history missed the cache once a conversation passed the
+// window size. Instead we trim in STEP-sized chunks: between trims the replayed history is
+// APPEND-ONLY (exactly what the cache wants), so turn N+1 re-reads turn N's prefix.
+const HISTORY_KEEP_MIN = 24;   // never replay fewer than this many messages
+const HISTORY_SOFT     = 40;   // only start trimming past this
+const HISTORY_STEP     = 16;   // trim this many at a time → prefix stable for 16 messages
 
 /**
  * Rebuild the Anthropic `messages` array for a conversation (oldest first,
  * last `max` rows). content_json is authoritative; plain-text rows fall back
  * to their display text.
  */
-export async function loadModelMessages(conversationId, max = 30) {
+export async function loadModelMessages(conversationId, max = 60) {
   const r = await query(
     `SELECT role, content, content_json FROM (
        SELECT id, role, content, content_json
@@ -123,7 +136,9 @@ export async function loadModelMessages(conversationId, max = 30) {
       // also HEALS rows persisted before the fix); drop rows left empty.
       // Pairing stays intact: only empty TEXT blocks are dropped, never
       // tool_use/tool_result, and a row that becomes empty had no tool_use.
-      content = content.map(clipBlock)
+      // NB: tool_result content is replayed VERBATIM (see TOOL_RESULT_CLIP) —
+      // rewriting it here would break the prompt-cache prefix match.
+      content = content
         .filter((b) => !(b && b.type === 'text' && !String(b.text || '').trim()));
       if (!content.length) continue;
     }
@@ -131,6 +146,13 @@ export async function loadModelMessages(conversationId, max = 30) {
     if (!Array.isArray(finalContent) && !String(finalContent).trim()) continue;
     out.push({ role: row.role, content: finalContent });
   }
+  // Quantised trim (see HISTORY_STEP): drop whole chunks so the window START stays put
+  // for STEP messages at a time, keeping the replayed prefix append-only and cacheable.
+  if (out.length > HISTORY_SOFT) {
+    const drop = Math.floor((out.length - HISTORY_KEEP_MIN) / HISTORY_STEP) * HISTORY_STEP;
+    if (drop > 0) out.splice(0, drop);
+  }
+
   // The API requires the history to OPEN with a plain user turn: drop leading
   // assistant rows AND tool_result rows orphaned by the window cut.
   const isOrphanToolResult = (m) =>

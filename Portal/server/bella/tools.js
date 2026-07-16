@@ -1735,7 +1735,10 @@ export const TOOL_DEFINITIONS = TOOLS.map((t, i) => {
   const def = { ...t.definition };
   // Prompt-caching breakpoint on the LAST tool definition: tools + system are
   // stable across turns, so every turn after the first reads them from cache.
-  if (i === TOOLS.length - 1) def.cache_control = { type: 'ephemeral' };
+  // ttl '1h' (GA — verified 2026-07-15, needs no beta header): these ~7.7k tokens of
+  // tool schemas are byte-identical for every user and every turn, but the default 5m
+  // entry expired during ordinary think-gaps and got RE-WRITTEN at 1.25x each time.
+  if (i === TOOLS.length - 1) def.cache_control = { type: 'ephemeral', ttl: '1h' };
   return def;
 });
 

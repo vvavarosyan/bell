@@ -28,7 +28,7 @@ import * as store from './store.js';
 const MODEL       = process.env.BDI_BELLA_MODEL || 'claude-sonnet-5';
 const MAX_TOKENS  = 2048;
 const MAX_ROUNDS  = 6;        // model-call rounds per user turn (tool loop bound)
-const HISTORY_MAX = 30;       // messages replayed from the conversation
+const HISTORY_MAX = 60;       // hard fetch cap; store.js quantises it to a cacheable window
 
 // ---------------------------------------------------------------------------
 // SSE parser lives in ./sse.js (zero-import module shared with the marketing
@@ -387,7 +387,9 @@ export async function runBellaTurn({ ctx, conversationId, userText, clientContex
 
         runners.push((async () => {
           const { result, summary, isError } = await executeTool(tu.name, tu.input, { ...ctx, conversationId: convId });
-          slots[i] = { type: 'tool_result', tool_use_id: tu.id, content: JSON.stringify(result).slice(0, 12_000), ...(isError ? { is_error: true } : {}) };
+          // Clip ONCE here; store.js replays these exact bytes (prompt caching is a
+          // prefix byte match — see store.TOOL_RESULT_CLIP).
+          slots[i] = { type: 'tool_result', tool_use_id: tu.id, content: JSON.stringify(result).slice(0, store.TOOL_RESULT_CLIP), ...(isError ? { is_error: true } : {}) };
           if (tool?.clientEffect !== 'navigate') {
             send('tool', { name: tu.name, status: isError ? 'error' : 'done', summary });
           }
