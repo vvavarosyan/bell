@@ -355,6 +355,18 @@ export async function runBellaTurn({ ctx, conversationId, userText, clientContex
       effectiveText = `[System note: the user said something approving, but ${pending.length} actions are pending: ${pending.map((p) => `#${p.id} ${p.tool}`).join(', ')}. Do NOT act. Ask which one they mean.]\n${userText}`;
     }
     // 0 pending → leave the message alone; she just answers normally.
+  } else if (!hidden) {
+    // The user asked something else instead of approving, so the pending proposal is stale
+    // — cancel it and drop its card (Val 2026-07-16: "when approval cards pop up and i ask
+    // a different question or change the plan, previous approval card stays active, it
+    // should not be like that"). This is a safety fix as much as a tidiness one: a card
+    // left sitting there could be clicked later and fire an email for a plan that no longer
+    // matches the conversation. If they still want it, Bella simply proposes again.
+    const dropped = await store.supersedePendingActions(tenantId, userId).catch(() => []);
+    if (dropped.length) {
+      effectiveText = `[System note: the user moved on to something else, so your ${dropped.length} still-pending proposal${dropped.length > 1 ? 's' : ''} (${dropped.map((d) => d.tool).join(', ')}) ${dropped.length > 1 ? 'were' : 'was'} CANCELLED and the approval card${dropped.length > 1 ? 's' : ''} removed. ${dropped.length > 1 ? 'They were' : 'It was'} NOT approved and did NOT run — never imply otherwise. If what they're asking now still needs that action, propose it again fresh.]\n${userText}`;
+      send('approval', { superseded: dropped.map((d) => d.id) });   // client drops the card
+    }
   }
 
   // Per-turn context rides in the user message (NOT the system prompt — that

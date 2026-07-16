@@ -286,6 +286,21 @@ export async function getActionStatuses(tenantId, userId, ids) {
   return out;
 }
 
+// Cancel every still-pending proposal for this user. A proposal is only valid for the
+// moment it was made: Val 2026-07-16 — "when approval cards pop up and i ask a different
+// question or change the plan, previous approval card stays active, it should not be like
+// that." A stale card is a real hazard, not just clutter — clicked later it would fire an
+// email or an enrollment for a plan that no longer matches the conversation. The inbox
+// draws only status='proposed', so this makes the card disappear everywhere at once.
+export async function supersedePendingActions(tenantId, userId) {
+  const r = await query(
+    `UPDATE bella_actions SET status = 'superseded'
+      WHERE tenant_id = $1 AND user_id = $2 AND status = 'proposed'
+      RETURNING id, tool`,
+    [tenantId, userId]);
+  return r.rows;
+}
+
 export async function setActionStatus(id, status, resultSummary = null, creditsCost = null) {
   await query(
     `UPDATE bella_actions

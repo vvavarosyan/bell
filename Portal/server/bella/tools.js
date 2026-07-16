@@ -39,6 +39,20 @@ const TOOL_TIMEOUT_MS = 12_000;
 
 // Sections Bella may navigate the user to (client-side effect; the UI ignores
 // anything not in this list — defense against a confused model).
+// Val 2026-07-16: "Emails must not contain (—) and any AI vibe." The em dash is the single
+// loudest "a machine wrote this" tell. The prompt forbids it, but a prompt is a request —
+// this is the guarantee, applied to what actually leaves the building. Numeric ranges
+// (2020–2024) are left alone; a dash opening a line is just dropped.
+export function stripAiDashes(s) {
+  return String(s || '')
+    .replace(/^[ \t]*[—–][ \t]*/gm, '')          // line-leading dash → gone
+    .replace(/\s*—\s*/g, ', ')                   // em dash → comma
+    .replace(/(?<!\d)\s*–\s*(?!\d)/g, ', ')      // en dash → comma, but keep 2020–2024
+    .replace(/\s+,/g, ',')                       // tidy the seams
+    .replace(/,\s*([,.;:!?])/g, '$1')
+    .replace(/,\s*$/gm, '');
+}
+
 export const NAV_SECTIONS = [
   'market-feed', 'signals', 'map', 'companies', 'people', 'jobs',
   'deep-data', 'crm', 'research', 'billing', 'account',
@@ -1287,7 +1301,10 @@ export const TOOLS = [
         ? args.cc.map((s) => String(s || '').trim()).filter((s) => s.includes('@'))
         : [];
       const { status, payload } = await internalCall(crmRouter, 'POST', `/records/${Number(args.record_id)}/email`, ctx, {
-        body: { subject: String(args.subject || ''), body: String(args.body || ''), to: args.to || undefined, cc: cc.length ? cc : undefined },
+        body: {
+          subject: stripAiDashes(args.subject), body: stripAiDashes(args.body),
+          to: args.to || undefined, cc: cc.length ? cc : undefined,
+        },
       });
       return asResult(status, payload, ['id', 'status']);
     },
