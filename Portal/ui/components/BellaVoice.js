@@ -229,12 +229,22 @@ export function BellaVoice({ onClose, onOpenChat }) {
       streamRef.current = stream;
       await stream.done;
     } catch (err) {
-      errored = err?.message || 'Connection lost.';
+      // Interrupting her aborts the stream on purpose — that rejection is expected, not a
+      // failure, so it must never surface as an error.
+      if (err?.name !== 'AbortError') errored = err?.message || 'Connection lost.';
     } finally {
       streamRef.current = null;
     }
     if (!aliveRef.current) { run.stop(); return; }
-    if (errored) { run.stop(); toast('Bella: ' + errored, 'error'); setLine(''); setSt('listening'); return; }
+    if (errored) {
+      // interrupt() / the VAD barge-in stop the run BEFORE aborting the stream, so a
+      // stopped run means Val cut her off deliberately — don't alarm him with a red toast
+      // for his own interruption.
+      const wasInterrupted = run.stopped;
+      run.stop();
+      if (!wasInterrupted) toast('Bella: ' + errored, 'error');
+      setLine(''); setSt('listening'); return;
+    }
     // Flush whatever remains after the stream ended (choices tail is UI-only).
     const rest = speechBuf.replace(CHOICES_RX, '').trim();
     if (rest && !run.stopped) run.push(rest);
@@ -367,8 +377,17 @@ export function BellaVoice({ onClose, onOpenChat }) {
           if (speechStart && bargeTentative) {
             if (lastSpeech - speechStart >= BARGE_MS) {
               // Real speech — she stops; the running capture becomes the utterance.
+              // Stop the whole speech QUEUE and abort the streaming turn — not just the
+              // current audio element. Pausing alone (the old `stopAudioRef.current?.()`)
+              // left playLoop running, so its next segment immediately re-set state to
+              // 'speaking', stomping this 'listening' and deadlocking the capture (the
+              // recorder-stop checks live only in the 'listening' branch) — she talked
+              // straight over Val. run.stop() also pauses the current audio, and aborting
+              // the stream stops us paying for a reply nobody will hear. Mirrors the
+              // tap-to-interrupt path (`interrupt()`), which was always correct.
               bargeTentative = false;
-              stopAudioRef.current?.();
+              speechRunRef.current?.stop();
+              try { streamRef.current?.abort(); } catch { /* ignore */ }
               setLine('');
               setSt('listening');
             } else if (now - lastSpeech > 450) {

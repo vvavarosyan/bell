@@ -14,6 +14,7 @@ import { useState, useEffect, useCallback } from 'react';
 import { html } from '../lib/html.js';
 import { api } from '../lib/api.js';
 import { toast } from '../lib/toast.js';
+import { fireToolEffects } from '../lib/bellaBus.js';
 
 export const APPROVALS_EVENT = 'bdi:bella-approvals-changed';
 export const fireApprovalsChanged = () => {
@@ -48,6 +49,12 @@ export function BellaApprovals({ onDecided = null }) {
       toast(verdict === 'approved'
         ? ('✓ ' + (r?.summary || a.result_summary || a.tool))
         : ('Denied — ' + (a.result_summary || a.tool)), verdict === 'approved' ? undefined : 'error');
+      // An approval executed here WRITES (send_email, add_to_crm, update_email_branding…),
+      // so open tabs must resync exactly as they do for the inline chat cards — this inbox
+      // is the ONLY surface for voice-proposed actions, and it was leaving every tab stale
+      // (BellaChat's inline path already did this; the inbox never did). The approve route
+      // returns plain JSON with no SSE 'tool' event, so the client must fire them.
+      if (verdict === 'approved') { try { fireToolEffects(a.tool); } catch { /* ignore */ } }
       // The host (BellaChat) sends the hidden continuation so Bella narrates
       // — and for an approved PLAN actually executes it.
       try { onDecided?.(a, verdict); } catch { /* ignore */ }

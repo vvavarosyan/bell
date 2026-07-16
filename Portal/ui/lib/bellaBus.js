@@ -22,6 +22,13 @@ export const TOOL_EFFECTS = {
   delete_deal: ['bdi:crm-changed'], send_email: ['bdi:crm-changed'],
   enroll_in_sequence: ['bdi:crm-changed'], send_whatsapp: ['bdi:crm-changed'],
   update_icp: ['bdi:icp-changed'], update_account_prefs: ['bdi:account-changed'],
+  // Email Settings writes MUST be here too (Val 2026-07-15: "Bella filled in the email
+  // settings but I had to refresh the page to see it"). Without an event, AccountTab's
+  // existing 'bdi:account-changed' listener never refetches — and worse, the tool's own
+  // uiAction navigates Val straight to the now-stale form, which then silently REVERTS
+  // her write on Save (the exact trap this map was built to close for ICP/prefs).
+  update_email_branding: ['bdi:account-changed'],
+  create_email_template: ['bdi:account-changed'],
 };
 export const fireToolEffects = (toolName) => (TOOL_EFFECTS[toolName] || []).forEach((ev) => {
   try { window.dispatchEvent(new CustomEvent(ev)); } catch { /* ignore */ }

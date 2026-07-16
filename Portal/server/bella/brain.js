@@ -322,9 +322,13 @@ export async function runBellaTurn({ ctx, conversationId, userText, clientContex
     + (fresh ? `[fresh context, mention only when relevant: ${fresh}]\n` : '')
     + effectiveText;
   messages.push({ role: 'user', content: [{ type: 'text', text: fullUserText }] });
-  await store.addMessage(convId, tenantId, userId, {
+  // Persist the user turn WITHOUT blocking the model call — nothing in the request needs
+  // its result, so awaiting it here just added DB latency to the time-to-first-token. It
+  // IS awaited before the first assistant row is written, so message ids stay ordered.
+  const userSaved = store.addMessage(convId, tenantId, userId, {
     role: 'user', content: hidden ? '' : userText, contentJson: [{ type: 'text', text: fullUserText }],
   });
+  userSaved.catch(() => { /* real failure is surfaced by the await inside the loop */ });
 
   let totalIn = 0, totalOut = 0, totalCacheRead = 0;
   try {
@@ -333,6 +337,9 @@ export async function runBellaTurn({ ctx, conversationId, userText, clientContex
       setHistoryCacheBreakpoint(messages);
       const { blocks, stopReason, inputTokens, cacheReadTokens, outputTokens } =
         await streamModelResponse({ apiKey, system, messages, signal, onToken: (t) => send('token', { t }) });
+      // The user row must land before any assistant row (history replays ORDER BY id).
+      // Resolved already after round 1 — free, and it overlapped the model's first token.
+      await userSaved;
       totalIn += inputTokens; totalOut += outputTokens; totalCacheRead += cacheReadTokens;
 
       const toolUses = blocks.filter((b) => b.type === 'tool_use');
