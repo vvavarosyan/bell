@@ -26,6 +26,7 @@ import creditsRouter   from '../routes/credits.js';
 import icpRouter       from '../routes/icp.js';
 import statsRouter     from '../routes/stats.js';
 import crmRouter       from '../routes/crm.js';
+import teamRouter      from '../routes/team.js';
 import whatsappRouter  from '../routes/whatsapp.js';
 import accountRouter   from '../routes/account.js';
 import billingRouter   from '../routes/billing.js';
@@ -1153,10 +1154,69 @@ export const TOOLS = [
   },
 
   {
+    definition: {
+      name: 'get_email_recipients',
+      description: "For a CRM record: who you can email or cc. Returns `cc` (addresses you MAY use — the company's REVEALED people plus company addresses) and `reveal` (decision-makers whose email is still locked; their address is NOT returned). Call this before cc-ing anyone. If the right person is under `reveal`, tell the user they must reveal them first — never guess an address.",
+      input_schema: {
+        type: 'object',
+        properties: { record_id: { type: 'integer' } },
+        required: ['record_id'],
+      },
+    },
+    async execute(args, ctx) {
+      const { status, payload } = await internalCall(crmRouter, 'GET', `/records/${Number(args.record_id)}/recipients`, ctx, {});
+      const r = asResult(status, payload);
+      if (r.error) return r;
+      return {
+        cc: (payload.cc || []).map((c) => ({ email: c.email || null, name: c.name || null, title: c.title || null, type: c.type, no_email: !!c.no_email })),
+        reveal: (payload.reveal || []).map((p) => ({ person_id: p.person_id, name: p.name, title: p.title })),
+        note: (payload.reveal || []).length
+          ? 'People under `reveal` are NOT revealed — Bell will not expose their email. Offer to reveal them (costs a credit) instead of guessing.'
+          : 'All available addresses are listed under `cc`.',
+      };
+    },
+    summarize: (_a, r) => r?.error ? 'failed' : `${(r?.cc || []).length} cc-able · ${(r?.reveal || []).length} need reveal`,
+  },
+
+  {
+    definition: {
+      name: 'get_pipeline',
+      description: 'The deal pipeline: its stages (id, name, order, won/lost) and every deal with its current stage. Call this before moving a deal — you need the real stage_id; never guess one.',
+      input_schema: { type: 'object', properties: {} },
+    },
+    async execute(_args, ctx) {
+      const { status, payload } = await internalCall(crmRouter, 'GET', '/pipeline', ctx, {});
+      const r = asResult(status, payload);
+      if (r.error) return r;
+      return {
+        stages: (payload.stages || []).map((s) => pick(s, ['id', 'name', 'position', 'is_won', 'is_lost'])),
+        deals: (payload.deals || []).map((d) => pick(d, ['id', 'title', 'value_num', 'currency', 'stage_id', 'status', 'record_id', 'company_name', 'person_name', 'expected_close'])),
+      };
+    },
+    summarize: (_a, r) => r?.error ? 'failed' : `${(r?.stages || []).length} stages · ${(r?.deals || []).length} deals`,
+  },
+
+  {
+    definition: {
+      name: 'list_team_members',
+      description: "The user's own teammates in this workspace (name, email, role). Use when they ask to copy a colleague on an email (pass the address as send_email cc) or to assign a record/deal to someone (use their id as owner_user_id).",
+      input_schema: { type: 'object', properties: {} },
+    },
+    async execute(_args, ctx) {
+      const { status, payload } = await internalCall(teamRouter, 'GET', '/members', ctx, {});
+      const r = asResult(status, payload);
+      if (r.error) return r;
+      const rows = payload.rows || payload.members || (Array.isArray(payload) ? payload : []);
+      return { members: rows.map((m) => pick(m, ['id', 'full_name', 'email', 'role', 'is_you'])) };
+    },
+    summarize: (_a, r) => r?.error ? 'failed' : `${(r?.members || []).length} teammates`,
+  },
+
+  {
     approval: 'always',
     definition: {
       name: 'send_email',
-      description: "Send an email to a CRM record's contact via the workspace's sending identity. ALWAYS gets user approval. BEFORE drafting: (1) call get_email_setup — if the user has no header/footer/signature yet, suggest setting it up first (update_email_branding) so the email doesn't look plain; the branding wraps the message automatically, so do NOT paste a signature/footer into the body. (2) call get_company for the recipient's company and weave in SPECIFICS — what they do, industry, city, Google reviews, partnerships, tech they run, recent news/signals — so it reads personally and earns a reply; never send a generic template. Personalization tokens like {company} are also supported.",
+      description: "Send an email to a CRM record's contact via the workspace's sending identity. ALWAYS gets user approval. BEFORE drafting: (1) call get_email_setup — if the user has no header/footer/signature yet, suggest setting it up first (update_email_branding) so the email doesn't look plain; the branding wraps the message automatically, so do NOT paste a signature/footer into the body. (2) call get_company for the recipient's company and weave in SPECIFICS — what they do, industry, city, Google reviews, partnerships, tech they run, recent news/signals — so it reads personally and earns a reply; never send a generic template. Personalization tokens like {company} are also supported. To copy in the company's other people, call get_email_recipients first and pass their addresses as cc — never invent an address.",
       input_schema: {
         type: 'object',
         properties: {
@@ -1164,18 +1224,27 @@ export const TOOLS = [
           subject: { type: 'string' },
           body: { type: 'string', description: 'Plain-text email body.' },
           to: { type: 'string', description: 'Override recipient (defaults to the record\'s email on file).' },
+          cc: {
+            type: 'array', items: { type: 'string' },
+            description: "Email addresses to copy in. Use addresses from get_email_recipients (the company's revealed people + company addresses) or the user's own teammates from list_team_members. Never guess an address.",
+          },
         },
         required: ['record_id', 'subject', 'body'],
       },
     },
-    describe: (args) => `Send email to record #${args.record_id} — "${String(args.subject || '').slice(0, 60)}" · ${String(args.body || '').slice(0, 120)}…`,
+    describe: (args) => `Send email to record #${args.record_id} — "${String(args.subject || '').slice(0, 60)}"${Array.isArray(args.cc) && args.cc.length ? ` · cc ${args.cc.join(', ')}` : ''} · ${String(args.body || '').slice(0, 120)}…`,
     async execute(args, ctx) {
+      // The route already accepts + forwards cc (filters on '@', caps at 25) and the mail
+      // transport emits it — only this schema was missing it, so Bella could never cc.
+      const cc = Array.isArray(args.cc)
+        ? args.cc.map((s) => String(s || '').trim()).filter((s) => s.includes('@'))
+        : [];
       const { status, payload } = await internalCall(crmRouter, 'POST', `/records/${Number(args.record_id)}/email`, ctx, {
-        body: { subject: String(args.subject || ''), body: String(args.body || ''), to: args.to || undefined },
+        body: { subject: String(args.subject || ''), body: String(args.body || ''), to: args.to || undefined, cc: cc.length ? cc : undefined },
       });
       return asResult(status, payload, ['id', 'status']);
     },
-    summarize: (args, r) => r?.error ? ('failed: ' + r.error) : `email sent to record #${args.record_id}`,
+    summarize: (args, r) => r?.error ? ('failed: ' + r.error) : `email sent to record #${args.record_id}${Array.isArray(args.cc) && args.cc.length ? ` (cc ${args.cc.length})` : ''}`,
   },
 
   {
@@ -1372,21 +1441,25 @@ export const TOOLS = [
     approval: 'act',
     definition: {
       name: 'update_deal',
-      description: 'Edit a deal: title, value, currency, expected close date.',
+      description: 'Edit a deal: title, value, currency, expected close date, its pipeline STAGE (move it forward/won/lost), or its owner. For stage_id call get_pipeline first for the real ids; for owner_user_id call list_team_members. Never guess either id.',
       input_schema: {
         type: 'object',
         properties: {
           deal_id: { type: 'integer' }, title: { type: 'string' },
           value_num: { type: 'number' }, currency: { type: 'string' },
           expected_close: { type: 'string', description: 'ISO date or null to clear.' },
+          stage_id: { type: 'integer', description: 'Move the deal to this pipeline stage (from get_pipeline). Moving to a won/lost stage sets the deal status automatically.' },
+          owner_user_id: { type: 'integer', description: 'Assign the deal to this teammate (from list_team_members).' },
         },
         required: ['deal_id'],
       },
     },
-    describe: (args) => `Update deal #${args.deal_id}${args.title ? ` ("${String(args.title).slice(0, 50)}")` : ''}${args.value_num !== undefined ? ` value ${args.value_num}` : ''}`,
+    describe: (args) => `Update deal #${args.deal_id}${args.title ? ` ("${String(args.title).slice(0, 50)}")` : ''}${args.value_num !== undefined ? ` value ${args.value_num}` : ''}${args.stage_id !== undefined ? ` → stage #${args.stage_id}` : ''}${args.owner_user_id !== undefined ? ` → owner #${args.owner_user_id}` : ''}`,
     async execute(args, ctx) {
       const body = {};
-      for (const k of ['title', 'value_num', 'currency', 'expected_close']) if (args[k] !== undefined) body[k] = args[k];
+      // stage_id + owner_user_id were missing from this whitelist, so Bella could never
+      // move a deal along the pipeline or assign it — the route supported both all along.
+      for (const k of ['title', 'value_num', 'currency', 'expected_close', 'stage_id', 'owner_user_id']) if (args[k] !== undefined) body[k] = args[k];
       const { status, payload } = await internalCall(crmRouter, 'PATCH', `/deals/${Number(args.deal_id)}`, ctx, { body });
       return asResult(status, payload, ['id', 'status', 'value_num']);
     },
