@@ -11,7 +11,16 @@ import { query } from '../db.js';
 import { filterSuppressed } from './suppression.js';
 
 const RESEND_URL = 'https://api.resend.com/emails';
-const DEFAULT_FROM = 'Bell <outreach@bell.qa>';
+// Transactional mail (team invites, notifications, template tests) must NOT come from an
+// "outreach@" mailbox: it reads as marketing on a login invite, and it mixes Bell's
+// transactional identity with its marketing identity — the one thing every deliverability
+// guide says to keep apart, since a marketing reputation hit would then land on the mail
+// people actually need. The `crm_email_from` setting overrides this when set (it never has
+// been — verified 2026-07-17, hence every invite to date has gone out as outreach@).
+// Val chose hello@bell.qa (2026-07-17); the mailbox lives on NameHero/cPanel so replies
+// reach a human. Resend verifies the DOMAIN (resend._domainkey.bell.qa is live), so any
+// @bell.qa local-part sends and signs correctly.
+const DEFAULT_FROM = 'Bell <hello@bell.qa>';
 
 export async function getFromAddress() {
   try {
