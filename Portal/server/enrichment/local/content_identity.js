@@ -36,6 +36,17 @@ function decodeEntities(s) {
 // positives on 2026-07-16: Stratèze LLC, Wärtsilä).
 const fold = (s) => String(s || '').normalize('NFD').replace(/[̀-ͯ]/g, '');
 
+// Length of the shared leading run of two strings. Used to tell a company's OWN trading
+// name (a prefix-variant of its domain/name) from a genuinely foreign brand. A PREFIX (not
+// a longest-common-substring) is deliberate: a shared generic word in the MIDDLE — Business,
+// Trading, Services — must never count as "same brand".
+function commonPrefixLen(a, b) {
+  const n = Math.min(a.length, b.length);
+  let i = 0;
+  while (i < n && a[i] === b[i]) i++;
+  return i;
+}
+
 // A page with NO real company content — parked, expired, blocked, a host/template default,
 // an error shell. It proves NOTHING about whether Bell's stored data is wrong (usually a
 // transient outage of an otherwise-correct site), so we SKIP; never quarantine on it.
@@ -119,6 +130,7 @@ export function contentIdentity(company, page) {
   // appears in its own content). website_conflict.js separately handles a domain that
   // belongs to a DIFFERENT registered company.
   const domainSlug = hostSlug(page.url || page.finalUrl || '');
+  const nameCompact = foldedName.toLowerCase().replace(/[^a-z0-9]+/g, '');
   if (domainSlug && domainSlug.length >= 4 && compact.includes(domainSlug)) {
     return { verdict: 'ok', reason: 'domain_brand_present' };
   }
@@ -127,13 +139,21 @@ export function contentIdentity(company, page) {
   // og:site_name naming a DIFFERENT brand to call it a conflict.
   for (const label of brandCandidates(meta)) {
     const foldedLabel = fold(label);
+    const labelCompact = foldedLabel.toLowerCase().replace(/[^a-z0-9]+/g, '');
     if (shareDistinctive(foldedName, foldedLabel)) continue;      // same brand family → not foreign
     // The site-name must also disagree with the DOMAIN — "Avey" on avey.ai is the site's
-    // own brand, not a takeover.
+    // own brand, not a takeover. A COMMON PREFIX (≥7) with the domain OR the company name is
+    // the same brand under a fuller/variant trading name, NOT foreign content: "Gulf
+    // Avenues" ↔ "Gulf Avenue Real Estate", blackcatqatar.com ↔ "Black Cat Engineering",
+    // easternexchangeqatar.com ↔ "Eastern Exchange Company" (2026-07-17 false positives). A
+    // PREFIX match (not a substring/LCS) is used on purpose so a shared GENERIC word in the
+    // middle — "…Business…", "…Trading…" — never counts (that would have cleared genuine
+    // takeovers like Fusion → "Circle K Business News").
     if (domainSlug && domainSlug.length >= 4) {
-      const labelCompact = foldedLabel.toLowerCase().replace(/[^a-z0-9]+/g, '');
       if (labelCompact.includes(domainSlug) || domainSlug.includes(labelCompact)) continue;
+      if (commonPrefixLen(labelCompact, domainSlug) >= 7) continue;
     }
+    if (nameCompact.length >= 7 && commonPrefixLen(labelCompact, nameCompact) >= 7) continue;
     const toks = foreignTokens(foldedLabel, D);
     if (toks.length) {
       return {

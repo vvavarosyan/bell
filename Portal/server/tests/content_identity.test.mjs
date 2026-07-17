@@ -138,6 +138,28 @@ notFlagged('ThemeForest template', 'qatar executive', 'https://qatarexecutive.qa
 notFlagged('Not Acceptable (blocked)', 'One Thousand And One LLC', 'https://www.onethousandone.com',
   { title: 'Not Acceptable!' }, 'Not Acceptable! An appropriate representation could not be found.');
 
+// ── REGRESSION: 2026-07-17 Apply run — trading-name variants of the domain must NOT flag ──
+notFlagged('Gulf Avenues ↔ "Gulf Avenue Real Estate" (plural variant)', 'Gulf Avenues', 'https://gulfavenues.com',
+  { title: 'Home', ogSiteName: 'Gulf Avenue Real Estate' }, 'Premium real estate developments.');
+notFlagged('blackcatqatar ↔ "Black Cat Engineering"', 'blackcatqatar', 'https://blackcatqatar.com',
+  { title: 'Home', ogSiteName: 'Black Cat Engineering & Contracting' }, 'Engineering and contracting in Qatar.');
+notFlagged('easternexchangeqatar ↔ "Eastern Exchange Company"', 'easternexchangeqatar', 'https://easternexchangeqatar.com',
+  { title: 'Home', ogSiteName: 'Eastern Exchange Company' }, 'Money transfer and currency exchange.');
+
+// ── These MUST STILL FLAG — a shared GENERIC middle word must not clear a real takeover ──
+test('still flags: Fusion → "Circle K Business News" (shared generic word only)', () => {
+  const r = contentIdentity({ name: 'Fusion Business Solutions LLC' }, {
+    ok: true, url: 'https://fusionqatar.com',
+    meta: { title: 'News', ogSiteName: 'Circle K Business News' }, text: 'Convenience store news and updates.' });
+  assert.equal(r.verdict, 'content-conflict', JSON.stringify(r));
+});
+test('still flags: Harsham → "Flashserve" (unrelated brand)', () => {
+  const r = contentIdentity({ name: 'Harsham General Contracting' }, {
+    ok: true, url: 'http://harsham.com',
+    meta: { title: 'Flashserve - Home', ogSiteName: 'Flashserve' }, text: 'The service superhero for dining.' });
+  assert.equal(r.verdict, 'content-conflict', JSON.stringify(r));
+});
+
 test('skip: unrendered/empty shell page → never flagged', () => {
   const r = contentIdentity(QF_ENDOWMENT, { ok: true, meta: {}, text: '' });
   assert.equal(r.verdict, 'skip', JSON.stringify(r));
