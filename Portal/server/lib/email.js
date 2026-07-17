@@ -48,7 +48,7 @@ export function inboundReplyTo(emailId) {
  * @returns {Promise<{id:string, raw:object}>}  the provider message id
  * @throws on missing key / provider error (caller maps to a safe message)
  */
-export async function sendEmail({ from, to, replyTo, subject, html, text, cc }) {
+export async function sendEmail({ from, to, replyTo, subject, html, text, cc, headers }) {
   const key = await getKey('resend');
   if (!key) throw new Error('email_provider_key_missing');           // internal — sanitize upstream
   if (!to) throw new Error('missing_recipient');
@@ -69,6 +69,11 @@ export async function sendEmail({ from, to, replyTo, subject, html, text, cc }) 
   if (!html && !text) body.text = '';
   if (replyTo) body.reply_to = replyTo;
   if (ccAllowed.length) body.cc = ccAllowed;
+  // Custom headers — this is how outreach sets the one-click unsubscribe (List-Unsubscribe +
+  // List-Unsubscribe-Post) that Gmail/Yahoo now require and Qatar law wants as a working
+  // opt-out. Was impossible before: the body had no headers field, so no marketing email
+  // could carry it. Harmless when unset (existing callers pass nothing).
+  if (headers && typeof headers === 'object' && Object.keys(headers).length) body.headers = headers;
 
   const res = await fetch(RESEND_URL, {
     method: 'POST',

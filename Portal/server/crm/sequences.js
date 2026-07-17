@@ -9,6 +9,7 @@
 // complete. Stops if the record is won/lost, has no email, or a send fails.
 
 import { query } from '../db.js';
+import { isQatarWorkingHour, nextQatarWorkingTime } from '../lib/qatar_time.js';
 import { sendEmail, getFromAddress, inboundReplyTo } from '../lib/email.js';
 import { getEmailBrandingByEmail, renderBrandedEmail } from '../lib/email_branding.js';
 import { resolveSendIdentity, formatFrom } from '../lib/email_domains.js';
@@ -40,14 +41,31 @@ async function safeRun() {
 
 /** Process all enrollments whose next step is due. Returns a small summary. */
 export async function runDue(limit = 25) {
+  // PAUSE THAT ACTUALLY PAUSES (was broken): the old query filtered only the ENROLLMENT's
+  // status, never the parent sequence's — so pausing a sequence left every in-flight
+  // enrollment sending. Now we JOIN crm_sequences and require s.status='active', so a
+  // paused/draft sequence stops its enrollments immediately.
   const due = await query(
-    `SELECT * FROM crm_sequence_enrollments
-      WHERE status = 'active' AND next_run_at IS NOT NULL AND next_run_at <= now()
-      ORDER BY next_run_at LIMIT $1`,
+    `SELECT e.* FROM crm_sequence_enrollments e
+       JOIN crm_sequences s ON s.id = e.sequence_id
+      WHERE e.status = 'active' AND s.status = 'active'
+        AND e.next_run_at IS NOT NULL AND e.next_run_at <= now()
+      ORDER BY e.next_run_at LIMIT $1`,
     [limit]
   );
-  let sent = 0, completed = 0, stopped = 0, errored = 0;
+  // QATAR WORKING-HOURS WINDOW (was absent — the runner could fire Friday 03:00). Bell is a
+  // Qatar B2B product, so sends are held to Sat–Thu, 07:00–17:00 Qatar time. Outside the
+  // window we DEFER (never drop) each due step to the next working slot. The outreach engine
+  // relies on this; it is also the right default for any business email.
+  const inWindow = isQatarWorkingHour();
+  let sent = 0, completed = 0, stopped = 0, errored = 0, deferred = 0;
   for (const enr of due.rows) {
+    if (!inWindow) {
+      const next = nextQatarWorkingTime();
+      await query(`UPDATE crm_sequence_enrollments SET next_run_at = $2 WHERE id = $1`, [enr.id, next.toISOString()]).catch(() => {});
+      deferred++;
+      continue;
+    }
     try {
       const r = await processEnrollment(enr);
       if (r === 'sent') sent++;
@@ -61,7 +79,7 @@ export async function runDue(limit = 25) {
       errored++;
     }
   }
-  return { due: due.rows.length, sent, completed, stopped, errored };
+  return { due: due.rows.length, sent, completed, stopped, errored, deferred };
 }
 
 async function processEnrollment(enr) {
