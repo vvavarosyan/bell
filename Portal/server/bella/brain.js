@@ -23,6 +23,7 @@ import { buildSystem } from './prompt.js';
 import { TOOL_DEFINITIONS, getTool, executeTool, requiresApproval } from './tools.js';
 import { buildPlanGrant, takeGrant, planApprovedNote } from './plan.js';
 import { freshSignalsBrief } from './context.js';
+import { formatQatar } from '../lib/qatar_time.js';
 import * as store from './store.js';
 
 const MODEL       = process.env.BDI_BELLA_MODEL || 'claude-sonnet-5';
@@ -378,7 +379,8 @@ export async function runBellaTurn({ ctx, conversationId, userText, clientContex
   let fresh = null;
   if (!hidden && !autonomous) fresh = await freshSignalsBrief(tenantId).catch(() => null);
   const fullUserText =
-    (section && !hidden ? `[user is currently on the "${section}" section]\n` : '')
+    (!hidden ? `[current date & time in Qatar (Asia/Qatar, UTC+3): ${formatQatar(new Date())}. Qatar is the reference timezone — resolve "today / tonight / tomorrow / this morning" and ALL scheduling against this, and pass schedule_task run_at in Qatar time.]\n` : '')
+    + (section && !hidden ? `[user is currently on the "${section}" section]\n` : '')
     + (voiceMode && !hidden ? '[voice conversation — reply in 1–3 short speakable sentences, plain prose, no lists, no quick-reply choices]\n' : '')
     + (fresh ? `[fresh context, mention only when relevant: ${fresh}]\n` : '')
     + effectiveText;

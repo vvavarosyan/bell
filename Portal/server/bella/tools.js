@@ -34,6 +34,7 @@ import openDataRouter  from '../routes/open_data.js';
 import publicNewsRouter from '../routes/public_news.js';
 import { SECTOR_GROUPS } from '../lib/industry_groups.js';
 import * as store from './store.js';
+import { formatQatar, parseQatarLocal } from '../lib/qatar_time.js';
 
 const TOOL_TIMEOUT_MS = 12_000;
 
@@ -1564,13 +1565,19 @@ export const TOOLS = [
     async execute(args, ctx) {
       const instruction = String(args.instruction || '').trim();
       if (!instruction) return { error: 'instruction required' };
-      let runAt = args.run_at ? new Date(args.run_at) : new Date(Date.now() + (Number(args.delay_hours) || 1) * 3600_000);
-      if (isNaN(runAt.getTime())) return { error: 'invalid run_at' };
+      // run_at with no timezone means Qatar-local (parseQatarLocal appends +03:00), so
+      // "21:00" is 9pm in Doha, not UTC. delay_hours is clock-independent and always safe.
+      // The current Qatar time is injected into every turn's context, so the model can now
+      // resolve "tonight" correctly instead of guessing a past time (the recurring failure).
+      let runAt = args.run_at
+        ? parseQatarLocal(args.run_at)
+        : new Date(Date.now() + (Number(args.delay_hours) || 1) * 3600_000);
+      if (!runAt || isNaN(runAt.getTime())) return { error: 'invalid run_at — pass an ISO datetime in Qatar time, or use delay_hours' };
       const now = Date.now();
-      if (runAt.getTime() < now) return { error: 'run_at is in the past' };
+      if (runAt.getTime() < now - 60_000) return { error: `run_at (${formatQatar(runAt)} Qatar) is in the past — it is currently ${formatQatar(new Date())} in Qatar. Pick a future time or use delay_hours.` };
       if (runAt.getTime() > now + 14 * 86400_000) return { error: 'max 14 days ahead' };
       const t = await store.createTask(ctx.tenant.id, ctx.user?.id ?? 0, ctx.conversationId || null, instruction, runAt.toISOString());
-      return { task_id: t.id, run_at: t.run_at };
+      return { task_id: t.id, run_at: t.run_at, run_at_qatar: formatQatar(runAt) };
     },
     summarize: (_a, r) => r?.error ? 'failed' : `task #${r?.task_id} scheduled`,
   },
