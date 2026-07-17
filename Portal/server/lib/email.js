@@ -48,9 +48,18 @@ export function inboundReplyTo(emailId) {
  * @returns {Promise<{id:string, raw:object}>}  the provider message id
  * @throws on missing key / provider error (caller maps to a safe message)
  */
-export async function sendEmail({ from, to, replyTo, subject, html, text, cc, headers }) {
-  const key = await getKey('resend');
-  if (!key) throw new Error('email_provider_key_missing');           // internal — sanitize upstream
+// Outreach (Bell's self-marketing) sends through a SEPARATE, ISOLATED Resend account and
+// its own subdomain (go.bell.qa), so an outreach reputation/AUP problem can NEVER take down
+// the transactional account that carries team invites, receipts and every tenant's CRM mail
+// (single chokepoint). channel:'outreach' selects the outreach key — and deliberately does
+// NOT fall back to the transactional key if it is missing: a fallback would defeat the whole
+// firewall. It stays inert until BDI_KEY_RESEND_OUTREACH exists (second Resend account).
+const OUTREACH_FROM = process.env.BDI_OUTREACH_FROM || 'Bell <hello@go.bell.qa>';
+
+export async function sendEmail({ from, to, replyTo, subject, html, text, cc, headers, channel }) {
+  const isOutreach = channel === 'outreach';
+  const key = await getKey(isOutreach ? 'resend-outreach' : 'resend');
+  if (!key) throw new Error(isOutreach ? 'outreach_channel_not_configured' : 'email_provider_key_missing');
   if (!to) throw new Error('missing_recipient');
 
   // Accuracy loop: never send to a suppressed address (hard bounce / complaint /
@@ -60,7 +69,7 @@ export async function sendEmail({ from, to, replyTo, subject, html, text, cc, he
   const ccAllowed = cc ? (await filterSuppressed(Array.isArray(cc) ? cc : [cc])).allowed : [];
 
   const body = {
-    from: from || (await getFromAddress()),
+    from: from || (isOutreach ? OUTREACH_FROM : await getFromAddress()),
     to: toAllowed,
     subject: subject || '(no subject)',
   };
