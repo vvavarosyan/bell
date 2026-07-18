@@ -48,6 +48,7 @@ import tendersRouter           from './routes/tenders.js';
 import realestateRouter        from './routes/realestate.js';
 import knowledgeRouter         from './routes/knowledge.js';
 import economicsRouter         from './routes/economics.js';
+import marketingOutreachRouter  from './routes/marketing_outreach.js';
 import whatsappRouter          from './routes/whatsapp.js';
 import whatsappWebhookRouter   from './routes/whatsapp_webhook.js';
 import bellaRouter             from './routes/bella.js';
@@ -55,6 +56,7 @@ import publicBellaRouter       from './routes/public_bella.js';
 import publicResearchRouter    from './routes/public_research.js';
 import { startBellaScheduler } from './bella/scheduler.js';
 import { startCrmScheduler } from './crm/sequences.js';
+import { startOutreachScheduler } from './outreach/engine.js';
 import { startInboundPoller } from './crm/inbound_poller.js';
 import authRouter              from './routes/auth.js';
 import billingRouter           from './routes/billing.js';
@@ -216,6 +218,7 @@ app.use('/api/imports',         ...feature, importsRouter);
 // unsubscribed user still gets a working frame before being routed to /subscribe.
 app.use('/api/stats',      requireAuth, statsRouter);
 app.use('/api/economics',  ...adminOnly, economicsRouter);
+app.use('/api/marketing',  ...adminOnly, marketingOutreachRouter);
 // Credits — balance/ledger for any signed-in tenant; /adjust is platform_admin
 // (enforced inside the router). No subscription gate so the top-bar pill always loads.
 app.use('/api/credits',    requireAuth, creditsRouter);
@@ -371,4 +374,9 @@ app.use((err, req, res, next) => {
   // Bella's scheduled/overnight task runner. Local engine: always on.
   // Prod: BDI_BELLA_SCHEDULER=1 on exactly ONE service (app.bell.qa).
   startBellaScheduler();
+
+  // Self-marketing outreach dispatcher. Gated by BDI_OUTREACH_SCHEDULER=1 (one service).
+  // Even then it sends NOTHING until BDI_OUTREACH_ENABLED is also set — the loop can run
+  // idle for as long as we like before the send is ever armed.
+  startOutreachScheduler();
 })();
