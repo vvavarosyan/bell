@@ -190,4 +190,24 @@ export async function composeEmail({ companyName, industry, city, website, lang 
   return { subject: stripDashes(t.subject), text: stripDashes(t.body), html: toHtml(stripDashes(t.body), fromName), source: 'template' };
 }
 
+// Append a light, deliverability-SAFE footer: a VISIBLE unsubscribe link (many people won't
+// hunt for the mail-client one) + a physical address (a legitimacy signal filters look for).
+// Deliberately text-forward with NO images/logo — a cold email that looks like a personal note
+// lands in the inbox; a graphics-heavy "newsletter" is far likelier to be filtered. Called at
+// SEND time because it needs the per-send unsubscribe URL.
+export function withFooter({ text, html, unsubUrl, lang = 'en', address = null } = {}) {
+  const addr = address || process.env.BDI_OUTREACH_ADDRESS || 'Doha, Qatar';
+  const isAr = lang === 'ar';
+  const brand = 'Bell · Qatar business intelligence · bell.qa';
+  const unsubLabel = isAr ? 'لإلغاء الاشتراك' : 'Not interested? Unsubscribe';
+  const textOut = `${text}\n\n----------\n${brand}\n${addr}\n${unsubLabel}: ${unsubUrl}`;
+  const dir = isAr ? ' dir="rtl"' : '';
+  const footerHtml = `<div${dir} style="margin-top:22px;padding-top:12px;border-top:1px solid #e2e6ee;font-size:12px;color:#8a93a6;line-height:1.7">
+    <div>${esc(brand)}</div>
+    <div>${esc(addr)}</div>
+    <div style="margin-top:6px">${esc(unsubLabel)}: <a href="${esc(unsubUrl)}" style="color:#5b8cff">${isAr ? 'اضغط هنا' : 'click here'}</a>.</div>
+  </div>`;
+  return { text: textOut, html: `${html}${footerHtml}` };
+}
+
 export { templateEmail, bellValueLine };

@@ -8,7 +8,7 @@
 // then a second send to yourself should be BLOCKED — that proves the opt-out works.
 
 import { query } from '../db.js';
-import { composeEmail } from '../outreach/compose.js';
+import { composeEmail, withFooter } from '../outreach/compose.js';
 import { generateOptoutToken, listUnsubscribeHeaders, isOptedOut } from '../outreach/optout.js';
 import { sendEmail } from '../lib/email.js';
 import { isSuppressed } from '../lib/suppression.js';
@@ -56,17 +56,18 @@ async function main() {
   const token = await generateOptoutToken(to, { companyId: co?.id || null });
   const headers = listUnsubscribeHeaders(token);
   const unsubUrl = (process.env.BELL_APP_URL || 'https://app.bell.qa').replace(/\/$/, '') + '/u/' + token;
+  const final = withFooter({ text: composed.text, html: composed.html, unsubUrl, lang: 'en' });
 
   const ins = await query(
     `INSERT INTO crm_emails (tenant_id, record_id, direction, to_email, subject, body_text, body_html, status, sent_by, provider)
      VALUES (1, NULL, 'out', $1, $2, $3, $4, 'queued', 'outreach-test', 'resend') RETURNING id`,
-    [to, composed.subject, composed.text, composed.html]);
+    [to, composed.subject, final.text, final.html]);
   const crmId = Number(ins.rows[0].id);
 
   console.log('Sending through the go.bell.qa channel…');
   try {
     const res = await sendEmail({
-      to, subject: composed.subject, html: composed.html, text: composed.text,
+      to, subject: composed.subject, html: final.html, text: final.text,
       replyTo: REPLY_TO, headers, channel: 'outreach',
     });
     await query(`UPDATE crm_emails SET status='sent', provider_message_id=$2, from_email=$3, sent_at=now() WHERE id=$1`,

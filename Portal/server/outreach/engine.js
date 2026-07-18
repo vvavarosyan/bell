@@ -13,7 +13,7 @@
 // preview*() NEVER sends — it composes drafts so Val can read exactly what would go out.
 
 import { query } from '../db.js';
-import { composeEmail } from './compose.js';
+import { composeEmail, withFooter } from './compose.js';
 import { buildTargets } from './targeting.js';
 import { generateOptoutToken, listUnsubscribeHeaders, isOptedOut } from './optout.js';
 import { isQatarWorkingHour } from '../lib/qatar_time.js';
@@ -181,23 +181,25 @@ async function sendOne(c, t) {
   });
   const token = await generateOptoutToken(email, { companyId: t.company_id, campaignId: c.id });
   const headers = listUnsubscribeHeaders(token);
+  const unsubUrl = (process.env.BELL_APP_URL || 'https://app.bell.qa').replace(/\/$/, '') + '/u/' + token;
+  const final = withFooter({ text: composed.text, html: composed.html, unsubUrl, lang: t.lang || 'en' });
 
   const ins = await query(
     `INSERT INTO crm_emails (tenant_id, record_id, direction, to_email, subject, body_text, body_html, status, sent_by, provider)
      VALUES (1, NULL, 'out', $1, $2, $3, $4, 'queued', 'outreach-engine', 'resend') RETURNING id`,
-    [email, composed.subject, composed.text, composed.html]);
+    [email, composed.subject, final.text, final.html]);
   const crmId = Number(ins.rows[0].id);
 
   try {
     const res = await sendEmail({
-      to: email, subject: composed.subject, html: composed.html, text: composed.text,
+      to: email, subject: composed.subject, html: final.html, text: final.text,
       replyTo: c.reply_to || OUTREACH_REPLY_TO(), headers, channel: 'outreach',
     });
     await query(`UPDATE crm_emails SET status='sent', provider_message_id=$2, from_email=$3, sent_at=now() WHERE id=$1`,
       [crmId, res?.id || null, 'hello@go.bell.qa']);
     await query(
       `UPDATE outreach_targets SET status='sent', crm_email_id=$2, optout_token=$3, subject=$4, body_text=$5, body_html=$6, sent_at=now(), updated_at=now() WHERE id=$1`,
-      [t.id, crmId, token, composed.subject, composed.text, composed.html]);
+      [t.id, crmId, token, composed.subject, final.text, final.html]);
     await query(`UPDATE outreach_arms SET sent = sent + 1 WHERE id = $1`, [t.arm_id]).catch(() => {});
     return 'sent';
   } catch (e) {
