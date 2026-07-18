@@ -12,7 +12,7 @@ import { query } from '../db.js';
 import { targetingSummary } from '../outreach/targeting.js';
 import {
   OUTREACH_ENABLED, listCampaigns, getCampaign, createCampaign, setCampaignStatus,
-  planCampaign, previewBatch, remainingAllowance,
+  planCampaign, previewBatch, remainingAllowance, addTarget, recordOutreachReply,
 } from '../outreach/engine.js';
 import { isQatarWorkingHour, formatQatar } from '../lib/qatar_time.js';
 
@@ -95,6 +95,24 @@ router.get('/preview', async (req, res) => {
     const lang = ['en', 'ar', 'bilingual'].includes(req.query.lang) ? req.query.lang : 'en';
     res.json({ drafts: await previewBatch({ tier, lang, n }) });
   } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// POST /api/marketing/campaigns/:id/add-target { email, companyName } — add ONE recipient
+// (for a controlled test send). Respects suppression + opt-out.
+router.post('/campaigns/:id/add-target', async (req, res) => {
+  try {
+    const out = await addTarget(Number(req.params.id), { email: req.body?.email, companyName: req.body?.companyName });
+    res.json(out);
+  } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+// POST /api/marketing/log-reply { fromEmail, subject, text } — manually record a reply (test
+// the Incoming flow + reply-stop without the inbound webhook wired yet).
+router.post('/log-reply', async (req, res) => {
+  try {
+    const out = await recordOutreachReply({ fromEmail: req.body?.fromEmail, subject: req.body?.subject, text: req.body?.text });
+    res.json(out);
+  } catch (e) { res.status(400).json({ error: e.message }); }
 });
 
 // POST /api/marketing/campaigns/:id/status { status } — draft|active|paused|done.

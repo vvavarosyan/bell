@@ -455,6 +455,8 @@ export const api = {
   mktPreview:             (id, n = 5) => request('/api/marketing/campaigns/' + id + '/preview?n=' + n),
   mktPreviewAdhoc:        (tier = 'role_mailbox', lang = 'en', n = 5) => request('/api/marketing/preview?tier=' + tier + '&lang=' + lang + '&n=' + n),
   mktSetStatus:           (id, status) => request('/api/marketing/campaigns/' + id + '/status', { method: 'POST', body: JSON.stringify({ status }) }),
+  mktAddTarget:           (id, email, companyName) => request('/api/marketing/campaigns/' + id + '/add-target', { method: 'POST', body: JSON.stringify({ email, companyName }) }),
+  mktLogReply:            (fromEmail, subject, text) => request('/api/marketing/log-reply', { method: 'POST', body: JSON.stringify({ fromEmail, subject, text }) }),
   mktTargets:             (id, status = '', limit = 100) => request('/api/marketing/campaigns/' + id + '/targets?limit=' + limit + (status ? '&status=' + status : '')),
   mktMail:                (direction = 'out', limit = 100) => request('/api/marketing/mail?direction=' + direction + '&limit=' + limit),
   mktMailOne:             (id) => request('/api/marketing/mail/' + id),

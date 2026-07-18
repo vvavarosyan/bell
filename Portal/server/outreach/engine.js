@@ -94,6 +94,30 @@ export async function planCampaign(campaignId, { max = 100000 } = {}) {
   return { inserted, counts };
 }
 
+/**
+ * Add ONE specific recipient to a campaign (for a controlled test send — e.g. MyWeb Systems,
+ * or your own address — without materializing the whole tier). Respects suppression + opt-out.
+ * Returns { added, id, company, reason }.
+ */
+export async function addTarget(campaignId, { email, companyName = null } = {}) {
+  const c = await getCampaign(campaignId);
+  if (!c) throw new Error('campaign_not_found');
+  const e = String(email || '').trim().toLowerCase();
+  if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(e)) throw new Error('invalid_email');
+  if (await isSuppressed(e)) return { added: false, reason: 'suppressed' };
+  if (await isOptedOut(e)) return { added: false, reason: 'opted_out' };
+  const co = (await query(
+      `SELECT c.id, c.name FROM company_contacts cc JOIN companies c ON c.id=cc.company_id
+        WHERE cc.type='email' AND lower(cc.value)=$1 LIMIT 1`, [e])).rows[0]
+    || (await query(`SELECT id, name FROM companies WHERE lower(email)=$1 LIMIT 1`, [e])).rows[0] || null;
+  const lang = c.lang_mode === 'ar' ? 'ar' : c.lang_mode === 'bilingual' ? 'bilingual' : 'en';
+  const r = await query(
+    `INSERT INTO outreach_targets (campaign_id, company_id, company_name, email, address_class, lang)
+     VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (campaign_id, email) DO NOTHING RETURNING id`,
+    [campaignId, co?.id || null, companyName || co?.name || null, e, 'manual', lang]);
+  return { added: !!r.rows[0], id: r.rows[0]?.id || null, company: companyName || co?.name || null };
+}
+
 // --- dry-run preview: draft, never send ------------------------------------
 /**
  * Compose N sample emails WITHOUT sending. Works with or without a campaign:

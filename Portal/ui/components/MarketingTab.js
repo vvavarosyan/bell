@@ -69,6 +69,28 @@ export function MarketingTab() {
     catch (err) { toast('Status change failed: ' + err.message, 'error'); }
     finally { setBusy(false); }
   };
+  const addRecipient = async (id) => {
+    const email = window.prompt('Add ONE recipient to this campaign (for a controlled test send):');
+    if (!email) return;
+    setBusy(true);
+    try {
+      const r = await api.mktAddTarget(id, email.trim(), null);
+      if (r.added) toast('Added ' + email + (r.company ? ' (' + r.company + ')' : '') + ' to the queue.');
+      else toast('Not added: ' + (r.reason || 'already queued'), 'error');
+      await loadTop();
+    } catch (err) { toast('Add failed: ' + err.message, 'error'); }
+    finally { setBusy(false); }
+  };
+  const logReply = async () => {
+    const fromEmail = window.prompt('Test the Incoming flow: whose email replied? (their address)');
+    if (!fromEmail) return;
+    const text = window.prompt('What did they say? (reply text)') || '(no text)';
+    try {
+      const r = await api.mktLogReply(fromEmail.trim(), 'Re: Bell', text);
+      toast(r.matched ? 'Reply logged, and that address is now marked replied (reply-stop).' : 'Reply logged (no matching sent email found).');
+      setMailDir('in'); await loadMail('in');
+    } catch (err) { toast('Log reply failed: ' + err.message, 'error'); }
+  };
   const readMail = async (id) => {
     try { const r = await api.mktMailOne(id); setOpenMail(r.email); }
     catch (err) { toast('Could not open message: ' + err.message, 'error'); }
@@ -137,6 +159,7 @@ export function MarketingTab() {
           </div>
           <div style=${{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
             <button class="btn btn-sm" disabled=${busy} onClick=${() => plan(c.id)}>Plan</button>
+            <button class="btn btn-sm" disabled=${busy} onClick=${() => addRecipient(c.id)}>＋ recipient</button>
             <button class="btn btn-sm" disabled=${busy} onClick=${() => preview(c.id)}>Preview</button>
             ${c.status === 'active'
               ? html`<button class="btn btn-sm" disabled=${busy} onClick=${() => setStatus(c.id, 'paused')}>Pause</button>`
@@ -185,7 +208,8 @@ export function MarketingTab() {
     <div style=${{ display: 'flex', gap: '6px', marginBottom: '10px' }}>
       <button class="btn btn-sm ${mailDir === 'out' ? 'btn-primary' : ''}" onClick=${() => setMailDir('out')}>Outgoing</button>
       <button class="btn btn-sm ${mailDir === 'in' ? 'btn-primary' : ''}" onClick=${() => setMailDir('in')}>Incoming (replies)</button>
-      <button class="btn btn-sm" onClick=${() => loadMail(mailDir)} style=${{ marginLeft: 'auto' }}>Refresh</button>
+      <button class="btn btn-sm" onClick=${logReply} style=${{ marginLeft: 'auto' }}>Log a reply (test)</button>
+      <button class="btn btn-sm" onClick=${() => loadMail(mailDir)}>Refresh</button>
     </div>
     ${mail.length ? html`
       <div style=${{ border: '1px solid var(--border)', borderRadius: '10px', overflow: 'hidden' }}>
