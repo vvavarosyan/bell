@@ -34,6 +34,17 @@ export async function hasConsent(email) {
   return r.rows[0]?.action === 'granted';
 }
 
+// The SEND-TIME opt-out gate: true iff this address's LATEST consent event is a withdrawal.
+// Absence of any consent row returns false — cold outreach runs on the founder-instruction
+// basis, not on prior consent, so "no row" is NOT "opted out" (using hasConsent here would
+// wrongly block every target). This is the predicate the engine checks before each send.
+export async function isOptedOut(email) {
+  const r = await query(
+    `SELECT action FROM outreach_consent WHERE lower(email)=lower($1) ORDER BY created_at DESC, id DESC LIMIT 1`,
+    [norm(email)]);
+  return r.rows[0]?.action === 'withdrawn';
+}
+
 // Mint an opaque one-click unsubscribe token for a specific send.
 export async function generateOptoutToken(email, { companyId = null, campaignId = null, crmEmailId = null } = {}) {
   const token = randomBytes(32).toString('base64url');
@@ -46,10 +57,16 @@ export async function generateOptoutToken(email, { companyId = null, campaignId 
 
 // The RFC 8058 headers every outreach email must carry (one-click unsubscribe that
 // Gmail/Yahoo honour and Qatar law wants as a working opt-out).
+// HTTPS one-click ONLY. An https List-Unsubscribe + the One-Click Post header fully satisfies
+// RFC 8058 and the Gmail/Yahoo bulk-sender rules on its own. We deliberately do NOT advertise a
+// mailto: because no mailbox is wired to receive and process unsubscribe emails — advertising an
+// unread opt-out address is itself a compliance/complaint risk (a recipient could email it and
+// never be removed). Add a mailto back only if a real unsubscribe@ mailbox is built and wired to
+// addSuppression.
 export function listUnsubscribeHeaders(token) {
   const url = `${APP_URL}/u/${token}`;
   return {
-    'List-Unsubscribe': `<${url}>, <mailto:unsubscribe@go.bell.qa?subject=unsubscribe>`,
+    'List-Unsubscribe': `<${url}>`,
     'List-Unsubscribe-Post': 'List-Unsubscribe=One-Click',
   };
 }

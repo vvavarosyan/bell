@@ -15,7 +15,7 @@
 import { query } from '../db.js';
 import { composeEmail } from './compose.js';
 import { buildTargets } from './targeting.js';
-import { generateOptoutToken, listUnsubscribeHeaders } from './optout.js';
+import { generateOptoutToken, listUnsubscribeHeaders, isOptedOut } from './optout.js';
 import { isQatarWorkingHour } from '../lib/qatar_time.js';
 import { sendEmail } from '../lib/email.js';
 import { isSuppressed } from '../lib/suppression.js';
@@ -25,6 +25,10 @@ export const OUTREACH_ENABLED = () => {
   return v === '1' || v === 'true' || v === 'yes' || v === 'on';
 };
 const GLOBAL_DAILY_CAP = () => Math.max(0, parseInt(process.env.BDI_OUTREACH_GLOBAL_CAP || '60', 10) || 0);
+// Where outreach replies land. DMARC ignores Reply-To, so bell.qa (parent of the go.bell.qa
+// sending domain) is safe and, unlike an isolated go.bell.qa inbox, is a mailbox Val already
+// reads. Override per-campaign (campaign.reply_to) or globally (BDI_OUTREACH_REPLY_TO).
+const OUTREACH_REPLY_TO = () => process.env.BDI_OUTREACH_REPLY_TO || 'hello@bell.qa';
 
 const firstIndustry = (t) => (t.industry || (Array.isArray(t.industries) ? t.industries[0] : null) || '').toString().trim() || null;
 
@@ -157,9 +161,17 @@ export async function remainingAllowance(c) {
 /** Send one target now. Re-checks suppression/consent at the last moment. */
 async function sendOne(c, t) {
   const email = String(t.email || '').toLowerCase();
-  // Last-moment safety re-check (state may have changed since planning).
+  // Last-moment safety re-checks (state may have changed since planning).
   if (await isSuppressed(email)) {
     await query(`UPDATE outreach_targets SET status='skipped', skip_reason='suppressed', updated_at=now() WHERE id=$1`, [t.id]);
+    return 'skipped';
+  }
+  // Consent-withdrawal gate — independent of suppression. An unsubscribe writes BOTH a
+  // withdrawn-consent row and a suppression row, but any withdrawal recorded via a path that
+  // doesn't also suppress would still be honoured here. (isOptedOut = latest event is a
+  // withdrawal; "no consent row" is NOT opted out — cold outreach runs on founder-instruction.)
+  if (await isOptedOut(email)) {
+    await query(`UPDATE outreach_targets SET status='skipped', skip_reason='opted_out', updated_at=now() WHERE id=$1`, [t.id]);
     return 'skipped';
   }
   const meta = t.company_id ? (await query(`SELECT industry, industries, city, website FROM companies WHERE id=$1`, [t.company_id])).rows[0] : null;
@@ -179,7 +191,7 @@ async function sendOne(c, t) {
   try {
     const res = await sendEmail({
       to: email, subject: composed.subject, html: composed.html, text: composed.text,
-      replyTo: c.reply_to || undefined, headers, channel: 'outreach',
+      replyTo: c.reply_to || OUTREACH_REPLY_TO(), headers, channel: 'outreach',
     });
     await query(`UPDATE crm_emails SET status='sent', provider_message_id=$2, from_email=$3, sent_at=now() WHERE id=$1`,
       [crmId, res?.id || null, 'hello@go.bell.qa']);

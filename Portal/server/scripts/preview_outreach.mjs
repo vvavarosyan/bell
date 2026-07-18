@@ -28,17 +28,15 @@ function card(d) {
 }
 
 async function main() {
-  const n = Math.max(1, parseInt(process.argv[2] || '8', 10) || 8);
+  const n = Math.max(1, parseInt(process.argv[2] || '10', 10) || 10);
+  // English only for now (Val's call 2026-07-18). Arabic + bilingual stay in the code and the
+  // plan; to preview them, pass a language: `node preview_outreach.mjs 6 ar`.
+  const lang = ['en', 'ar', 'bilingual'].includes(process.argv[3]) ? process.argv[3] : 'en';
   console.log('Building targeting summary…');
   const sum = await targetingSummary();
 
-  console.log(`Drafting ${n} English + 3 Arabic + 2 bilingual samples (no send)…`);
-  const [en, ar, bi] = await Promise.all([
-    previewBatch({ tier: 'role_mailbox', lang: 'en', n }),
-    previewBatch({ tier: 'role_mailbox', lang: 'ar', n: 3 }),
-    previewBatch({ tier: 'role_mailbox', lang: 'bilingual', n: 2 }),
-  ]);
-  const drafts = [...en, ...ar, ...bi];
+  console.log(`Drafting ${n} ${lang.toUpperCase()} samples (no send)…`);
+  const drafts = await previewBatch({ tier: 'role_mailbox', lang, n });
 
   const html = `<!doctype html><html><head><meta charset="utf-8"><title>Bell Outreach Preview</title>
   <style>
