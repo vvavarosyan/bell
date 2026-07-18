@@ -57,6 +57,7 @@ import publicResearchRouter    from './routes/public_research.js';
 import { startBellaScheduler } from './bella/scheduler.js';
 import { startCrmScheduler } from './crm/sequences.js';
 import { startOutreachScheduler } from './outreach/engine.js';
+import { startOutreachReplyPoller } from './outreach/reply_poller.js';
 import { startInboundPoller } from './crm/inbound_poller.js';
 import authRouter              from './routes/auth.js';
 import billingRouter           from './routes/billing.js';
@@ -382,4 +383,9 @@ app.use((err, req, res, next) => {
   // Even then it sends NOTHING until BDI_OUTREACH_ENABLED is also set — the loop can run
   // idle for as long as we like before the send is ever armed.
   startOutreachScheduler();
+
+  // Outreach REPLY poller (IMAP). Reads the dedicated replies mailbox and threads replies into
+  // the admin mail log + reply-stop (+ forward to Val's inbox). Gated by BDI_OUTREACH_IMAP_* on
+  // one service.
+  startOutreachReplyPoller();
 })();
