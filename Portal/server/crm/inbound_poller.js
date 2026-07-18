@@ -18,6 +18,7 @@ let simpleParser = null;
 const TICK_MS = 60_000;
 let timer = null;
 let running = false;
+const failCounts = new Map();   // uid -> failed attempts (poison-message guard)
 
 function cfg() {
   return {
@@ -67,7 +68,7 @@ async function poll() {
     try {
       const uids = await client.search({ seen: false }, { uid: true });
       for (const uid of (uids || [])) {
-        let processed = false;
+        let ok = false;
         try {
           const msg = await client.fetchOne(uid, { source: true, envelope: true }, { uid: true });
           if (msg) {
@@ -83,15 +84,29 @@ async function poll() {
               if (!subject) subject = parsed.subject || '';
               if (!emailId) for (const a of (parsed.to?.value || [])) { emailId = parseReplyId(a.address); if (emailId) break; }
             } catch (e) { /* envelope-only is enough to match */ }
-            if (emailId) { await processInboundReply({ emailId, fromAddr, subject, text }); processed = true; }
+            if (emailId) await processInboundReply({ emailId, fromAddr, subject, text });
           }
+          ok = true;
         } catch (e) {
           console.warn('[crm-inbound] message', uid, 'failed:', e.message);
         }
-        // Mark seen so we don't reprocess (idempotency in processInboundReply backs this up).
-        try { await client.messageFlagsAdd(uid, ['\\Seen'], { uid: true }); } catch { /* ignore */ }
-        void processed;
+        // Mark Seen only when processing SUCCEEDED — a transient DB/network error must not
+        // permanently lose the reply (it stays unseen and retries next tick). Poison guard:
+        // after 3 failed attempts, mark Seen anyway and log loudly.
+        if (ok) {
+          try { await client.messageFlagsAdd(uid, ['\\Seen'], { uid: true }); } catch { /* ignore */ }
+          failCounts.delete(uid);
+        } else {
+          const n = (failCounts.get(uid) || 0) + 1;
+          failCounts.set(uid, n);
+          if (n >= 3) {
+            console.error('[crm-inbound] message', uid, 'failed', n, 'times — marking Seen (dead-letter). CHECK THE MAILBOX MANUALLY.');
+            try { await client.messageFlagsAdd(uid, ['\\Seen'], { uid: true }); } catch { /* ignore */ }
+            failCounts.delete(uid);
+          }
+        }
       }
+      if (failCounts.size > 500) failCounts.clear();
     } finally { lock.release(); }
   } finally { await client.logout().catch(() => {}); }
 }

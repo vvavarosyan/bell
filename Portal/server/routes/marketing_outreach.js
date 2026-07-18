@@ -14,6 +14,9 @@ import {
   OUTREACH_ENABLED, listCampaigns, getCampaign, createCampaign, setCampaignStatus,
   planCampaign, previewBatch, remainingAllowance, addTarget, recordOutreachReply, sendTestNow,
 } from '../outreach/engine.js';
+import {
+  breakerStatus, resetBreaker, preflight, isQatarHolidayToday, getState,
+} from '../outreach/machine.js';
 import { isQatarWorkingHour, formatQatar } from '../lib/qatar_time.js';
 
 const router = express.Router();
@@ -56,6 +59,98 @@ router.get('/summary', async (_req, res) => {
       engagement: { emailed: e0.emailed || 0, replied: e0.replied || 0, unsubscribed: e0.unsubscribed || 0 },
       addressable: tiers,
     });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// GET /api/marketing/machine — the autonomous layer's own state: circuit breaker, last
+// pre-flight self-test, holiday status. The admin sees WHY the machine is or isn't sending.
+router.get('/machine', async (_req, res) => {
+  try {
+    const [breaker, pf, hol] = await Promise.all([breakerStatus(), getState('preflight'), isQatarHolidayToday()]);
+    res.json({ breaker, preflight: pf, holiday: hol });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// POST /api/marketing/machine/reset-breaker — admin investigated, resume sending.
+router.post('/machine/reset-breaker', async (_req, res) => {
+  try { await resetBreaker(); res.json({ ok: true }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// POST /api/marketing/machine/preflight — run the self-test on demand (shows in the panel).
+router.post('/machine/preflight', async (_req, res) => {
+  try { res.json(await preflight()); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Qatar holidays (movable feasts — admin adds them when announced; fixed civic days are code).
+router.get('/holidays', async (_req, res) => {
+  try { res.json({ holidays: (await query(`SELECT day, name FROM qatar_holidays ORDER BY day`)).rows }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+router.post('/holidays', async (req, res) => {
+  try {
+    const { day, name } = req.body || {};
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(String(day || '')) || !name) return res.status(400).json({ error: 'need day (YYYY-MM-DD) and name' });
+    await query(`INSERT INTO qatar_holidays (day, name) VALUES ($1,$2) ON CONFLICT (day) DO UPDATE SET name=EXCLUDED.name`, [day, name]);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+router.delete('/holidays/:day', async (req, res) => {
+  try { await query(`DELETE FROM qatar_holidays WHERE day=$1`, [req.params.day]); res.json({ ok: true }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// GET /api/marketing/hot-leads — every INTERESTED reply across campaigns: who, what they said,
+// whether they've since converted. The machine's output tray.
+router.get('/hot-leads', async (_req, res) => {
+  try {
+    const r = await query(
+      `SELECT t.id, t.company_id, t.company_name, t.email, t.replied_at, t.reply_text,
+              t.converted_at, t.converted_tenant_id, c.name AS campaign_name
+         FROM outreach_targets t JOIN outreach_campaigns c ON c.id = t.campaign_id
+        WHERE t.reply_class = 'interested'
+        ORDER BY t.replied_at DESC NULLS LAST LIMIT 200`);
+    res.json({ leads: r.rows });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// GET /api/marketing/campaigns/:id/stats — the funnel + per-arm performance.
+router.get('/campaigns/:id/stats', async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const funnel = (await query(
+      `SELECT
+         count(*)::int                                                        AS targets,
+         count(*) FILTER (WHERE t.status IN ('sent','replied','bounced','unsubscribed'))::int AS emailed,
+         count(*) FILTER (WHERE ce.status IN ('delivered','opened'))::int     AS delivered,
+         count(*) FILTER (WHERE ce.status = 'opened')::int                    AS opened,
+         count(*) FILTER (WHERE ce.clicked_at IS NOT NULL)::int               AS clicked,
+         count(*) FILTER (WHERE t.status = 'replied')::int                    AS replied,
+         count(*) FILTER (WHERE t.reply_class = 'interested')::int            AS interested,
+         count(*) FILTER (WHERE t.status = 'unsubscribed')::int               AS unsubscribed,
+         count(*) FILTER (WHERE t.status = 'bounced')::int                    AS bounced,
+         count(*) FILTER (WHERE t.converted_at IS NOT NULL)::int              AS converted,
+         count(*) FILTER (WHERE t.touch_count > 1)::int                       AS followups_sent
+       FROM outreach_targets t LEFT JOIN crm_emails ce ON ce.id = t.crm_email_id
+       WHERE t.campaign_id = $1`, [id])).rows[0];
+    const arms = (await query(
+      `SELECT id, key, angle, is_active, sent, replied, positive, unsubscribed, bounced
+         FROM outreach_arms WHERE campaign_id=$1 ORDER BY id`, [id])).rows;
+    res.json({ funnel, arms });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// POST /api/marketing/clear-tests — wipe TEST artifacts so real outreach starts on a clean
+// slate: manual test sends (sent_by='outreach-test'), manually-added targets, and test replies.
+// NEVER touches the consent ledger (append-only, legally required) or real engine sends.
+router.post('/clear-tests', async (_req, res) => {
+  try {
+    const a = await query(`DELETE FROM crm_emails WHERE direction='out' AND sent_by='outreach-test'`);
+    const b = await query(`DELETE FROM crm_emails WHERE direction='in' AND sent_by='outreach-inbound'
+                            AND from_email NOT IN (SELECT lower(email) FROM outreach_targets WHERE address_class <> 'manual')`);
+    const c = await query(`DELETE FROM outreach_targets WHERE address_class='manual'`);
+    res.json({ ok: true, removed: { test_sends: a.rowCount, test_replies: b.rowCount, manual_targets: c.rowCount } });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

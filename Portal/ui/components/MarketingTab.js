@@ -20,6 +20,9 @@ const STATUS_TINT = {
 export function MarketingTab() {
   const [summary, setSummary] = useState(null);
   const [campaigns, setCampaigns] = useState([]);
+  const [machine, setMachine] = useState(null);     // breaker / preflight / holiday
+  const [hotLeads, setHotLeads] = useState([]);
+  const [stats, setStats] = useState(null);         // {campaign, funnel, arms} for the stats drawer
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
@@ -32,8 +35,11 @@ export function MarketingTab() {
   const loadTop = useCallback(async () => {
     setLoading(true);
     try {
-      const [s, c] = await Promise.all([api.mktSummary(), api.mktCampaigns()]);
-      setSummary(s); setCampaigns(c.campaigns || []);
+      const [s, c, m, h] = await Promise.all([
+        api.mktSummary(), api.mktCampaigns(),
+        api.mktMachine().catch(() => null), api.mktHotLeads().catch(() => ({ leads: [] })),
+      ]);
+      setSummary(s); setCampaigns(c.campaigns || []); setMachine(m); setHotLeads(h.leads || []);
     } catch (err) { toast('Marketing load failed: ' + err.message, 'error'); }
     finally { setLoading(false); }
   }, []);
@@ -92,6 +98,25 @@ export function MarketingTab() {
     } catch (err) { toast('Send now failed: ' + err.message, 'error'); }
     finally { setBusy(false); }
   };
+  const openStats = async (c) => {
+    setBusy(true);
+    try { const r = await api.mktStats(c.id); setStats({ campaign: c, ...r }); }
+    catch (err) { toast('Stats failed: ' + err.message, 'error'); }
+    finally { setBusy(false); }
+  };
+  const resumeBreaker = async () => {
+    if (!window.confirm('Resume sending? Only do this after understanding why the breaker tripped (bad addresses? spam complaint?).')) return;
+    try { await api.mktResetBreaker(); toast('Breaker reset — the machine may send again.'); await loadTop(); }
+    catch (err) { toast('Reset failed: ' + err.message, 'error'); }
+  };
+  const clearTests = async () => {
+    if (!window.confirm('Remove ALL test artifacts (test sends, test replies, hand-added recipients)? Real engine sends and the consent ledger are never touched.')) return;
+    try {
+      const r = await api.mktClearTests();
+      toast('Cleared: ' + r.removed.test_sends + ' test sends, ' + r.removed.test_replies + ' test replies, ' + r.removed.manual_targets + ' manual recipients.');
+      await loadTop(); await loadMail(mailDir);
+    } catch (err) { toast('Clear failed: ' + err.message, 'error'); }
+  };
   const logReply = async () => {
     const fromEmail = window.prompt('Test the Incoming flow: whose email replied? (their address)');
     if (!fromEmail) return;
@@ -143,6 +168,26 @@ export function MarketingTab() {
       </div>
     </div>`;
 
+  // --- machine safety panel (breaker + pre-flight + holiday) ----------------
+  const br = machine?.breaker;
+  const pf = machine?.preflight;
+  const machinePanel = html`
+    ${br?.tripped ? html`
+      <div style=${{ border: '1px solid #c0392b', borderRadius: '12px', padding: '14px 16px', marginBottom: '14px', background: 'rgba(192,57,43,0.12)' }}>
+        <div style=${{ fontWeight: 700, color: '#c0392b' }}>⛔ CIRCUIT BREAKER TRIPPED — the machine paused itself</div>
+        <div class="small" style=${{ margin: '6px 0' }}>${br.reason} (${(br.at || '').slice(0, 16).replace('T', ' ')})</div>
+        <button class="btn btn-sm" onClick=${resumeBreaker}>I investigated — resume sending</button>
+      </div>` : null}
+    ${machine?.holiday?.holiday ? html`
+      <div style=${{ border: '1px solid var(--border)', borderRadius: '12px', padding: '10px 16px', marginBottom: '14px', background: 'var(--bg-elev)' }}>
+        <span class="small">🕌 Today is a Qatar holiday (${machine.holiday.name}) — the machine stays silent today.</span>
+      </div>` : null}
+    ${pf && !pf.ok ? html`
+      <div style=${{ border: '1px solid #b7791f', borderRadius: '12px', padding: '10px 16px', marginBottom: '14px', background: 'rgba(183,121,31,0.1)' }}>
+        <div style=${{ fontWeight: 700, color: '#b7791f' }}>⚠ Pre-flight self-test failing — sending is blocked</div>
+        ${(pf.checks || []).filter((c) => !c.ok).map((c) => html`<div key=${c.name} class="small">${c.name}: ${c.detail}</div>`)}
+      </div>` : null}`;
+
   // --- engagement (real totals, not just the company list) ------------------
   const engagement = html`
     <div class="section-title" style=${{ marginBottom: '8px' }}>Engagement</div>
@@ -183,6 +228,7 @@ export function MarketingTab() {
             <button class="btn btn-sm" disabled=${busy} onClick=${() => addRecipient(c.id)}>＋ recipient</button>
             <button class="btn btn-sm" disabled=${busy} onClick=${() => sendNow(c.id)}>Send now (test)</button>
             <button class="btn btn-sm" disabled=${busy} onClick=${() => preview(c.id)}>Preview</button>
+            <button class="btn btn-sm" disabled=${busy} onClick=${() => openStats(c)}>Stats</button>
             ${c.status === 'active'
               ? html`<button class="btn btn-sm" disabled=${busy} onClick=${() => setStatus(c.id, 'paused')}>Pause</button>`
               : html`<button class="btn btn-sm btn-primary" disabled=${busy} onClick=${() => setStatus(c.id, 'active')}>Activate</button>`}
@@ -224,13 +270,30 @@ export function MarketingTab() {
       </div>` : null}
     ${campaigns.length ? campaigns.map(campaignRow) : html`<div class="muted small" style=${{ marginBottom: '16px' }}>No campaigns yet. Create one, click Plan to build its queue, then Preview to read the drafts.</div>`}`;
 
+  // --- hot leads (the machine's output tray) --------------------------------
+  const hotLeadsSection = hotLeads.length ? html`
+    <div class="section-title" style=${{ marginTop: '22px', marginBottom: '8px' }}>🔥 Hot leads — replied "interested"</div>
+    <div style=${{ border: '1px solid var(--border)', borderRadius: '10px', overflow: 'hidden', marginBottom: '4px' }}>
+      ${hotLeads.map((l, i) => html`
+        <div key=${l.id} style=${{ padding: '10px 12px', borderTop: i ? '1px solid var(--border)' : 'none' }}>
+          <div style=${{ display: 'flex', justifyContent: 'space-between', gap: '10px', flexWrap: 'wrap' }}>
+            <div style=${{ fontWeight: 700 }}>${l.company_name || l.email}
+              ${l.converted_at ? html`<span style=${{ marginLeft: '8px', color: '#1e8449', fontSize: '12px', fontWeight: 700 }}>✓ SIGNED UP</span>` : null}
+            </div>
+            <div class="muted small">${l.email} · ${l.campaign_name} · ${(l.replied_at || '').slice(0, 16).replace('T', ' ')}</div>
+          </div>
+          ${l.reply_text ? html`<div class="small" style=${{ marginTop: '4px', color: 'var(--muted)', whiteSpace: 'pre-wrap' }}>${String(l.reply_text).slice(0, 300)}</div>` : null}
+        </div>`)}
+    </div>` : null;
+
   // --- mail log -------------------------------------------------------------
   const mailSection = html`
     <div class="section-title" style=${{ marginTop: '22px', marginBottom: '8px' }}>Mail log</div>
-    <div style=${{ display: 'flex', gap: '6px', marginBottom: '10px' }}>
+    <div style=${{ display: 'flex', gap: '6px', marginBottom: '10px', flexWrap: 'wrap' }}>
       <button class="btn btn-sm ${mailDir === 'out' ? 'btn-primary' : ''}" onClick=${() => setMailDir('out')}>Outgoing</button>
       <button class="btn btn-sm ${mailDir === 'in' ? 'btn-primary' : ''}" onClick=${() => setMailDir('in')}>Incoming (replies)</button>
       <button class="btn btn-sm" onClick=${logReply} style=${{ marginLeft: 'auto' }}>Log a reply (test)</button>
+      <button class="btn btn-sm" onClick=${clearTests}>Clear test data</button>
       <button class="btn btn-sm" onClick=${() => loadMail(mailDir)}>Refresh</button>
     </div>
     ${mail.length ? html`
@@ -272,6 +335,47 @@ export function MarketingTab() {
       </div>
     </div>` : null;
 
+  // --- stats drawer (funnel + arms) -----------------------------------------
+  const statsPanel = stats ? (() => {
+    const f = stats.funnel || {};
+    const stages = [
+      ['Targets', f.targets, 'var(--text)'], ['Emailed', f.emailed, '#3f7fd8'],
+      ['Delivered', f.delivered, '#3f7fd8'], ['Opened', f.opened, '#7fb0e8'],
+      ['Replied', f.replied, '#1e8449'], ['Interested', f.interested, '#1e8449'],
+      ['Converted', f.converted, '#0e6e3e'],
+    ];
+    const maxV = Math.max(1, ...stages.map((s) => s[1] || 0));
+    return html`
+      <div onClick=${() => setStats(null)} style=${{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 60, display: 'flex', justifyContent: 'flex-end' }}>
+        <div onClick=${(ev) => ev.stopPropagation()} style=${{ width: 'min(620px,100%)', background: 'var(--bg)', height: '100%', overflowY: 'auto', padding: '18px', boxShadow: '-8px 0 24px rgba(0,0,0,0.3)' }}>
+          <div style=${{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
+            <div style=${{ fontWeight: 700 }}>${stats.campaign.name} — funnel</div>
+            <button class="btn btn-sm" onClick=${() => setStats(null)}>Close</button>
+          </div>
+          ${stages.map(([label, v, tint]) => html`
+            <div key=${label} style=${{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '7px' }}>
+              <div class="small" style=${{ flex: '0 0 90px', textAlign: 'right', color: 'var(--muted)' }}>${label}</div>
+              <div style=${{ flex: 1, background: 'var(--bg-elev)', borderRadius: '6px', overflow: 'hidden', height: '22px', position: 'relative' }}>
+                <div style=${{ width: Math.max(2, Math.round(100 * (v || 0) / maxV)) + '%', height: '100%', background: tint, opacity: 0.55 }}></div>
+                <div class="small" style=${{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', paddingLeft: '8px', fontWeight: 700 }}>${num(v)}</div>
+              </div>
+            </div>`)}
+          <div class="small" style=${{ margin: '6px 0 16px', color: 'var(--muted)' }}>
+            Also: ${num(f.followups_sent)} follow-ups · ${num(f.unsubscribed)} unsubscribed · ${num(f.bounced)} bounced · ${num(f.clicked)} clicked
+          </div>
+          <div class="section-title" style=${{ marginBottom: '8px' }}>A/B angles (the machine leans toward what gets replies)</div>
+          ${(stats.arms || []).map((a) => html`
+            <div key=${a.id} style=${{ border: '1px solid var(--border)', borderRadius: '10px', padding: '10px 12px', marginBottom: '8px', background: 'var(--bg-elev)' }}>
+              <div style=${{ display: 'flex', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px' }}>
+                <div style=${{ fontWeight: 700 }}>${a.key}${a.is_active ? '' : ' (off)'}</div>
+                <div class="small">sent <b>${num(a.sent)}</b> · replied <b style=${{ color: '#1e8449' }}>${num(a.replied)}</b> · interested <b>${num(a.positive)}</b></div>
+              </div>
+              <div class="muted small" style=${{ marginTop: '3px' }}>${a.angle}</div>
+            </div>`)}
+        </div>
+      </div>`;
+  })() : null;
+
   // --- mail reader (overlay) ------------------------------------------------
   const mailReader = openMail ? html`
     <div onClick=${() => setOpenMail(null)} style=${{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 60, display: 'flex', justifyContent: 'flex-end' }}>
@@ -297,11 +401,14 @@ export function MarketingTab() {
       </div>
       <div class="muted small" style=${{ marginBottom: '16px' }}>Every outgoing and incoming outreach email is logged below.</div>
       ${banner}
+      ${machinePanel}
       ${engagement}
       ${market}
       ${campaignsSection}
+      ${hotLeadsSection}
       ${mailSection}
       ${previewPanel}
+      ${statsPanel}
       ${mailReader}
     </div></div>`;
 }

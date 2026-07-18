@@ -13,7 +13,7 @@ import { generateOptoutToken, listUnsubscribeHeaders, isOptedOut } from '../outr
 import { sendEmail } from '../lib/email.js';
 import { isSuppressed } from '../lib/suppression.js';
 
-const REPLY_TO = process.env.BDI_OUTREACH_REPLY_TO || 'hello@bell.qa';
+const REPLY_TO = process.env.BDI_OUTREACH_REPLY_TO || 'replies@bell.qa';
 
 async function lookupCompany(email) {
   const e = String(email || '').toLowerCase();

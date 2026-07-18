@@ -18,10 +18,14 @@ export function dailyEmailLimit(planId) {
 export async function emailsSentToday(tenantId) {
   // "Today" = the Qatar calendar day, not the server's UTC day. Before this the counter
   // reset at UTC midnight (03:00 in Doha), so a daily cap never lined up with a Qatar day.
+  // Count EVERYTHING that went out today — including rows the webhook later flipped to
+  // 'bounced'/'complained'. Before this, a same-day bounce dropped out of the count and
+  // silently refunded quota (adversarial review 2026-07-18). A send that bounced still spent
+  // the day's reputation budget.
   const r = await query(
     `SELECT count(*)::int AS n FROM crm_emails
       WHERE tenant_id = $1 AND direction = 'out'
-        AND status IN ('sent','delivered','opened')
+        AND status IN ('sent','delivered','opened','bounced','complained')
         AND sent_at >= (date_trunc('day', now() AT TIME ZONE 'Asia/Qatar') AT TIME ZONE 'Asia/Qatar')`,
     [Number(tenantId)]);
   return r.rows[0]?.n || 0;

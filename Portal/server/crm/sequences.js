@@ -83,6 +83,15 @@ export async function runDue(limit = 25) {
 }
 
 async function processEnrollment(enr) {
+  // ATOMIC CLAIM (adversarial review 2026-07-18): push next_run_at 15 minutes out BEFORE any
+  // work, compare-and-set on the due condition. A concurrent runner (or a crash/redeploy
+  // mid-send) can no longer re-run this enrollment and send the SAME step twice — losing the
+  // race means someone else owns it; a crash means one 15-minute delay, not a duplicate email.
+  const claim = await query(
+    `UPDATE crm_sequence_enrollments SET next_run_at = now() + interval '15 minutes'
+      WHERE id=$1 AND status='active' AND next_run_at <= now() RETURNING id`, [enr.id]);
+  if (!claim.rows.length) return 'stopped';
+
   // The step to send now.
   const stepR = await query(
     `SELECT step_no, delay_days, subject, body FROM crm_sequence_steps

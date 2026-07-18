@@ -33,10 +33,13 @@ export async function processInboundReply({ emailId, fromAddr, subject, text }) 
   const subj = subject || 'Re: (reply)';
   const body = String(text || '').slice(0, 20000);
 
-  // Idempotency guard — don't double-record the same reply (IMAP re-reads etc.).
+  // Idempotency guard — don't double-record the same reply (IMAP re-read + webhook double
+  // delivery). Window is MINUTES, not days: email threads keep the same "Re: …" subject, so a
+  // 2-day window silently dropped a prospect's SECOND real reply in a thread (adversarial
+  // review 2026-07-18). 10 minutes still catches every duplicate-delivery case.
   const dup = await query(
     `SELECT 1 FROM crm_emails WHERE record_id=$1 AND direction='in' AND from_email=$2 AND subject=$3
-       AND created_at > now() - interval '2 days' LIMIT 1`,
+       AND created_at > now() - interval '10 minutes' LIMIT 1`,
     [o.record_id, from, subj]);
   if (dup.rows.length) return { matched: true, record_id: o.record_id, duplicate: true };
 

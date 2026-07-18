@@ -54,7 +54,7 @@ export function inboundReplyTo(emailId) {
 // (single chokepoint). channel:'outreach' selects the outreach key — and deliberately does
 // NOT fall back to the transactional key if it is missing: a fallback would defeat the whole
 // firewall. It stays inert until BDI_KEY_RESEND_OUTREACH exists (second Resend account).
-const OUTREACH_FROM = process.env.BDI_OUTREACH_FROM || 'Bell <hello@go.bell.qa>';
+export const OUTREACH_FROM = process.env.BDI_OUTREACH_FROM || 'Bell <hello@go.bell.qa>';
 
 export async function sendEmail({ from, to, replyTo, subject, html, text, cc, headers, channel }) {
   const isOutreach = channel === 'outreach';

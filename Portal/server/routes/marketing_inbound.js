@@ -6,11 +6,19 @@
 // sent target as 'replied' (reply-stop — the automation must not keep emailing someone who has
 // answered a human).
 
+import { timingSafeEqual } from 'crypto';
 import { Router } from 'express';
 import { recordOutreachReply } from '../outreach/engine.js';
 
 const router = Router();
 const TOKEN = process.env.BDI_OUTREACH_INBOUND_TOKEN || null;
+
+function tokenOk(provided) {
+  if (!TOKEN) return false;
+  const a = Buffer.from(String(provided || ''));
+  const b = Buffer.from(TOKEN);
+  return a.length === b.length && timingSafeEqual(a, b);
+}
 
 function firstAddr(v) {
   if (!v) return null;
@@ -24,7 +32,7 @@ router.post('/', async (req, res, next) => {
   try {
     if (!TOKEN) return res.status(503).json({ error: 'inbound_disabled' });
     const provided = req.get('x-bdi-inbound-token') || req.query.token;
-    if (provided !== TOKEN) return res.status(401).json({ error: 'unauthorized' });
+    if (!tokenOk(provided)) return res.status(401).json({ error: 'unauthorized' });
 
     const body = req.body || {};
     const out = await recordOutreachReply({

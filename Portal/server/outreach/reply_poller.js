@@ -18,9 +18,26 @@ let timer = null;
 let running = false;
 
 // Bounces / auto-responders should NOT count as a human reply (they'd wrongly reply-stop and add
-// noise). Bounces are already handled by the Resend bounce webhook → suppression.
+// noise). Bounces are already handled by the Resend bounce webhook → suppression. Arabic
+// out-of-office wording included — half of Qatar replies in Arabic.
 const AUTO_FROM_RX = /(mailer-daemon|postmaster|no-?reply|do-?not-?reply|bounce|notifications?@)/i;
-const AUTO_SUBJECT_RX = /(out of office|automatic reply|auto[-\s]?reply|undeliverable|delivery status|mail delivery failed|returned mail)/i;
+const AUTO_SUBJECT_RX = /(out of office|automatic reply|auto[-\s]?reply|undeliverable|delivery status|mail delivery failed|returned mail|خارج المكتب|رد تلقائي|رد آلي|في إجازة)/i;
+
+// Bell's OWN addresses: the forward copy (and anything else Bell sends itself) must never be
+// re-ingested as a prospect reply — if the forward inbox ever routes back into the polled
+// mailbox, that would loop forever (forward → capture → forward → …).
+function selfAddresses() {
+  const set = new Set(['hello@bell.qa', 'hello@go.bell.qa', 'replies@bell.qa', 'reply@bell.qa']);
+  const fwd = (process.env.BDI_OUTREACH_REPLY_FORWARD_TO || '').toLowerCase().trim();
+  if (fwd) set.add(fwd);
+  const user = (process.env.BDI_OUTREACH_IMAP_USER || '').toLowerCase().trim();
+  if (user) set.add(user);
+  return set;
+}
+
+// A message that keeps failing (poison) is marked Seen after 3 attempts and logged loudly —
+// otherwise it would retry every tick forever. Anything less broken retries next tick unseen.
+const failCounts = new Map();
 
 function cfg() {
   return {
@@ -68,7 +85,9 @@ async function poll() {
     const lock = await client.getMailboxLock('INBOX');
     try {
       const uids = await client.search({ seen: false }, { uid: true });
+      const self = selfAddresses();
       for (const uid of (uids || [])) {
+        let ok = false;
         try {
           const msg = await client.fetchOne(uid, { source: true, envelope: true }, { uid: true });
           if (msg) {
@@ -82,13 +101,30 @@ async function poll() {
               if (!subject) subject = parsed.subject || '';
             } catch { /* envelope is enough */ }
             const isAuto = (fromAddr && AUTO_FROM_RX.test(fromAddr)) || (subject && AUTO_SUBJECT_RX.test(subject));
-            if (fromAddr && !isAuto) {
+            const isSelf = fromAddr && self.has(fromAddr.toLowerCase());
+            if (fromAddr && !isAuto && !isSelf) {
               await recordOutreachReply({ fromEmail: fromAddr, subject, text });
             }
           }
+          ok = true;
         } catch (e) { console.warn('[outreach-inbound] message', uid, 'failed:', e.message); }
-        try { await client.messageFlagsAdd(uid, ['\\Seen'], { uid: true }); } catch { /* ignore */ }
+        // Mark Seen only when processing SUCCEEDED (a transient DB error must not lose the
+        // reply — it stays unseen and retries next tick). After 3 failed attempts the message
+        // is marked Seen anyway (poison guard) and logged loudly.
+        if (ok) {
+          try { await client.messageFlagsAdd(uid, ['\\Seen'], { uid: true }); } catch { /* ignore */ }
+          failCounts.delete(uid);
+        } else {
+          const n = (failCounts.get(uid) || 0) + 1;
+          failCounts.set(uid, n);
+          if (n >= 3) {
+            console.error('[outreach-inbound] message', uid, 'failed', n, 'times — marking Seen (dead-letter). CHECK THE MAILBOX MANUALLY.');
+            try { await client.messageFlagsAdd(uid, ['\\Seen'], { uid: true }); } catch { /* ignore */ }
+            failCounts.delete(uid);
+          }
+        }
       }
+      if (failCounts.size > 500) failCounts.clear();   // memory guard
     } finally { lock.release(); }
   } finally { await client.logout().catch(() => {}); }
 }

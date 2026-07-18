@@ -210,4 +210,33 @@ export function withFooter({ text, html, unsubUrl, lang = 'en', address = null }
   return { text: textOut, html: `${html}${footerHtml}` };
 }
 
+// ---- reply classification --------------------------------------------------
+// What did the reply MEAN? Deterministic rules first (they are the legally-important ones and
+// must never depend on an LLM being up):
+//   remove_me  — any wording asking to stop → treated as a MANDATORY unsubscribe by the caller.
+//   auto_reply — out-of-office / autoresponder → not a human, must not stop the sequence.
+// Everything else goes to Haiku for interested / not_interested; if the model is unavailable
+// the reply stays 'unclassified' (never guessed — Rule 2.1).
+const REMOVE_RX = /(unsubscribe|remove (me|us)|take (me|us) off|stop (emailing|sending|contacting)|don'?t (email|contact)|no more emails|delete my (email|address)|opt me out|قف عن|توقفوا عن|لا تراسل|أوقفوا|الغاء الاشتراك|إلغاء الاشتراك)/i;
+const AUTOREPLY_RX = /(out of (the )?office|automatic reply|auto[-\s]?reply|autoreply|on (annual |sick )?leave|currently (away|travell?ing)|will (respond|reply) (when|upon|after)|delivery (status|failure)|undeliverable|خارج المكتب|رد تلقائي|رد آلي|في إجازة)/i;
+
+export async function classifyReply({ subject = '', text = '' } = {}) {
+  const t = (String(subject) + '\n' + String(text)).slice(0, 4000);
+  if (REMOVE_RX.test(t)) return { class: 'remove_me', basis: 'rule' };
+  if (AUTOREPLY_RX.test(t)) return { class: 'auto_reply', basis: 'rule' };
+  let key = null;
+  try { key = await getKey('anthropic'); } catch { key = null; }
+  if (!key) return { class: 'unclassified', basis: 'no_model' };
+  try {
+    const raw = await callHaiku(key,
+      'You classify a reply to a B2B sales email. Return STRICT JSON only: {"class":"interested"|"not_interested"|"auto_reply"|"remove_me"}. "interested" = they want to know more, a demo, a call, pricing, or asked a real question. "not_interested" = a human politely declining. "auto_reply" = an automated message. "remove_me" = any request to stop emailing.',
+      'Subject: ' + String(subject).slice(0, 200) + '\n\nReply:\n' + String(text).slice(0, 2500),
+      { temperature: 0 });
+    const parsed = parseJson(raw);
+    const cls = parsed?.class;
+    if (['interested', 'not_interested', 'auto_reply', 'remove_me'].includes(cls)) return { class: cls, basis: 'model' };
+  } catch { /* fall through */ }
+  return { class: 'unclassified', basis: 'model_failed' };
+}
+
 export { templateEmail, bellValueLine };
