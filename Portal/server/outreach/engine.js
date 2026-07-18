@@ -271,13 +271,18 @@ async function sendOne(c, t, { followUp = false } = {}) {
   if (await isOptedOut(email)) { await release('skipped', 'opted_out'); return 'skipped'; }
 
   // Per-domain throttle: never hammer one company in a day. Deferred, not skipped — the claim
-  // is released back to eligible and the next tick retries.
-  const domain = email.split('@')[1];
-  const throttle = await domainSentToday(domain);
-  if (throttle.capped) {
-    if (followUp) await query(`UPDATE outreach_targets SET next_touch_at = now() + interval '2 hours', updated_at=now() WHERE id=$1`, [t.id]);
-    else await query(`UPDATE outreach_targets SET status='pending', updated_at=now() WHERE id=$1`, [t.id]);
-    return 'deferred';
+  // is released back to eligible and the next tick retries. HAND-ADDED ('manual') targets are
+  // exempt: they are the admin's own controlled tests, which legitimately repeat to one mailbox
+  // in a day — the throttle protects real companies, not the test loop (Val hit this live:
+  // gmail's 2/day cap silently blocked his third test send).
+  if (t.address_class !== 'manual') {
+    const domain = email.split('@')[1];
+    const throttle = await domainSentToday(domain);
+    if (throttle.capped) {
+      if (followUp) await query(`UPDATE outreach_targets SET next_touch_at = now() + interval '2 hours', updated_at=now() WHERE id=$1`, [t.id]);
+      else await query(`UPDATE outreach_targets SET status='pending', updated_at=now() WHERE id=$1`, [t.id]);
+      return 'deferred';
+    }
   }
 
   // Bandit: assign an arm on first touch (sticky per target so follow-ups keep the same angle).
@@ -461,12 +466,18 @@ export async function sendTestNow(campaignId, { max = 5 } = {}) {
     `SELECT * FROM outreach_targets
       WHERE campaign_id=$1 AND status='pending' AND address_class='manual'
       ORDER BY id LIMIT $2`, [campaignId, Math.min(Math.max(1, max), 10)])).rows;
-  let sent = 0, skipped = 0, failed = 0;
+  // Every outcome reported HONESTLY by name — Val's live test saw a throttle-deferral lumped
+  // in with "failed" and had no way to know what actually happened.
+  let sent = 0, skipped = 0, deferred = 0, raced = 0, failed = 0;
   for (const t of due) {
     const r = await sendOne(c, t);
-    if (r === 'sent') sent += 1; else if (r === 'skipped') skipped += 1; else failed += 1;
+    if (r === 'sent') sent += 1;
+    else if (r === 'skipped') skipped += 1;
+    else if (r === 'deferred') deferred += 1;
+    else if (r === 'raced') raced += 1;
+    else failed += 1;
   }
-  return { sent, skipped, failed, considered: due.length };
+  return { sent, skipped, deferred, raced, failed, considered: due.length };
 }
 
 // --- inbound replies (reply capture + reply-stop) ---------------------------

@@ -11,6 +11,13 @@ import { api } from '../lib/api.js';
 import { toast } from '../lib/toast.js';
 
 const num = (n) => (n == null ? '0' : Number(n).toLocaleString());
+// Timestamps shown in QATAR time — raw UTC in the log confused Val ("17:56" was 20:56 Doha).
+const qtime = (ts) => {
+  if (!ts) return '';
+  try {
+    return new Date(ts).toLocaleString('en-GB', { timeZone: 'Asia/Qatar', day: '2-digit', month: 'short', hour: '2-digit', minute: '2-digit' });
+  } catch { return String(ts).slice(0, 16).replace('T', ' '); }
+};
 const STATUS_TINT = {
   active: '#1e8449', paused: '#b7791f', draft: 'var(--muted)', done: 'var(--muted)',
   sent: '#3f7fd8', replied: '#1e8449', pending: 'var(--muted)', skipped: '#b7791f',
@@ -94,7 +101,14 @@ export function MarketingTab() {
     try {
       const r = await api.mktSendNow(id);
       if (r.considered === 0) toast('No hand-added recipients to send to. Use "＋ recipient" first.', 'error');
-      else toast('Sent ' + r.sent + ', skipped ' + r.skipped + ', failed ' + r.failed + '.');
+      else {
+        const parts = ['Sent ' + r.sent];
+        if (r.skipped) parts.push(r.skipped + ' skipped (suppressed/opted out)');
+        if (r.deferred) parts.push(r.deferred + ' deferred (daily domain limit — retries next tick)');
+        if (r.raced) parts.push(r.raced + ' already being handled');
+        if (r.failed) parts.push(r.failed + ' FAILED (open the mail log entry for the error)');
+        toast(parts.join(' · '), r.sent > 0 ? undefined : 'error');
+      }
       await loadTop(); setMailDir('out'); await loadMail('out');
     } catch (err) { toast('Send now failed: ' + err.message, 'error'); }
     finally { setBusy(false); }
@@ -185,7 +199,7 @@ export function MarketingTab() {
     ${br?.tripped ? html`
       <div style=${{ border: '1px solid #c0392b', borderRadius: '12px', padding: '14px 16px', marginBottom: '14px', background: 'rgba(192,57,43,0.12)' }}>
         <div style=${{ fontWeight: 700, color: '#c0392b' }}>⛔ CIRCUIT BREAKER TRIPPED — the machine paused itself</div>
-        <div class="small" style=${{ margin: '6px 0' }}>${br.reason} (${(br.at || '').slice(0, 16).replace('T', ' ')})</div>
+        <div class="small" style=${{ margin: '6px 0' }}>${br.reason} (${qtime(br.at)})</div>
         <button class="btn btn-sm" onClick=${resumeBreaker}>I investigated — resume sending</button>
       </div>` : null}
     ${machine?.holiday?.holiday ? html`
@@ -290,7 +304,7 @@ export function MarketingTab() {
             <div style=${{ fontWeight: 700 }}>${l.company_name || l.email}
               ${l.converted_at ? html`<span style=${{ marginLeft: '8px', color: '#1e8449', fontSize: '12px', fontWeight: 700 }}>✓ SIGNED UP</span>` : null}
             </div>
-            <div class="muted small">${l.email} · ${l.campaign_name} · ${(l.replied_at || '').slice(0, 16).replace('T', ' ')}</div>
+            <div class="muted small">${l.email} · ${l.campaign_name} · ${qtime(l.replied_at)}</div>
           </div>
           ${l.reply_text ? html`<div class="small" style=${{ marginTop: '4px', color: 'var(--muted)', whiteSpace: 'pre-wrap' }}>${String(l.reply_text).slice(0, 300)}</div>` : null}
         </div>`)}
@@ -319,7 +333,7 @@ export function MarketingTab() {
             </div>
             <div style=${{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>${m.subject || '(no subject)'}</div>
             <div class="small" style=${{ flex: '0 0 auto', color: STATUS_TINT[m.status] || 'var(--muted)' }}>${m.status}</div>
-            <div class="muted small" style=${{ flex: '0 0 auto' }}>${(m.sent_at || m.created_at || '').slice(0, 16).replace('T', ' ')}</div>
+            <div class="muted small" style=${{ flex: '0 0 auto' }}>${qtime(m.sent_at || m.created_at)}</div>
           </div>`)}
       </div>` : html`<div class="muted small">${mailDir === 'out' ? 'No outreach emails sent yet.' : 'No replies captured yet. Replies are captured once inbound is wired (they land in ' + '(reply inbox)' + ').'}</div>`}`;
 
@@ -361,7 +375,7 @@ export function MarketingTab() {
             <div class="small" style=${{ flex: 1, minWidth: '160px', color: 'var(--muted)' }}>
               ${s.reason || '—'}${s.detail ? ' · ' + s.detail : ''}${s.source ? ' · via ' + s.source : ''}
             </div>
-            <div class="muted small" style=${{ flex: '0 0 auto' }}>${(s.updated_at || s.created_at || '').slice(0, 16).replace('T', ' ')}</div>
+            <div class="muted small" style=${{ flex: '0 0 auto' }}>${qtime(s.updated_at || s.created_at)}</div>
             <button class="btn btn-sm" onClick=${() => unsuppress(s.email)}>Un-suppress</button>
           </div>`)}
       </div>` : html`<div class="muted small">Nothing is suppressed.</div>`) : null}`;
@@ -415,7 +429,7 @@ export function MarketingTab() {
           <div style=${{ fontWeight: 700 }}>${openMail.direction === 'in' ? 'Reply received' : 'Outreach email'}</div>
           <button class="btn btn-sm" onClick=${() => setOpenMail(null)}>Close</button>
         </div>
-        <div class="muted small">${openMail.direction === 'in' ? 'From: ' + openMail.from_email : 'To: ' + openMail.to_email} · ${(openMail.sent_at || openMail.created_at || '').slice(0, 16).replace('T', ' ')} · ${openMail.status}</div>
+        <div class="muted small">${openMail.direction === 'in' ? 'From: ' + openMail.from_email : 'To: ' + openMail.to_email} · ${qtime(openMail.sent_at || openMail.created_at)} · ${openMail.status}</div>
         <div style=${{ fontWeight: 700, margin: '10px 0' }}>${openMail.subject || '(no subject)'}</div>
         ${openMail.body_html
           ? html`<div dangerouslySetInnerHTML=${{ __html: openMail.body_html }} style=${{ border: '1px solid var(--border)', borderRadius: '8px', padding: '12px', background: '#fff', color: '#111' }} />`
