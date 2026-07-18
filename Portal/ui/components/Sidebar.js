@@ -50,6 +50,7 @@ export const NAV_SECTIONS = [
       { id: 'sources',     label: 'Sources',     icon: 'sources',  placeholder: false, visibility: ['platform_admin'] },
       { id: 'db-stats',    label: 'Database',    icon: 'database',  placeholder: false, visibility: ['platform_admin'] },
       { id: 'economics',   label: 'Economics',   icon: 'insights',  placeholder: false, visibility: ['platform_admin'] },
+      { id: 'marketing',   label: 'Marketing',   icon: 'megaphone', placeholder: false, visibility: ['platform_admin'] },
       { id: 'admin-users', label: 'Users',       icon: 'team',      placeholder: false, visibility: ['platform_admin'] },
       { id: 'detail-requests', label: 'Detail Requests', icon: 'inbox', placeholder: false, visibility: ['platform_admin'] },
       { id: 'announcements', label: 'Announcements', icon: 'megaphone', placeholder: false, visibility: ['platform_admin'] },

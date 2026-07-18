@@ -66,6 +66,7 @@ import accountRouter           from './routes/account.js';
 import feedRouter              from './routes/feed.js';
 import crmRouter               from './routes/crm.js';
 import crmInboundRouter        from './routes/crm_inbound.js';
+import marketingInboundRouter  from './routes/marketing_inbound.js';
 import outreachUnsubRouter     from './routes/outreach_unsub.js';
 import resendWebhookRouter     from './routes/resend_webhook.js';
 import detailRequestsRouter    from './routes/detail_requests.js';
@@ -287,6 +288,8 @@ app.use('/api/sync',               syncRouter);
 app.use('/u',                      outreachUnsubRouter);
 // Inbound email webhook — machine-to-machine, self-gated by BDI_CRM_INBOUND_TOKEN.
 app.use('/api/crm-inbound',        crmInboundRouter);
+// Outreach REPLY webhook — machine-to-machine, self-gated by BDI_OUTREACH_INBOUND_TOKEN.
+app.use('/api/marketing-inbound',  marketingInboundRouter);
 // Resend email-events webhook (opens/clicks/delivery) — self-gated by ?secret.
 app.use('/api/resend-webhook',     resendWebhookRouter);
 

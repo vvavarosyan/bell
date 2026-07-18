@@ -32,6 +32,7 @@ import { ResearchApprovalsTab } from './components/ResearchApprovalsTab.js';
 import { DeepDataTab }   from './components/DeepDataTab.js';
 import { RealEstateTab } from './components/RealEstateTab.js';
 import { EconomicsTab } from './components/EconomicsTab.js';
+import { MarketingTab } from './components/MarketingTab.js';
 import { SyncTab }       from './components/SyncTab.js';
 import { MarketFeedTab } from './components/MarketFeedTab.js';
 import { SignalsTab } from './components/SignalsTab.js';
@@ -81,6 +82,7 @@ const VIEWS = {
   'sources':     { Component: SourcesTab },
   'db-stats':    { Component: StatsTab },
   'economics':   { Component: EconomicsTab },
+  'marketing':   { Component: MarketingTab },
   'admin-users': { Component: AdminUsersTab },
   'settings':    { Component: SettingsTab },
   'billing':     { Component: BillingTab },

@@ -446,6 +446,18 @@ export const api = {
   economicsCosts:         () => request('/api/economics/costs'),
   saveEconomicsCost:      (body) => request('/api/economics/costs', { method: 'POST', body: JSON.stringify(body) }),
   deleteEconomicsCost:    (id) => request('/api/economics/costs/' + id, { method: 'DELETE' }),
+  // ---- Self-marketing outreach (admin-only) ----
+  mktSummary:             () => request('/api/marketing/summary'),
+  mktCampaigns:           () => request('/api/marketing/campaigns'),
+  mktCreateCampaign:      (body) => request('/api/marketing/campaigns', { method: 'POST', body: JSON.stringify(body) }),
+  mktCampaign:            (id) => request('/api/marketing/campaigns/' + id),
+  mktPlan:                (id) => request('/api/marketing/campaigns/' + id + '/plan', { method: 'POST' }),
+  mktPreview:             (id, n = 5) => request('/api/marketing/campaigns/' + id + '/preview?n=' + n),
+  mktPreviewAdhoc:        (tier = 'role_mailbox', lang = 'en', n = 5) => request('/api/marketing/preview?tier=' + tier + '&lang=' + lang + '&n=' + n),
+  mktSetStatus:           (id, status) => request('/api/marketing/campaigns/' + id + '/status', { method: 'POST', body: JSON.stringify({ status }) }),
+  mktTargets:             (id, status = '', limit = 100) => request('/api/marketing/campaigns/' + id + '/targets?limit=' + limit + (status ? '&status=' + status : '')),
+  mktMail:                (direction = 'out', limit = 100) => request('/api/marketing/mail?direction=' + direction + '&limit=' + limit),
+  mktMailOne:             (id) => request('/api/marketing/mail/' + id),
   // ---- Tenders (Qatar public procurement) ----
   tenders:                (q = {}) => request('/api/tenders?' + new URLSearchParams(q)),
   tenderBuyers:           (q = {}) => request('/api/tenders/buyers?' + new URLSearchParams(q)),

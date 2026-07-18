@@ -107,6 +107,35 @@ router.post('/campaigns/:id/status', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// GET /api/marketing/mail?direction=out|in&limit= — the outreach mail log (admin sees ALL
+// outgoing sends AND incoming replies).
+router.get('/mail', async (req, res) => {
+  try {
+    const dir = req.query.direction === 'in' ? 'in' : 'out';
+    const limit = Math.min(500, Math.max(1, parseInt(req.query.limit, 10) || 100));
+    const where = dir === 'out'
+      ? `direction='out' AND sent_by IN ('outreach-engine','outreach-test')`
+      : `direction='in' AND sent_by='outreach-inbound'`;
+    const r = await query(
+      `SELECT id, to_email, from_email, subject, status, sent_by, sent_at, created_at, error
+         FROM crm_emails WHERE ${where}
+        ORDER BY COALESCE(sent_at, created_at) DESC LIMIT $1`, [limit]);
+    res.json({ direction: dir, mail: r.rows });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// GET /api/marketing/mail/:id — one message with its full body (for the reader panel).
+router.get('/mail/:id', async (req, res) => {
+  try {
+    const r = await query(
+      `SELECT id, direction, to_email, from_email, subject, body_text, body_html, status, sent_by,
+              provider_message_id, sent_at, created_at, error
+         FROM crm_emails WHERE id=$1`, [Number(req.params.id)]);
+    if (!r.rows[0]) return res.status(404).json({ error: 'not_found' });
+    res.json({ email: r.rows[0] });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // GET /api/marketing/campaigns/:id/targets?status=&limit= — read the queue.
 router.get('/campaigns/:id/targets', async (req, res) => {
   try {

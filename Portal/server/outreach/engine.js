@@ -73,14 +73,23 @@ export async function planCampaign(campaignId, { max = 100000 } = {}) {
   if (!c) throw new Error('campaign_not_found');
   const langForMode = c.lang_mode === 'ar' ? 'ar' : c.lang_mode === 'bilingual' ? 'bilingual' : 'en';
   const { targets, counts } = await buildTargets({ tier: c.audience_tier, lang: langForMode, campaignId, max });
+  // Batch-insert (500/query) — a role-mailbox campaign is ~12k targets; one-at-a-time would
+  // hang the Plan button for a minute.
   let inserted = 0;
-  for (const t of targets) {
+  const CHUNK = 500;
+  for (let i = 0; i < targets.length; i += CHUNK) {
+    const slice = targets.slice(i, i + CHUNK);
+    const vals = []; const params = [];
+    slice.forEach((t, j) => {
+      const b = j * 6;
+      vals.push(`($${b + 1},$${b + 2},$${b + 3},$${b + 4},$${b + 5},$${b + 6})`);
+      params.push(campaignId, t.company_id, t.company_name, t.email, t.address_class, t.lang);
+    });
     const r = await query(
       `INSERT INTO outreach_targets (campaign_id, company_id, company_name, email, address_class, lang)
-       VALUES ($1,$2,$3,$4,$5,$6)
-       ON CONFLICT (campaign_id, email) DO NOTHING RETURNING id`,
-      [campaignId, t.company_id, t.company_name, t.email, t.address_class, t.lang]);
-    if (r.rows[0]) inserted += 1;
+       VALUES ${vals.join(',')}
+       ON CONFLICT (campaign_id, email) DO NOTHING`, params);
+    inserted += r.rowCount || 0;
   }
   return { inserted, counts };
 }
@@ -263,4 +272,30 @@ export async function runOutreachTick() {
     report.push({ campaign: c.id, sent, skipped, failed });
   }
   return { ran: true, report };
+}
+
+// --- inbound replies (reply capture + reply-stop) ---------------------------
+/**
+ * Record an inbound reply to an outreach email: log it (so the admin mail view shows it) and
+ * mark the most recent sent target for that address as 'replied' — which takes them out of the
+ * pending queue (reply-stop: a human is now in the loop, the automation must not keep emailing).
+ * Fed by the /api/marketing-inbound webhook. Returns { matched, targetId, campaignId }.
+ */
+export async function recordOutreachReply({ fromEmail, subject = null, text = null, toEmail = null } = {}) {
+  const from = String(fromEmail || '').trim().toLowerCase();
+  if (!from) return { matched: false, reason: 'no_from' };
+  // Log the incoming message for the admin mail view.
+  await query(
+    `INSERT INTO crm_emails (tenant_id, record_id, direction, to_email, from_email, subject, body_text, status, sent_by, provider, sent_at)
+     VALUES (1, NULL, 'in', $1, $2, $3, $4, 'delivered', 'outreach-inbound', 'inbound', now())`,
+    [toEmail || OUTREACH_REPLY_TO(), from, subject, text]);
+  // Reply-stop: the most recent 'sent' target for this address becomes 'replied'.
+  const r = await query(
+    `UPDATE outreach_targets SET status='replied', replied_at=now(), updated_at=now()
+      WHERE id = (SELECT id FROM outreach_targets WHERE lower(email)=$1 AND status='sent'
+                   ORDER BY sent_at DESC NULLS LAST LIMIT 1)
+      RETURNING id, campaign_id, arm_id`, [from]);
+  const t = r.rows[0];
+  if (t?.arm_id) await query(`UPDATE outreach_arms SET replied = replied + 1 WHERE id=$1`, [t.arm_id]).catch(() => {});
+  return { matched: !!t, targetId: t?.id || null, campaignId: t?.campaign_id || null };
 }
