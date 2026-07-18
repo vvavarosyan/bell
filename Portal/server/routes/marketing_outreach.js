@@ -29,11 +29,20 @@ async function campaignCounts(id) {
 // GET /api/marketing/summary — the dashboard header: engine state + addressable market.
 router.get('/summary', async (_req, res) => {
   try {
-    const [tiers, sentToday] = await Promise.all([
+    const [tiers, sentToday, eng] = await Promise.all([
       targetingSummary(),
       query(`SELECT count(*)::int AS n FROM outreach_targets WHERE status='sent'
                 AND sent_at >= (date_trunc('day', now() AT TIME ZONE 'Asia/Qatar') AT TIME ZONE 'Asia/Qatar')`),
+      // Engagement totals — match what the mail log shows (every outreach send / reply), plus
+      // the real opt-out count (across ALL addresses, not just the company list).
+      query(`SELECT
+                (SELECT count(*)::int FROM crm_emails WHERE direction='out'
+                   AND sent_by IN ('outreach-engine','outreach-test') AND status='sent') AS emailed,
+                (SELECT count(*)::int FROM crm_emails WHERE direction='in'
+                   AND sent_by='outreach-inbound')                                        AS replied,
+                (SELECT count(*)::int FROM email_suppressions WHERE reason='unsubscribe')  AS unsubscribed`),
     ]);
+    const e0 = eng.rows[0] || {};
     res.json({
       engine: {
         send_enabled: OUTREACH_ENABLED(),
@@ -44,6 +53,7 @@ router.get('/summary', async (_req, res) => {
         qatar_time: formatQatar(new Date()),
         channel: 'go.bell.qa (isolated)',
       },
+      engagement: { emailed: e0.emailed || 0, replied: e0.replied || 0, unsubscribed: e0.unsubscribed || 0 },
       addressable: tiers,
     });
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -139,12 +149,17 @@ router.get('/mail', async (req, res) => {
     const dir = req.query.direction === 'in' ? 'in' : 'out';
     const limit = Math.min(500, Math.max(1, parseInt(req.query.limit, 10) || 100));
     const where = dir === 'out'
-      ? `direction='out' AND sent_by IN ('outreach-engine','outreach-test')`
-      : `direction='in' AND sent_by='outreach-inbound'`;
+      ? `ce.direction='out' AND ce.sent_by IN ('outreach-engine','outreach-test')`
+      : `ce.direction='in' AND ce.sent_by='outreach-inbound'`;
+    // For each row, resolve the company behind the address (who they are) so the admin sees
+    // WHO — not just an email. Match the outreach address (to_email out, from_email in).
+    const addrCol = dir === 'out' ? 'ce.to_email' : 'ce.from_email';
     const r = await query(
-      `SELECT id, to_email, from_email, subject, status, sent_by, sent_at, created_at, error
-         FROM crm_emails WHERE ${where}
-        ORDER BY COALESCE(sent_at, created_at) DESC LIMIT $1`, [limit]);
+      `SELECT ce.id, ce.to_email, ce.from_email, ce.subject, ce.status, ce.sent_by, ce.sent_at, ce.created_at, ce.error,
+              (SELECT c.name FROM company_contacts cc JOIN companies c ON c.id=cc.company_id
+                WHERE cc.type='email' AND lower(cc.value)=lower(${addrCol}) LIMIT 1) AS company_name
+         FROM crm_emails ce WHERE ${where}
+        ORDER BY COALESCE(ce.sent_at, ce.created_at) DESC LIMIT $1`, [limit]);
     res.json({ direction: dir, mail: r.rows });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });

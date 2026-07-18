@@ -112,6 +112,7 @@ export function MarketingTab() {
 
   const e = summary.engine || {};
   const a = summary.addressable || {};
+  const g = summary.engagement || {};
 
   const chip = (label, value, tint) => html`
     <div key=${label} style=${{ border: '1px solid var(--border)', borderRadius: '10px', background: 'var(--bg-elev)', padding: '10px 14px', minWidth: 0 }}>
@@ -140,6 +141,15 @@ export function MarketingTab() {
         ${chip('Channel', 'go.bell.qa')}
         ${chip('Qatar time', (e.qatar_time || '').split(' ').slice(-2).join(' ') || '—')}
       </div>
+    </div>`;
+
+  // --- engagement (real totals, not just the company list) ------------------
+  const engagement = html`
+    <div class="section-title" style=${{ marginBottom: '8px' }}>Engagement</div>
+    <div style=${{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(140px,1fr))', gap: '10px', marginBottom: '20px' }}>
+      ${chip('Emailed (total)', num(g.emailed), '#3f7fd8')}
+      ${chip('Replied', num(g.replied), '#1e8449')}
+      ${chip('Unsubscribed', num(g.unsubscribed), '#8a4fbf')}
     </div>`;
 
   // --- addressable market ---------------------------------------------------
@@ -228,8 +238,11 @@ export function MarketingTab() {
         ${mail.map((m, i) => html`
           <div key=${m.id} onClick=${() => readMail(m.id)} style=${{ display: 'flex', gap: '12px', alignItems: 'center', padding: '9px 12px', cursor: 'pointer',
               borderTop: i ? '1px solid var(--border)' : 'none' }}>
-            <div style=${{ flex: '0 0 190px', minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-              ${mailDir === 'out' ? m.to_email : m.from_email}
+            <div style=${{ flex: '0 0 220px', minWidth: 0 }}>
+              <div style=${{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', fontWeight: m.company_name ? 600 : 400 }}>
+                ${m.company_name || (mailDir === 'out' ? m.to_email : m.from_email)}
+              </div>
+              ${m.company_name ? html`<div class="muted small" style=${{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>${mailDir === 'out' ? m.to_email : m.from_email}</div>` : null}
             </div>
             <div style=${{ flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>${m.subject || '(no subject)'}</div>
             <div class="small" style=${{ flex: '0 0 auto', color: STATUS_TINT[m.status] || 'var(--muted)' }}>${m.status}</div>
@@ -284,6 +297,7 @@ export function MarketingTab() {
       </div>
       <div class="muted small" style=${{ marginBottom: '16px' }}>Every outgoing and incoming outreach email is logged below.</div>
       ${banner}
+      ${engagement}
       ${market}
       ${campaignsSection}
       ${mailSection}

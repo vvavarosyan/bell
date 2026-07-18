@@ -343,5 +343,15 @@ export async function recordOutreachReply({ fromEmail, subject = null, text = nu
       RETURNING id, campaign_id, arm_id`, [from]);
   const t = r.rows[0];
   if (t?.arm_id) await query(`UPDATE outreach_arms SET replied = replied + 1 WHERE id=$1`, [t.arm_id]).catch(() => {});
+
+  // "Both": besides the admin log, forward a copy to a human inbox so Val sees replies where he
+  // works — with Reply-To set to the prospect so he can answer them directly. Gated by
+  // BDI_OUTREACH_REPLY_FORWARD_TO (unset = no forward). Best-effort; a forward failure never
+  // breaks capture.
+  const forwardTo = process.env.BDI_OUTREACH_REPLY_FORWARD_TO || null;
+  if (forwardTo) {
+    const body = `New reply to Bell outreach.\n\nFrom: ${from}${t ? '' : '  (no matching sent email found)'}\nSubject: ${subject || '(none)'}\n\n${text || '(no text)'}\n\nReply to this email to answer ${from} directly.`;
+    sendEmail({ to: forwardTo, subject: 'Outreach reply from ' + from, text: body, replyTo: from }).catch(() => {});
+  }
   return { matched: !!t, targetId: t?.id || null, campaignId: t?.campaign_id || null };
 }
