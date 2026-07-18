@@ -64,6 +64,7 @@ import accountRouter           from './routes/account.js';
 import feedRouter              from './routes/feed.js';
 import crmRouter               from './routes/crm.js';
 import crmInboundRouter        from './routes/crm_inbound.js';
+import outreachUnsubRouter     from './routes/outreach_unsub.js';
 import resendWebhookRouter     from './routes/resend_webhook.js';
 import detailRequestsRouter    from './routes/detail_requests.js';
 import outreachRouter          from './routes/outreach.js';
@@ -134,7 +135,11 @@ app.get('/api/health', async (req, res) => {
     // (Resend key present) — diagnoses "in-app arrived but email didn't".
     // NB: emailProviderConfigured() is async — must await or JSON shows "{}".
     const email = await emailProviderConfigured().catch(() => false);
-    res.json({ ok, db: ok ? 'connected' : 'down', build: BUILD_SHA, email, ts: new Date().toISOString() });
+    // `outreach_email` = the ISOLATED outreach account's key is present on this service
+    // (the separate go.bell.qa Resend account). Confirms the firewall is wired without
+    // exposing the key. Off until Val sets BDI_KEY_RESEND_OUTREACH.
+    const outreachEmail = await getKey('resend-outreach').then((k) => !!k).catch(() => false);
+    res.json({ ok, db: ok ? 'connected' : 'down', build: BUILD_SHA, email, outreach_email: outreachEmail, ts: new Date().toISOString() });
   } catch (err) {
     res.status(500).json({ ok: false, db: 'down', error: err.message });
   }
@@ -274,6 +279,9 @@ app.use('/api/whatsapp-webhook',   whatsappWebhookRouter);
 app.use('/api/auth',               authRouter);
 app.use('/api/billing',            billingRouter);
 app.use('/api/sync',               syncRouter);
+// Public one-click unsubscribe for outreach (RFC 8058) — NOT Clerk-gated; recipients aren't
+// logged in. Token-scoped, so it exposes nothing.
+app.use('/u',                      outreachUnsubRouter);
 // Inbound email webhook — machine-to-machine, self-gated by BDI_CRM_INBOUND_TOKEN.
 app.use('/api/crm-inbound',        crmInboundRouter);
 // Resend email-events webhook (opens/clicks/delivery) — self-gated by ?secret.
