@@ -133,7 +133,21 @@ export async function addTarget(campaignId, { email, companyName = null } = {}) 
     `INSERT INTO outreach_targets (campaign_id, company_id, company_name, email, address_class, lang)
      VALUES ($1,$2,$3,$4,$5,$6) ON CONFLICT (campaign_id, email) DO NOTHING RETURNING id`,
     [campaignId, co?.id || null, companyName || co?.name || null, e, 'manual', lang]);
-  return { added: !!r.rows[0], id: r.rows[0]?.id || null, company: companyName || co?.name || null };
+  if (r.rows[0]) return { added: true, id: r.rows[0].id, company: companyName || co?.name || null };
+
+  // The address already has a row in this campaign (UNIQUE guard). If that row is FINISHED
+  // (failed/skipped/sent/replied/unsubscribed/bounced), re-adding means "queue it again" — reset
+  // it to pending with fresh touch state. (Suppression/opt-out were already re-checked above, so
+  // a still-unsubscribed address never gets here.) Rows still pending/sending stay untouched.
+  const requeue = await query(
+    `UPDATE outreach_targets
+        SET status='pending', skip_reason=NULL, touch_count=0, next_touch_at=NULL,
+            reply_class=NULL, reply_text=NULL, address_class='manual', updated_at=now()
+      WHERE campaign_id=$1 AND lower(email)=$2
+        AND status IN ('failed','skipped','sent','replied','unsubscribed','bounced')
+      RETURNING id`, [campaignId, e]);
+  if (requeue.rows[0]) return { added: true, requeued: true, id: requeue.rows[0].id, company: companyName || co?.name || null };
+  return { added: false, reason: 'already queued', id: null, company: companyName || co?.name || null };
 }
 
 // --- dry-run preview: draft, never send ------------------------------------
