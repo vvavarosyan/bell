@@ -296,34 +296,48 @@ async function sendOne(c, t, { followUp = false } = {}) {
     [email, composed.subject, final.text, final.html]);
   const crmId = Number(ins.rows[0].id);
 
+  // THE SEND. Only a failure HERE may mark anything 'failed'.
+  let res;
   try {
-    const res = await sendEmail({
+    res = await sendEmail({
       to: email, subject: composed.subject, html: final.html, text: final.text,
       replyTo: c.reply_to || OUTREACH_REPLY_TO(), headers, channel: 'outreach',
     });
+  } catch (e) {
+    await query(`UPDATE crm_emails SET status='failed', error=$2 WHERE id=$1`, [crmId, String(e.message).slice(0, 400)]).catch(() => {});
+    await query(`UPDATE outreach_targets SET status='failed', skip_reason=$2, next_touch_at=NULL, updated_at=now() WHERE id=$1`, [t.id, String(e.message).slice(0, 200)]).catch(() => {});
+    return 'failed';
+  }
+
+  // BOOKKEEPING — the email IS out. A failure below must NEVER mark the send 'failed' (that
+  // exact confusion hit Val's live test: a SQL type error here labelled a delivered email
+  // "failed"). Errors are logged, and a minimal fallback still records the send.
+  try {
     // Log the REAL wire From (BDI_OUTREACH_FROM override included), not a hardcoded literal.
     const fromAddr = (OUTREACH_FROM.match(/<([^>]+)>/) || [null, OUTREACH_FROM])[1];
     await query(`UPDATE crm_emails SET status='sent', provider_message_id=$2, from_email=$3, sent_at=now() WHERE id=$1`,
       [crmId, res?.id || null, fromAddr]);
     // Touch bookkeeping: schedule the next follow-up unless this was the last allowed touch.
+    // Explicit ::int casts — Postgres cannot infer a parameter used in both an assignment and
+    // a CASE comparison ("inconsistent types deduced"), reproduced + fixed 2026-07-18.
     const touches = (t.touch_count || 0) + 1;
     const maxTouches = Math.max(1, c.max_touches || 1);
     const gapDays = Math.max(1, c.touch_gap_days || 4);
     await query(
       `UPDATE outreach_targets
-          SET status='sent', crm_email_id=$2, optout_token=$3, subject=$4, body_text=$5, body_html=$6,
-              sent_at=now(), touch_count=$7,
-              next_touch_at = CASE WHEN $7 >= $8 THEN NULL ELSE now() + ($9 || ' days')::interval END,
+          SET status='sent', crm_email_id=$2::bigint, optout_token=$3, subject=$4, body_text=$5, body_html=$6,
+              sent_at=now(), touch_count=$7::int,
+              next_touch_at = CASE WHEN $7::int >= $8::int THEN NULL ELSE now() + make_interval(days => $9::int) END,
               updated_at=now()
         WHERE id=$1`,
-      [t.id, crmId, token, composed.subject, final.text, final.html, touches, maxTouches, String(gapDays)]);
+      [t.id, crmId, token, composed.subject, final.text, final.html, touches, maxTouches, gapDays]);
     if (arm) await query(`UPDATE outreach_arms SET sent = sent + 1 WHERE id = $1`, [arm.id]).catch(() => {});
-    return 'sent';
   } catch (e) {
-    await query(`UPDATE crm_emails SET status='failed', error=$2 WHERE id=$1`, [crmId, String(e.message).slice(0, 400)]);
-    await query(`UPDATE outreach_targets SET status='failed', skip_reason=$2, next_touch_at=NULL, updated_at=now() WHERE id=$1`, [t.id, String(e.message).slice(0, 200)]);
-    return 'failed';
+    console.error('[outreach] bookkeeping after a SUCCESSFUL send failed (send is out, recording minimally):', e.message);
+    await query(`UPDATE outreach_targets SET status='sent', crm_email_id=$2, optout_token=$3, sent_at=now(), touch_count=COALESCE(touch_count,0)+1, updated_at=now() WHERE id=$1`,
+      [t.id, crmId, token]).catch(() => {});
   }
+  return 'sent';
 }
 
 // --- scheduler --------------------------------------------------------------
@@ -500,12 +514,26 @@ export async function recordOutreachReply({ fromEmail, subject = null, text = nu
   }
 
   // "Both": forward the reply to a human inbox so Val sees it where he works — Reply-To is the
-  // prospect, so he can answer directly. Hot leads are flagged in the subject.
+  // prospect, so he can answer directly. Hot leads are flagged in the subject. Every forward
+  // attempt is LOGGED to crm_emails (sent_by 'outreach-forward') with its outcome — Val's live
+  // test had forwards vanish with no trace; a silent .catch(()=>{}) must never hide that again.
   const forwardTo = process.env.BDI_OUTREACH_REPLY_FORWARD_TO || null;
   if (forwardTo && cls.class !== 'remove_me') {
     const tag = cls.class === 'interested' ? '🔥 INTERESTED — ' : '';
+    const fwdSubject = tag + 'Outreach reply from ' + from;
     const body = `New reply to Bell outreach${cls.class !== 'unclassified' ? ' (' + cls.class + ')' : ''}.\n\nFrom: ${from}${t ? '' : '  (no matching sent email found)'}\nSubject: ${subject || '(none)'}\n\n${text || '(no text)'}\n\nReply to this email to answer ${from} directly.`;
-    sendEmail({ to: forwardTo, subject: tag + 'Outreach reply from ' + from, text: body, replyTo: from }).catch(() => {});
+    const fwdLog = await query(
+      `INSERT INTO crm_emails (tenant_id, record_id, direction, to_email, subject, body_text, status, sent_by, provider)
+       VALUES (1, NULL, 'out', $1, $2, $3, 'queued', 'outreach-forward', 'resend') RETURNING id`,
+      [forwardTo, fwdSubject, body]).catch(() => null);
+    const fwdId = fwdLog?.rows?.[0]?.id || null;
+    try {
+      const fres = await sendEmail({ to: forwardTo, subject: fwdSubject, text: body, replyTo: from });
+      if (fwdId) await query(`UPDATE crm_emails SET status='sent', provider_message_id=$2, sent_at=now() WHERE id=$1`, [fwdId, fres?.id || null]).catch(() => {});
+    } catch (e) {
+      console.error('[outreach] reply-forward to ' + forwardTo + ' FAILED:', e.message);
+      if (fwdId) await query(`UPDATE crm_emails SET status='failed', error=$2 WHERE id=$1`, [fwdId, String(e.message).slice(0, 400)]).catch(() => {});
+    }
   }
   return { matched: !!t, targetId: t?.id || null, campaignId: t?.campaign_id || null, reply_class: cls.class };
 }

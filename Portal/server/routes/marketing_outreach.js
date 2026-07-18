@@ -141,6 +141,42 @@ router.get('/campaigns/:id/stats', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// GET /api/marketing/suppressions — the do-not-send list WITH its why (reason/detail/source/
+// when), newest first. This answers "what suppressed this address?" — e.g. whether an
+// unsubscribe came from the link, a 'remove me' reply, or a bounce.
+router.get('/suppressions', async (req, res) => {
+  try {
+    const q = String(req.query.q || '').trim().toLowerCase();
+    const params = [];
+    let where = '';
+    if (q) { params.push('%' + q + '%'); where = `WHERE email LIKE $1`; }
+    params.push(200);
+    const r = await query(
+      `SELECT email, reason, detail, source, created_at, updated_at
+         FROM email_suppressions ${where} ORDER BY updated_at DESC LIMIT $${params.length}`, params);
+    res.json({ suppressions: r.rows });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// POST /api/marketing/suppressions/remove { email } — admin un-suppress (for TEST addresses,
+// or a person who asks to hear from Bell again). Removes the block AND records a fresh
+// consent-granted event on the founder's authority so the ledger explains the reversal.
+// ⚠ Never use on a real prospect who unsubscribed and did NOT ask to come back.
+router.post('/suppressions/remove', async (req, res) => {
+  try {
+    const email = String(req.body?.email || '').trim().toLowerCase();
+    if (!email) return res.status(400).json({ error: 'need email' });
+    const { removeSuppression } = await import('../lib/suppression.js');
+    const { recordConsent } = await import('../outreach/optout.js');
+    const removed = await removeSuppression(email);
+    await recordConsent(email, {
+      action: 'granted', basis: 'founder_instruction',
+      evidence: { via: 'admin_unsuppress', note: 'removed from suppression list by platform admin' },
+    }).catch(() => {});
+    res.json({ ok: true, removed });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // POST /api/marketing/clear-tests — wipe TEST artifacts so real outreach starts on a clean
 // slate: manual test sends (sent_by='outreach-test'), manually-added targets, and test replies.
 // NEVER touches the consent ledger (append-only, legally required) or real engine sends.

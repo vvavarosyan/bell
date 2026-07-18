@@ -31,6 +31,7 @@ export function MarketingTab() {
   const [mailDir, setMailDir] = useState('out');
   const [mail, setMail] = useState([]);
   const [openMail, setOpenMail] = useState(null);   // full email body in the reader
+  const [supp, setSupp] = useState(null);           // suppression list (null = collapsed)
 
   const loadTop = useCallback(async () => {
     setLoading(true);
@@ -116,6 +117,15 @@ export function MarketingTab() {
       toast('Cleared: ' + r.removed.test_sends + ' test sends, ' + r.removed.test_replies + ' test replies, ' + r.removed.manual_targets + ' manual recipients.');
       await loadTop(); await loadMail(mailDir);
     } catch (err) { toast('Clear failed: ' + err.message, 'error'); }
+  };
+  const loadSupp = async () => {
+    try { const r = await api.mktSuppressions(); setSupp(r.suppressions || []); }
+    catch (err) { toast('Suppression list failed: ' + err.message, 'error'); }
+  };
+  const unsuppress = async (email) => {
+    if (!window.confirm('Remove ' + email + ' from the do-not-send list?\n\nOnly do this for TEST addresses, or someone who ASKED to hear from Bell again. Never for a real prospect who unsubscribed.')) return;
+    try { await api.mktUnsuppress(email); toast(email + ' un-suppressed.'); await loadSupp(); await loadTop(); }
+    catch (err) { toast('Un-suppress failed: ' + err.message, 'error'); }
   };
   const logReply = async () => {
     const fromEmail = window.prompt('Test the Incoming flow: whose email replied? (their address)');
@@ -335,6 +345,27 @@ export function MarketingTab() {
       </div>
     </div>` : null;
 
+  // --- suppressed addresses (the do-not-send list, with WHY + unsuppress) ---
+  const suppSection = html`
+    <div class="section-title" style=${{ marginTop: '22px', marginBottom: '8px' }}>
+      Suppressed addresses
+      <button class="btn btn-sm" style=${{ marginLeft: '10px' }} onClick=${() => (supp === null ? loadSupp() : setSupp(null))}>
+        ${supp === null ? 'Show' : 'Hide'}
+      </button>
+    </div>
+    ${supp !== null ? (supp.length ? html`
+      <div style=${{ border: '1px solid var(--border)', borderRadius: '10px', overflow: 'hidden' }}>
+        ${supp.map((s, i) => html`
+          <div key=${s.email} style=${{ display: 'flex', gap: '12px', alignItems: 'center', padding: '9px 12px', borderTop: i ? '1px solid var(--border)' : 'none', flexWrap: 'wrap' }}>
+            <div style=${{ flex: '0 0 220px', fontWeight: 600, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis' }}>${s.email}</div>
+            <div class="small" style=${{ flex: 1, minWidth: '160px', color: 'var(--muted)' }}>
+              ${s.reason || '—'}${s.detail ? ' · ' + s.detail : ''}${s.source ? ' · via ' + s.source : ''}
+            </div>
+            <div class="muted small" style=${{ flex: '0 0 auto' }}>${(s.updated_at || s.created_at || '').slice(0, 16).replace('T', ' ')}</div>
+            <button class="btn btn-sm" onClick=${() => unsuppress(s.email)}>Un-suppress</button>
+          </div>`)}
+      </div>` : html`<div class="muted small">Nothing is suppressed.</div>`) : null}`;
+
   // --- stats drawer (funnel + arms) -----------------------------------------
   const statsPanel = stats ? (() => {
     const f = stats.funnel || {};
@@ -407,6 +438,7 @@ export function MarketingTab() {
       ${campaignsSection}
       ${hotLeadsSection}
       ${mailSection}
+      ${suppSection}
       ${previewPanel}
       ${statsPanel}
       ${mailReader}

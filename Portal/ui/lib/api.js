@@ -469,6 +469,8 @@ export const api = {
   mktHolidays:            () => request('/api/marketing/holidays'),
   mktAddHoliday:          (day, name) => request('/api/marketing/holidays', { method: 'POST', body: JSON.stringify({ day, name }) }),
   mktClearTests:          () => request('/api/marketing/clear-tests', { method: 'POST' }),
+  mktSuppressions:        (q = '') => request('/api/marketing/suppressions' + (q ? '?q=' + encodeURIComponent(q) : '')),
+  mktUnsuppress:          (email) => request('/api/marketing/suppressions/remove', { method: 'POST', body: JSON.stringify({ email }) }),
   // ---- Tenders (Qatar public procurement) ----
   tenders:                (q = {}) => request('/api/tenders?' + new URLSearchParams(q)),
   tenderBuyers:           (q = {}) => request('/api/tenders/buyers?' + new URLSearchParams(q)),
