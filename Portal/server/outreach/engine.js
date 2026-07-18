@@ -298,6 +298,28 @@ export async function runOutreachTick() {
   return { ran: true, report };
 }
 
+/**
+ * Send NOW to explicitly-added test recipients only (address_class='manual'), on demand,
+ * bypassing the hours/scheduler/enabled gates — for the end-to-end test session. It can NEVER
+ * touch the bulk-planned tier (role_mailbox/named_person/unclassified), so it cannot cause an
+ * unsolicited mass send; that path stays behind the full gates. Admin-triggered, hard-capped,
+ * and still respects suppression + opt-out (via sendOne). Returns { sent, skipped, failed }.
+ */
+export async function sendTestNow(campaignId, { max = 5 } = {}) {
+  const c = await getCampaign(campaignId);
+  if (!c) throw new Error('campaign_not_found');
+  const due = (await query(
+    `SELECT * FROM outreach_targets
+      WHERE campaign_id=$1 AND status='pending' AND address_class='manual'
+      ORDER BY id LIMIT $2`, [campaignId, Math.min(Math.max(1, max), 10)])).rows;
+  let sent = 0, skipped = 0, failed = 0;
+  for (const t of due) {
+    const r = await sendOne(c, t);
+    if (r === 'sent') sent += 1; else if (r === 'skipped') skipped += 1; else failed += 1;
+  }
+  return { sent, skipped, failed, considered: due.length };
+}
+
 // --- inbound replies (reply capture + reply-stop) ---------------------------
 /**
  * Record an inbound reply to an outreach email: log it (so the admin mail view shows it) and

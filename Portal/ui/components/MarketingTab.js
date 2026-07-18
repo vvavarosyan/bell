@@ -81,6 +81,17 @@ export function MarketingTab() {
     } catch (err) { toast('Add failed: ' + err.message, 'error'); }
     finally { setBusy(false); }
   };
+  const sendNow = async (id) => {
+    if (!window.confirm('Send NOW to the test recipients you added to this campaign? (Only addresses you added by hand — never the bulk list.)')) return;
+    setBusy(true);
+    try {
+      const r = await api.mktSendNow(id);
+      if (r.considered === 0) toast('No hand-added recipients to send to. Use "＋ recipient" first.', 'error');
+      else toast('Sent ' + r.sent + ', skipped ' + r.skipped + ', failed ' + r.failed + '.');
+      await loadTop(); setMailDir('out'); await loadMail('out');
+    } catch (err) { toast('Send now failed: ' + err.message, 'error'); }
+    finally { setBusy(false); }
+  };
   const logReply = async () => {
     const fromEmail = window.prompt('Test the Incoming flow: whose email replied? (their address)');
     if (!fromEmail) return;
@@ -160,6 +171,7 @@ export function MarketingTab() {
           <div style=${{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
             <button class="btn btn-sm" disabled=${busy} onClick=${() => plan(c.id)}>Plan</button>
             <button class="btn btn-sm" disabled=${busy} onClick=${() => addRecipient(c.id)}>＋ recipient</button>
+            <button class="btn btn-sm" disabled=${busy} onClick=${() => sendNow(c.id)}>Send now (test)</button>
             <button class="btn btn-sm" disabled=${busy} onClick=${() => preview(c.id)}>Preview</button>
             ${c.status === 'active'
               ? html`<button class="btn btn-sm" disabled=${busy} onClick=${() => setStatus(c.id, 'paused')}>Pause</button>`

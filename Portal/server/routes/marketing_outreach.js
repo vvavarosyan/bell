@@ -12,7 +12,7 @@ import { query } from '../db.js';
 import { targetingSummary } from '../outreach/targeting.js';
 import {
   OUTREACH_ENABLED, listCampaigns, getCampaign, createCampaign, setCampaignStatus,
-  planCampaign, previewBatch, remainingAllowance, addTarget, recordOutreachReply,
+  planCampaign, previewBatch, remainingAllowance, addTarget, recordOutreachReply, sendTestNow,
 } from '../outreach/engine.js';
 import { isQatarWorkingHour, formatQatar } from '../lib/qatar_time.js';
 
@@ -104,6 +104,13 @@ router.post('/campaigns/:id/add-target', async (req, res) => {
     const out = await addTarget(Number(req.params.id), { email: req.body?.email, companyName: req.body?.companyName });
     res.json(out);
   } catch (e) { res.status(400).json({ error: e.message }); }
+});
+
+// POST /api/marketing/campaigns/:id/send-now — send NOW to explicitly-added test recipients
+// only (never the bulk tier). For the end-to-end test session on prod.
+router.post('/campaigns/:id/send-now', async (req, res) => {
+  try { res.json(await sendTestNow(Number(req.params.id), { max: 5 })); }
+  catch (e) { res.status(400).json({ error: e.message }); }
 });
 
 // POST /api/marketing/log-reply { fromEmail, subject, text } — manually record a reply (test
