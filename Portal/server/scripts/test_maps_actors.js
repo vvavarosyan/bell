@@ -5,7 +5,7 @@
 import { query } from '../db.js';
 import { compareActors } from '../enrichment/gmaps_sweep.js';
 
-const SEARCHES = ['construction company Doha Qatar', 'medical clinic Doha Qatar'];
+const SEARCHES = ['construction company', 'medical clinic'];   // location is added per-actor in sweepOne
 
 async function main() {
   const ready = await query(`SELECT to_regclass('gmaps_places') AS t`);

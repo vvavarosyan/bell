@@ -20,11 +20,16 @@ export const ACTORS = {
   microworlds: 'microworlds/crawler-google-places',
 };
 
-function inputFor(actorKey, searchTerm, maxPlaces) {
-  // Both actors accept searchStringsArray + max item caps; keep inputs minimal + identical.
-  const base = { searchStringsArray: [searchTerm], language: 'en' };
-  if (actorKey === 'compass') return { ...base, maxCrawledPlacesPerSearch: maxPlaces, skipClosedPlaces: false };
-  return { ...base, maxCrawledPlacesPerSearch: maxPlaces };
+// The two actors take DIFFERENT input shapes (live-verified 2026-07-20 — the identical-input
+// assumption failed microworlds with a 400):
+//   compass     — searchStringsArray (location words inside the term) + maxCrawledPlacesPerSearch
+//   microworlds — keywords[] + location (geocoded to a polygon) + max_result_per_keyword +
+//                 scrape_contacts:true (the email/social enrichment add-on, ~$2/1k extra)
+function inputFor(actorKey, keyword, location, maxPlaces) {
+  if (actorKey === 'compass') {
+    return { searchStringsArray: [keyword + ' ' + location], language: 'en', maxCrawledPlacesPerSearch: maxPlaces, skipClosedPlaces: false };
+  }
+  return { keywords: [keyword], location, max_result_per_keyword: maxPlaces, scrape_contacts: true };
 }
 
 function normPlace(item) {
@@ -43,11 +48,12 @@ function normPlace(item) {
   };
 }
 
-/** Run one actor on one search term; stage results. Returns {fetched, staged}. */
-export async function sweepOne(actorKey, searchTerm, { maxPlaces = 25, timeoutMs = 300_000 } = {}) {
+/** Run one actor on one keyword; stage results. Returns {fetched, staged}. */
+export async function sweepOne(actorKey, keyword, { location = 'Doha, Qatar', maxPlaces = 25, timeoutMs = 300_000 } = {}) {
   const actorId = ACTORS[actorKey];
   if (!actorId) throw new Error('unknown actor ' + actorKey);
-  const items = await runSync(actorId, inputFor(actorKey, searchTerm, maxPlaces), { timeoutMs });
+  const searchTerm = keyword + ' @ ' + location;
+  const items = await runSync(actorId, inputFor(actorKey, keyword, location, maxPlaces), { timeoutMs });
   let staged = 0;
   for (const item of items || []) {
     const p = normPlace(item);

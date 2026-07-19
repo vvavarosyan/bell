@@ -27,7 +27,8 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 export async function currentBatchSize() {
   const s = await getState('spark_batch_size');
-  return Math.min(150, Math.max(25, Number(s?.size) || 120));
+  // Floor 5 (calibration can go small after a max-credits refusal), ceiling 150 (prompt cap).
+  return Math.min(150, Math.max(5, Number(s?.size) || 120));
 }
 
 async function pickPending(limit) {
@@ -187,6 +188,15 @@ export async function runOneBatch({ onProgress = () => {}, batchOverride = null 
     const err = resp?.error || (resp ? 'status ' + resp.status : 'poll timeout');
     await query(`UPDATE spark_runs SET status='failed', error=$2, completed_at=now(), updated_at=now() WHERE id=$1`, [run.id, String(err).slice(0, 500)]);
     await query(`UPDATE companies SET spark_status=NULL WHERE id = ANY($1)`, [rows.map((r) => r.id)]);
+    // "Agent reached max credits" = the batch asked for more research than one free run can
+    // hold (Val's live calibration, run 1: 144 companies → refusal). Shrink HARD (÷3, floor 5)
+    // and tell the runner to retry smaller instead of giving up the day.
+    if (/max credits|refusal/i.test(String(err))) {
+      const cur = await currentBatchSize();
+      const next = Math.max(5, Math.floor(cur / 3));
+      await setState('spark_batch_size', { size: next });
+      return { status: 'shrunk', error: err, next_batch: next };
+    }
     return { status: 'run_failed', error: err };
   }
 

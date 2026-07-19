@@ -31,6 +31,10 @@ async function main() {
     console.log('— Run ' + i + '/' + MAX_RUNS + ' —');
     const r = await runOneBatch({ onProgress: (m) => console.log('  ' + m) });
     if (r.status === 'no_pending') { console.log('  Nothing left to submit — every company has been through Spark. 🎉'); break; }
+    if (r.status === 'shrunk') {
+      console.log('  Batch was too big for one free run ("max credits") — shrinking to ' + r.next_batch + ' and retrying with the next run.');
+      continue;
+    }
     if (r.status === 'submit_failed' || r.status === 'run_failed') {
       console.log('  STOPPED: ' + (r.error || r.status));
       if (/quota|limit|429|payment|insufficient/i.test(String(r.error || ''))) {
