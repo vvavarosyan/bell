@@ -11,7 +11,7 @@ import { Mail, CheckCircle2 } from 'lucide-react';
 export function OptInForm() {
   const [email, setEmail] = useState('');
   const [company, setCompany] = useState('');
-  const [state, setState] = useState<'idle' | 'busy' | 'done' | 'error'>('idle');
+  const [state, setState] = useState<'idle' | 'busy' | 'done' | 'already' | 'error'>('idle');
   const [error, setError] = useState('');
 
   const submit = async (e: React.FormEvent) => {
@@ -25,7 +25,10 @@ export function OptInForm() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ email: email.trim(), company: company.trim() }),
       });
-      if (res.ok) setState('done');
+      if (res.ok) {
+        const data = await res.json().catch(() => ({}));
+        setState(data.already ? 'already' : 'done');
+      }
       else {
         const data = await res.json().catch(() => ({}));
         setError(data.error === 'invalid_email' ? 'That email address doesn’t look right.' : 'Something went wrong — please try again in a minute.');
@@ -37,14 +40,17 @@ export function OptInForm() {
     }
   };
 
-  if (state === 'done') {
+  if (state === 'done' || state === 'already') {
     return (
       <div className="rounded-lg border border-border bg-bg-elev-2 p-8 text-center">
         <CheckCircle2 className="mx-auto mb-3 text-accent" size={28} />
-        <p className="text-lg font-medium mb-1">You&rsquo;re on the list.</p>
+        <p className="text-lg font-medium mb-1">
+          {state === 'already' ? 'This email is already subscribed.' : 'You’re on the list.'}
+        </p>
         <p className="text-text-muted text-sm">
-          We&rsquo;ll email you Qatar tenders and market signals worth knowing about. Every email
-          has a one-click unsubscribe.
+          {state === 'already'
+            ? 'No need to sign up again — you’re already getting our Qatar market updates. Every email has a one-click unsubscribe.'
+            : 'We’ll email you Qatar tenders and market signals worth knowing about. Every email has a one-click unsubscribe.'}
         </p>
       </div>
     );

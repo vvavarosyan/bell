@@ -7,7 +7,7 @@
 // rate-limited, and it only ever ADDS a consent row — it can't read or modify anything.
 
 import { Router } from 'express';
-import { recordConsent } from '../outreach/optout.js';
+import { recordConsent, hasConsent } from '../outreach/optout.js';
 import { sendWelcome } from '../outreach/digest.js';
 
 const router = Router();
@@ -34,6 +34,12 @@ router.post('/', async (req, res) => {
     const email = String(req.body?.email || '').trim().toLowerCase();
     if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email) || email.length > 254) return res.status(400).json({ error: 'invalid_email' });
     const company = String(req.body?.company || '').trim().slice(0, 200) || null;
+    // Already subscribed (latest consent = granted)? Say so honestly — no duplicate consent
+    // row, no re-welcome, and the form tells the visitor they're already on the list (Val's
+    // ask 2026-07-19). A previously-WITHDRAWN address falls through and re-subscribes cleanly.
+    if (await hasConsent(email).catch(() => false)) {
+      return res.json({ ok: true, already: true });
+    }
     await recordConsent(email, {
       action: 'granted', basis: 'web_form', formVersion: 'optin-v1',
       wordingShown: WORDING, noticeVersion: 'v1',
