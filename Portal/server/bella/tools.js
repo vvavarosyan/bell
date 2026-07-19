@@ -1292,7 +1292,7 @@ export const TOOLS = [
     approval: 'always',
     definition: {
       name: 'send_email',
-      description: "Send an email to a CRM record's contact via the workspace's sending identity. ALWAYS gets user approval. BEFORE drafting: (1) call get_email_setup — if the user has no header/footer/signature yet, suggest setting it up first (update_email_branding) so the email doesn't look plain; the branding wraps the message automatically, so do NOT paste a signature/footer into the body. (2) call get_company for the recipient's company and weave in SPECIFICS — what they do, industry, city, Google reviews, partnerships, tech they run, recent news/signals — so it reads personally and earns a reply; never send a generic template. Personalization tokens like {company} are also supported. To copy in the company's other people, call get_email_recipients first and pass their addresses as cc — never invent an address.",
+      description: "Send an email to a CRM record's contact via the workspace's sending identity. ALWAYS gets user approval. NOT for cold outreach to companies that never engaged — for Bell's own self-marketing batches use add_to_outreach (the outreach machine) instead; this path has no unsubscribe link and rides the main domain. BEFORE drafting: (1) call get_email_setup — if the user has no header/footer/signature yet, suggest setting it up first (update_email_branding) so the email doesn't look plain; the branding wraps the message automatically, so do NOT paste a signature/footer into the body. (2) call get_company for the recipient's company and weave in SPECIFICS — what they do, industry, city, Google reviews, partnerships, tech they run, recent news/signals — so it reads personally and earns a reply; never send a generic template. Personalization tokens like {company} are also supported. To copy in the company's other people, call get_email_recipients first and pass their addresses as cc — never invent an address.",
       input_schema: {
         type: 'object',
         properties: {
@@ -1324,6 +1324,59 @@ export const TOOLS = [
       return asResult(status, payload, ['id', 'status']);
     },
     summarize: (args, r) => r?.error ? ('failed: ' + r.error) : `email sent to record #${args.record_id}${Array.isArray(args.cc) && args.cc.length ? ` (cc ${args.cc.length})` : ''}`,
+  },
+
+  {
+    approval: 'act',
+    definition: {
+      name: 'add_to_outreach',
+      description: "PLATFORM ADMIN ONLY — Bell's own self-marketing. Adds companies to the outreach MACHINE's queue (admin → Marketing), which sends cold email under ALL its protections: the isolated go.bell.qa domain, a working unsubscribe in every email, suppression/consent checks, warmup ramp, daily caps, Qatar working hours, holidays, the circuit breaker, and reply-stop. Sends are NOT immediate — the machine sends on its own schedule once armed, or the admin can use 'Send now (test)' in the Marketing tab. NEVER use send_email for cold outreach to companies that have not engaged: that would bypass every protection and burn the main bell.qa domain. After adding, tell the admin honestly which companies were queued, which had no usable email, and that sending follows the machine's schedule.",
+      input_schema: {
+        type: 'object',
+        properties: {
+          companies: { type: 'array', items: { type: 'string' }, description: 'Company names (as in Bell) or numeric company ids.' },
+          campaign_name: { type: 'string', description: "Campaign to queue into (created as a draft if missing). Default 'Bella outreach'." },
+        },
+        required: ['companies'],
+      },
+    },
+    describe: (args) => `Queue ${Array.isArray(args.companies) ? args.companies.length : 0} companies for Bell outreach (campaign "${args.campaign_name || 'Bella outreach'}")`,
+    async execute(args, ctx) {
+      if (Number(ctx?.tenant?.id) !== 1) return { error: 'admin_only: the outreach machine is Bell self-marketing, not a customer feature.' };
+      const { query } = await import('../db.js');
+      const { addTarget, createCampaign } = await import('../outreach/engine.js');
+      const { classifyAddress } = await import('../outreach/address_rules.js');
+
+      const name = String(args.campaign_name || 'Bella outreach').slice(0, 120);
+      let campaign = (await query(`SELECT * FROM outreach_campaigns WHERE name=$1 ORDER BY id LIMIT 1`, [name])).rows[0];
+      if (!campaign) campaign = await createCampaign({ name, goal: 'Queued by Bella on admin instruction' });
+
+      const results = [];
+      for (const raw of (args.companies || []).slice(0, 25)) {
+        const term = String(raw || '').trim();
+        if (!term) continue;
+        const co = /^\d+$/.test(term)
+          ? (await query(`SELECT id, name, email FROM companies WHERE id=$1`, [Number(term)])).rows[0]
+          : (await query(`SELECT id, name, email FROM companies WHERE name ILIKE $1 AND is_active=true ORDER BY (name_normalized = lower($2)) DESC, id LIMIT 1`, ['%' + term + '%', term])).rows[0];
+        if (!co) { results.push({ company: term, queued: false, reason: 'company_not_found' }); continue; }
+        // Best address: prefer a ROLE mailbox (info@, sales@ — the defensible tier).
+        const emails = (await query(`SELECT value FROM company_contacts WHERE company_id=$1 AND type='email'`, [co.id])).rows.map((r) => r.value);
+        if (co.email) emails.push(co.email);
+        const role = emails.find((e) => classifyAddress({ email: e }).outcome === 'role_mailbox');
+        const email = role || emails[0] || null;
+        if (!email) { results.push({ company: co.name, queued: false, reason: 'no_email_on_file' }); continue; }
+        const r = await addTarget(campaign.id, { email, companyName: co.name });
+        results.push({ company: co.name, email, queued: !!r.added, reason: r.added ? (r.requeued ? 'requeued' : 'queued') : r.reason });
+      }
+      return {
+        campaign: campaign.name, campaign_status: campaign.status,
+        queued: results.filter((r) => r.queued).length, results,
+        note: campaign.status !== 'active'
+          ? 'The campaign is a DRAFT — nothing sends until the admin activates it in admin → Marketing (or uses Send now for a test).'
+          : 'The machine will send within its warmup/daily allowance during Qatar working hours.',
+      };
+    },
+    summarize: (args, r) => r?.error ? ('failed: ' + r.error) : `queued ${r?.queued ?? 0}/${Array.isArray(args.companies) ? args.companies.length : 0} for outreach ("${r?.campaign}")`,
   },
 
   {

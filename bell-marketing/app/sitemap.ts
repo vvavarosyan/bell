@@ -88,5 +88,11 @@ export default async function sitemap(): Promise<MetadataRoute.Sitemap> {
     }));
   } catch { /* soft */ }
 
-  return [...staticEntries, ...collectionEntries, ...dynamicItemEntries, ...newsEntries, ...researchEntries];
+  // DEDUPE by URL — /news and /research appeared twice (once as static routes, once as
+  // collection indexes), which Google flags as "Duplicate without user-selected canonical"
+  // (Search Console, 2026-07-18). First occurrence wins (static entries carry the tuned
+  // priorities).
+  const seen = new Set<string>();
+  return [...staticEntries, ...collectionEntries, ...dynamicItemEntries, ...newsEntries, ...researchEntries]
+    .filter(e => (seen.has(e.url) ? false : (seen.add(e.url), true)));
 }

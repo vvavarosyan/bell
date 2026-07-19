@@ -128,6 +128,7 @@ app.use(cors());
 // specific paths, then express.json for everything else.
 app.use('/api/auth/clerk-webhook',     express.raw({ type: 'application/json', limit: '1mb' }));
 app.use('/api/billing/stripe-webhook', express.raw({ type: 'application/json', limit: '2mb' }));
+app.use('/api/resend-webhook',         express.raw({ type: 'application/json', limit: '1mb' }));
 app.use(express.json({ limit: '10mb' }));
 
 // Health. `build` = the deployed commit (Railway injects RAILWAY_GIT_COMMIT_SHA),

@@ -18,11 +18,20 @@
 
 import { timingSafeEqual } from 'crypto';
 import { Router } from 'express';
+import { Webhook } from 'svix';
 import { query } from '../db.js';
 import { handleBounce } from '../lib/suppression.js';
 
 const router = Router();
 const SECRET = process.env.BDI_RESEND_WEBHOOK_SECRET || null;
+// Svix signing secrets (whsec_…) — Resend signs every webhook. TWO possible senders: the
+// transactional account and the isolated outreach account, each with its own secret. When any
+// signing secret is configured, verification is REQUIRED (fail closed); the query-string token
+// is the legacy fallback only while no signing secret is set.
+const SIGNING_SECRETS = [
+  process.env.BDI_RESEND_WEBHOOK_SIGNING_SECRET,
+  process.env.BDI_RESEND_WEBHOOK_SIGNING_SECRET_OUTREACH,
+].filter(Boolean);
 
 function secretOk(provided) {
   if (!SECRET) return true;                       // unset = open (set it in prod!)
@@ -31,10 +40,31 @@ function secretOk(provided) {
   return a.length === b.length && timingSafeEqual(a, b);
 }
 
+// Verify the Svix signature against the RAW body (mounted with express.raw). Returns the
+// parsed event on success, null on failure.
+function verifySigned(req) {
+  const headers = {
+    'svix-id': req.header('svix-id'),
+    'svix-timestamp': req.header('svix-timestamp'),
+    'svix-signature': req.header('svix-signature'),
+  };
+  const raw = Buffer.isBuffer(req.body) ? req.body.toString('utf8') : JSON.stringify(req.body || {});
+  for (const s of SIGNING_SECRETS) {
+    try { return new Webhook(s).verify(raw, headers); } catch { /* try next secret */ }
+  }
+  return null;
+}
+
 router.post('/', async (req, res) => {
-  if (!secretOk(req.query.secret)) return res.status(401).json({ error: 'unauthorized' });
+  let evt;
+  if (SIGNING_SECRETS.length) {
+    evt = verifySigned(req);
+    if (!evt) return res.status(401).json({ error: 'bad_signature' });
+  } else {
+    if (!secretOk(req.query.secret)) return res.status(401).json({ error: 'unauthorized' });
+    evt = Buffer.isBuffer(req.body) ? (() => { try { return JSON.parse(req.body.toString('utf8')); } catch { return {}; } })() : (req.body || {});
+  }
   try {
-    const evt = req.body || {};
     const type = evt.type || evt.event || '';
     const msgId = evt?.data?.email_id || evt?.data?.id || null;
     if (msgId && type) {

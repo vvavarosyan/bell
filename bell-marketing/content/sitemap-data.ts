@@ -81,7 +81,10 @@ export const SITEMAP_SECTIONS: SitemapSection[] = [
     description: 'The main entry points to Bell.qa.',
     routes: [
       { label: 'Home',     href: '/',         description: 'The Bell.qa front door.',                          status: 'live',        priority: 1.0, changeFrequency: 'weekly' },
-      { label: 'Data',     href: '/data',     description: 'Where Bell.qa intelligence comes from.',           status: 'live',        priority: 0.9, changeFrequency: 'weekly' },
+      // live-quiet: /data 308-redirects to /data/coverage (next.config), so it must NOT be in
+      // the XML sitemap — Google flags "Page with redirect" (Search Console, 2026-07-18). It
+      // stays in the nav + human sitemap; /data/coverage is the indexed canonical.
+      { label: 'Data',     href: '/data',     description: 'Where Bell.qa intelligence comes from.',           status: 'live-quiet',  priority: 0.9, changeFrequency: 'weekly' },
       { label: 'Pricing',  href: '/pricing',  description: 'Plans, credits, and how to apply for access.',     status: 'live' },
       { label: 'Status',   href: '/status',   description: 'Live operational status of every system.',         status: 'live' },
     ],
@@ -149,6 +152,7 @@ export const SITEMAP_SECTIONS: SitemapSection[] = [
       { label: 'Roadmap',              href: '/roadmap',   description: 'What we\'re building next.',                              status: 'live' },
       { label: 'Support',              href: '/support',   description: 'Get help from the team.',                                 status: 'live' },
       { label: 'Contact',              href: '/contact',   description: 'Reach the Bell.qa team.',                                 status: 'live' },
+      { label: 'Market Updates',       href: '/market-updates', description: 'Get Qatar tenders and market signals by email.',     status: 'live' },
       // /sovereign is intentionally live-quiet — visible to anyone browsing
       // the HTML sitemap, but excluded from /sitemap.xml so it doesn't get
       // advertised in the public routes feed.
