@@ -367,6 +367,20 @@ export function MarketingTab() {
       <button class="btn btn-sm" disabled=${busy} onClick=${previewDigest}>Preview this week's digest</button>
     </div>`;
 
+  // --- physical letters (the offline channel — no spam filter) --------------
+  const letterCard = html`
+    <div class="section-title" style=${{ marginBottom: '8px' }}>Physical letters</div>
+    <div style=${{ border: '1px solid var(--border)', borderRadius: '10px', background: 'var(--bg-elev)', padding: '12px 14px', marginBottom: '20px', display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
+      <div class="small" style=${{ flex: 1, minWidth: '220px' }}>
+        Print-ready bilingual letter (EN + AR) on Bell letterhead, addressed with the company's
+        real address and live tender numbers. Print it, mail it — no spam filter in the way.
+      </div>
+      <button class="btn btn-sm" onClick=${() => {
+        const q = window.prompt('Company name (or id) for the letter:');
+        if (q) window.open('/api/marketing/letter?' + (/^\d+$/.test(q.trim()) ? 'company_id=' + q.trim() : 'q=' + encodeURIComponent(q.trim())), '_blank');
+      }}>Generate letter</button>
+    </div>`;
+
   // --- hot leads (the machine's output tray) --------------------------------
   const hotLeadsSection = hotLeads.length ? html`
     <div class="section-title" style=${{ marginTop: '22px', marginBottom: '8px' }}>🔥 Hot leads — replied "interested"</div>
@@ -547,6 +561,7 @@ export function MarketingTab() {
       ${market}
       ${campaignsSection}
       ${digestCard}
+      ${letterCard}
       ${hotLeadsSection}
       ${mailSection}
       ${suppSection}

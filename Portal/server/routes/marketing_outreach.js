@@ -141,6 +141,76 @@ router.get('/campaigns/:id/stats', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// GET /api/marketing/letter?company_id= | ?q=name — a PRINT-READY bilingual physical letter
+// (A4) for a company: Bell letterhead, the company's address block (from company_locations /
+// companies.address), EN + AR body, signature. Val prints and mails it — the offline channel
+// that no spam filter touches. Deterministic template (no model), grounded in known facts only.
+router.get('/letter', async (req, res) => {
+  try {
+    const esc = (s) => String(s ?? '').replace(/[&<>]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]));
+    let co = null;
+    if (req.query.company_id) {
+      co = (await query(`SELECT id, name, industry, industries, address, city FROM companies WHERE id=$1`, [Number(req.query.company_id)])).rows[0];
+    } else if (req.query.q) {
+      co = (await query(
+        `SELECT id, name, industry, industries, address, city FROM companies
+          WHERE name ILIKE $1 AND is_active = true ORDER BY (name_normalized = lower($2)) DESC, id LIMIT 1`,
+        ['%' + String(req.query.q).trim() + '%', String(req.query.q).trim()])).rows[0];
+    }
+    if (!co) return res.status(404).send('<p style="font-family:sans-serif">Company not found. Use ?company_id=… or ?q=name</p>');
+    const loc = (await query(
+      `SELECT address FROM company_locations WHERE company_id=$1 ORDER BY is_primary DESC, id LIMIT 1`, [co.id]))
+      .rows[0]?.address || co.address || (co.city ? co.city + ', Qatar' : 'Doha, Qatar');
+    const industry = co.industry || (Array.isArray(co.industries) ? co.industries[0] : null);
+    const today = new Date().toLocaleDateString('en-GB', { timeZone: 'Asia/Qatar', day: 'numeric', month: 'long', year: 'numeric' });
+    const openTenders = (await query(`SELECT count(*)::int AS n FROM tenders WHERE deadline_at > now()`)).rows[0]?.n || 0;
+
+    const indLineEn = industry
+      ? `Right now Bell is tracking ${openTenders} open government tenders in Qatar — including opportunities in ${esc(industry)}.`
+      : `Right now Bell is tracking ${openTenders} open government tenders across Qatar.`;
+    const indLineAr = industry
+      ? `تتابع Bell حاليًا ${openTenders} مناقصة حكومية مفتوحة في قطر، من بينها فرص في قطاع ${esc(industry)}.`
+      : `تتابع Bell حاليًا ${openTenders} مناقصة حكومية مفتوحة في قطر.`;
+
+    res.set('Content-Type', 'text/html; charset=utf-8').send(`<!doctype html><html><head><meta charset="utf-8">
+<title>Bell letter — ${esc(co.name)}</title>
+<style>
+  @page { size: A4; margin: 22mm 20mm; }
+  html, body { background: #fff; }
+  body { font-family: Georgia, 'Times New Roman', serif; color: #1a2233; font-size: 12.5pt; line-height: 1.65; margin: 0; padding: 24px; color-scheme: light; }
+  .head { display: flex; justify-content: space-between; align-items: baseline; border-bottom: 2px solid #1a2233; padding-bottom: 8px; margin-bottom: 26px; }
+  .brand { font-size: 20pt; font-weight: bold; letter-spacing: 0.06em; }
+  .brand small { display:block; font-size: 8.5pt; letter-spacing: 0.14em; font-weight: normal; color: #555; }
+  .to { margin-bottom: 24px; white-space: pre-line; }
+  .ar { direction: rtl; text-align: right; font-family: 'Geeza Pro', 'Arial', sans-serif; border-top: 1px solid #ccc; margin-top: 26px; padding-top: 20px; }
+  .sig { margin-top: 30px; }
+  .foot { margin-top: 34px; padding-top: 10px; border-top: 1px solid #ccc; font-size: 9pt; color: #555; }
+  .noprint { position: fixed; top: 10px; right: 10px; font-family: sans-serif; }
+  @media print { .noprint { display: none; } }
+</style></head><body>
+<div class="noprint"><button onclick="window.print()" style="padding:8px 16px;font-size:14px;cursor:pointer">🖨 Print</button></div>
+<div class="head">
+  <div class="brand">BELL<small>QATAR BUSINESS INTELLIGENCE · BELL.QA</small></div>
+  <div>${esc(today)}</div>
+</div>
+<div class="to">${esc(co.name)}
+${esc(loc)}</div>
+<p>Dear ${esc(co.name)} team,</p>
+<p>Winning business in Qatar increasingly depends on seeing opportunities first. ${indLineEn}</p>
+<p>Bell is a Qatari business‑intelligence platform: every government tender the moment it is published, live signals on which companies are buying and expanding, and enriched profiles of 190,000+ Qatar companies — in one place.</p>
+<p>If that would be useful to your team, visit <b>bell.qa</b> or write to <b>hello@bell.qa</b> and we will show you a live example from your own sector. No commitment — just a look at what you are currently not seeing.</p>
+<div class="sig">Kind regards,<br><br><b>Val Varosyan</b><br>Founder, Bell — bell.qa</div>
+<div class="ar">
+<p>السادة فريق ${esc(co.name)} المحترمين،</p>
+<p>النجاح في السوق القطري يعتمد بشكل متزايد على رؤية الفرص قبل الآخرين. ${indLineAr}</p>
+<p>Bell منصة قطرية لذكاء الأعمال: كل مناقصة حكومية فور نشرها، وإشارات حية عن الشركات التي تشتري وتتوسع، وملفات مفصّلة لأكثر من 190,000 شركة قطرية — في مكان واحد.</p>
+<p>إن كان ذلك مفيدًا لفريقكم، تفضلوا بزيارة <b>bell.qa</b> أو راسلونا على <b>hello@bell.qa</b> وسنعرض لكم مثالًا حيًا من قطاعكم.</p>
+</div>
+<div class="foot">Bell · Qatar business intelligence · bell.qa · hello@bell.qa · Doha, Qatar</div>
+</body></html>`);
+  } catch (e) { res.status(500).send('<p>' + String(e.message) + '</p>'); }
+});
+
 // GET /api/marketing/suppressions — the do-not-send list WITH its why (reason/detail/source/
 // when), newest first. This answers "what suppressed this address?" — e.g. whether an
 // unsubscribe came from the link, a 'remove me' reply, or a bounce.
