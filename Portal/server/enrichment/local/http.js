@@ -96,7 +96,18 @@ export function htmlToText(html) {
     .replace(/<[^>]+>/g, ' ')
     .replace(/&nbsp;/gi, ' ')
     .replace(/&amp;/gi, '&')
-    .replace(/&#0?38;/g, '&')
+    // Numeric/hex character entities — AFTER tag-strip so a decoded '<' can't create a tag,
+    // BEFORE whitespace collapse. Decoding these makes entity-obfuscated emails
+    // (info&#64;company&#46;com) visible to the email regex; before this they were
+    // silently invisible (Track A, 2026-07-19). Control chars are dropped.
+    .replace(/&#x([0-9a-f]{1,6});/gi, (_, h) => {
+      const c = parseInt(h, 16);
+      return c >= 32 && c <= 0x10ffff ? String.fromCodePoint(c) : ' ';
+    })
+    .replace(/&#(\d{1,7});/g, (_, n) => {
+      const c = parseInt(n, 10);
+      return c >= 32 && c <= 0x10ffff ? String.fromCodePoint(c) : ' ';
+    })
     .replace(/[ \t\f\v]+/g, ' ')
     .replace(/\n\s*\n\s*\n+/g, '\n\n')
     .trim();

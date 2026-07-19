@@ -30,31 +30,42 @@ import { recordReject } from './rejects.js';
 import { recordSearch } from './ledger.js';
 import { contentIdentity } from './content_identity.js';
 import {
-  findEmails, findPhones, findSocials, preferOwnEmails,
-  guessAddress, extractTeam, extractPartners, pickLogo,
+  findEmails, findCfEmails, findPhones, findSocials, findWhatsApp, preferOwnEmails,
+  guessAddress, guessAddresses, extractTeam, extractPartners, pickLogo,
   inferIndustry, extractFoundedYear, bestDescription,
 } from './extract.js';
 
 export const STAGE_LABEL = 'Local Engine 2 — Website Harvester';
 export const TOOL_NAME   = 'local_website_harvester';
 
-const MAX_PAGES        = 9;      // homepage + up to 8 discovered pages (incl. partners/clients)
+const MAX_PAGES        = 13;     // homepage + up to 12 discovered pages (Track A: was 9 — room for locations + lang-prefixed pages)
 const JS_SHELL_CHARS   = 400;    // homepage text shorter than this ⇒ JS-rendered shell
 const CONCURRENCY      = Number(process.env.BELL_HARVESTER_CONCURRENCY || 7);
 const SOURCE           = 'stage7-website';
+// Track A: at most this many per-page render escalations per company (each render is 5-22s;
+// the MAX_BROWSER_PAGES=3 semaphore protects memory, this protects sweep time).
+const MAX_PAGE_RENDERS = 2;
 
-// Page-path hints, grouped by what we expect to mine there.
+// Page-path hints, grouped by what we expect to mine there. Arabic hints work because
+// classifyPage/pickPages decode the pathname before matching.
 const PAGE_HINTS = {
-  contact: ['/contact', '/contact-us', '/contactus', '/get-in-touch', '/reach-us', '/reach', '/enquir', '/inquir'],
-  about:   ['/about', '/about-us', '/aboutus', '/who-we-are', '/company', '/overview'],
-  team:    ['/team', '/our-team', '/people', '/leadership', '/management', '/board', '/staff', '/directors', '/founders'],
-  partner: ['/partner', '/partners', '/clients', '/our-clients', '/customers', '/sponsors', '/brands'],
+  contact:  ['/contact', '/contact-us', '/contactus', '/get-in-touch', '/reach-us', '/reach', '/enquir', '/inquir', '/اتصل', '/تواصل'],
+  location: ['/location', '/locations', '/branch', '/branches', '/our-locations', '/our-branches', '/where-we-are', '/find-us', '/store-locator', '/showrooms', '/outlets', '/فروع'],
+  about:    ['/about', '/about-us', '/aboutus', '/who-we-are', '/company', '/overview'],
+  team:     ['/team', '/our-team', '/people', '/leadership', '/management', '/board', '/staff', '/directors', '/founders'],
+  partner:  ['/partner', '/partners', '/clients', '/our-clients', '/customers', '/sponsors', '/brands'],
 };
 const ALL_HINTS = Object.values(PAGE_HINTS).flat();
 
-function classifyPage(url) {
+function decodedPath(url) {
   let path = '/';
   try { path = new URL(url).pathname.toLowerCase(); } catch {}
+  try { path = decodeURIComponent(path); } catch { /* keep encoded */ }
+  return path;
+}
+
+function classifyPage(url) {
+  const path = decodedPath(url);
   for (const [kind, hints] of Object.entries(PAGE_HINTS)) {
     if (hints.some(h => path.includes(h))) return kind;
   }
@@ -63,13 +74,21 @@ function classifyPage(url) {
 
 // Common paths to probe directly even when the homepage doesn't link them
 // (sites with JavaScript-rendered navs hide their links from the raw HTML).
+// Track A adds locations + language-prefixed variants (/en/contact, /ar/contact) — many Qatar
+// sites live entirely under a language prefix, where the bare guesses 404.
 const GUESS_PATHS = [
-  { path: '/contact',    kind: 'contact' },
-  { path: '/contact-us', kind: 'contact' },
-  { path: '/about',      kind: 'about'   },
-  { path: '/about-us',   kind: 'about'   },
-  { path: '/our-team',   kind: 'team'    },
-  { path: '/team',       kind: 'team'    },
+  { path: '/contact',     kind: 'contact' },
+  { path: '/contact-us',  kind: 'contact' },
+  { path: '/en/contact',  kind: 'contact' },
+  { path: '/en/contact-us', kind: 'contact' },
+  { path: '/ar/contact',  kind: 'contact' },
+  { path: '/locations',   kind: 'location' },
+  { path: '/branches',    kind: 'location' },
+  { path: '/about',       kind: 'about'   },
+  { path: '/about-us',    kind: 'about'   },
+  { path: '/en/about',    kind: 'about'   },
+  { path: '/our-team',    kind: 'team'    },
+  { path: '/team',        kind: 'team'    },
   { path: '/partners',    kind: 'partner' },
   { path: '/clients',     kind: 'partner' },
   { path: '/our-clients', kind: 'partner' },
@@ -99,8 +118,7 @@ function pickPages(homeUrl, links) {
     let clean = l;
     try { const u = new URL(l); u.search = ''; u.hash = ''; clean = u.toString().replace(/\/$/, ''); } catch { continue; }
     if (clean === homeUrl || seen.has(clean)) continue;
-    let path = '';
-    try { path = new URL(clean).pathname.toLowerCase(); } catch {}
+    const path = decodedPath(clean);
     if (!ALL_HINTS.some(h => path.includes(h))) continue;
     const kind = classifyPage(clean);
     // Prefer breadth: at most 2 pages of any single kind.
@@ -110,8 +128,8 @@ function pickPages(homeUrl, links) {
     gotKind.add(kind);
     picked.push({ url: clean, kind });
   }
-  // Sort so contact/team come first (most valuable) within our small budget.
-  const order = { contact: 0, team: 1, about: 2, partner: 3, other: 4 };
+  // Sort so contact/locations/team come first (most valuable) within our small budget.
+  const order = { contact: 0, location: 1, team: 2, about: 3, partner: 4, other: 5 };
   picked.sort((a, b) => (order[a.kind] ?? 9) - (order[b.kind] ?? 9));
   return picked.slice(0, MAX_PAGES - 1);
 }
@@ -167,8 +185,24 @@ export async function enrichCompany(company) {
   const toCrawl = [...linked, ...guesses].slice(0, MAX_PAGES - 1);
 
   // 3) Load them (sequential, polite). Guessed pages soft-fail on 404.
+  // Track A: PER-PAGE render escalation — a fetch-mode crawl whose contact/locations page is a
+  // JS shell used to silently yield nothing (only the HOMEPAGE ever escalated). Bounded to
+  // MAX_PAGE_RENDERS per company, highest-value kinds only.
+  let pageRenders = 0;
+  let shellSubpageUnrendered = false;
   for (const p of toCrawl) {
-    const r = await load(p.url);
+    let r = await load(p.url);
+    const isShellPage = !r.ok || (r.text || '').length < JS_SHELL_CHARS;
+    if (isShellPage && !renderMode && (p.kind === 'contact' || p.kind === 'location')) {
+      if (pageRenders < MAX_PAGE_RENDERS && await rendererAvailable()) {
+        pageRenders += 1;
+        const rr = await renderPage(p.url);
+        if (rr.ok && (rr.text || '').length > (r.text || '').length) r = rr;
+      } else if (isShellPage) {
+        // A key page stayed unreadable — proof-of-search must not claim verified-empty.
+        shellSubpageUnrendered = true;
+      }
+    }
     if (r.ok && r.text) pages.push({ url: r.finalUrl, kind: p.kind, page: r });
   }
 
@@ -184,11 +218,26 @@ export async function enrichCompany(company) {
   //    - phones: deduped by digits (collapses format variants), capped;
   //    - socials: capped per platform inside findSocials.
   const siteDomain = (hostOf(home.finalUrl) || '').replace(/^www\./, '');
-  const rawEmails = [...new Set([...allMailto, ...findEmails(allText)])];
-  const emails  = preferOwnEmails(rawEmails, siteDomain, 12);
+  // Track A: also decode Cloudflare-obfuscated emails from RAW HTML (invisible in text), and
+  // detect web-agency credit domains ("designed by …") so role emails on an agency's domain
+  // are still dropped even though role@other-domain is now generally kept.
+  const cfEmails = pages.flatMap((p) => findCfEmails(p.page.html));
+  const agencyDomains = new Set();
+  for (const m of allText.matchAll(/(?:designed|developed|powered|created|built)\s+by[^\n]{0,80}/gi)) {
+    for (const dm of m[0].matchAll(/([a-z0-9-]+(?:\.[a-z0-9-]+)*\.[a-z]{2,24})/gi)) agencyDomains.add(dm[1].toLowerCase());
+  }
+  const rawEmails = [...new Set([...allMailto, ...findEmails(allText), ...cfEmails])];
+  const emails  = preferOwnEmails(rawEmails, siteDomain, 12, { agencyDomains });
   const phones  = findPhones(allText, allTel).slice(0, 10);
   const socials = findSocials(allText, allLinks, { companyName: company.name, siteDomain });
+  const whatsapp = findWhatsApp(allText, allLinks);
   const address = guessAddress(allText);
+  // Track B: ALL address lines, per page (provenance kept), for company_locations.
+  const locationCandidates = [];
+  for (const p of pages) {
+    if (p.kind !== 'contact' && p.kind !== 'location' && p.kind !== 'home') continue;
+    for (const a of guessAddresses(p.page.text)) locationCandidates.push({ ...a, source_url: p.url });
+  }
   const logo    = pickLogo(pages[0].page.meta);
   const homeMeta = pages[0].page.meta || {};
   const description = bestDescription(homeMeta, allText);
@@ -238,10 +287,18 @@ export async function enrichCompany(company) {
 
   // 5) Persist contacts (provenance = the page each was found on, best-effort).
   const homeProv = pages[0].url;
-  let wE = 0, wP = 0, wS = 0;
+  let wE = 0, wP = 0, wS = 0, wW = 0, wL = 0;
   const keptEmailSet = new Set(emails.map((x) => String(x).toLowerCase()));
+  const siteDomLower = siteDomain.toLowerCase();
   for (const e of emails) {
-    const r = await upsertContact('company', company.id, { type: 'email', value: e, source: SOURCE, source_url: homeProv });
+    // Off-domain ROLE mailboxes are kept (Doha Clinic class) but labelled so the drawer
+    // shows WHY the domain differs.
+    const d = String(e).split('@')[1] || '';
+    const offDomainRole = siteDomLower && d !== siteDomLower && !d.endsWith('.' + siteDomLower) && !siteDomLower.endsWith('.' + d);
+    const r = await upsertContact('company', company.id, {
+      type: 'email', value: e, source: SOURCE, source_url: homeProv,
+      ...(offDomainRole ? { source_label: 'role email on external domain' } : {}),
+    });
     if (r) wE++; else await recordReject(company.id, 'harvester', 'email', e, 'invalid or junk address');
   }
   // Emails seen on the page but NOT kept (other companies' domains / over cap).
@@ -252,9 +309,30 @@ export async function enrichCompany(company) {
     const r = await upsertContact('company', company.id, { type: 'phone', value: p.value, value_display: p.display, source: SOURCE, source_url: homeProv });
     if (r) wP++;
   }
+  for (const w of whatsapp) {
+    const r = await upsertContact('company', company.id, { type: 'whatsapp', value: w, value_display: w, source: SOURCE, source_url: homeProv, source_label: 'WhatsApp' });
+    if (r) wW++;
+  }
   for (const s of socials) {
     const r = await upsertContact('company', company.id, { type: 'social', value: s.url, value_display: s.url, source: SOURCE, source_url: homeProv, source_label: s.network });
     if (r) wS++;
+  }
+
+  // 5b) Branch/location rows (Track B). One row per distinct address line; re-harvest updates
+  // (unique on company_id + lower(address)), never duplicates. Geocoding happens later via
+  // "Geocode Companies.command" — coordinates stay NULL here (Rule 2.1).
+  for (const loc of locationCandidates.slice(0, 8)) {
+    try {
+      const r = await query(
+        `INSERT INTO company_locations (company_id, label, address, source, source_url, updated_at)
+         VALUES ($1,$2,$3,$4,$5, now())
+         ON CONFLICT (company_id, lower(address)) DO UPDATE
+           SET label = COALESCE(company_locations.label, EXCLUDED.label),
+               source_url = EXCLUDED.source_url, updated_at = now()
+         RETURNING id`,
+        [company.id, loc.label ? loc.label.slice(0, 120) : null, loc.address.slice(0, 300), SOURCE, loc.source_url]);
+      if (r.rows[0]) wL++;
+    } catch (e) { /* table may predate migration 098 on stale boots; never break the harvest */ }
   }
 
   // 6) Company-level fields (only fill blanks — never overwrite curated data).
@@ -269,13 +347,14 @@ export async function enrichCompany(company) {
     stage7_scraped_at: new Date().toISOString(),
     stage7_pages:      pages.map(p => ({ url: p.url, kind: p.kind })),
     stage7_rendered:   renderMode,
-    stage7_found:      { emails: wE, phones: wP, socials: wS, people: peopleAdded, partners: partners.length },
+    stage7_found:      { emails: wE, phones: wP, socials: wS, whatsapp: wW, locations: wL, people: peopleAdded, partners: partners.length },
+    stage7_page_renders: pageRenders,
     // Proof-of-search: a JS-shell homepage crawled WITHOUT a successful render
     // was never actually readable — "no data" from it proves nothing (the
     // ledger demotes it to degraded_empty instead of verified_empty).
-    stage7_shell_unrendered: pages[0].page.text.length < JS_SHELL_CHARS && !renderMode,
+    stage7_shell_unrendered: (pages[0].page.text.length < JS_SHELL_CHARS && !renderMode) || shellSubpageUnrendered,
   };
-  const wroteSomething = (wE + wP + wS + peopleAdded + partners.length) > 0 || !!address || !!logo;
+  const wroteSomething = (wE + wP + wS + wW + wL + peopleAdded + partners.length) > 0 || !!address || !!logo;
   await markStage(company.id, wroteSomething ? 'done' : 'no_data', summary);
   await recomputeBellScoreForCompany(company.id);
 

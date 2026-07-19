@@ -372,11 +372,58 @@ router.get('/map', async (req, res, next) => {
         year: row.founded_year || row.incorporation_year || null,
       },
     }));
+
+    // Track B: BRANCH pins from company_locations (geocoded, non-primary — the primary point
+    // already shows via companies.latitude, which the geocoder fills). Each branch carries the
+    // parent's sources/year so the map's source-chip + year filters keep working on them.
+    try {
+      const locs = await query(`
+        SELECT l.id AS location_id, l.company_id, l.label, l.is_primary, l.latitude, l.longitude,
+               c.bin, c.name, c.is_active, c.status_normalized, c.industry, c.city,
+               c.linkedin_url, c.website, c.founded_year,
+               EXTRACT(YEAR FROM c.incorporation_date)::int AS incorporation_year,
+               (SELECT array_agg(DISTINCT cs.source ORDER BY cs.source)
+                FROM company_sources cs WHERE cs.company_id = c.id) AS sources
+          FROM company_locations l
+          JOIN companies c ON c.id = l.company_id
+         WHERE l.latitude IS NOT NULL AND l.longitude IS NOT NULL
+           AND l.is_primary = false
+           AND c.archived = false`);
+      for (const row of locs.rows) {
+        features.push({
+          type: 'Feature',
+          geometry: { type: 'Point', coordinates: [Number(row.longitude), Number(row.latitude)] },
+          properties: {
+            id: row.company_id, location_id: row.location_id, location_label: row.label || 'Branch',
+            bin: row.bin, name: row.name, is_active: row.is_active, status: row.status_normalized,
+            industry: row.industry, city: row.city, sources: row.sources || [],
+            website: row.website, linkedin_url: row.linkedin_url,
+            year: row.founded_year || row.incorporation_year || null,
+          },
+        });
+      }
+    } catch { /* table may not exist on a stale boot — the base map still works */ }
+
     res.json({
       type: 'FeatureCollection',
       features,
       total: features.length,
     });
+  } catch (err) { next(err); }
+});
+
+// GET /api/companies/:id/locations — all of a company's locations (for the drawer block and
+// the map's sibling-spread tie-lines). MUST stay above the generic /:id handler.
+router.get('/:id/locations', async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) return res.json({ locations: [] });
+    const r = await query(
+      `SELECT id, label, address, zone_no, street_no, building_no, latitude, longitude,
+              is_primary, source, geocode_status, geocode_method, geocoded_at
+         FROM company_locations WHERE company_id=$1
+        ORDER BY is_primary DESC, id`, [id]);
+    res.json({ locations: r.rows });
   } catch (err) { next(err); }
 });
 

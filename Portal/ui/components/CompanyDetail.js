@@ -10,6 +10,7 @@ import { formatValue, isEmptyValue } from '../lib/format.js';
 import { BellScore } from './BellScore.js';
 import { ContactIcons } from './ContactIcons.js';
 import { SearchProofBlock } from './SearchProof.js';
+import { LocationsBlock } from './LocationsBlock.js';
 import { RequestDetailsBox } from './RequestDetailsBox.js';
 import { CompanyLogo } from './CompanyLogo.js';
 import { SourceBadge, FreshnessStamp } from './SourceBadge.js';
@@ -784,6 +785,8 @@ function CompanyTab({ company, extra, similar, relationships, contacts, onReload
           <${SearchProofBlock} companyId=${company.id} />
         </section>
       ` : null}
+
+      <${LocationsBlock} companyId=${company.id} />
 
       ${Object.keys(linkedinExtras).length > 0 ? html`
         <section class="group" key="more-linkedin">

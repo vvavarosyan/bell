@@ -456,7 +456,14 @@ export function emailDomain(email) {
   return m ? m[1] : '';
 }
 
-/** Lower rank = better candidate for the primary email. */
+// Generic role localparts (info@, sales@, …). A ROLE address on a different domain is very
+// often still THIS company's real mailbox (their site under a trading-name/product domain, or
+// mail hosted on an older domain) — the proven Doha Clinic case: site dchqatar.com, email
+// info@dchqatar.com dropped because the registered domain differed. PERSONAL addresses on
+// other domains stay dropped (client/footer pollution).
+const ROLE_LOCAL_RX = /^(info|contact|contactus|sales|support|hello|admin|office|reception|enquir\w*|inquir\w*|hr|careers|jobs|marketing|booking|bookings|reservations?|orders?|service|services|mail|general)$/i;
+
+/** Lower rank = better candidate for the primary email. 3 = drop, 4 = keep-but-last. */
 export function emailPrimaryRank(email, siteDomain = '') {
   const d = emailDomain(email);
   const sd = String(siteDomain || '').toLowerCase().replace(/^www\./, '');
@@ -464,21 +471,27 @@ export function emailPrimaryRank(email, siteDomain = '') {
   if (own) return 0;
   if (ISP_DOMAINS.has(d)) return 1;
   if (FREEMAIL.has(d)) return 2;
-  return 3;
+  const local = String(email).toLowerCase().split('@')[0];
+  if (ROLE_LOCAL_RX.test(local)) return 4;   // role mailbox on another domain: KEPT, never primary
+  return 3;                                  // personal on another domain: dropped
 }
 
 /**
- * Keep every plausible company email (own-domain, ISP, or free webmail) and
- * return them ordered best-first, so the caller can mark index 0 as primary.
- * Emails on a DIFFERENT company's domain are dropped (footer/client pollution).
+ * Keep every plausible company email (own-domain, ISP, free webmail, and ROLE mailboxes on
+ * other domains) and return them ordered best-first, so the caller can mark index 0 as
+ * primary. PERSONAL emails on a different company's domain are dropped (footer/client
+ * pollution). opts.agencyDomains: domains credited as the site's web agency ("designed by…")
+ * — role emails on those are dropped too (info@webteck.com is the agency, not the company).
  */
-export function rankCompanyEmails(emails, siteDomain = '') {
+export function rankCompanyEmails(emails, siteDomain = '', opts = {}) {
   const list = [...new Set((emails || []).map((e) => String(e).toLowerCase().trim()).filter(Boolean))];
   const sd = String(siteDomain || '').toLowerCase().replace(/^www\./, '');
+  const agency = opts.agencyDomains instanceof Set ? opts.agencyDomains : new Set(opts.agencyDomains || []);
   const out = [];
   for (const e of list) {
     const r = emailPrimaryRank(e, sd);
-    if (sd && r === 3) continue;        // other-company domain → drop
+    if (sd && r === 3) continue;               // personal on another company's domain → drop
+    if (r === 4 && agency.has(emailDomain(e))) continue;   // role email on the web agency's domain → drop
     out.push({ email: e, rank: r });
   }
   out.sort((a, b) => a.rank - b.rank);

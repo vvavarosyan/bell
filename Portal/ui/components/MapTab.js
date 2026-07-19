@@ -215,6 +215,54 @@ async function showNetwork(map, companyId, origin) {
   } catch { /* soft — the popup already opened */ }
 }
 
+// --- Branch sibling-spread (Track B) -----------------------------------------
+// Click any pin of a multi-location company → tie-lines to its sibling locations.
+// SEPARATE source/layer ids + timer from the company-network arcs (they use
+// module-global state; sharing ids would break each other's cleanup).
+let branchAnimTimer = null;
+function clearBranchTies(map) {
+  if (branchAnimTimer) { clearInterval(branchAnimTimer); branchAnimTimer = null; }
+  try { if (map.getLayer('branch-ties')) map.removeLayer('branch-ties'); } catch { /* ignore */ }
+  try { if (map.getLayer('branch-ties-glow')) map.removeLayer('branch-ties-glow'); } catch { /* ignore */ }
+  try { if (map.getSource('branch-ties-src')) map.removeSource('branch-ties-src'); } catch { /* ignore */ }
+}
+
+async function showBranchTies(map, companyId, origin) {
+  try {
+    const r = await api.companyLocations(companyId);
+    clearBranchTies(map);
+    const sibs = (r.locations || []).filter((l) =>
+      Number.isFinite(Number(l.latitude)) && Number.isFinite(Number(l.longitude)) &&
+      (Math.abs(Number(l.longitude) - origin[0]) > 1e-6 || Math.abs(Number(l.latitude) - origin[1]) > 1e-6));
+    if (!sibs.length) return;
+    const fc = {
+      type: 'FeatureCollection',
+      features: sibs.map((l) => ({
+        type: 'Feature',
+        geometry: { type: 'LineString', coordinates: arcCoords(origin, [Number(l.longitude), Number(l.latitude)]) },
+        properties: { label: l.label || 'Branch' },
+      })),
+    };
+    map.addSource('branch-ties-src', { type: 'geojson', data: fc });
+    map.addLayer({
+      id: 'branch-ties-glow', type: 'line', source: 'branch-ties-src',
+      paint: { 'line-color': '#f97316', 'line-width': 5, 'line-opacity': 0.18, 'line-blur': 3 },
+    });
+    map.addLayer({
+      id: 'branch-ties', type: 'line', source: 'branch-ties-src',
+      paint: { 'line-color': '#f97316', 'line-width': 1.8, 'line-opacity': 0.9, 'line-dasharray': [0, 4, 3] },
+    });
+    const seq = [[0, 4, 3], [1, 4, 2], [2, 4, 1], [3, 4, 0]];
+    let step = 0;
+    branchAnimTimer = setInterval(() => {
+      step = (step + 1) % seq.length;
+      try { map.setPaintProperty('branch-ties', 'line-dasharray', seq[step]); }
+      catch { clearInterval(branchAnimTimer); branchAnimTimer = null; }
+    }, 110);
+    toast(`Locations: ${sibs.length + 1} sites of this company connected`);
+  } catch { /* soft */ }
+}
+
 // --- Real Estate layers (consolidated onto the main Map, Val 2026-07-12) -----
 // District price heat + buildings (loaded once), and land parcels drawn live
 // from Qatar GIS for the current viewport only (we never store 253k polygons).
@@ -688,6 +736,8 @@ export function MapTab() {
             const cid = Number(f.properties.id);
             if (Number.isFinite(cid) && cid > 0) {
               showNetwork(map, cid, f.geometry.coordinates.slice());
+              // Track B: also tie this pin to the company's OTHER locations (branches).
+              showBranchTies(map, cid, f.geometry.coordinates.slice());
             }
           });
 
@@ -695,7 +745,7 @@ export function MapTab() {
           map.on('click', (e) => {
             const layers = ['company-points', 'clusters', 'signal-points'].filter((l) => map.getLayer(l));
             const hits = layers.length ? map.queryRenderedFeatures(e.point, { layers }) : [];
-            if (!hits.length) clearNetwork(map);
+            if (!hits.length) { clearNetwork(map); clearBranchTies(map); }
           });
 
           ['clusters', 'company-points', 'signal-points'].forEach(layer => {
@@ -1104,6 +1154,7 @@ function openPopup(map, coords, p, mapboxgl) {
     .setHTML(`
       <div class="map-popup-body">
         <div class="map-popup-name">${escapeHtml(p.name)}</div>
+        ${p.location_id ? `<div class="map-popup-line" style="color:#f97316;font-weight:600">${escapeHtml(p.location_label || 'Branch')}</div>` : ''}
         ${p.industry ? `<div class="map-popup-line">${escapeHtml(p.industry)}</div>` : ''}
         ${p.city ? `<div class="map-popup-line">${escapeHtml(p.city)}</div>` : ''}
         ${p.year ? `<div class="map-popup-line">Founded ${escapeHtml(p.year)}</div>` : ''}

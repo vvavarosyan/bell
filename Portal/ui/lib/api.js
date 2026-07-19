@@ -483,6 +483,7 @@ export const api = {
   tenderSyncStatus:       () => request('/api/tenders/sync-status'),
   tenderItem:             (id) => request('/api/tenders/' + id),
   companyMapNetwork:      (id) => request(`/api/companies/${id}/map-network`),
+  companyLocations:       (id) => request(`/api/companies/${id}/locations`),
   // ---- WhatsApp (CRM) ----
   waConfig:               () => request('/api/whatsapp/config'),
   waSaveConfig:           (body) => request('/api/whatsapp/config', { method: 'PUT', body: JSON.stringify(body) }),

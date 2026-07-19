@@ -74,6 +74,9 @@ export const MIRROR_TABLES = [
   // What each company's website runs (Engine 6 tech-stack fingerprints) —
   // mirrored so the portal can filter/show technographics.
   { name: 'company_tech',         watermark: 'updated_at' },
+  // Company branches/locations (Track B). company_id is a soft ref (no FK), so
+  // ordering doesn't matter. Writes must bump updated_at explicitly (no trigger).
+  { name: 'company_locations',    watermark: 'updated_at' },
   // Qatar public tenders (scraped locally via "Run Tender Scan.command"). Mirror
   // them to prod so Bella + the in-market score can use them; prod regenerates
   // the 'tender' signals from these rows. award_company_id is a soft ref (no FK),

@@ -13,7 +13,7 @@
 // the harvester decides how to persist them.
 
 import {
-  normalizePhone, cleanCompanySocials, rankCompanyEmails,
+  normalizePhone, cleanCompanySocials, rankCompanyEmails, decodeCloudflareEmail,
   looksLikeName as dqLooksLikeName, isHeadingTitle, isFakePerson,
 } from '../../lib/dataquality.js';
 
@@ -23,18 +23,54 @@ import {
 
 const EMAIL_RX = /[a-z0-9._%+\-]+@[a-z0-9.\-]+\.[a-z]{2,24}/gi;
 
+// Spelled-out obfuscation: "info [at] company [dot] com" / "info(at)company(dot)com".
+// BRACKETED markers only — bare " at … dot " matches ordinary prose (Rule 2.1).
+const AT_DOT_RX = /([a-z0-9._%+\-]{1,40})\s*[\[(]\s*at\s*[\])]\s*([a-z0-9\-]{1,60})\s*[\[(]\s*dot\s*[\])]\s*([a-z]{2,24})/gi;
+
+function emailJunk(v) {
+  if (/\.(png|jpe?g|gif|svg|webp|ico|pdf|css|js)$/i.test(v)) return true;   // asset filenames
+  if (/^[0-9]+@[0-9]+/.test(v)) return true;                                // pure-numeric junk
+  if (/sentry\.io$|wixpress\.com$|example\.|placeholder|@sentry|\.png@/i.test(v)) return true;
+  if (/@(\d+\.){3}\d+$/.test(v)) return true;                               // ip-literal
+  if (v.length > 80) return true;
+  return false;
+}
+
 export function findEmails(text) {
   if (!text) return [];
   const seen = new Set();
   const out = [];
   for (const m of text.match(EMAIL_RX) || []) {
     const v = m.toLowerCase();
-    if (seen.has(v)) continue;
-    if (/\.(png|jpe?g|gif|svg|webp|ico|pdf|css|js)$/i.test(v)) continue;  // asset filenames
-    if (/^[0-9]+@[0-9]+/.test(v)) continue;                               // pure-numeric junk
-    if (/sentry\.io$|wixpress\.com$|example\.|placeholder|@sentry|\.png@/i.test(v)) continue;
-    if (/@(\d+\.){3}\d+$/.test(v)) continue;                              // ip-literal
-    if (v.length > 80) continue;
+    if (seen.has(v) || emailJunk(v)) continue;
+    seen.add(v);
+    out.push(v);
+  }
+  // Second, conservative pass: bracketed [at]/[dot] spelled-out addresses.
+  for (const m of text.matchAll(AT_DOT_RX)) {
+    const v = (m[1] + '@' + m[2] + '.' + m[3]).toLowerCase();
+    if (seen.has(v) || emailJunk(v)) continue;
+    seen.add(v);
+    out.push(v);
+  }
+  return out;
+}
+
+// Cloudflare email obfuscation: <a href="/cdn-cgi/l/email-protection#HEX"> and
+// data-cfemail="HEX" attributes in RAW HTML. The visible text is useless
+// ("[email protected]"); the hex XOR-decodes to the real address via the existing
+// decodeCloudflareEmail. Emits DECODED addresses only — never the raw hex/href.
+const CF_HEX_RX = /(?:email-protection#|data-cfemail=")([0-9a-fA-F]{6,})/g;
+
+export function findCfEmails(html) {
+  if (!html) return [];
+  const seen = new Set();
+  const out = [];
+  for (const m of String(html).matchAll(CF_HEX_RX)) {
+    const decoded = decodeCloudflareEmail(m[1]);
+    if (!decoded) continue;
+    const v = decoded.toLowerCase();
+    if (seen.has(v) || emailJunk(v)) continue;
     seen.add(v);
     out.push(v);
   }
@@ -63,12 +99,13 @@ export function emailDomain(email) {
  * Own-domain first, then webmail, capped. If no site domain is known, returns
  * the deduped input (capped).
  */
-export function preferOwnEmails(emails, siteDomain = '', cap = 12) {
+export function preferOwnEmails(emails, siteDomain = '', cap = 12, opts = {}) {
   // Delegate to the shared ranker (server/lib/dataquality.js): keeps own-domain,
-  // Qatar-ISP, and free-webmail addresses — own-domain first so the caller can
-  // mark index 0 as primary — and drops emails on a DIFFERENT company's domain
-  // (the classic "designed by webteck.com" / client-email pollution).
-  return rankCompanyEmails(emails, siteDomain).slice(0, cap);
+  // Qatar-ISP, free-webmail, and ROLE mailboxes on other domains (never primary) —
+  // own-domain first so the caller can mark index 0 as primary — and drops
+  // PERSONAL emails on a DIFFERENT company's domain plus role emails on the
+  // credited web agency's domain (opts.agencyDomains).
+  return rankCompanyEmails(emails, siteDomain, opts).slice(0, cap);
 }
 
 // ===========================================================================
@@ -172,6 +209,76 @@ export function guessAddress(text) {
     if (hits >= 2 && hits > bestScore) { best = line; bestScore = hits; }
   }
   return best;
+}
+
+/**
+ * ALL plausible address lines on a page (Track A/B: branches). Same conservative scoring as
+ * guessAddress (hits >= 2), every qualifying line kept, deduped by normalized text, each with
+ * a label from the nearest preceding short heading-ish line (e.g. "Lusail Branch"). Capped.
+ */
+// Structural address markers — a line must have one of THESE (not just city words) to count
+// as a location row. "As Qatar's premier hospital since 2001, Doha…" has doha+qatar+a digit
+// but is prose, not an address (live Doha Clinic test, 2026-07-19).
+const ADDR_STRUCT_RX = /\b(p\.?\s?o\.?\s?box|street|st\.|road|rd\.|tower|building|bldg|floor|fl\.|suite|office|zone|area|district|avenue|ave\.|boulevard|blvd|west bay|industrial area|corniche|شارع|منطقة|مبنى)\b/i;
+const ADDR_PROSE_RX = /\b(copyright|all rights|rights reserved|©|since \d{4}|established (in|since)|founded (in|since)|premier|leading|welcome to|developed by|designed by)\b/i;
+
+export function guessAddresses(text, cap = 8) {
+  if (!text) return [];
+  const lines = text.split('\n').map(l => l.trim());
+  const out = [];
+  const seen = new Set();
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i];
+    if (!line || line.length < 12 || line.length > 160) continue;
+    if (!/\d/.test(line)) continue;
+    if (ADDR_PROSE_RX.test(line)) continue;          // marketing/copyright prose, not an address
+    if (!ADDR_STRUCT_RX.test(line)) continue;        // must have a structural marker
+    const hits = (line.match(ADDR_HINT_RX) ? 1 : 0)
+               + (/qatar/i.test(line) ? 1 : 0)
+               + (/doha/i.test(line) ? 1 : 0)
+               + (/p\.?\s?o\.?\s?box/i.test(line) ? 1 : 0);
+    if (hits < 2) continue;
+    const norm = line.toLowerCase().replace(/\s+/g, ' ');
+    if (seen.has(norm)) continue;
+    seen.add(norm);
+    // Label: nearest preceding short non-address line that looks like a heading
+    // ("Lusail Branch", "Head Office", "Doha Showroom"). Optional.
+    let label = null;
+    for (let j = i - 1; j >= Math.max(0, i - 3); j -= 1) {
+      const cand = lines[j];
+      if (!cand || cand.length < 3 || cand.length > 60) continue;
+      if (/\d{3,}/.test(cand)) continue;                       // long numbers = not a heading
+      if (/(branch|office|showroom|store|outlet|headquarters|head office|location|فرع)/i.test(cand)) { label = cand; break; }
+    }
+    out.push({ label, address: line });
+    if (out.length >= cap) break;
+  }
+  return out;
+}
+
+// ===========================================================================
+// WhatsApp (Track A) — wa.me / api.whatsapp.com links carry the company's
+// WhatsApp number; before this it was fingerprinted for tech-stack and the
+// NUMBER thrown away (0 whatsapp contacts DB-wide).
+// ===========================================================================
+
+const WA_RX = /(?:wa\.me\/|api\.whatsapp\.com\/send\/?\?(?:[^"'\s]*&)?phone=)\+?(\d{7,15})/gi;
+
+/** Extract WhatsApp numbers from links + text. Returns E.164-ish strings ('+974…'). */
+export function findWhatsApp(text, links = []) {
+  const hay = String(text || '') + '\n' + (links || []).join('\n');
+  const out = [];
+  const seen = new Set();
+  for (const m of hay.matchAll(WA_RX)) {
+    let digits = m[1];
+    if (digits.length < 7 || digits.length > 15) continue;
+    const v = '+' + digits;
+    if (seen.has(v)) continue;
+    seen.add(v);
+    out.push(v);
+    if (out.length >= 4) break;
+  }
+  return out;
 }
 
 // ===========================================================================
