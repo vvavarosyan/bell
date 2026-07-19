@@ -23,7 +23,7 @@ router.post('/:key/test', async (req, res, next) => {
       return res.json({ ok: false, error: 'Email provider (Resend) is not configured on this service.' });
     }
     const r = renderPreview({ subject: req.body?.subject, html: req.body?.html });
-    await sendEmail({ to, subject: '[Bell test] ' + (r.subject || 'Email template'), html: r.html });
+    await sendEmail({ to, subject: '[Bell test] ' + (r.subject || 'Email template'), html: r.html, system: 'template-test' });
     res.json({ ok: true, to });
   } catch (err) {
     res.json({ ok: false, error: err.message });

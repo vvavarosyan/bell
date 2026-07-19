@@ -273,15 +273,74 @@ router.post('/campaigns/:id/status', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// GET /api/marketing/mail?direction=out|in&limit= — the outreach mail log (admin sees ALL
-// outgoing sends AND incoming replies).
+// GET /api/marketing/email-overview — the whole-of-Bell email picture: every system that sends,
+// counts by status, for today / 7 days / 30 days / all-time (ledger starts 2026-07-19).
+router.get('/email-overview', async (_req, res) => {
+  try {
+    const bySystem = (await query(
+      `SELECT system, channel,
+              count(*)::int AS total,
+              count(*) FILTER (WHERE status IN ('sent','delivered','opened'))::int AS ok,
+              count(*) FILTER (WHERE status='delivered')::int AS delivered,
+              count(*) FILTER (WHERE status='opened')::int    AS opened,
+              count(*) FILTER (WHERE status='bounced')::int   AS bounced,
+              count(*) FILTER (WHERE status='complained')::int AS complained,
+              count(*) FILTER (WHERE status='failed')::int    AS failed,
+              count(*) FILTER (WHERE created_at >= (date_trunc('day', now() AT TIME ZONE 'Asia/Qatar') AT TIME ZONE 'Asia/Qatar'))::int AS today,
+              count(*) FILTER (WHERE created_at > now() - interval '7 days')::int AS last7d
+         FROM email_log GROUP BY system, channel ORDER BY total DESC`)).rows;
+    const totals = (await query(
+      `SELECT count(*)::int AS total,
+              count(*) FILTER (WHERE created_at >= (date_trunc('day', now() AT TIME ZONE 'Asia/Qatar') AT TIME ZONE 'Asia/Qatar'))::int AS today,
+              count(*) FILTER (WHERE created_at > now() - interval '7 days')::int AS last7d,
+              count(*) FILTER (WHERE status='failed')::int AS failed
+         FROM email_log`)).rows[0];
+    const inbound = (await query(
+      `SELECT count(*)::int AS total,
+              count(*) FILTER (WHERE sent_by='outreach-inbound')::int AS outreach_replies,
+              count(*) FILTER (WHERE sent_by<>'outreach-inbound')::int AS crm_replies,
+              count(*) FILTER (WHERE COALESCE(sent_at, created_at) > now() - interval '7 days')::int AS last7d
+         FROM crm_emails WHERE direction='in'`)).rows[0];
+    res.json({ since: '2026-07-19', by_system: bySystem, totals, inbound });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Digest (the engine behind bell.qa/market-updates).
+router.get('/digest/preview', async (_req, res) => {
+  try {
+    const { buildDigest, listSubscribers } = await import('../outreach/digest.js');
+    const [d, subs] = await Promise.all([buildDigest(), listSubscribers()]);
+    res.json({ subscribers: subs.length, subject: d.subject, text: d.text, html: d.html, facts: d.facts });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+router.post('/digest/send', async (_req, res) => {
+  try {
+    const { sendDigestNow } = await import('../outreach/digest.js');
+    res.json(await sendDigestNow());
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// GET /api/marketing/mail?direction=out|in&system=&limit= — the mail log (admin sees ALL
+// outgoing sends AND incoming replies, filterable by system).
+const OUT_SYSTEMS = {
+  outreach: `('outreach-engine','outreach-test')`,
+  forwards: `('outreach-forward')`,
+  digest: `('digest')`,
+  welcome: `('optin-welcome')`,
+  all: `('outreach-engine','outreach-test','outreach-forward','digest','optin-welcome')`,
+};
 router.get('/mail', async (req, res) => {
   try {
     const dir = req.query.direction === 'in' ? 'in' : 'out';
     const limit = Math.min(500, Math.max(1, parseInt(req.query.limit, 10) || 100));
+    const sys = OUT_SYSTEMS[req.query.system] ? req.query.system : 'all';
     const where = dir === 'out'
-      ? `ce.direction='out' AND ce.sent_by IN ('outreach-engine','outreach-test')`
-      : `ce.direction='in' AND ce.sent_by='outreach-inbound'`;
+      ? (req.query.system === 'crm'
+          // CRM & sequence mail: everything the platform's tenants sent (sent_by is the
+          // sender's user email there, not one of the machine's system names).
+          ? `ce.direction='out' AND ce.sent_by NOT IN ${OUT_SYSTEMS.all}`
+          : `ce.direction='out' AND ce.sent_by IN ${OUT_SYSTEMS[sys]}`)
+      : `ce.direction='in'`;
     // For each row, resolve the company behind the address (who they are) so the admin sees
     // WHO — not just an email. Match the outreach address (to_email out, from_email in).
     const addrCol = dir === 'out' ? 'ce.to_email' : 'ce.from_email';

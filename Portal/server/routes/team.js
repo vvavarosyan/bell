@@ -132,7 +132,7 @@ async function sendInviteEmail(req, email, token) {
     + `<p style="font-size:12px;color:#888">If you didn't expect this, you can ignore it. This invite expires in 14 days.</p>`
     + `<p style="font-size:12px;color:#888">Bell Data Intelligence · bell.qa</p></div>`;
   const from = await getFromAddress();
-  await sendEmail({ from, to: email, subject, html, text });
+  await sendEmail({ from, to: email, subject, html, text, system: 'invite' });
 }
 
 function escapeHtml(s) {

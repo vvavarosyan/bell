@@ -36,27 +36,31 @@ export function MarketingTab() {
   const [form, setForm] = useState({ name: '', goal: '', audience_tier: 'role_mailbox', lang_mode: 'en', daily_cap: 30 });
   const [drafts, setDrafts] = useState(null);       // {campaignId, rows} for the preview panel
   const [mailDir, setMailDir] = useState('out');
+  const [mailSys, setMailSys] = useState('all');
   const [mail, setMail] = useState([]);
   const [openMail, setOpenMail] = useState(null);   // full email body in the reader
   const [supp, setSupp] = useState(null);           // suppression list (null = collapsed)
+  const [overview, setOverview] = useState(null);   // whole-of-Bell email counts
+  const [digest, setDigest] = useState(null);       // digest preview drawer
 
   const loadTop = useCallback(async () => {
     setLoading(true);
     try {
-      const [s, c, m, h] = await Promise.all([
+      const [s, c, m, h, o] = await Promise.all([
         api.mktSummary(), api.mktCampaigns(),
         api.mktMachine().catch(() => null), api.mktHotLeads().catch(() => ({ leads: [] })),
+        api.mktEmailOverview().catch(() => null),
       ]);
-      setSummary(s); setCampaigns(c.campaigns || []); setMachine(m); setHotLeads(h.leads || []);
+      setSummary(s); setCampaigns(c.campaigns || []); setMachine(m); setHotLeads(h.leads || []); setOverview(o);
     } catch (err) { toast('Marketing load failed: ' + err.message, 'error'); }
     finally { setLoading(false); }
   }, []);
-  const loadMail = useCallback(async (dir) => {
-    try { const r = await api.mktMail(dir, 200); setMail(r.mail || []); }
+  const loadMail = useCallback(async (dir, sys) => {
+    try { const r = await api.mktMail(dir, 200, sys || 'all'); setMail(r.mail || []); }
     catch (err) { toast('Mail load failed: ' + err.message, 'error'); }
   }, []);
   useEffect(() => { loadTop(); }, [loadTop]);
-  useEffect(() => { loadMail(mailDir); }, [mailDir, loadMail]);
+  useEffect(() => { loadMail(mailDir, mailSys); }, [mailDir, mailSys, loadMail]);
 
   const createCampaign = async () => {
     if (!form.name.trim()) { toast('Give the campaign a name.', 'error'); return; }
@@ -140,6 +144,23 @@ export function MarketingTab() {
     if (!window.confirm('Remove ' + email + ' from the do-not-send list?\n\nOnly do this for TEST addresses, or someone who ASKED to hear from Bell again. Never for a real prospect who unsubscribed.')) return;
     try { await api.mktUnsuppress(email); toast(email + ' un-suppressed.'); await loadSupp(); await loadTop(); }
     catch (err) { toast('Un-suppress failed: ' + err.message, 'error'); }
+  };
+  const previewDigest = async () => {
+    setBusy(true);
+    try { setDigest(await api.mktDigestPreview()); }
+    catch (err) { toast('Digest preview failed: ' + err.message, 'error'); }
+    finally { setBusy(false); }
+  };
+  const sendDigest = async () => {
+    const subs = digest?.subscribers ?? '?';
+    if (!window.confirm('Send the market-update digest NOW to all ' + subs + ' subscribers?')) return;
+    setBusy(true);
+    try {
+      const r = await api.mktDigestSend();
+      toast('Digest: sent ' + r.sent + ' of ' + r.subscribers + (r.failed ? ' · ' + r.failed + ' failed' : '') + '.');
+      setDigest(null); await loadTop(); setMailDir('out'); setMailSys('digest'); await loadMail('out', 'digest');
+    } catch (err) { toast('Digest send failed: ' + err.message, 'error'); }
+    finally { setBusy(false); }
   };
   const logReply = async () => {
     const fromEmail = window.prompt('Test the Incoming flow: whose email replied? (their address)');
@@ -294,6 +315,58 @@ export function MarketingTab() {
       </div>` : null}
     ${campaigns.length ? campaigns.map(campaignRow) : html`<div class="muted small" style=${{ marginBottom: '16px' }}>No campaigns yet. Create one, click Plan to build its queue, then Preview to read the drafts.</div>`}`;
 
+  // --- whole-of-Bell email overview (the observatory) -----------------------
+  const SYSTEM_LABEL = {
+    'outreach-engine': 'Outreach (machine)', 'outreach-test': 'Outreach (tests)', 'outreach-forward': 'Reply forwards',
+    digest: 'Market digest', 'optin-welcome': 'Subscribe welcome', sequence: 'CRM sequences', crm: 'CRM sends',
+    'crm-forward': 'CRM reply forwards', invite: 'Team invites', notification: 'Notifications',
+    'template-test': 'Template tests', transactional: 'Other transactional',
+  };
+  const ov = overview;
+  const overviewSection = ov ? html`
+    <div class="section-title" style=${{ marginTop: '4px', marginBottom: '8px' }}>All Bell email — every system</div>
+    <div style=${{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit,minmax(130px,1fr))', gap: '10px', marginBottom: '10px' }}>
+      ${chip('Sent today (all systems)', num(ov.totals?.today))}
+      ${chip('Last 7 days', num(ov.totals?.last7d))}
+      ${chip('All-time (since 19 Jul)', num(ov.totals?.total))}
+      ${chip('Failed', num(ov.totals?.failed), ov.totals?.failed ? '#c0392b' : 'var(--muted)')}
+      ${chip('Replies in (7d)', num(ov.inbound?.last7d), '#1e8449')}
+    </div>
+    ${(ov.by_system || []).length ? html`
+      <div style=${{ border: '1px solid var(--border)', borderRadius: '10px', overflow: 'hidden', marginBottom: '20px' }}>
+        <div style=${{ display: 'flex', gap: '10px', padding: '7px 12px', background: 'var(--bg-elev)', borderBottom: '1px solid var(--border)', fontWeight: 700, fontSize: '12px', color: 'var(--muted)' }}>
+          <div style=${{ flex: 1 }}>System</div>
+          <div style=${{ flex: '0 0 56px', textAlign: 'right' }}>Total</div>
+          <div style=${{ flex: '0 0 56px', textAlign: 'right' }}>Today</div>
+          <div style=${{ flex: '0 0 66px', textAlign: 'right' }}>Delivered</div>
+          <div style=${{ flex: '0 0 56px', textAlign: 'right' }}>Opened</div>
+          <div style=${{ flex: '0 0 60px', textAlign: 'right' }}>Bounced</div>
+          <div style=${{ flex: '0 0 50px', textAlign: 'right' }}>Failed</div>
+        </div>
+        ${(ov.by_system || []).map((s, i) => html`
+          <div key=${s.system + s.channel} style=${{ display: 'flex', gap: '10px', padding: '7px 12px', borderTop: i ? '1px solid var(--border)' : 'none', fontSize: '13px' }}>
+            <div style=${{ flex: 1, fontWeight: 600 }}>${SYSTEM_LABEL[s.system] || s.system}
+              <span class="muted small" style=${{ marginLeft: '6px' }}>${s.channel === 'outreach' ? 'go.bell.qa' : 'bell.qa'}</span></div>
+            <div style=${{ flex: '0 0 56px', textAlign: 'right' }}>${num(s.total)}</div>
+            <div style=${{ flex: '0 0 56px', textAlign: 'right' }}>${num(s.today)}</div>
+            <div style=${{ flex: '0 0 66px', textAlign: 'right', color: '#3f7fd8' }}>${num(s.delivered + s.opened)}</div>
+            <div style=${{ flex: '0 0 56px', textAlign: 'right', color: '#7fb0e8' }}>${num(s.opened)}</div>
+            <div style=${{ flex: '0 0 60px', textAlign: 'right', color: s.bounced ? '#c0392b' : 'var(--muted)' }}>${num(s.bounced + s.complained)}</div>
+            <div style=${{ flex: '0 0 50px', textAlign: 'right', color: s.failed ? '#c0392b' : 'var(--muted)' }}>${num(s.failed)}</div>
+          </div>`)}
+      </div>` : html`<div class="muted small" style=${{ marginBottom: '20px' }}>The all-email ledger starts counting from today — every send from every Bell system will appear here.</div>`}` : null;
+
+  // --- digest card (the engine behind bell.qa/market-updates) ---------------
+  const digestCard = html`
+    <div class="section-title" style=${{ marginBottom: '8px' }}>Market-updates digest</div>
+    <div style=${{ border: '1px solid var(--border)', borderRadius: '10px', background: 'var(--bg-elev)', padding: '12px 14px', marginBottom: '20px', display: 'flex', gap: '10px', alignItems: 'center', flexWrap: 'wrap' }}>
+      <div class="small" style=${{ flex: 1, minWidth: '220px' }}>
+        Subscribers from <b>bell.qa/market-updates</b> get a welcome email instantly and the weekly
+        digest (Sundays 09:00 Qatar): real tender + signal numbers, with links into Bell.
+      </div>
+      <button class="btn btn-sm" disabled=${busy} onClick=${previewDigest}>Preview this week's digest</button>
+    </div>`;
+
   // --- hot leads (the machine's output tray) --------------------------------
   const hotLeadsSection = hotLeads.length ? html`
     <div class="section-title" style=${{ marginTop: '22px', marginBottom: '8px' }}>🔥 Hot leads — replied "interested"</div>
@@ -320,6 +393,11 @@ export function MarketingTab() {
       <button class="btn btn-sm" onClick=${clearTests}>Clear test data</button>
       <button class="btn btn-sm" onClick=${() => loadMail(mailDir)}>Refresh</button>
     </div>
+    ${mailDir === 'out' ? html`
+      <div style=${{ display: 'flex', gap: '6px', marginBottom: '10px', flexWrap: 'wrap' }}>
+        ${[['all', 'All outreach'], ['outreach', 'Cold emails'], ['digest', 'Digest'], ['welcome', 'Welcomes'], ['forwards', 'Forwards'], ['crm', 'CRM & sequences']].map(([k, label]) => html`
+          <button key=${k} class="btn btn-sm ${mailSys === k ? 'btn-primary' : ''}" onClick=${() => setMailSys(k)}>${label}</button>`)}
+      </div>` : null}
     ${mail.length ? html`
       <div style=${{ border: '1px solid var(--border)', borderRadius: '10px', overflow: 'hidden' }}>
         ${mail.map((m, i) => html`
@@ -421,6 +499,23 @@ export function MarketingTab() {
       </div>`;
   })() : null;
 
+  // --- digest preview drawer ------------------------------------------------
+  const digestPanel = digest ? html`
+    <div onClick=${() => setDigest(null)} style=${{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 60, display: 'flex', justifyContent: 'flex-end' }}>
+      <div onClick=${(ev) => ev.stopPropagation()} style=${{ width: 'min(620px,100%)', background: 'var(--bg)', height: '100%', overflowY: 'auto', padding: '18px', boxShadow: '-8px 0 24px rgba(0,0,0,0.3)' }}>
+        <div style=${{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px', gap: '8px', flexWrap: 'wrap' }}>
+          <div style=${{ fontWeight: 700 }}>This week's digest — ${num(digest.subscribers)} subscriber${digest.subscribers === 1 ? '' : 's'}</div>
+          <div style=${{ display: 'flex', gap: '6px' }}>
+            <button class="btn btn-sm btn-primary" disabled=${busy || !digest.subscribers} onClick=${sendDigest}>Send now to ${num(digest.subscribers)}</button>
+            <button class="btn btn-sm" onClick=${() => setDigest(null)}>Close</button>
+          </div>
+        </div>
+        <div style=${{ fontWeight: 700, marginBottom: '10px' }}>${digest.subject}</div>
+        <div dangerouslySetInnerHTML=${{ __html: digest.html }} style=${{ border: '1px solid var(--border)', borderRadius: '8px', padding: '14px', background: '#fff', color: '#111' }} />
+        <div class="muted small" style=${{ marginTop: '10px' }}>Every recipient also gets a personal unsubscribe footer. The weekly auto-send runs Sundays from 09:00 Qatar time.</div>
+      </div>
+    </div>` : null;
+
   // --- mail reader (overlay) ------------------------------------------------
   const mailReader = openMail ? html`
     <div onClick=${() => setOpenMail(null)} style=${{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 60, display: 'flex', justifyContent: 'flex-end' }}>
@@ -447,14 +542,17 @@ export function MarketingTab() {
       <div class="muted small" style=${{ marginBottom: '16px' }}>Every outgoing and incoming outreach email is logged below.</div>
       ${banner}
       ${machinePanel}
+      ${overviewSection}
       ${engagement}
       ${market}
       ${campaignsSection}
+      ${digestCard}
       ${hotLeadsSection}
       ${mailSection}
       ${suppSection}
       ${previewPanel}
       ${statsPanel}
+      ${digestPanel}
       ${mailReader}
     </div></div>`;
 }

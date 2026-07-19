@@ -25,7 +25,7 @@ export async function notifyEmail({ to, title, body, link }) {
       ? (/^https?:\/\//i.test(link) ? link : APP_URL + (link.startsWith('/') ? link : '/' + link))
       : APP_URL;
     const { subject, html } = await renderAnnouncementEmail({ title, body: body || '', ctaText: 'Open Bell', ctaUrl });
-    await sendEmail({ to, subject: subject || title, html });
+    await sendEmail({ to, subject: subject || title, html, system: 'notification' });
     return true;
   } catch (err) {
     console.error('[notifications] email send failed:', err.message);

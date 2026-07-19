@@ -1342,7 +1342,10 @@ export const TOOLS = [
     },
     describe: (args) => `Queue ${Array.isArray(args.companies) ? args.companies.length : 0} companies for Bell outreach (campaign "${args.campaign_name || 'Bella outreach'}")`,
     async execute(args, ctx) {
-      if (Number(ctx?.tenant?.id) !== 1) return { error: 'admin_only: the outreach machine is Bell self-marketing, not a customer feature.' };
+      // Gate by WHO the user is (platform admin), not which workspace number they're in —
+      // Val's live test: his app.bell.qa workspace isn't tenant 1, so a tenant-id gate wrongly
+      // refused the platform owner. Customers can never have this role.
+      if (ctx?.user?.role !== 'platform_admin') return { error: 'admin_only: the outreach machine is Bell self-marketing, not a customer feature.' };
       const { query } = await import('../db.js');
       const { addTarget, createCampaign } = await import('../outreach/engine.js');
       const { classifyAddress } = await import('../outreach/address_rules.js');

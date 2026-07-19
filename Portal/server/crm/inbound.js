@@ -66,6 +66,7 @@ export async function processInboundReply({ emailId, fromAddr, subject, text }) 
         from: fromAddrOut, to: o.sent_by, replyTo: from,
         subject: 'Reply from ' + from + ': ' + subj,
         text: `${from} replied to your Bell outreach:\n\n${body}`,
+        system: 'crm-forward', tenantId: o.tenant_id,
       });
     } catch (e) { console.warn('[crm-inbound] forward failed:', e.message); }
   }

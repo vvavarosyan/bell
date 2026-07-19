@@ -158,7 +158,7 @@ async function processEnrollment(enr) {
   try {
     try { from = formatFrom(await resolveSendIdentity(enr.tenant_id)); } catch { from = null; }
     from = from || await getFromAddress();
-    const res = await sendEmail({ from, to, replyTo: effReplyTo, subject, html: bodyHtml || undefined, text: bodyText });
+    const res = await sendEmail({ from, to, replyTo: effReplyTo, subject, html: bodyHtml || undefined, text: bodyText, system: 'sequence', tenantId: enr.tenant_id });
     await query(`UPDATE crm_emails SET status='sent', provider_message_id=$2, from_email=$3, reply_to=$4, sent_at=now() WHERE id=$1`,
       [emailId, res.id, from, effReplyTo]);
   } catch (e) {

@@ -68,6 +68,17 @@ router.post('/', async (req, res) => {
     const type = evt.type || evt.event || '';
     const msgId = evt?.data?.email_id || evt?.data?.id || null;
     if (msgId && type) {
+      // Keep the universal ledger (email_log, migration 097) in step — same terminal-status
+      // rules as crm_emails below. Best-effort.
+      const ledgerStatus = { 'email.delivered': 'delivered', 'email.opened': 'opened', 'email.bounced': 'bounced', 'email.complained': 'complained' }[type];
+      if (ledgerStatus) {
+        const guard = ledgerStatus === 'complained' ? `('complained')`
+          : ledgerStatus === 'bounced' ? `('bounced','complained')`
+          : ledgerStatus === 'delivered' ? `('opened','bounced','complained')`
+          : `('bounced','complained')`;
+        await query(`UPDATE email_log SET status=$2 WHERE provider_message_id=$1 AND status NOT IN ${guard}`,
+          [msgId, ledgerStatus]).catch(() => {});
+      }
       if (type === 'email.opened') {
         // Terminal statuses win; the open timestamp is still recorded.
         await query(

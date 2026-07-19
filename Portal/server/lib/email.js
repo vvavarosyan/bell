@@ -56,7 +56,22 @@ export function inboundReplyTo(emailId) {
 // firewall. It stays inert until BDI_KEY_RESEND_OUTREACH exists (second Resend account).
 export const OUTREACH_FROM = process.env.BDI_OUTREACH_FROM || 'Bell <hello@go.bell.qa>';
 
-export async function sendEmail({ from, to, replyTo, subject, html, text, cc, headers, channel }) {
+// The universal ledger (migration 097): EVERY send — success or failure — leaves an email_log
+// row here at the chokepoint, so the admin can count every email Bell ever sends, from every
+// system. Fire-and-forget: a ledger hiccup never blocks a send.
+async function logSend({ system, channel, tenantId, from, to, subject, ok, providerMessageId, error }) {
+  try {
+    const { query } = await import('../db.js');
+    await query(
+      `INSERT INTO email_log (system, channel, tenant_id, from_email, to_email, subject, status, provider_message_id, error)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+      [system || 'transactional', channel === 'outreach' ? 'outreach' : 'transactional', tenantId || null,
+       from || null, Array.isArray(to) ? to.join(', ') : String(to || ''), String(subject || '').slice(0, 300),
+       ok ? 'sent' : 'failed', providerMessageId || null, error ? String(error).slice(0, 400) : null]);
+  } catch { /* the ledger must never break sending */ }
+}
+
+export async function sendEmail({ from, to, replyTo, subject, html, text, cc, headers, channel, system, tenantId }) {
   const isOutreach = channel === 'outreach';
   const key = await getKey(isOutreach ? 'resend-outreach' : 'resend');
   if (!key) throw new Error(isOutreach ? 'outreach_channel_not_configured' : 'email_provider_key_missing');
@@ -93,7 +108,10 @@ export async function sendEmail({ from, to, replyTo, subject, html, text, cc, he
   let data; try { data = JSON.parse(text_); } catch { data = { raw: text_ }; }
   if (!res.ok) {
     const msg = data?.message || data?.error || text_;
+    await logSend({ system, channel, tenantId, from: body.from, to: toAllowed, subject, ok: false, error: 'resend ' + res.status + ': ' + String(msg).slice(0, 300) });
     throw new Error('resend ' + res.status + ': ' + String(msg).slice(0, 300));
   }
-  return { id: data?.id || data?.data?.id || null, raw: data };
+  const msgId = data?.id || data?.data?.id || null;
+  await logSend({ system, channel, tenantId, from: body.from, to: toAllowed, subject, ok: true, providerMessageId: msgId });
+  return { id: msgId, raw: data };
 }

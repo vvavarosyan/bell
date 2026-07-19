@@ -7,7 +7,8 @@
 // rate-limited, and it only ever ADDS a consent row — it can't read or modify anything.
 
 import { Router } from 'express';
-import { recordConsent } from '../outreach/optout.js';
+import { recordConsent, hasConsent } from '../outreach/optout.js';
+import { sendWelcome } from '../outreach/digest.js';
 
 const router = Router();
 
@@ -33,12 +34,16 @@ router.post('/', async (req, res) => {
     const email = String(req.body?.email || '').trim().toLowerCase();
     if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email) || email.length > 254) return res.status(400).json({ error: 'invalid_email' });
     const company = String(req.body?.company || '').trim().slice(0, 200) || null;
+    const already = await hasConsent(email).catch(() => false);
     await recordConsent(email, {
       action: 'granted', basis: 'web_form', formVersion: 'optin-v1',
       wordingShown: WORDING, noticeVersion: 'v1',
       ip: String(ip).slice(0, 100), userAgent: (req.get('user-agent') || '').slice(0, 300),
       evidence: { company, source: 'marketing-optin' },
     });
+    // Welcome email — only on a NEW subscription (re-submitting the form doesn't re-welcome).
+    // Fire-and-forget: the form response never waits on the send.
+    if (!already) sendWelcome(email).catch(() => {});
     res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: 'failed' }); }
 });

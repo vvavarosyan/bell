@@ -519,7 +519,7 @@ router.post('/records/:id/email', async (req, res, next) => {
       let from;
       try { from = formatFrom(await resolveSendIdentity(tenantId(req))); } catch (e) { console.error('[crm] identity resolve failed:', e.message); }
       from = from || await getFromAddress();
-      const sent = await sendEmail({ from, to, cc: cc.length ? cc : undefined, replyTo: effReplyTo, subject, html: bodyHtml || undefined, text: bodyOut });
+      const sent = await sendEmail({ from, to, cc: cc.length ? cc : undefined, replyTo: effReplyTo, subject, html: bodyHtml || undefined, text: bodyOut, system: 'crm', tenantId: req.tenant?.id });
       await query(`UPDATE crm_emails SET status='sent', provider_message_id=$2, from_email=$3, reply_to=$4, sent_at=now() WHERE id=$1`,
         [emailId, sent.id, from, effReplyTo]);
       await logActivity(null, tenantId(req), id, 'email_out', {
@@ -928,7 +928,7 @@ router.post('/records/bulk', async (req, res, next) => {
         const emailId = Number(insB.rows[0].id);
         const effReplyTo = inboundReplyTo(emailId) || replyTo;
         try {
-          const s = await sendEmail({ from, to, replyTo: effReplyTo, subject, html: bodyHtml || undefined, text: bodyText });
+          const s = await sendEmail({ from, to, replyTo: effReplyTo, subject, html: bodyHtml || undefined, text: bodyText, system: 'crm', tenantId: req.tenant?.id });
           await query(`UPDATE crm_emails SET status='sent', provider_message_id=$2, from_email=$3, reply_to=$4, sent_at=now() WHERE id=$1`, [emailId, s.id, from, effReplyTo]);
           await logActivity(null, tid, r0.id, 'email_out', { actorUserId: actorUserId(req), actorEmail: replyTo, summary: 'Email sent: ' + (subject || '(no subject)'), payload: { to, email_id: emailId, bulk: true } });
           await markContacted(null, tid, r0.id, replyTo);

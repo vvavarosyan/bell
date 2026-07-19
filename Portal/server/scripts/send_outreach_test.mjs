@@ -68,7 +68,7 @@ async function main() {
   try {
     const res = await sendEmail({
       to, subject: composed.subject, html: final.html, text: final.text,
-      replyTo: REPLY_TO, headers, channel: 'outreach',
+      replyTo: REPLY_TO, headers, channel: 'outreach', system: 'outreach-test',
     });
     await query(`UPDATE crm_emails SET status='sent', provider_message_id=$2, from_email=$3, sent_at=now() WHERE id=$1`,
       [crmId, res?.id || null, 'hello@go.bell.qa']);

@@ -320,7 +320,7 @@ async function sendOne(c, t, { followUp = false } = {}) {
   try {
     res = await sendEmail({
       to: email, subject: composed.subject, html: final.html, text: final.text,
-      replyTo: c.reply_to || OUTREACH_REPLY_TO(), headers, channel: 'outreach',
+      replyTo: c.reply_to || OUTREACH_REPLY_TO(), headers, channel: 'outreach', system: 'outreach-engine',
     });
   } catch (e) {
     await query(`UPDATE crm_emails SET status='failed', error=$2 WHERE id=$1`, [crmId, String(e.message).slice(0, 400)]).catch(() => {});
@@ -370,6 +370,10 @@ async function _safeTick() {
     if (r?.ran && r.report?.some((x) => x.sent > 0)) {
       console.log('[outreach] tick:', JSON.stringify(r.report));
     }
+    // Weekly subscriber digest (consented list — independent of the cold-send gate).
+    const { maybeSendWeeklyDigest } = await import('./digest.js');
+    const d = await maybeSendWeeklyDigest();
+    if (d?.sent) console.log('[outreach] weekly digest:', JSON.stringify(d));
   } catch (e) {
     console.error('[outreach] tick failed:', e.message);
   } finally { _running = false; }
@@ -553,7 +557,7 @@ export async function recordOutreachReply({ fromEmail, subject = null, text = nu
       [forwardTo, fwdSubject, body]).catch(() => null);
     const fwdId = fwdLog?.rows?.[0]?.id || null;
     try {
-      const fres = await sendEmail({ to: forwardTo, subject: fwdSubject, text: body, replyTo: from });
+      const fres = await sendEmail({ to: forwardTo, subject: fwdSubject, text: body, replyTo: from, system: 'outreach-forward' });
       if (fwdId) await query(`UPDATE crm_emails SET status='sent', provider_message_id=$2, sent_at=now() WHERE id=$1`, [fwdId, fres?.id || null]).catch(() => {});
     } catch (e) {
       console.error('[outreach] reply-forward to ' + forwardTo + ' FAILED:', e.message);
