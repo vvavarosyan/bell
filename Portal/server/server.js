@@ -69,6 +69,7 @@ import crmRouter               from './routes/crm.js';
 import crmInboundRouter        from './routes/crm_inbound.js';
 import marketingInboundRouter  from './routes/marketing_inbound.js';
 import marketingOptinRouter    from './routes/marketing_optin.js';
+import marketingContactRouter  from './routes/marketing_contact.js';
 import outreachUnsubRouter     from './routes/outreach_unsub.js';
 import resendWebhookRouter     from './routes/resend_webhook.js';
 import detailRequestsRouter    from './routes/detail_requests.js';
@@ -295,6 +296,8 @@ app.use('/api/crm-inbound',        crmInboundRouter);
 app.use('/api/marketing-inbound',  marketingInboundRouter);
 // PUBLIC opt-in (marketing site posts consent here) — rate-limited, append-only.
 app.use('/api/marketing-optin',    marketingOptinRouter);
+// PUBLIC contact form (bell.qa/contact) — rate-limited, sends one internal email.
+app.use('/api/marketing-contact',  marketingContactRouter);
 // Resend email-events webhook (opens/clicks/delivery) — self-gated by ?secret.
 app.use('/api/resend-webhook',     resendWebhookRouter);
 

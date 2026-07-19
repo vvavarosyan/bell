@@ -1,5 +1,5 @@
 import type { Metadata } from 'next';
-import { ComingSoon } from '@/components/coming-soon';
+import { ContactForm } from '@/components/contact-form';
 
 export const metadata: Metadata = {
   title: 'Contact',
@@ -7,12 +7,14 @@ export const metadata: Metadata = {
 };
 
 export default function ContactPage() {
-  // Real contact form (name/email/company/message) + /api/contact + Mailtrap
-  // wiring lands in Round 5.
   return (
-    <ComingSoon
-      title="Get in touch"
-      description="We're wiring up the contact form right now. For now, email val@bell.qa directly and we'll respond within a day."
-    />
+    <div className="max-w-prose-narrow mx-auto px-6 py-24">
+      <h1 className="text-display-md text-gradient mb-4 text-center">Get in touch</h1>
+      <p className="text-text-muted text-lg leading-relaxed mb-10 text-center">
+        Access, partnerships, data questions, feedback — we read every message and usually
+        reply within a day.
+      </p>
+      <ContactForm />
+    </div>
   );
 }
