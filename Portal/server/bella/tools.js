@@ -1184,6 +1184,20 @@ export const TOOLS = [
     },
     describe: (args) => `Set CRM record #${args.record_id} status → ${args.status}`,
     async execute(args, ctx) {
+      // HONESTY GUARD (Val's 7AM scheduled batch, 2026-07-19): in an AUTONOMOUS run, marking a
+      // record 'contacted' is refused unless an email actually went out to it in the last 24h.
+      // Bella had marked 6 companies Contacted with zero emails sent — "contacted" must mean
+      // contacted. (Interactive use is exempt: Val may mark contacted after a phone call.)
+      if (ctx?.autonomous && String(args.status) === 'contacted') {
+        const { query } = await import('../db.js');
+        const sent = await query(
+          `SELECT 1 FROM crm_emails WHERE record_id=$1 AND direction='out'
+             AND status IN ('sent','delivered','opened') AND sent_at > now() - interval '24 hours' LIMIT 1`,
+          [Number(args.record_id)]);
+        if (!sent.rows.length) {
+          return { error: 'refused_not_actually_contacted: no email has been SENT to this record in the last 24h. Actually send it first (send_email) and only then mark contacted. Report honestly what was and was not done — never mark contacted without a real send.' };
+        }
+      }
       const { status, payload } = await internalCall(crmRouter, 'PATCH', `/records/${Number(args.record_id)}`, ctx, { body: { status: String(args.status || '') } });
       return asResult(status, payload, ['id', 'status']);
     },

@@ -237,6 +237,9 @@ function setHistoryCacheBreakpoint(messages) {
 export async function runBellaTurn({ ctx, conversationId, userText, clientContext, send, signal, autonomous = false }) {
   const tenantId = ctx.tenant?.id;
   const userId   = ctx.user?.id ?? 0;
+  // Tools need to know they're in an unattended run (e.g. set_crm_status refuses a fake
+  // 'contacted' in autonomous mode). Additive — ctx is per-request.
+  ctx.autonomous = autonomous;
 
   const { key: apiKey, timedOut: keyTimedOut } = await anthropicKey();
   if (!apiKey) {

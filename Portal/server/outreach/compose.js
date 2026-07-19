@@ -220,8 +220,34 @@ export function withFooter({ text, html, unsubUrl, lang = 'en', address = null }
 const REMOVE_RX = /(unsubscribe|remove (me|us)|take (me|us) off|stop (emailing|sending|contacting)|don'?t (email|contact)|no more emails|delete my (email|address)|opt me out|قف عن|توقفوا عن|لا تراسل|أوقفوا|الغاء الاشتراك|إلغاء الاشتراك)/i;
 const AUTOREPLY_RX = /(out of (the )?office|automatic reply|auto[-\s]?reply|autoreply|on (annual |sick )?leave|currently (away|travell?ing)|will (respond|reply) (when|upon|after)|delivery (status|failure)|undeliverable|خارج المكتب|رد تلقائي|رد آلي|في إجازة)/i;
 
+// Strip QUOTED content from a reply — only classify what the HUMAN typed. Every normal reply
+// quotes the original email underneath, and Bell's own footer contains the word "Unsubscribe":
+// classifying the full body made EVERY reply look like a removal request (Val's live test —
+// "Sounds interesting, tell me more" got suppressed as remove_me). Cut at the first quote
+// marker; if nothing remains above the quote, classification stays conservative (unclassified).
+export function topReplyOnly(text) {
+  const lines = String(text || '').split(/\r?\n/);
+  const out = [];
+  for (const line of lines) {
+    const s = line.trim();
+    if (/^>/.test(s)) break;                                        // "> quoted"
+    if (/^On .{0,120}wrote:?\s*$/i.test(s)) break;                  // Gmail/Apple "On ... wrote:"
+    if (/^في .{0,120}كتب/.test(s)) break;                            // Arabic "On ... wrote"
+    if (/^-{2,}\s*Original Message\s*-{2,}/i.test(s)) break;        // Outlook
+    if (/^From:\s.+/.test(s) && out.length) break;                  // Outlook top-post header block
+    if (/^_{4,}$/.test(s)) break;                                   // Outlook divider
+    if (/^-{4,}$/.test(s)) break;                                   // Bell's own footer divider
+    out.push(line);
+  }
+  return out.join('\n').trim();
+}
+
 export async function classifyReply({ subject = '', text = '' } = {}) {
-  const t = (String(subject) + '\n' + String(text)).slice(0, 4000);
+  const top = topReplyOnly(text);
+  // Only the human's own words are classified. (Subject is "Re: <our subject>" — ours never
+  // contains stop-language, and including it is harmless.)
+  const t = (String(subject) + '\n' + top).slice(0, 4000);
+  if (!top) return { class: 'unclassified', basis: 'empty_after_quote_strip' };
   if (REMOVE_RX.test(t)) return { class: 'remove_me', basis: 'rule' };
   if (AUTOREPLY_RX.test(t)) return { class: 'auto_reply', basis: 'rule' };
   let key = null;
@@ -230,7 +256,7 @@ export async function classifyReply({ subject = '', text = '' } = {}) {
   try {
     const raw = await callHaiku(key,
       'You classify a reply to a B2B sales email. Return STRICT JSON only: {"class":"interested"|"not_interested"|"auto_reply"|"remove_me"}. "interested" = they want to know more, a demo, a call, pricing, or asked a real question. "not_interested" = a human politely declining. "auto_reply" = an automated message. "remove_me" = any request to stop emailing.',
-      'Subject: ' + String(subject).slice(0, 200) + '\n\nReply:\n' + String(text).slice(0, 2500),
+      'Subject: ' + String(subject).slice(0, 200) + '\n\nReply (quoted original stripped):\n' + top.slice(0, 2500),
       { temperature: 0 });
     const parsed = parseJson(raw);
     const cls = parsed?.class;

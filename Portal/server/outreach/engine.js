@@ -13,7 +13,7 @@
 // preview*() NEVER sends — it composes drafts so Val can read exactly what would go out.
 
 import { query } from '../db.js';
-import { composeEmail, withFooter, classifyReply } from './compose.js';
+import { composeEmail, withFooter, classifyReply, topReplyOnly } from './compose.js';
 import { buildTargets } from './targeting.js';
 import { generateOptoutToken, listUnsubscribeHeaders, isOptedOut, recordConsent } from './optout.js';
 import { isQatarWorkingHour } from '../lib/qatar_time.js';
@@ -522,7 +522,7 @@ export async function recordOutreachReply({ fromEmail, subject = null, text = nu
       WHERE id = (SELECT id FROM outreach_targets WHERE lower(email)=$1 AND status IN ('sent','replied')
                    AND sent_at > now() - interval '60 days'
                    ORDER BY sent_at DESC NULLS LAST LIMIT 1)
-      RETURNING id, campaign_id, arm_id, replied_at`, [from, cls.class, String(text || '').slice(0, 2000)]);
+      RETURNING id, campaign_id, arm_id, replied_at`, [from, cls.class, (topReplyOnly(text) || String(text || '')).slice(0, 2000)]);
   t = r.rows[0];
   if (t?.arm_id) await query(`UPDATE outreach_arms SET replied = replied + 1 WHERE id=$1`, [t.arm_id]).catch(() => {});
   if (t?.arm_id && cls.class === 'interested') await query(`UPDATE outreach_arms SET positive = positive + 1 WHERE id=$1`, [t.arm_id]).catch(() => {});
