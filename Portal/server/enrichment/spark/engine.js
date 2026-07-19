@@ -28,14 +28,21 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 export async function currentBatchSize() {
   const s = await getState('spark_batch_size');
   // Floor 5 (calibration can go small after a max-credits refusal), ceiling 150 (prompt cap).
-  return Math.min(150, Math.max(5, Number(s?.size) || 120));
+  const size = Math.min(150, Math.max(5, Number(s?.size) || 120));
+  // 'ceiling' = the refusal-proven per-run credit limit. Growth must never re-climb past it —
+  // every re-probe of the refusal zone burns one of the 5 free daily runs.
+  const ceiling = Number(s?.ceiling) || 0;
+  return ceiling >= 5 ? Math.min(size, ceiling) : size;
 }
 
 async function pickPending(limit) {
+  // Spark's unique power is finding web presence Bell doesn't know — so NO-WEBSITE companies
+  // first (the harvester/reharvest can't help those at all), best-scored first within each
+  // band. Website-having companies still follow; every company is submitted eventually.
   const r = await query(
     `SELECT id, name, primary_registration_no AS cr, city, website FROM companies
       WHERE spark_status IS NULL AND is_active = true AND COALESCE(archived, false) = false
-      ORDER BY id LIMIT $1`, [limit]);
+      ORDER BY (website IS NOT NULL), bell_score DESC NULLS LAST, id LIMIT $1`, [limit]);
   return r.rows;
 }
 
@@ -192,9 +199,14 @@ export async function runOneBatch({ onProgress = () => {}, batchOverride = null 
     // hold (Val's live calibration, run 1: 144 companies → refusal). Shrink HARD (÷3, floor 5)
     // and tell the runner to retry smaller instead of giving up the day.
     if (/max credits|refusal/i.test(String(err))) {
+      const s = (await getState('spark_batch_size')) || {};
       const cur = await currentBatchSize();
-      const next = Math.max(5, Math.floor(cur / 3));
-      await setState('spark_batch_size', { size: next });
+      // This refusal PROVED cur is over the per-run credit limit — remember a safe ceiling
+      // (75% of the refused size, and never higher than a previously proven one).
+      const prior = Number(s.ceiling) || 150;
+      const ceiling = Math.max(5, Math.min(prior, Math.floor(cur * 0.75)));
+      const next = Math.max(5, Math.min(Math.floor(cur / 3), ceiling));
+      await setState('spark_batch_size', { size: next, ceiling });
       return { status: 'shrunk', error: err, next_batch: next };
     }
     return { status: 'run_failed', error: err };
@@ -226,12 +238,14 @@ export async function runOneBatch({ onProgress = () => {}, batchOverride = null 
     `UPDATE spark_runs SET status=$2, returned_count=$3, ingested_facts=$4, completed_at=now(), updated_at=now() WHERE id=$1`,
     [run.id, matched ? 'completed' : 'empty', matched, ingestedFacts]);
 
-  // Self-adjust the dial.
+  // Self-adjust the dial — growth never climbs past the refusal-proven ceiling.
+  const s = (await getState('spark_batch_size')) || {};
+  const ceiling = Number(s.ceiling) >= 5 ? Number(s.ceiling) : 150;
   const cur = await currentBatchSize();
   let next = cur;
-  if (coverage < 0.6) next = Math.max(25, Math.floor(cur * 0.6));
-  else if (coverage >= 0.9) next = Math.min(150, Math.ceil(cur * 1.2));
-  if (next !== cur) await setState('spark_batch_size', { size: next });
+  if (coverage < 0.6) next = Math.max(5, Math.floor(cur * 0.6));
+  else if (coverage >= 0.9) next = Math.min(150, ceiling, Math.ceil(cur * 1.2));
+  if (next !== cur) await setState('spark_batch_size', { size: next, ...(Number(s.ceiling) >= 5 ? { ceiling: Number(s.ceiling) } : {}) });
 
   return {
     status: 'completed', submitted: rows.length, returned: matched, empty: emptyN,
