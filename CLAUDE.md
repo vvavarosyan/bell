@@ -6,29 +6,24 @@ Val is the founder and sole operator. He is **not** a developer and does not rea
 
 ---
 
-## ⏳ OPEN CHECKLIST — Val still has to do these (as of 2026‑07‑10)
+## ⏳ OPEN CHECKLIST — as of 2026‑07‑19 (the outreach‑machine + data‑completeness sessions)
 
 **Ask him where he is in this list at the start of the session. Do not assume it's done.**
+Full detail lives in memory: [[self-marketing-outreach]] and [[data-completeness-program]].
 
-- [ ] **0.** While a long enrich runs: local Portal (`127.0.0.1:3939`) → **Local Engines → Pause**. Un‑pause when it's finished. (8 GB Mac; two browser stacks is what caused the old slowdowns.)
-- [ ] **1.** `Enrich Tender Details.command` — was running 2026‑07‑10 evening. Hours, resumable.
-- [ ] **2.** `Check Tender Detail.command` → expect **`OPEN with a closing date` ≈ 331 / 331** (the open count grew with the newest scan).
-      ⚠️ It will ALSO report **`captured by parser v4: 0`**, **`still to (re)enrich: ~19,400`** AND **the junk‑`entity_ref` warning (~10,000)**. **All three are expected, not failures** — `DETAIL_V` was bumped 3 → 4 so the archive gets re‑checked once more (picks up `raw.fields`, the verbatim capture of every published field), and the junk `"Request"` refs are wiped during that v4 pass (fix added 2026‑07‑10: the enrich merges `raw`, so on pages with no real entity ref the stale junk used to survive re‑enrichment — 3,725 v3 rows proved it).
-- [ ] **3.** `Backfill Tender Industries.command` — recompute categorisation on the cleaned set.
-- [ ] **4.** Test: local Portal → **Signals → Tenders** → open a Monaqasat tender. Expect a real **closing date**, a **full description**, and **no** cards titled `- Materials Department`.
-- [ ] **5.** Deploy BOTH: `Push Changes.command`, then `Open Production Release.command`.
-      Commit: `Monaqasat detail fixes + QSE disclosures source + proof-of-search ledger`
-      (the batch also carries Phase 2 A3+C1, built 2026‑07‑10 — see §5.)
-- [ ] **5b.** Double‑click `Open Bell.qa Portal.command` once — restarts the local Portal so it applies the new database migrations (079 QSE disclosures, 080 search ledger).
-- [ ] **5c.** Double‑click `Run QSE Scan.command` (2–3 min, plain fetch — safe to run any time, even during an enrich). Expect "~54 listed companies", several hundred announcements, and a successful push. **"Disclosures" signals appear on app.bell.qa → Signals within ~15 minutes** (signals generate on prod; the local Portal's Signals tab does not generate them).
-- [ ] **6.** Re‑run `Enrich Tender Details.command` once more (hours, resumable). This is the v4 pass that fills the **"As published"** block on every tender AND clears the junk entity_refs. Verify with `Check Tender Detail.command`: `captured by parser v4` climbs toward the detail‑page count and the junk‑entity_ref warning disappears.
-- [ ] **7.** After all enrich passes: `Install Always-On Engine.command` (safely restarts the engine service — it froze mid‑round 2026‑07‑10 09:26; a **45‑minute round watchdog** is now in the tree so a future stuck round restarts itself), then local Portal → **Local Engines → Resume**. ⚠️ Do step 5b (Portal restart) BEFORE this, or the new proof‑of‑search rows have no table to land in.
+- [ ] **1.** `Reharvest No-Email Companies.command` — was RUNNING 2026‑07‑19 (the ~8,600 harvested‑but‑no‑email cohort through the upgraded extractor; hours, resumable). Val will paste the closing lines ("Cohort: X → Y"). When done: **Claude runs the DATA push himself** (runPush) — do not send Val to `Push Changes.command` for data.
+- [ ] **2.** After step 1: `Geocode Companies.command` once more — newly harvested structured addresses convert the "unparseable" pile into map pins (first runs: 11 → 410 coords, 7.3k unparseable awaiting better addresses). It pushes to prod itself.
+- [ ] **3.** THE OUTREACH MACHINE IS ARMED (BDI_OUTREACH_SCHEDULER=1 + BDI_OUTREACH_ENABLED=1 on app.bell.qa) and the **"Bella outreach" campaign is ACTIVE with MyWeb Systems** — first real cold send lands the next Qatar working window (Sat–Thu 07:00–17:00). Val checks admin.bell.qa → Marketing → Stats/Mail log. Weekly digest auto‑sends Sundays ≥09:00 (confirmed firing).
+- [ ] **4.** Ramp‑up to the full ~5,400 role‑mailbox campaign: plan approved (tender‑heavy industries first — prioritization is coded into Plan), waiting on a few days of MyWeb/engine results before Val activates a bulk campaign.
+- [ ] **5.** Eid al‑Fitr / Eid al‑Adha dates → add to the holiday calendar when Qatar announces them (admin → Marketing API or ask Claude).
+- [ ] **6.** ⚖️ The PDPPL lawyer review of cold outreach is STILL OPEN (Val's standing instruction: machine runs on his authority; brief at repo root `Bell — Legal Brief for Counsel (Qatar PDPPL outreach).md`).
 
 **Not urgent, whenever he has a spare night:**
-- [ ] **`Enrich Ashghal Details.command`** — fills real description/bond/fees for the ~2,800 CLOSED/archived Ashghal tenders (open ones already done; QatarEnergy fully detailed 2026‑07‑11, 1,236/1,236). Browser‑based, hours, resumable; don't run alongside another long enrich.
-- [ ] **271 rows "awaiting host heal"** — fragment rows whose host title is still truncated (hosts sit in the awarded archive). They look like phantoms but are **unproven**, so the repair tool refuses to delete them. Clear via `Backfill Full Tender Archive.command` (hours) → then `Preview Tender Phantom Repair.command` → `Apply Tender Phantom Repair.command`.
+- [ ] `Enrich Ashghal Details.command` — closed/archived Ashghal tender details. Browser‑based, hours; not alongside another long enrich.
+- [ ] 271 tender rows "awaiting host heal" → `Backfill Full Tender Archive.command` then Preview/Apply Tender Phantom Repair.
+- [ ] `Apply Website-Content Conflict.command` (engine paused) — cleans existing wrong‑content rows (QF Endowment etc.); Preview showed 0 false positives.
 
-**Parked at Val's request:** MOCI Stage‑2 (the diagnose run needed hours of manual scrolling). Design preserved in `Bell — MOCI Stage-2 Design (Phase 2 A1).md`. Don't restart it without asking.
+**Parked at Val's request:** MOCI Stage‑2 (design in `Bell — MOCI Stage-2 Design (Phase 2 A1).md`) · Hukoomi KB source (needs a watched browser run) · marketing‑site SEO validation (waiting on Google) · physical‑letter generator · Arabic outreach campaigns (one flag away).
 
 ---
 
@@ -148,12 +143,12 @@ Portal/
       local/        harvester, finder, relationships, email_finder, company_facts,
                     tech_stack, crawl4ai, render, http      ← Engines 1–6, all $0
       stages/       stage1..6  ← EXTERNAL, PAID (Apify, Firecrawl), manual‑only
-    bella/          brain, tools (41), prompt, store, scheduler, voice, marketing
+    bella/          brain, tools (~57), prompt, store, scheduler, voice, marketing
     news/           signals.js (signal generators), enrich.js (Haiku summaries)
     routes/         express routers
     scripts/        one‑shot + diagnostic scripts run by .command files
     tests/          node test files (run with plain `node`)
-  migrations/       NNN_name.sql, applied in order at Portal boot. Latest = 090.
+  migrations/       NNN_name.sql, applied in order at Portal boot. Latest = 098.
   ui/components/    React 18 (esm.sh import map) + htm tagged templates. No build step.
 Data/Companies/1. Data Gathering/Directories/   MOCI, QFC, QFZ, QSTP scrapers (Python)
 *.command                                        Val's entry points
@@ -163,25 +158,19 @@ Data/Companies/1. Data Gathering/Directories/   MOCI, QFC, QFZ, QSTP scrapers (P
 
 ---
 
-## 5. Current state (2026‑07‑10)
+## 5. Current state (2026‑07‑19)
 
-### Live
-25,199 tenders (Monaqasat + Ashghal + QatarEnergy) · tender→industry matching + opportunity signals · QSE disclosures (420 live, 'disclosure' signals) · multi‑industry ICP scoring · Engine 6 tech‑stack fingerprinting · Bella G1–G4.2 (chat + voice + 50 tools) · news publishing + SEO · Import Phase 2 · credit/reveal system · 0 Risk Phase 1.
+### Live (everything committed IS deployed — no uncommitted work; tree = both envs)
+~27K tenders across FOUR sources (Monaqasat + Ashghal + QatarEnergy + Kahramaa) · signals + QSE disclosures + Qatar Market Pulse · Qatar Knowledge Base (governance + laws + regulators + Gazette feed, customer‑facing) · GIS/Real‑Estate on the Map · Bella (chat + voice, ~57 tools incl. add_to_outreach + get_outreach_status, platform‑admin gated) · Team/CRM/credits/0‑Risk · saved lists + notes.
 
-~191K companies, ~76K active, ~16K with websites.
+**THE SELF‑MARKETING MACHINE (2026‑07‑18/19, ARMED + LIVE):** full autonomous cold‑outreach engine at admin.bell.qa → Marketing. Isolated go.bell.qa Resend channel (never falls back to transactional) · consent ledger + one‑click unsubscribe (/u/:token) + suppression manager · Haiku composer (no em‑dashes, no AI clichés, grounded) · warmup ramp (actual send‑days), Qatar hours + holidays, per‑domain throttle, circuit breaker (any complaint / >5% bounce = self‑pause), pre‑flight self‑test · follow‑ups (3 touches, sticky to Thompson‑bandit A/B arms on reply rate) · reply intelligence (IMAP poller on replies@bell.qa; quote‑stripped classification — the footer's own "Unsubscribe" word once made EVERY reply look like remove_me; "remove me" EN/AR = auto‑unsubscribe; interested = 🔥 hot lead + forward to hello@bell.qa) · conversion attribution → "Converted" · **email observatory** (migration 097 email_log at the sendEmail chokepoint — every send from every Bell system counted, all statuses) · weekly market‑updates digest (real tender/signal numbers) + welcome email for bell.qa/market-updates subscribers · contact form live at bell.qa/contact. Campaign "Bella outreach" ACTIVE (MyWeb Systems pilot). The Plan button orders targets tender‑heavy‑industries‑first. Lawyer review OPEN (Val's authority; brief at repo root).
 
-### Uncommitted work in the tree (tested, NOT deployed)
-1. **Monaqasat detail‑table fixes** — see `server/tests/tender_phantom_split.test.mjs` (55/55) and the header comments in `scrape_monaqasat.js`. Four bugs: phantom tenders from refs embedded in titles, `deadline_at` NULL on all open tenders, `entity_ref = "Request"`, truncated descriptions. Plus verbatim capture of all ~25 published fields, `packRaw`, and (2026‑07‑10) the junk‑entity_ref merge fix in `enrich.js` — the enrich merges `raw`, so stale `"Request"` survived re‑enrichment on pages with no real entity ref; now deleted before merge.
-2. **Phase 2 C1 — QSE disclosures source** (built + tested 2026‑07‑10): `server/qse/` (scrape_qse / sql / ingest_qse) + migration 079 + `Run QSE Scan.command` + new signal kind `disclosure` (news/signals.js, routes/signals.js, SignalsTab). ALL plain fetch, no browser: `/pps/qse_files/MarketWatch.txt` (54 listed companies incl. venture market), per‑company announcements embedded server‑side in company‑profile pages (dedup on the exchange's own `InformationTypeDetailID`), financial‑statement documents + market notices via Liferay serveResource POSTs. Mirrored table (registered in `sync/tables.js`); prod regenerates the signals itself. Proven live on QNBK/QIBK/TQES + all four endpoints; 20/20 unit tests on verbatim fixtures; 15/15 PGlite on real migrations 070+077+079+080. ⚠ qe.com.qa's WAF stalls rapid clients — the scan paces ~0.8s/page.
-3. **Phase 2 A3 — proof‑of‑search ledger** (built + tested 2026‑07‑10): migration 080 `search_ledger` (append‑only, LOCAL‑ONLY, never synced — like enrichment_rejects) + `enrichment/local/ledger.js` + pure `ledger_rules.js`. Outcomes: found / candidate / **verified_empty** (full method ran, tiers live → real proof) / **degraded_empty** (a tier was disabled/blocked, or SMTP‑unverifiable email → NOT proof) / skipped / error. Hooked into all six engines' markStage; finder now records which search tiers actually ran. Also fixed: engines 1/2/3 left a company stuck on `running` forever if it threw mid‑enrich — now stamped `failed`. UI: "Search proof" block in the company drawer + "Proof of search" card in Local Engines (local‑admin only). 12/12 unit tests. Takes effect after the local Portal restarts (migration 080) and the always‑on engine restarts (new code).
+**DATA COMPLETENESS Tracks A+B (2026‑07‑19, DEPLOYED):** harvester upgrade — role emails on external domains KEPT (Doha Clinic case → info@dchqatar.com captured, proven live), Cloudflare/entity/at‑dot de‑obfuscation, WhatsApp contacts (type 'whatsapp', shown in UI), locations/branches + /en /ar pages, per‑page render escalation, multi‑address capture, doctors/staff (admin‑locked via the existing people lockdown) · migration 098 `company_locations` (mirrored) · **$0 QARS geocoder** (Qatar's own GIS locator, INWANI zone/street/building codes, EXACT‑or‑nothing, built‑in ground‑truth proof pass that refuses to run under 85% agreement) · branch pins + sibling tie‑lines on the Map · "Locations (N)" drawer block · Bella get_company includes locations/WhatsApp. Val's commands: `Reharvest No-Email Companies.command` (the 8.6k no‑email cohort) + `Geocode Companies.command` (first runs took the map from 11 → 410 coordinates).
 
-Commit message when it ships:
-`Monaqasat detail fixes + QSE disclosures source + proof-of-search ledger`
+~191K companies, ~76K active, ~16K with websites. Latest migration = **098**. Deep memory: [[self-marketing-outreach]], [[data-completeness-program]].
 
-### ⏳ Immediately pending — ask Val about these first
-He is running **`Enrich Tender Details.command`** (hours, resumable; measured 2026‑07‑10 ~19:00: ~55 rows/min, ETA ~22:00). When it finishes, follow the OPEN CHECKLIST at the top (steps 2 → 7): check, backfill industries, local test, deploy, Portal restart, QSE scan, v4 enrich pass, engine restart + resume.
-
-Also open: **271 rows "awaiting host heal"** — needs `Backfill Full Tender Archive.command` (hours) to heal archive titles, then re‑run Preview/Apply Tender Phantom Repair. Archived rows, not urgent.
+### ⏳ Immediately pending — see the OPEN CHECKLIST at the top
+Reharvest running → Claude runs the DATA push himself → Geocode again → watch MyWeb first send → ramp decision → lawyer.
 
 ---
 

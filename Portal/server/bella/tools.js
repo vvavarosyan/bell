@@ -1383,6 +1383,54 @@ export const TOOLS = [
   },
 
   {
+    definition: {
+      name: 'get_outreach_status',
+      description: "PLATFORM ADMIN ONLY — how Bell's own self-marketing machine is doing: engine state (armed? breaker tripped? within Qatar hours?), each campaign's funnel (queued/sent/replied/interested/unsubscribed/bounced/converted), today's send count, hot leads (who replied 'interested'), and subscriber count. Use when the admin asks how outreach/marketing is going — report numbers plainly and honestly, including bounces and unsubscribes, never only the good news.",
+      input_schema: { type: 'object', properties: {} },
+    },
+    async execute(args, ctx) {
+      if (ctx?.user?.role !== 'platform_admin') return { error: 'admin_only: outreach status is Bell self-marketing, not a customer feature.' };
+      const { query } = await import('../db.js');
+      const { OUTREACH_ENABLED } = await import('../outreach/engine.js');
+      const { breakerStatus, isQatarHolidayToday } = await import('../outreach/machine.js');
+      const { isQatarWorkingHour } = await import('../lib/qatar_time.js');
+      const { listSubscribers } = await import('../outreach/digest.js');
+
+      const campaigns = (await query(
+        `SELECT c.id, c.name, c.status, c.audience_tier, c.daily_cap,
+                count(t.*) FILTER (WHERE t.status='pending')::int AS pending,
+                count(t.*) FILTER (WHERE t.status IN ('sent','replied','bounced','unsubscribed'))::int AS emailed,
+                count(t.*) FILTER (WHERE t.status='replied')::int AS replied,
+                count(t.*) FILTER (WHERE t.reply_class='interested')::int AS interested,
+                count(t.*) FILTER (WHERE t.status='unsubscribed')::int AS unsubscribed,
+                count(t.*) FILTER (WHERE t.status='bounced')::int AS bounced,
+                count(t.*) FILTER (WHERE t.converted_at IS NOT NULL)::int AS converted
+           FROM outreach_campaigns c LEFT JOIN outreach_targets t ON t.campaign_id=c.id
+          GROUP BY c.id ORDER BY c.created_at DESC LIMIT 10`)).rows;
+      const sentToday = (await query(
+        `SELECT count(*)::int AS n FROM crm_emails WHERE direction='out'
+           AND sent_by IN ('outreach-engine','outreach-test') AND status IN ('sent','delivered','opened')
+           AND sent_at >= (date_trunc('day', now() AT TIME ZONE 'Asia/Qatar') AT TIME ZONE 'Asia/Qatar')`)).rows[0].n;
+      const hotLeads = (await query(
+        `SELECT company_name, email, replied_at FROM outreach_targets
+          WHERE reply_class='interested' ORDER BY replied_at DESC NULLS LAST LIMIT 5`)).rows;
+      const [breaker, holiday, subs] = await Promise.all([
+        breakerStatus(), isQatarHolidayToday(), listSubscribers().catch(() => []),
+      ]);
+      return {
+        engine: {
+          armed: OUTREACH_ENABLED(), within_qatar_hours: isQatarWorkingHour(),
+          holiday_today: holiday.holiday ? holiday.name : null,
+          breaker_tripped: breaker.tripped, breaker_reason: breaker.reason,
+          sent_today: sentToday,
+        },
+        campaigns, hot_leads: hotLeads, digest_subscribers: subs.length,
+      };
+    },
+    summarize: (args, r) => r?.error ? 'admin only' : `outreach status: ${r?.engine?.sent_today ?? 0} sent today · ${(r?.campaigns || []).length} campaigns`,
+  },
+
+  {
     approval: 'act',
     definition: {
       name: 'create_sequence',

@@ -91,6 +91,22 @@ export async function planCampaign(campaignId, { max = 100000 } = {}) {
   if (!c) throw new Error('campaign_not_found');
   const langForMode = c.lang_mode === 'ar' ? 'ar' : c.lang_mode === 'bilingual' ? 'bilingual' : 'en';
   const { targets, counts } = await buildTargets({ tier: c.audience_tier, lang: langForMode, campaignId, max });
+  // RAMP PRIORITIZATION (Val approved 2026-07-19): the engine sends in insertion order, so
+  // sort the queue before inserting — tender-heavy industries first (Bell's pitch lands
+  // hardest where government tenders decide revenue), then everyone else. Within each band,
+  // companies WITH a website first (better personalization data).
+  const TENDER_HEAVY = new Set([
+    'Construction & Contracting', 'Trading & Distribution', 'Information Technology',
+    'Telecommunications', 'Oil & Gas', 'Engineering', 'Facilities Management',
+    'Healthcare', 'Logistics & Transportation', 'Manufacturing',
+  ]);
+  const indOf = (t) => t.industry || (Array.isArray(t.industries) ? t.industries[0] : null) || '';
+  targets.sort((a, b) => {
+    const ia = TENDER_HEAVY.has(indOf(a)) ? 0 : 1;
+    const ib = TENDER_HEAVY.has(indOf(b)) ? 0 : 1;
+    if (ia !== ib) return ia - ib;
+    return (b.website ? 1 : 0) - (a.website ? 1 : 0);
+  });
   // Batch-insert (500/query) — a role-mailbox campaign is ~12k targets; one-at-a-time would
   // hang the Plan button for a minute.
   let inserted = 0;
