@@ -285,7 +285,9 @@ export function findWhatsApp(text, links = []) {
 // Team people (name + title) — conservative
 // ===========================================================================
 
-const ROLE_RX = /\b(c[efo]o|cto|cmo|coo|chief|founder|co-?founder|owner|president|vice president|vp|director|managing director|general manager|head of|partner|principal|manager|lead|chairman|chairwoman|board member|ceo|cfo)\b/i;
+// Clinical titles included (Val 2026-07-15: doctors/staff captured — people data is
+// admin-locked platform-wide, so PDPPL protection is inherited).
+const ROLE_RX = /\b(c[efo]o|cto|cmo|coo|chief|founder|co-?founder|owner|president|vice president|vp|director|managing director|general manager|head of|partner|principal|manager|lead|chairman|chairwoman|board member|ceo|cfo|doctor|physician|surgeon|consultant|specialist|dentist|general practitioner|cardiolog\w*|dermatolog\w*|orthopedic\w*|gynecolog\w*|paediatric\w*|pediatric\w*|radiolog\w*|psychiatr\w*|ophthalmolog\w*|neurolog\w*|urolog\w*)\b/i;
 const NAME_TOKEN = /^[A-Z][a-zA-Z'’.-]+$/;
 const NAME_JUNK = /\b(home|about|contact|services|products|news|blog|careers?|team|menu|copyright|all rights|privacy|terms|cookie|subscribe|newsletter|read more|learn more|view|click|email|phone)\b/i;
 

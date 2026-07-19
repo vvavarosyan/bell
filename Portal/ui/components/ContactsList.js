@@ -107,6 +107,7 @@ function ContactRow({ contact, kind, refId, onChange, readOnly = false }) {
   if (contact.type === 'email') href = 'mailto:' + contact.value;
   if (contact.type === 'phone') href = 'tel:' + contact.value.replace(/\s+/g, '');
   if (contact.type === 'social') href = contact.value;
+  if (contact.type === 'whatsapp') href = 'https://wa.me/' + contact.value.replace(/[^\d]/g, '');
 
   const isSocial = contact.type === 'social';
   const sm = isSocial ? socialMeta(contact.value) : null;
@@ -186,6 +187,7 @@ export function ContactsList({ kind, refId, contacts, onChange, readOnly = false
   const emails  = (contacts || []).filter(c => c.type === 'email');
   const phones  = (contacts || []).filter(c => c.type === 'phone');
   const socials = (contacts || []).filter(c => c.type === 'social');
+  const whatsapps = (contacts || []).filter(c => c.type === 'whatsapp');
 
   const renderGroup = (label, items) => html`
     <div class="contact-group">
@@ -217,6 +219,7 @@ export function ContactsList({ kind, refId, contacts, onChange, readOnly = false
     <div class="contacts-list">
       ${renderGroup('Emails',  emails)}
       ${renderGroup('Phones',  phones)}
+      ${whatsapps.length > 0 ? renderGroup('WhatsApp', whatsapps) : null}
       ${socials.length > 0 ? renderSocials(socials) : null}
       ${!readOnly ? html`<${AddContactForm} kind=${kind} refId=${refId} onChange=${onChange} />` : null}
     </div>

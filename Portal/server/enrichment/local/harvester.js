@@ -52,7 +52,11 @@ const PAGE_HINTS = {
   contact:  ['/contact', '/contact-us', '/contactus', '/get-in-touch', '/reach-us', '/reach', '/enquir', '/inquir', '/اتصل', '/تواصل'],
   location: ['/location', '/locations', '/branch', '/branches', '/our-locations', '/our-branches', '/where-we-are', '/find-us', '/store-locator', '/showrooms', '/outlets', '/فروع'],
   about:    ['/about', '/about-us', '/aboutus', '/who-we-are', '/company', '/overview'],
-  team:     ['/team', '/our-team', '/people', '/leadership', '/management', '/board', '/staff', '/directors', '/founders'],
+  // Clinical/professional staff pages included (Val approved 2026-07-15: doctors/staff
+  // captured; people data is already admin-locked platform-wide, so this inherits PDPPL
+  // protection automatically — customers never see person details).
+  team:     ['/team', '/our-team', '/people', '/leadership', '/management', '/board', '/staff', '/directors', '/founders',
+             '/doctors', '/our-doctors', '/physicians', '/medical-team', '/consultants', '/specialists', '/dentists', '/أطباء'],
   partner:  ['/partner', '/partners', '/clients', '/our-clients', '/customers', '/sponsors', '/brands'],
 };
 const ALL_HINTS = Object.values(PAGE_HINTS).flat();

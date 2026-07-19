@@ -249,7 +249,7 @@ export const TOOLS = [
   {
     definition: {
       name: 'get_company',
-      description: 'Full profile of one company by id — everything you need to PERSONALIZE outreach: identity, industry tags, description, website, Google review rating + volume, partnerships, technographics, financials, contacts (masked unless revealed), people count (people details restricted for customer accounts), enrichment score. Call this before drafting an email so the message references THIS company specifically.',
+      description: 'Full profile of one company by id — everything you need to PERSONALIZE outreach: identity, industry tags, description, website, Google review rating + volume, partnerships, technographics, financials, contacts (masked unless revealed; includes WhatsApp numbers where captured), physical LOCATIONS (head office + branches with addresses — reference "your Lusail branch" when relevant), people count (people details restricted for customer accounts), enrichment score. Call this before drafting an email so the message references THIS company specifically.',
       input_schema: {
         type: 'object',
         properties: { id: { type: 'integer', description: 'Company id from search_companies.' } },

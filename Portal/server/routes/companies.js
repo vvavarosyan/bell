@@ -493,6 +493,12 @@ router.get('/:id', async (req, res, next) => {
       query(`SELECT id, tech, category, confidence, evidence, detected_at, updated_at
                FROM company_tech WHERE company_id = $1 ORDER BY category, tech`, [id]).catch(() => ({ rows: [] })),
     ]);
+    // Track B: physical locations (head office + branches) — also feeds Bella's get_company so
+    // she can personalize with "your Lusail branch". Fail-soft pre-098.
+    const locations = await query(
+      `SELECT id, label, address, latitude, longitude, is_primary, source, geocode_status
+         FROM company_locations WHERE company_id = $1 ORDER BY is_primary DESC, id`, [id])
+      .then((r) => r.rows).catch(() => []);
     if (!company.rows.length) return res.status(404).json({ error: 'not_found' });
     const row = company.rows[0];
     const efSnapshot = row.extra_fields || {};   // capture before masking may strip it
@@ -538,6 +544,7 @@ router.get('/:id', async (req, res, next) => {
       partnerships: partnerships.rows,
       rejects:      rejects,
       tech:         tech.rows,
+      locations,
     });
   } catch (err) { next(err); }
 });
