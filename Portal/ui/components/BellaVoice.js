@@ -48,6 +48,7 @@ export function BellaVoice({ onClose, onOpenChat }) {
   const audioRef = useRef(null);      // current playback element
   const stopAudioRef = useRef(null);  // stops playback AND resolves speak()'s promise
   const aliveRef = useRef(true);
+  const turnInFlightRef = useRef(false);   // guard: never run two voice turns at once
   const stateRef = useRef('starting');
   const setSt = (s) => { stateRef.current = s; setState(s); };
 
@@ -186,6 +187,7 @@ export function BellaVoice({ onClose, onOpenChat }) {
   const runTurn = async (text) => {
     setSt('thinking');
     setBellaBusy(true);          // orb pulses while she works
+    turnInFlightRef.current = true;
     try {
     setLine('“' + text.slice(0, 100) + '”');
     let finalText = '';
@@ -193,6 +195,7 @@ export function BellaVoice({ onClose, onOpenChat }) {
     // Speech starts the moment the FIRST sentence has streamed.
     const run = newSpeechRun();
     let speechBuf = '';
+    let spokeAnything = false;
     const feedSpeech = (t) => {
       if (run.stopped) return;
       speechBuf += t;
@@ -200,9 +203,17 @@ export function BellaVoice({ onClose, onOpenChat }) {
         const cut = cutSpeechSegment(speechBuf);
         if (!cut) break;
         speechBuf = cut.rest;
+        spokeAnything = true;
         run.push(cut.segment);
       }
     };
+    // Progress cue (Val 2026-07-20: "user left wondering why Bella said nothing"):
+    // if she's still working after ~2.6s with nothing spoken yet (a tool-heavy
+    // turn), say a short filler so the user knows she's on it. The real answer
+    // queues right after.
+    const fillerTimer = setTimeout(() => {
+      if (!spokeAnything && !run.stopped && aliveRef.current) { spokeAnything = true; run.push('Working on it — one moment.'); }
+    }, 2600);
     try {
       const stream = await api.bellaChat(
         { conversation_id: convIdRef.current, message: text, context: { section: currentRoute().tab, voice: true } },
@@ -236,6 +247,7 @@ export function BellaVoice({ onClose, onOpenChat }) {
       if (err?.name !== 'AbortError') errored = err?.message || 'Connection lost.';
     } finally {
       streamRef.current = null;
+      clearTimeout(fillerTimer);
     }
     if (!aliveRef.current) { run.stop(); return; }
     if (errored) {
@@ -266,11 +278,15 @@ export function BellaVoice({ onClose, onOpenChat }) {
       return;
     }
     if (aliveRef.current && !run.stopped) { setLine(''); setSt('listening'); }
-    } finally { setBellaBusy(false); }
+    } finally { setBellaBusy(false); turnInFlightRef.current = false; }
   };
 
   const processUtterance = async (blob) => {
     if (!aliveRef.current || !blob || blob.size < 2000) { setSt('listening'); return; }
+    // Never start a second turn while one is still running (chat approval +
+    // voice, or a fast follow-up) — that caused two answers to collide (Val
+    // 2026-07-20). Drop this utterance; she'll hear the next one.
+    if (turnInFlightRef.current) { setLine(''); return; }
     setSt('thinking');
     setLine('…');
     try {
@@ -381,7 +397,10 @@ export function BellaVoice({ onClose, onOpenChat }) {
           // frame starts a TENTATIVE capture and ducks her volume; only
           // sustained speech (BARGE_MS) commits the interrupt — a cough or a
           // short blip gets discarded and she carries on at full volume.
-          if (rms > bargeTh) {
+          // Gate on audioRef: only arm barge-in while audio is ACTUALLY playing
+          // (not during the TTS-fetch gap) — else her own leaking voice / room
+          // noise could false-trigger and cut her off (Val 2026-07-20).
+          if (rms > bargeTh && audioRef.current) {
             lastSpeech = now;
             if (!speechStart) {
               speechStart = now;
