@@ -301,6 +301,13 @@ export async function runBellaTurn({ ctx, conversationId, userText, clientContex
   const approvalMode = prefs.approval_mode === 'auto' ? 'auto' : 'ask';
   const system = buildSystem(ctx.user, ctx.tenant, prefs);
 
+  // Start the fresh-signals brief NOW so its (up to 3) DB queries overlap the
+  // approval/supersede work below + the first model call, instead of adding
+  // serial latency before Bella's first token (Val 2026-07-20: slow to start).
+  // It's best-effort + 60s-cached; on a hidden/approval turn the result is
+  // simply unused (and the cache is warmed for the next real turn).
+  const freshP = autonomous ? Promise.resolve(null) : freshSignalsBrief(tenantId).catch(() => null);
+
   // Approval continuations: after the Approve/Deny buttons the client sends
   // "[[action:ID:approved|denied]]" — swap it for a framing note the model
   // narrates from. Hidden: no user bubble is rendered (display content '').
@@ -404,7 +411,7 @@ export async function runBellaTurn({ ctx, conversationId, userText, clientContex
   // Proactive awareness: a one-line brief of the last 24h of signals (ICP
   // matches highlighted). Skipped on hidden/autonomous turns; best-effort.
   let fresh = null;
-  if (!hidden && !autonomous) fresh = await freshSignalsBrief(tenantId).catch(() => null);
+  if (!hidden && !autonomous) fresh = await freshP;
   const fullUserText =
     (!hidden ? `[current date & time in Qatar (Asia/Qatar, UTC+3): ${formatQatar(new Date())}. Qatar is the reference timezone — resolve "today / tonight / tomorrow / this morning" and ALL scheduling against this, and pass schedule_task run_at in Qatar time.]\n` : '')
     + (section && !hidden ? `[user is currently on the "${section}" section]\n` : '')
