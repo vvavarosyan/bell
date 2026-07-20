@@ -139,7 +139,20 @@ export async function loadModelMessages(conversationId, max = 60) {
       // NB: tool_result content is replayed VERBATIM (see TOOL_RESULT_CLIP) —
       // rewriting it here would break the prompt-cache prefix match.
       content = content
-        .filter((b) => !(b && b.type === 'text' && !String(b.text || '').trim()));
+        .filter((b) => !(b && b.type === 'text' && !String(b.text || '').trim()))
+        // Heal tool_use blocks whose stream was cut off (barge-in / abort) before
+        // completion: a missing `input` makes Anthropic reject the WHOLE replay
+        // ("messages.N.content.M.tool_use.input: Field required", hit live
+        // 2026-07-20) — one bad block breaks every subsequent turn. Guarantee an
+        // input and strip streaming scratch. A block that's already clean is
+        // returned untouched, so the cached prompt prefix is unchanged.
+        .map((b) => {
+          if (!b || b.type !== 'tool_use' || (b.input !== undefined && b._partial === undefined)) return b;
+          let input = b.input;
+          if (input === undefined) { try { input = b._partial ? JSON.parse(b._partial) : {}; } catch { input = {}; } }
+          const { _partial, ...rest } = b;
+          return { ...rest, input: input ?? {} };
+        });
       if (!content.length) continue;
     }
     const finalContent = content || String(row.content || '');

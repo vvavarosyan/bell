@@ -160,7 +160,18 @@ async function streamModelResponse({ apiKey, system, messages, signal, onToken }
   // blocks must be non-empty", hit live 2026-07-03): models often open a text
   // block but stream zero characters into it before tool calls. Drop empties
   // here so neither the tool loop nor the DB ever holds one.
-  const cleaned = blocks.filter((b) => b && !(b.type === 'text' && !String(b.text || '').trim()));
+  const cleaned = blocks
+    .filter((b) => b && !(b.type === 'text' && !String(b.text || '').trim()))
+    // A tool_use whose stream was cut off before content_block_stop (barge-in /
+    // abort) never got its `input` set. Guarantee one now so the block is safe to
+    // store + replay (else Anthropic rejects the whole next request with
+    // "tool_use.input: Field required").
+    .map((b) => {
+      if (b.type !== 'tool_use') return b;
+      if (b.input === undefined) { try { b.input = b._partial ? JSON.parse(b._partial) : {}; } catch { b.input = {}; } }
+      if (b._partial !== undefined) delete b._partial;
+      return b;
+    });
   return {
     blocks: cleaned.length ? cleaned : [{ type: 'text', text: '(no answer this round — please ask again)' }],
     stopReason, inputTokens, cacheReadTokens, outputTokens,
