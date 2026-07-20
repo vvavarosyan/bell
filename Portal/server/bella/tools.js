@@ -13,6 +13,7 @@
 // flag on each definition is the hook the brain already honors.
 
 import { query } from '../db.js';
+import { resolveCenter, companiesNear, buildingsNear, landAt } from '../gis/nearby.js';
 import { planSteps, planSummary } from './plan.js';
 import openstatsRouter from '../routes/openstats.js';
 import companiesRouter from '../routes/companies.js';
@@ -584,6 +585,61 @@ export const TOOLS = [
       if (v === 'transactions') return `${(r?.transactions || []).length} transactions${args.district ? ' · ' + args.district : ''}`;
       return 'Qatar real-estate market';
     },
+  },
+
+  {
+    definition: {
+      name: 'map_nearby',
+      description: 'MAP AWARENESS — what is physically NEAR a place, from Bell\'s own geodata. Give a center as company_id (a company you found), OR a place/building name, OR lat+lng. Returns the geocoded companies AND the registered GIS buildings/landmarks within the radius, each with its distance in metres, nearest first. Use for "which companies are near X", "what\'s around this building", "who are their neighbours". All Qatar; coordinates are Bell\'s stored geocodes.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          company_id: { type: 'integer', description: 'Center on this company (from search_companies).' },
+          place:      { type: 'string', description: 'Center on a company/building by name (if no id).' },
+          lat:        { type: 'number' },
+          lng:        { type: 'number' },
+          radius_m:   { type: 'integer', description: 'Search radius in metres, 50–5000 (default 1000).' },
+          include:    { type: 'string', description: 'companies | buildings | both (default both).' },
+          limit:      { type: 'integer', description: 'Max per list, 1–25 (default 12).' },
+        },
+      },
+    },
+    async execute(args) {
+      const center = await resolveCenter({ lat: args.lat, lng: args.lng, companyId: args.company_id, name: args.place });
+      if (!center) return { error: 'Could not resolve a Qatar location — give a company_id, a known place name, or lat+lng.' };
+      const radius = Math.min(Math.max(Number(args.radius_m) || 1000, 50), 5000);
+      const limit = Math.min(Math.max(Number(args.limit) || 12, 1), 25);
+      const inc = String(args.include || 'both').toLowerCase();
+      const out = { center: center.label, center_lat: center.lat, center_lng: center.lng, radius_m: radius };
+      if (inc !== 'buildings') out.companies = await companiesNear(center.lat, center.lng, radius, limit);
+      if (inc !== 'companies') out.buildings = await buildingsNear(center.lat, center.lng, radius, limit);
+      return out;
+    },
+    summarize: (args, r) => `near ${r?.center || 'point'}: ${(r?.companies || []).length} companies, ${(r?.buildings || []).length} buildings`,
+  },
+
+  {
+    definition: {
+      name: 'land_info',
+      description: 'LAND / PARCEL info at a location, from Qatar\'s cadastre + zoning (Bell\'s stored GIS). Give a center as company_id, a place/building name, or lat+lng. Returns the enclosing plot\'s size in square metres and its official land-use zoning (e.g. "Residential", "Mixed use", "Commercial"). Use for "how big is this plot", "what\'s the zoning here", "land size". Source-stated (Rule 2.1); if there is no parcel record for the point, say so — never guess a size.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          company_id: { type: 'integer' },
+          place:      { type: 'string' },
+          lat:        { type: 'number' },
+          lng:        { type: 'number' },
+        },
+      },
+    },
+    async execute(args) {
+      const center = await resolveCenter({ lat: args.lat, lng: args.lng, companyId: args.company_id, name: args.place });
+      if (!center) return { error: 'Could not resolve a Qatar location — give a company_id, a known place name, or lat+lng.' };
+      const land = await landAt(center.lat, center.lng);
+      if (!land) return { location: center.label, note: 'No cadastre/zoning parcel on record for this point — do not guess a size.' };
+      return { location: center.label, ...land };
+    },
+    summarize: (args, r) => r?.plot_area_sqm ? `${r.plot_area_sqm} m² · ${r.zoning || 'zoning n/a'}` : `land info · ${r?.location || 'point'}`,
   },
 
   {
