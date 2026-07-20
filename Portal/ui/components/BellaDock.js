@@ -11,11 +11,12 @@ import { api } from '../lib/api.js';
 import { BellaChat } from './BellaChat.js';
 import { usePendingApprovalCount } from './BellaApprovals.js';
 import { BellaVoice } from './BellaVoice.js';
-import { BELLA_OPEN_EVENT } from '../lib/bellaBus.js';
+import { BELLA_OPEN_EVENT, BELLA_BUSY_EVENT } from '../lib/bellaBus.js';
 
 export function BellaDock() {
   const [open, setOpen] = useState(false);
   const [voice, setVoice] = useState(false);
+  const [working, setWorking] = useState(false);   // orb pulses while a turn runs
   const pendingApprovals = usePendingApprovalCount();   // badge: approvals waiting anywhere
 
   // "Bella does it for me" (onboarding) opens the chat with a seeded task.
@@ -23,6 +24,14 @@ export function BellaDock() {
     const onOpen = () => setOpen(true);
     window.addEventListener(BELLA_OPEN_EVENT, onOpen);
     return () => window.removeEventListener(BELLA_OPEN_EVENT, onOpen);
+  }, []);
+
+  // Reflect Bella's "working" state on the orb so the user sees she's busy even
+  // when the panel is closed (Val 2026-07-20).
+  useEffect(() => {
+    const onBusy = (e) => setWorking(!!e?.detail?.busy);
+    window.addEventListener(BELLA_BUSY_EVENT, onBusy);
+    return () => window.removeEventListener(BELLA_BUSY_EVENT, onBusy);
   }, []);
 
   const toggleVoice = async () => {
@@ -39,7 +48,7 @@ export function BellaDock() {
 
   return html`
     <div class="bella-dock">
-      <button class=${'bella-orb' + (open || voice ? ' open' : '')} title=${pendingApprovals ? pendingApprovals + ' Bella action(s) waiting for your approval — click to review' : 'Bella — your Bell assistant'} onClick=${() => setOpen((o) => !o)} style=${{ position: 'relative' }}>
+      <button class=${'bella-orb' + (open || voice ? ' open' : '') + (working ? ' working' : '')} title=${working ? 'Bella is working…' : (pendingApprovals ? pendingApprovals + ' Bella action(s) waiting for your approval — click to review' : 'Bella — your Bell assistant')} onClick=${() => setOpen((o) => !o)} style=${{ position: 'relative' }}>
         <span class="bella-orb-core"></span>
         ${pendingApprovals ? html`<span style=${{ position: 'absolute', top: '-4px', right: '-6px', minWidth: '15px', height: '15px', borderRadius: '999px', background: 'var(--amber, #f59e0b)', color: '#111', fontSize: '10px', fontWeight: 800, display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '0 3px' }}>${pendingApprovals}</span>` : null}
       </button>

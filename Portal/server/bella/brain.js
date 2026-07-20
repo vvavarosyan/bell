@@ -181,10 +181,12 @@ async function streamModelResponse({ apiKey, system, messages, signal, onToken, 
       return b;
     });
   if (!cleaned.length) {
-    // A round that produced no usable content. The fallback used to be saved but
-    // NEVER streamed (onToken only fires on live deltas), so voice heard silence.
-    // Emit it as a real token so the client always gets SOMETHING to show/speak.
-    const msg = 'Sorry — I didn’t catch that. Could you say it again?';
+    // A round that produced no usable content (the MODEL returned nothing — not
+    // the user). The fallback used to be saved but NEVER streamed (onToken only
+    // fires on live deltas), so voice heard silence. Emit it as a real token so
+    // the client always gets SOMETHING — and word it honestly (don't blame the
+    // user for hearing, Val 2026-07-20 saw "didn't catch that" mid-task).
+    const msg = 'Sorry, I got a bit stuck there — could you ask me to continue, or rephrase that?';
     try { onToken(msg); } catch { /* ignore */ }
     return { blocks: [{ type: 'text', text: msg }], stopReason, inputTokens, cacheReadTokens, outputTokens };
   }
@@ -543,6 +545,14 @@ export async function runBellaTurn({ ctx, conversationId, userText, clientContex
     // temperature (§2.8); tools array kept, tool_choice 'none' (rare tail-only
     // cache miss — acceptable). If even this fails, still say something.
     if (!answered) {
+      // HONESTY nudge (Val 2026-07-20: she said "Done." when the emails were NOT
+      // drafted — the contacts needed reveal). Append the instruction to the last
+      // (tool-results) user turn so alternation stays valid; it's transient, not
+      // persisted. Demands a truthful account of what did vs did NOT complete.
+      const lastMsg = messages[messages.length - 1];
+      if (lastMsg?.role === 'user' && Array.isArray(lastMsg.content)) {
+        lastMsg.content.push({ type: 'text', text: '[Wrap up now — no more tools. In 1–3 sentences tell the user plainly what you ACTUALLY completed and what you did NOT finish, and why (e.g. contacts needing reveal). NEVER claim a step succeeded if its tool did not confirm success — do not say "done" if it isn\'t.]' });
+      }
       try {
         setHistoryCacheBreakpoint(messages);
         const wrap = await streamModelResponse({

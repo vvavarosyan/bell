@@ -86,6 +86,22 @@ export function takeBellaSeed() {
   try { const s = window.__bellaSeed; window.__bellaSeed = null; return s || null; } catch { return null; }
 }
 
+// Bella "working" signal — the orb pulses while ANY turn (chat or voice) is
+// running, so the user knows she's busy even with the panel closed (Val
+// 2026-07-20: "when a complex work is given, the round icon should indicate
+// work is in process"). A counter, so overlapping chat+voice turns don't clear
+// it early; only the last one to finish flips it back to idle.
+export const BELLA_BUSY_EVENT = 'bdi:bella-busy';
+let _bellaBusyCount = 0;
+export function setBellaBusy(on) {
+  _bellaBusyCount = Math.max(0, _bellaBusyCount + (on ? 1 : -1));
+  const busy = _bellaBusyCount > 0;
+  try {
+    window.__bellaBusy = busy;
+    window.dispatchEvent(new CustomEvent(BELLA_BUSY_EVENT, { detail: { busy } }));
+  } catch { /* ignore */ }
+}
+
 /** The session's active conversation id, or null if none / gone stale. */
 export function getActiveConversation(staleMs = BELLA_CONV_STALE_MS) {
   try {

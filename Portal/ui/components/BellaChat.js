@@ -9,7 +9,7 @@ import { useState, useEffect, useRef, useCallback } from 'react';
 import { html } from '../lib/html.js';
 import { api } from '../lib/api.js';
 import { currentRoute, navigateTo } from '../lib/router.js';
-import { emitBellaAction, stashPending, fireToolEffects,
+import { emitBellaAction, stashPending, fireToolEffects, setBellaBusy,
   BELLA_CONV_EVENT, getActiveConversation, setActiveConversation, BELLA_FILL_RESULT_EVENT,
   BELLA_OPEN_EVENT, takeBellaSeed } from '../lib/bellaBus.js';
 import { BellaApprovals, fireApprovalsChanged, APPROVALS_EVENT } from './BellaApprovals.js';
@@ -319,6 +319,7 @@ export function BellaChat({ onClose }) {
     if (!text || busy) return;
     setInput('');
     setBusy(true);
+    setBellaBusy(true);          // orb pulses while she works (visible with panel closed)
     busyRef.current = true;
     const now = new Date().toISOString();
     // Hidden turns (approval continuations) show no user bubble.
@@ -395,6 +396,7 @@ export function BellaChat({ onClose }) {
         ? { ...m, streaming: false, error: (m.content || m.error) ? m.error : "Bella didn't respond — please try again." }
         : m);
       setBusy(false);
+      setBellaBusy(false);
       busyRef.current = false;
       streamRef.current = null;
       refreshConvs();

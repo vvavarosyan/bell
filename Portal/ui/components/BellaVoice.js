@@ -16,7 +16,7 @@ import { html } from '../lib/html.js';
 import { api } from '../lib/api.js';
 import { toast } from '../lib/toast.js';
 import { currentRoute, navigateTo } from '../lib/router.js';
-import { emitBellaAction, stashPending, fireToolEffects,
+import { emitBellaAction, stashPending, fireToolEffects, setBellaBusy,
   BELLA_CONV_EVENT, getActiveConversation, setActiveConversation } from '../lib/bellaBus.js';
 import { fireApprovalsChanged } from './BellaApprovals.js';
 import { cutSpeechSegment, segmentAll } from '../lib/speech.js';
@@ -185,6 +185,8 @@ export function BellaVoice({ onClose, onOpenChat }) {
 
   const runTurn = async (text) => {
     setSt('thinking');
+    setBellaBusy(true);          // orb pulses while she works
+    try {
     setLine('“' + text.slice(0, 100) + '”');
     let finalText = '';
     let errored = null;
@@ -264,6 +266,7 @@ export function BellaVoice({ onClose, onOpenChat }) {
       return;
     }
     if (aliveRef.current && !run.stopped) { setLine(''); setSt('listening'); }
+    } finally { setBellaBusy(false); }
   };
 
   const processUtterance = async (blob) => {
