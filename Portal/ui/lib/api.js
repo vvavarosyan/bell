@@ -443,6 +443,7 @@ export const api = {
   realEstateBuildingCategories: () => request('/api/real-estate/building-categories'),
   realEstateMap:          () => request('/api/real-estate/map'),
   realEstateParcels:      (q = {}) => request('/api/real-estate/parcels?' + new URLSearchParams(q)),
+  realEstateLand:         (q = {}) => request('/api/real-estate/land?' + new URLSearchParams(q)),
   // ---- Qatar Knowledge (Phase 6 · official Qatar sources + laws) ----
   knowledgeStats:         () => request('/api/knowledge/stats'),
   knowledgeSources:       () => request('/api/knowledge/sources'),

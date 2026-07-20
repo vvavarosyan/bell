@@ -296,11 +296,21 @@ async function loadREData(map) {
 }
 let parcelFetchSeq = 0;
 async function fetchParcels(map) {
-  if (!map.getSource('re-parcels')) return;
-  if (map.getZoom() < 14) { map.getSource('re-parcels').setData({ type: 'FeatureCollection', features: [] }); return; }
+  if (map.getZoom() < 14) {
+    for (const s of ['re-parcels', 're-land']) if (map.getSource(s)) map.getSource(s).setData({ type: 'FeatureCollection', features: [] });
+    return;
+  }
   const b = map.getBounds();
   const bbox = [b.getWest(), b.getSouth(), b.getEast(), b.getNorth()].join(',');
   const seq = ++parcelFetchSeq;
+  // RELIABLE first: Bell's own cadastre points (always available). Then the live
+  // Qatar-GIS polygons as a detail overlay (may be empty if that server is down).
+  try {
+    const land = await api.realEstateLand({ bbox });
+    if (seq === parcelFetchSeq && map.getSource('re-land')) {
+      map.getSource('re-land').setData(land && land.type ? land : { type: 'FeatureCollection', features: [] });
+    }
+  } catch { /* ignore */ }
   try {
     const gj = await api.realEstateParcels({ bbox });
     if (seq === parcelFetchSeq && map.getSource('re-parcels')) {
@@ -357,6 +367,7 @@ export function MapTab() {
     setLayerVisibility(map, 're-buildings',    showBuildings);
     setLayerVisibility(map, 're-parcels-fill', showParcels);
     setLayerVisibility(map, 're-parcels-line', showParcels);
+    setLayerVisibility(map, 're-land', showParcels);
     if ((showREPrices || showBuildings) && map.getSource('re-districts')) loadREData(map);
     showParcelsRef.current = showParcels;
     if (showParcels) fetchParcels(map);
@@ -671,10 +682,21 @@ export function MapTab() {
             id: 're-buildings', type: 'circle', source: 're-buildings', layout: { visibility: 'none' },
             paint: { 'circle-radius': ['interpolate', ['linear'], ['zoom'], 8, 1.6, 14, 4], 'circle-color': '#a5c3ff', 'circle-opacity': 0.85 },
           });
+          // Land — Bell's OWN cadastre plots as points (reliable, always
+          // available: plot size + id). Rendered under the same "Land parcels"
+          // toggle, beneath the live polygon overlay.
+          map.addSource('re-land', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+          map.addLayer({ id: 're-land', type: 'circle', source: 're-land', layout: { visibility: 'none' },
+            paint: { 'circle-radius': ['interpolate', ['linear'], ['zoom'], 14, 2.2, 18, 5], 'circle-color': '#7ea6ff', 'circle-opacity': 0.6, 'circle-stroke-color': '#5b8cff', 'circle-stroke-width': 0.5 } });
           // Land parcels — polygons fetched live per viewport (never stored).
           map.addSource('re-parcels', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
           map.addLayer({ id: 're-parcels-fill', type: 'fill', source: 're-parcels', layout: { visibility: 'none' }, paint: { 'fill-color': '#5b8cff', 'fill-opacity': 0.07 } });
           map.addLayer({ id: 're-parcels-line', type: 'line', source: 're-parcels', layout: { visibility: 'none' }, paint: { 'line-color': '#7ea6ff', 'line-width': 0.6, 'line-opacity': 0.55 } });
+          map.on('click', 're-land', (e) => {
+            const p = e.features[0]?.properties || {};
+            new mapboxgl.Popup({ offset: 6 }).setLngLat(e.lngLat)
+              .setHTML(`<div style="font:600 12px system-ui;color:#111">Plot ${p.pin || ''}</div>${p.area_sqm ? `<div style="font:11px system-ui;color:#333">${Number(p.area_sqm).toLocaleString()} m²</div>` : ''}`).addTo(map);
+          });
           map.on('click', 're-districts', (e) => {
             const p = e.features[0]?.properties || {};
             new mapboxgl.Popup({ offset: 10 }).setLngLat(e.lngLat)

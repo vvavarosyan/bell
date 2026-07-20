@@ -213,6 +213,35 @@ router.get('/map', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+// RELIABLE land layer from Bell's OWN stored cadastre (centroids + area_sqm +
+// zoning) — always works, even when Qatar's external GIS is unreachable (which
+// left the live-polygon layer blank on prod, Val 2026-07-20). Viewport-lazy +
+// capped. Points, not polygons (we don't store the boundary geometry), each
+// clickable for plot size + zoning.
+router.get('/land', async (req, res, next) => {
+  try {
+    const bbox = String(req.query.bbox || '').split(',').map(Number);
+    if (bbox.length !== 4 || bbox.some((n) => !Number.isFinite(n))) return res.status(400).json({ error: 'bad_bbox' });
+    const [xmin, ymin, xmax, ymax] = bbox;
+    if ((xmax - xmin) > 0.12 || (ymax - ymin) > 0.12) return res.json({ type: 'FeatureCollection', features: [] });
+    const rows = (await query(
+      `SELECT pin, area_sqm, centroid_lat AS lat, centroid_lng AS lng
+         FROM gis_cadastre_plots
+        WHERE centroid_lat BETWEEN $1 AND $2 AND centroid_lng BETWEEN $3 AND $4
+          AND area_sqm IS NOT NULL
+        LIMIT 4000`, [ymin, ymax, xmin, xmax])).rows;
+    res.set('Cache-Control', 'public, max-age=600');
+    res.json({
+      type: 'FeatureCollection',
+      features: rows.map((r) => ({
+        type: 'Feature',
+        geometry: { type: 'Point', coordinates: [Number(r.lng), Number(r.lat)] },
+        properties: { pin: r.pin, area_sqm: Math.round(r.area_sqm) },
+      })),
+    });
+  } catch (err) { next(err); }
+});
+
 // Viewport proxy for the parcel / land-use polygons. We deliberately never store
 // the ~253k polygons — the map fetches only what's in view, live from Qatar GIS,
 // through here (server-side, so no CORS). Guarded to small (zoomed-in) viewports.
