@@ -81,7 +81,10 @@ export function mapQFC(raw) {
       primary_registration_no: qfcNumber,
       incorporation_date: parseDate(raw.date_of_qfc_incorporation_or_registration) || parseDate(raw.date_of_licence),
       address: nz(raw.registered_address) || nz(raw.location),
-      city: 'Doha',
+      // NO city guess (Rule 2.1). The QFC register states no city field, so
+      // asserting 'Doha' for every entity was a guess that put wrong cities on the
+      // map. City is left missing; a real one can be derived later from the
+      // registered_address via the $0 geocoder. Country is definitionally Qatar.
       country: 'Qatar',
     },
     extraFields: {

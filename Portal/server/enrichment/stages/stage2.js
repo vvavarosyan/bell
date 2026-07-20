@@ -230,7 +230,10 @@ async function applyProfile(companyId, item) {
     employeeRng,
     foundedYear,
     nz(item.websiteUrl),
-    nz(hq?.city),
+    null,   // city ($15): intentionally NOT taken from the LinkedIn HQ — that's an
+            // unverified guess (it put "Lusail" on DOC's Al Sadd pin). Rule 2.1:
+            // leave city missing rather than assert LinkedIn's HQ city. The COALESCE
+            // in the UPDATE keeps any existing city and never fills from this null.
     nz(hq?.country),
     address,
     JSON.stringify(extras),

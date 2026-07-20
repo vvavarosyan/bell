@@ -194,21 +194,17 @@ export function findSocials(text, links = [], opts = {}) {
 
 const ADDR_HINT_RX = /\b(p\.?\s?o\.?\s?box|street|st\.|road|rd\.|tower|building|bldg|floor|fl\.|suite|office|zone|area|district|avenue|ave\.|boulevard|blvd|doha|qatar|west bay|al\s+\w+|industrial area|corniche)\b/i;
 
-/** Return a single best address line, or null. Only used when DB address is empty. */
+/**
+ * Return a single best address line, or null. Only used when DB address is empty.
+ * Delegates to the GUARDED guessAddresses() so it enforces the same structural-
+ * marker requirement and prose/copyright rejection — the earlier standalone
+ * version had neither and stored ~245 page-titles / "Since 1999" taglines /
+ * "Please enter a valid…" form text as addresses (Rule 2.1 violation, fixed
+ * 2026-07-20). Verified live: rejects all junk samples, keeps real addresses.
+ */
 export function guessAddress(text) {
-  if (!text) return null;
-  const lines = text.split('\n').map(l => l.trim()).filter(Boolean);
-  let best = null, bestScore = 0;
-  for (const line of lines) {
-    if (line.length < 12 || line.length > 160) continue;
-    if (!/\d/.test(line)) continue;                 // addresses almost always have a number
-    const hits = (line.match(ADDR_HINT_RX) ? 1 : 0)
-               + (/qatar/i.test(line) ? 1 : 0)
-               + (/doha/i.test(line) ? 1 : 0)
-               + (/p\.?\s?o\.?\s?box/i.test(line) ? 1 : 0);
-    if (hits >= 2 && hits > bestScore) { best = line; bestScore = hits; }
-  }
-  return best;
+  const a = guessAddresses(text, 1);
+  return a.length ? a[0].address : null;
 }
 
 /**
@@ -220,7 +216,11 @@ export function guessAddress(text) {
 // as a location row. "As Qatar's premier hospital since 2001, Doha…" has doha+qatar+a digit
 // but is prose, not an address (live Doha Clinic test, 2026-07-19).
 const ADDR_STRUCT_RX = /\b(p\.?\s?o\.?\s?box|street|st\.|road|rd\.|tower|building|bldg|floor|fl\.|suite|office|zone|area|district|avenue|ave\.|boulevard|blvd|west bay|industrial area|corniche|شارع|منطقة|مبنى)\b/i;
-const ADDR_PROSE_RX = /\b(copyright|all rights|rights reserved|©|since \d{4}|established (in|since)|founded (in|since)|premier|leading|welcome to|developed by|designed by)\b/i;
+// Prose/marketing/form-validation markers that mean "this line is NOT an address"
+// even if it has a digit + city word. Expanded 2026-07-20 with the patterns found
+// in the 245 junk rows (web-agency credits, form validation, first-person blurbs).
+// Only phrases that never occur inside a real Qatar address line — kept conservative.
+const ADDR_PROSE_RX = /\b(copyright|all rights|rights reserved|©|since \d{4}|established (in|since)|was established|founded (in|since)|premier|leading|welcome to|(developed|designed|powered|hosted|created|built|website) by|please enter|enter a valid|valid qatar mobile|is required|we are|we offer|we provide|we focus|our (mission|vision|company|aim)|based in (doha|qatar))\b/i;
 
 export function guessAddresses(text, cap = 8) {
   if (!text) return [];

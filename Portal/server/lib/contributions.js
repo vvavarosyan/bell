@@ -7,7 +7,7 @@
 // later, admin-gated step. Tenant-scoped throughout.
 
 import { query } from '../db.js';
-import { isValidPhone, normalizePhone, cleanWebsiteUrl, parseSocialUrl, looksLikeName } from './dataquality.js';
+import { isValidPhone, normalizePhone, cleanWebsiteUrl, parseSocialUrl, looksLikeName, isJunkAddress } from './dataquality.js';
 import { upsertContact } from './contacts.js';
 import { normalizeName } from '../ingest/normalize.js';
 import { recomputeBellScoreForCompany } from '../assembly/bell_score.js';
@@ -256,7 +256,11 @@ export async function promoteDatapoint({ id, decidedBy = 'admin' }) {
     } else if (dp.field === 'address') {
       const cur = (await query(`SELECT address FROM companies WHERE id=$1`, [eid])).rows[0];
       oldValue = cur?.address || null;
-      await query(`UPDATE companies SET address=$2 WHERE id=$1 AND (address IS NULL OR btrim(address)='')`, [eid, dp.value]);
+      // Reject obvious non-address text (copyright/marketing/form-validation) so a
+      // contributed value can't seed the junk we're cleaning up (Rule 2.1).
+      if (!isJunkAddress(dp.value)) {
+        await query(`UPDATE companies SET address=$2 WHERE id=$1 AND (address IS NULL OR btrim(address)='')`, [eid, dp.value]);
+      }
     } else {
       await query(`UPDATE companies SET extra_fields = jsonb_set(extra_fields,'{contributed}',
         coalesce(extra_fields->'contributed','[]'::jsonb) || $2::jsonb, true) WHERE id=$1`,

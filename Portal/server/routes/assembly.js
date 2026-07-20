@@ -160,7 +160,19 @@ router.post('/dedup/:id/decide', async (req, res, next) => {
     // Merge — A→B means B is canonical, A is duplicate
     const canonical = action === 'merge_a_to_b' ? cand.company_b_id : cand.company_a_id;
     const duplicate = action === 'merge_a_to_b' ? cand.company_a_id : cand.company_b_id;
-    await mergeCompanies(canonical, duplicate);
+    try {
+      await mergeCompanies(canonical, duplicate);
+    } catch (err) {
+      // Rule 2.1 guard: different official registration numbers = distinct legal
+      // entities. Tell the admin why instead of a generic 500.
+      if (err && err.code === 'registration_conflict') {
+        return res.status(409).json({
+          error: 'registration_conflict',
+          message: `These records carry different official registration numbers (${err.regA} vs ${err.regB}), so they look like separate legal entities and were NOT merged. If you're certain they're the same company, flag it for a manual override.`,
+        });
+      }
+      throw err;
+    }
     // The CHECK constraint stores past-tense decisions: merge_a_to_b → merged_a_to_b.
     const decisionVal = action === 'merge_a_to_b' ? 'merged_a_to_b' : 'merged_b_to_a';
     await query(`

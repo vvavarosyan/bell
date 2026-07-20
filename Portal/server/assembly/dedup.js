@@ -134,6 +134,18 @@ function normalizeRegistration(s) {
   return v.length >= 4 ? v : null;
 }
 
+// The branch-stripped BASE commercial registration. MOCI issues a branch CR as
+// "<base>/<n>" (e.g. 42828/2) for the SAME legal entity as its base CR (42828) —
+// so strip a trailing "/n" before comparing. Only a differing BASE is a true
+// cross-entity conflict; a branch suffix is the same company and must still merge.
+function baseRegistration(s) {
+  const v = normalizeRegistration(s);
+  if (!v) return null;
+  let x = v.replace(/\/\d+$/, '');
+  if (/^\d+$/.test(x)) x = x.replace(/^0+/, '') || '0';
+  return x.length >= 4 ? x : null;
+}
+
 // ---------------------------------------------------------------------------
 // Find candidate pairs across all signals — returns Map<pairKey, { a, b, reasons[] }>
 // ---------------------------------------------------------------------------
@@ -368,6 +380,27 @@ function mergeExtraFields(canonExtra, dupExtra, canonReg, dupReg) {
 // ---------------------------------------------------------------------------
 export async function mergeCompanies(canonicalId, duplicateId, jobLog = null) {
   if (canonicalId === duplicateId) return { merged: false, reason: 'same_id' };
+
+  // REGISTRATION-CONFLICT GUARD (Rule 2.1). A differing OFFICIAL commercial
+  // registration = a different legal entity, so never silently fuse the two — a
+  // wrong merge corrupts prod. This is the single chokepoint every merge path
+  // goes through (cluster pre-merge, pair pass, bulk-approve, manual admin), so
+  // the guard lives here. It compares the BRANCH-STRIPPED base CR: a MOCI branch
+  // record (42828/2) IS the same entity as its base CR (42828) and must still
+  // merge; only a differing base blocks. Fails loudly (throws) rather than
+  // returning quietly, so a caller can never record it as a successful merge.
+  {
+    const [{ rows: [cr] }, { rows: [dr] }] = await Promise.all([
+      query('SELECT primary_registration_no FROM companies WHERE id = $1', [canonicalId]),
+      query('SELECT primary_registration_no FROM companies WHERE id = $1', [duplicateId]),
+    ]);
+    const regA = baseRegistration(cr?.primary_registration_no);
+    const regB = baseRegistration(dr?.primary_registration_no);
+    if (regA && regB && regA !== regB) {
+      jobLog?.(`    ⚠ skip #${duplicateId} → #${canonicalId}: registration conflict ${regA} vs ${regB} (distinct legal entities — not merged)`);
+      throw Object.assign(new Error('registration_conflict'), { code: 'registration_conflict', regA, regB });
+    }
+  }
 
   // Per-step timer + error logger. Logs through jobLog AND console whenever
   // a step exceeds 500ms or throws. Added 2026-05-23 to diagnose a hang

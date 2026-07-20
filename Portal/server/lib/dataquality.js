@@ -403,6 +403,18 @@ export function isJunkEmail(value) {
   return !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(s);   // must be a syntactically valid address
 }
 
+// Copyright / marketing / form-validation / SEO-title text that gets scraped or
+// pasted into an address field (found in 245 stored rows, 2026-07-20). A REJECT
+// filter: it fires only on clearly-junk prose, so it is SAFE on short legit
+// addresses that lack city words ("Building 5, Zone 55"). Rule 2.1 — a missing
+// value stays missing rather than store a false address.
+const JUNK_ADDRESS_RX = /\b(copyright|all rights reserved|rights reserved|since \d{4}|established (in|since)|was established|founded (in|since)|(developed|designed|powered|hosted|created|built|website) by|please enter|must start with|enter a valid|valid qatar mobile|is required|we are|we're|we offer|we provide|we focus|our (mission|vision|company|aim)|to be recognized|has been engaged|operates (as|through)|based in (doha|qatar)|welcome to|home of luxury|made in qatar|shop online|read more|learn more|click here)\b/i;
+export function isJunkAddress(value) {
+  const s = String(value || '').trim();
+  if (!s) return false;                    // empty is "missing", not "junk"
+  return JUNK_ADDRESS_RX.test(s) || /©/.test(s) || /#1\s/.test(s);
+}
+
 /** True for a website-template / placeholder "person" that isn't a real employee. */
 export function isFakePerson({ name = '', title = '', headline = '' } = {}) {
   if (isPlaceholderName(name)) return true;
