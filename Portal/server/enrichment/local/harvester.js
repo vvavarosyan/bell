@@ -29,6 +29,7 @@ import { renderPage, rendererAvailable, closeRenderer } from './render.js';
 import { recordReject } from './rejects.js';
 import { recordSearch } from './ledger.js';
 import { contentIdentity } from './content_identity.js';
+import { extractMapLinks } from './maplinks.js';
 import {
   findEmails, findCfEmails, findPhones, findSocials, findWhatsApp, preferOwnEmails,
   guessAddress, guessAddresses, extractTeam, extractPartners, pickLogo,
@@ -242,6 +243,30 @@ export async function enrichCompany(company) {
     if (p.kind !== 'contact' && p.kind !== 'location' && p.kind !== 'home') continue;
     for (const a of guessAddresses(p.page.text)) locationCandidates.push({ ...a, source_url: p.url });
   }
+  // Track B+: Google-Maps links the company pins on its OWN site carry EXACT
+  // coordinates (the company stated them — not a guess), so a branch becomes a
+  // map pin with no INWANI codes needed. Each distinct pin → a location with
+  // lat/lng already set (Qatar-bbox validated inside extractMapLinks).
+  const mapPins = [];
+  for (const p of pages) {
+    if (p.kind !== 'contact' && p.kind !== 'location' && p.kind !== 'home') continue;
+    const { coords } = extractMapLinks(p.page.html, p.page.links);
+    for (const c of coords) mapPins.push({ ...c, source_url: p.url });
+  }
+  const seenPin = new Set();
+  for (const pin of mapPins) {
+    const key = pin.lat.toFixed(4) + ',' + pin.lng.toFixed(4);
+    if (seenPin.has(key)) continue;
+    seenPin.add(key);
+    locationCandidates.push({
+      label: pin.name || 'Branch',
+      // Distinct address key per pin (satisfies the UNIQUE) — the place name if
+      // the link had one, else the coordinate string. Never a fabricated street.
+      address: pin.name || (pin.lat.toFixed(5) + ', ' + pin.lng.toFixed(5)),
+      latitude: pin.lat, longitude: pin.lng,
+      source_url: pin.source_url,
+    });
+  }
   const logo    = pickLogo(pages[0].page.meta);
   const homeMeta = pages[0].page.meta || {};
   const description = bestDescription(homeMeta, allText);
@@ -325,16 +350,24 @@ export async function enrichCompany(company) {
   // 5b) Branch/location rows (Track B). One row per distinct address line; re-harvest updates
   // (unique on company_id + lower(address)), never duplicates. Geocoding happens later via
   // "Geocode Companies.command" — coordinates stay NULL here (Rule 2.1).
-  for (const loc of locationCandidates.slice(0, 8)) {
+  for (const loc of locationCandidates.slice(0, 12)) {
     try {
+      const hasCoords = Number.isFinite(loc.latitude) && Number.isFinite(loc.longitude);
       const r = await query(
-        `INSERT INTO company_locations (company_id, label, address, source, source_url, updated_at)
-         VALUES ($1,$2,$3,$4,$5, now())
+        `INSERT INTO company_locations (company_id, label, address, latitude, longitude, source, source_url, geocode_status, updated_at)
+         VALUES ($1,$2,$3,$4,$5,$6,$7,$8, now())
          ON CONFLICT (company_id, lower(address)) DO UPDATE
            SET label = COALESCE(company_locations.label, EXCLUDED.label),
+               -- Only ADD coordinates from a map pin; never overwrite an existing geocode.
+               latitude  = COALESCE(company_locations.latitude,  EXCLUDED.latitude),
+               longitude = COALESCE(company_locations.longitude, EXCLUDED.longitude),
+               geocode_status = CASE WHEN company_locations.latitude IS NULL AND EXCLUDED.latitude IS NOT NULL
+                                     THEN EXCLUDED.geocode_status ELSE company_locations.geocode_status END,
                source_url = EXCLUDED.source_url, updated_at = now()
          RETURNING id`,
-        [company.id, loc.label ? loc.label.slice(0, 120) : null, loc.address.slice(0, 300), SOURCE, loc.source_url]);
+        [company.id, loc.label ? loc.label.slice(0, 120) : null, loc.address.slice(0, 300),
+         hasCoords ? loc.latitude : null, hasCoords ? loc.longitude : null,
+         SOURCE, loc.source_url, hasCoords ? 'website-maplink' : null]);
       if (r.rows[0]) wL++;
     } catch (e) { /* table may predate migration 098 on stale boots; never break the harvest */ }
   }
