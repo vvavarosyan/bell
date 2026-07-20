@@ -180,6 +180,37 @@ function arcCoords(a, b, steps = 32) {
   return pts;
 }
 
+// Spread markers that share the EXACT same coordinate so they're individually
+// visible and clickable when zoomed in. Many companies get the same geocode (a
+// zone/landmark centroid — e.g. 60 stacked on one point), which otherwise reads as
+// a single dot no matter how far you zoom. Fans a coincident group out in a
+// phyllotaxis (sunflower) spiral whose radius grows with the count. Deterministic,
+// so pins don't jump between reloads. Only touches groups of 2+.
+function deOverlap(features) {
+  const groups = new Map();
+  for (const f of features) {
+    const c = f.geometry && f.geometry.coordinates;
+    if (!c) { groups.set(f, [f]); continue; }
+    const key = c[0].toFixed(5) + ',' + c[1].toFixed(5);
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(f);
+  }
+  const out = [];
+  for (const arr of groups.values()) {
+    if (arr.length < 2 || !arr[0].geometry) { out.push(...arr); continue; }
+    const [lng0, lat0] = arr[0].geometry.coordinates;
+    const cosLat = Math.cos((lat0 * Math.PI) / 180) || 1;
+    arr.forEach((f, i) => {
+      const t = i + 0.5;
+      const r = 0.00012 * Math.sqrt(t);       // ~13 m × √index; 60 pts → ~100 m radius
+      const ang = t * 2.399963;               // golden angle → even sunflower spread
+      out.push({ ...f, geometry: { type: 'Point', coordinates: [lng0 + (r * Math.sin(ang)) / cosLat, lat0 + r * Math.cos(ang)] },
+        properties: { ...f.properties, stacked: arr.length } });
+    });
+  }
+  return out;
+}
+
 // Always-on branch network: every branch pin (a company_locations point or an
 // archived child company) draws a tie-line back to its parent company's pin, so a
 // multi-location business reads as one connected constellation. Built once from the
@@ -389,6 +420,7 @@ export function MapTab() {
   const showParcelsRef = useRef(false);
   const [showPlaces,   setShowPlaces]   = useState(false);  // OpenStreetMap places (viewport-lazy)
   const showPlacesRef  = useRef(false);
+  const [showBranchNet, setShowBranchNet] = useState(false); // parent↔branch tie-lines + branch pins
   const [toolsOpen,    setToolsOpen]    = useState(true);   // collapsible toolbox
   const [activeSources, setActiveSources] = useState(new Set(SOURCES));
   const [yearRange,    setYearRange]    = useState({ min: 1950, max: new Date().getFullYear() });
@@ -410,9 +442,11 @@ export function MapTab() {
     setLayerVisibility(map, 'company-points',  showCompanies);
     setLayerVisibility(map, 'clusters',        showCompanies);
     setLayerVisibility(map, 'cluster-count',   showCompanies);
-    // Branch-network tie-lines ride the Companies toggle.
-    setLayerVisibility(map, 'branch-net-glow', showCompanies);
-    setLayerVisibility(map, 'branch-net-line', showCompanies);
+    // Branch network — its own toggle (tie-lines + branch pins), so it's findable
+    // and visible without turning on all companies.
+    setLayerVisibility(map, 'branch-net-glow', showBranchNet);
+    setLayerVisibility(map, 'branch-net-line', showBranchNet);
+    setLayerVisibility(map, 'branch-pins',     showBranchNet);
     // Real Estate layers
     setLayerVisibility(map, 're-districts',    showREPrices);
     setLayerVisibility(map, 're-buildings',    showBuildings);
@@ -425,7 +459,7 @@ export function MapTab() {
     if ((showREPrices || showBuildings) && map.getSource('re-districts')) loadREData(map);
     showParcelsRef.current = showParcels;
     if (showParcels) fetchParcels(map);
-  }, [showHeatmap, showTraffic, showWeather, showSignals, showCompanies, showREPrices, showBuildings, showParcels, showPlaces, activeSources, yearRange]);
+  }, [showHeatmap, showTraffic, showWeather, showSignals, showCompanies, showREPrices, showBuildings, showParcels, showPlaces, showBranchNet, activeSources, yearRange]);
 
   // ---- Boot -------------------------------------------------------------
   useEffect(() => {
@@ -464,6 +498,9 @@ export function MapTab() {
           api.signalsMap().catch(() => ({ rows: [] })),
         ]);
         if (cancelled) return;
+        // Fan out coincident markers so a stack of 30–60 companies at one geocode
+        // becomes individually visible/clickable instead of a single dot.
+        if (geo && Array.isArray(geo.features)) geo.features = deOverlap(geo.features);
         geoDataRef.current = geo;
         setStats({ total: geo.total });
         const sigGeo = {
@@ -591,20 +628,30 @@ export function MapTab() {
             cluster: true, clusterMaxZoom: 14, clusterRadius: 50,
           });
 
-          // Branch network — ambient parent→branch tie-lines (added first so they
-          // render UNDER the pins). Toggled with the Companies layer. A faint teal
-          // constellation; the orange click-highlight (showBranchTies) still layers
-          // on top when a company is selected.
+          // Branch network — parent→branch tie-lines (added first so they render
+          // UNDER the pins). Its own "Branch network" toggle. Teal constellation;
+          // the orange click-highlight (showBranchTies) still layers on top.
           map.addSource('branch-net-src', { type: 'geojson', data: buildBranchNetwork(geo.features) });
           map.addLayer({
             id: 'branch-net-glow', type: 'line', source: 'branch-net-src',
             layout: { visibility: 'none', 'line-cap': 'round', 'line-join': 'round' },
-            paint: { 'line-color': '#22d3ee', 'line-width': 3, 'line-opacity': 0.10, 'line-blur': 2 },
+            paint: { 'line-color': '#22d3ee', 'line-width': 5, 'line-opacity': 0.16, 'line-blur': 3 },
           });
           map.addLayer({
             id: 'branch-net-line', type: 'line', source: 'branch-net-src',
             layout: { visibility: 'none', 'line-cap': 'round', 'line-join': 'round' },
-            paint: { 'line-color': '#22d3ee', 'line-width': 1.1, 'line-opacity': 0.5 },
+            paint: { 'line-color': '#2dd4bf', 'line-width': 1.6, 'line-opacity': 0.8 },
+          });
+          // Branch pins themselves (the location/child points), highlighted when the
+          // Branch network toggle is on so the constellation reads clearly.
+          map.addLayer({
+            id: 'branch-pins', type: 'circle', source: 'companies',
+            filter: ['all', ['!', ['has', 'point_count']], ['any', ['has', 'location_id'], ['==', ['get', 'is_branch'], true]]],
+            layout: { visibility: 'none' },
+            paint: {
+              'circle-radius': ['interpolate', ['linear'], ['zoom'], 9, 3.5, 14, 6, 18, 9],
+              'circle-color': '#f97316', 'circle-stroke-color': '#0d1018', 'circle-stroke-width': 1.5, 'circle-opacity': 0.95,
+            },
           });
 
           map.addLayer({
@@ -1128,6 +1175,11 @@ export function MapTab() {
                 onChange=${e => setShowPlaces(e.target.checked)} />
               <span>Places (OSM)</span>
               <span class="map-toggle-hint">zoom in</span>
+            </label>
+            <label class="map-toggle">
+              <input type="checkbox" checked=${showBranchNet}
+                onChange=${e => setShowBranchNet(e.target.checked)} />
+              <span>Branch network</span>
             </label>
           </div>
           <div class="map-controls-section">

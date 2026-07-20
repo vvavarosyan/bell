@@ -66,7 +66,12 @@ router.get('/summary', async (_req, res, next) => {
       `SELECT count(*) FILTER (WHERE status='new' AND country ILIKE '%qatar%')::int AS qatar,
               count(*) FILTER (WHERE status='new' AND NOT (country ILIKE '%qatar%'))::int AS foreign
          FROM spark_discoveries`);
-    res.json({ gmaps_candidates: g.rows[0].candidates, spark_qatar: s.rows[0].qatar, spark_foreign: s.rows[0].foreign });
+    const o = await query(
+      `SELECT count(*)::int AS candidates FROM osm_places
+        WHERE matched_company_id IS NULL AND review_status IS NULL
+          AND name IS NOT NULL AND (phone IS NOT NULL OR website IS NOT NULL)
+          AND category_group = ANY($1) AND latitude IS NOT NULL`, [OSM_BUSINESS_GROUPS]).catch(() => ({ rows: [{ candidates: 0 }] }));
+    res.json({ gmaps_candidates: g.rows[0].candidates, spark_qatar: s.rows[0].qatar, spark_foreign: s.rows[0].foreign, osm_candidates: o.rows[0].candidates });
   } catch (err) { next(err); }
 });
 
@@ -227,6 +232,78 @@ router.post('/spark/:id/ignore', async (req, res, next) => {
   try {
     const r = await query(`UPDATE spark_discoveries SET status='ignored', updated_at=now() WHERE id=$1 AND status='new' RETURNING id`, [Number(req.params.id)]);
     if (!r.rows.length) return res.status(409).json({ error: 'not_new' });
+    res.json({ ignored: Number(req.params.id) });
+  } catch (err) { next(err); }
+});
+
+// --- OpenStreetMap place candidates ---------------------------------------
+// Named Qatar businesses OSM knows that Bell doesn't (unmatched + reachable).
+// review_status: NULL candidate → 'promoted' | 'ignored'. Business-y groups only,
+// and a contact (phone/website) so a promoted company is actually useful.
+const OSM_BUSINESS_GROUPS = ['Food & Drink', 'Shopping', 'Health', 'Finance', 'Offices & Business', 'Tourism & Hotels', 'Automotive', 'Education'];
+
+// GET /osm — candidates, newest first, with a name-match hint.
+router.get('/osm', async (req, res, next) => {
+  try {
+    const limit = Math.min(Number(req.query.limit) || 100, 300);
+    const rows = (await query(
+      `SELECT id, name, category, category_group, address, phone, website, latitude, longitude
+         FROM osm_places
+        WHERE matched_company_id IS NULL AND review_status IS NULL
+          AND name IS NOT NULL
+          AND (phone IS NOT NULL OR website IS NOT NULL)
+          AND category_group = ANY($1)
+          AND latitude IS NOT NULL
+        ORDER BY id DESC LIMIT $2`, [OSM_BUSINESS_GROUPS, limit])).rows;
+    for (const r of rows) {
+      const norm = normalizeName(r.name || '');
+      if (norm) {
+        const m = await query(`SELECT id, name FROM companies WHERE name_normalized=$1 AND COALESCE(archived,false)=false LIMIT 1`, [norm]);
+        r.possible_match = m.rows[0] || null;
+      }
+    }
+    res.json({ rows, count: rows.length });
+  } catch (err) { next(err); }
+});
+
+// POST /osm/:id/promote
+router.post('/osm/:id/promote', async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    const out = await withTransaction(async (client) => {
+      const cr = await client.query(`SELECT * FROM osm_places WHERE id=$1 FOR UPDATE`, [id]);
+      if (!cr.rows.length) return { error: 'not_found' };
+      const p = cr.rows[0];
+      if (p.matched_company_id || p.review_status) return { error: 'not_candidate', status: p.review_status || 'matched' };
+
+      const { companyId, created, matchedMethod } = await promoteToCompany(client, {
+        name: p.name, website: p.website, phone: p.phone, category: p.category,
+        latitude: p.latitude, longitude: p.longitude, country: 'Qatar',
+        source: 'osm', sourceRecordId: 'osm:' + p.osm_type + '/' + p.osm_id, raw: p.tags,
+      });
+      if (Number.isFinite(Number(p.latitude)) && Number.isFinite(Number(p.longitude))) {
+        await client.query(
+          `INSERT INTO company_locations (company_id, label, address, latitude, longitude, source, geocode_status, updated_at)
+           VALUES ($1,'Head office',$2,$3,$4,'osm-review','osm', now())
+           ON CONFLICT (company_id, lower(address)) DO NOTHING`,
+          [companyId, (p.address || (Number(p.latitude).toFixed(5) + ', ' + Number(p.longitude).toFixed(5))).slice(0, 300), Number(p.latitude), Number(p.longitude)]);
+      }
+      await client.query(`UPDATE osm_places SET matched_company_id=$2, review_status='promoted', updated_at=now() WHERE id=$1`, [id, companyId]);
+      return { promoted: id, company_id: companyId, created, phone: p.phone, matchedMethod };
+    });
+    if (out.error === 'not_found') return res.status(404).json(out);
+    if (out.error === 'not_candidate') return res.status(409).json(out);
+    if (out.phone) await upsertContact('company', out.company_id, { type: 'phone', value: out.phone, source: 'osm-review' }).catch(() => {});
+    await recomputeBellScoreForCompany(out.company_id).catch(() => {});
+    res.json({ promoted: out.promoted, company_id: out.company_id, created: out.created, linked_to_existing: !out.created });
+  } catch (err) { next(err); }
+});
+
+// POST /osm/:id/ignore
+router.post('/osm/:id/ignore', async (req, res, next) => {
+  try {
+    const r = await query(`UPDATE osm_places SET review_status='ignored', updated_at=now() WHERE id=$1 AND review_status IS NULL AND matched_company_id IS NULL RETURNING id`, [Number(req.params.id)]);
+    if (!r.rows.length) return res.status(409).json({ error: 'not_candidate' });
     res.json({ ignored: Number(req.params.id) });
   } catch (err) { next(err); }
 });

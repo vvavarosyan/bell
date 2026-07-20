@@ -19,13 +19,14 @@ import { navigateTo } from '../lib/router.js';
 
 const TABS = [
   { key: 'gmaps',   label: 'Maps candidates',  blurb: 'New businesses Google Maps found that matched no company. Approve → a Qatar company with its rating, phone and map pin.' },
+  { key: 'osm',     label: 'OSM places',       blurb: 'Named Qatar businesses OpenStreetMap knows (with a phone or website) that Bell doesn\'t have yet. Approve → a Qatar company with its location and contact. Dedup-guarded.' },
   { key: 'qatar',   label: 'Spark · Qatar',    blurb: 'Qatar companies Spark discovered while researching others. Approve → a real Qatar company.' },
   { key: 'foreign', label: 'Spark · foreign',  blurb: 'Non-Qatar companies — kept admin-only for future Middle-East expansion. Never enter Bell.' },
 ];
 
 export function ReviewQueueTab() {
   const [tab, setTab] = useState('gmaps');
-  const [counts, setCounts] = useState({ gmaps_candidates: 0, spark_qatar: 0, spark_foreign: 0 });
+  const [counts, setCounts] = useState({ gmaps_candidates: 0, spark_qatar: 0, spark_foreign: 0, osm_candidates: 0 });
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState(null);
@@ -38,6 +39,7 @@ export function ReviewQueueTab() {
     if (!silent) setLoading(true);
     try {
       const r = tab === 'gmaps' ? await api.discoveryGmaps(200)
+        : tab === 'osm' ? await api.discoveryOsm(200)
         : await api.discoverySpark(tab, 200);
       setRows(r.rows || []);
     } catch (err) { if (!silent) toast('Load failed: ' + err.message, 'error'); }
@@ -59,11 +61,13 @@ export function ReviewQueueTab() {
     finally { setBusyId(null); }
   };
 
-  const promote = (id) => act('promote', id, tab === 'gmaps' ? api.promoteGmaps : api.promoteSpark, 'approve');
-  const ignore  = (id) => act('ignore', id, tab === 'gmaps' ? api.ignoreGmaps : api.ignoreSpark, 'reject');
+  const promoteFn = tab === 'gmaps' ? api.promoteGmaps : tab === 'osm' ? api.promoteOsm : api.promoteSpark;
+  const ignoreFn  = tab === 'gmaps' ? api.ignoreGmaps  : tab === 'osm' ? api.ignoreOsm  : api.ignoreSpark;
+  const promote = (id) => act('promote', id, promoteFn, 'approve');
+  const ignore  = (id) => act('ignore', id, ignoreFn, 'reject');
 
   const chip = (t) => {
-    const n = t.key === 'gmaps' ? counts.gmaps_candidates : t.key === 'qatar' ? counts.spark_qatar : counts.spark_foreign;
+    const n = t.key === 'gmaps' ? counts.gmaps_candidates : t.key === 'osm' ? counts.osm_candidates : t.key === 'qatar' ? counts.spark_qatar : counts.spark_foreign;
     return html`<button key=${t.key} class=${'toolbar-toggle' + (tab === t.key ? ' accent' : '')}
       onClick=${() => setTab(t.key)} style=${{ whiteSpace: 'nowrap' }}>${t.label}${n ? ` · ${Number(n).toLocaleString()}` : ''}</button>`;
   };
@@ -88,8 +92,8 @@ export function ReviewQueueTab() {
                 <div style=${{ flex: '1 1 320px', minWidth: 0 }}>
                   <div style=${{ fontWeight: 700 }}>${tab === 'gmaps' ? r.title : r.name}</div>
                   <div class="muted small" style=${{ marginTop: '3px', display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
-                    ${tab === 'gmaps' ? html`
-                      ${r.category ? html`<span>🏷 ${r.category}</span>` : null}
+                    ${(tab === 'gmaps' || tab === 'osm') ? html`
+                      ${r.category ? html`<span>🏷 ${r.category}${r.category_group ? ` · ${r.category_group}` : ''}</span>` : null}
                       ${r.address ? html`<span>📍 ${r.address}</span>` : null}
                       ${r.phone ? html`<span>📞 ${r.phone}</span>` : null}
                       ${r.rating ? html`<span>⭐ ${r.rating} · ${r.reviews_count || 0} reviews</span>` : null}
@@ -101,8 +105,8 @@ export function ReviewQueueTab() {
                       ${r.source_company_name ? html`<span>found via ${r.source_company_name}</span>` : null}
                     `}
                   </div>
-                  ${r.maybe_existing ? html`<div class="small" style=${{ marginTop: '4px', color: 'var(--amber, #b7791f)' }}>
-                    ⚠ May already exist: <a href="#" onClick=${(e) => { e.preventDefault(); navigateTo('companies', r.maybe_existing.id); }}>${r.maybe_existing.name}</a> — approving will link to it, not duplicate.
+                  ${(r.maybe_existing || r.possible_match) ? html`<div class="small" style=${{ marginTop: '4px', color: 'var(--amber, #b7791f)' }}>
+                    ⚠ May already exist: <a href="#" onClick=${(e) => { e.preventDefault(); navigateTo('companies', (r.maybe_existing || r.possible_match).id); }}>${(r.maybe_existing || r.possible_match).name}</a> — approving will link to it, not duplicate.
                   </div>` : null}
                 </div>
                 <div style=${{ display: 'flex', gap: '6px', alignItems: 'center' }}>
