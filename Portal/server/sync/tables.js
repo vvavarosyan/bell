@@ -105,6 +105,11 @@ export const MIRROR_TABLES = [
   { name: 'knowledge_sources',        watermark: 'updated_at' },
   { name: 'knowledge_pages',          watermark: 'updated_at' },
   { name: 'knowledge_changes',        watermark: 'detected_at' },
+
+  // OpenStreetMap Qatar reference layer (migration 102). matched_company_id is a
+  // soft ref (id-mirror, no remap needed).
+  { name: 'osm_places',               watermark: 'updated_at' },
+  { name: 'osm_streets',              watermark: 'updated_at' },
 ];
 
 export const MIRROR_TABLE_NAMES = new Set(MIRROR_TABLES.map((t) => t.name));

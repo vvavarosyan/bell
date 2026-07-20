@@ -70,6 +70,26 @@ export async function companiesNear(lat, lng, radiusM, limit = 20) {
     .slice(0, limit);
 }
 
+/** OpenStreetMap places (restaurants, shops, clinics…) within radiusM, nearest first. */
+export async function placesNear(lat, lng, radiusM, limit = 20, group = null) {
+  const b = bboxFor(lat, lng, radiusM);
+  const params = [b.ymin, b.ymax, b.xmin, b.xmax];
+  let extra = '';
+  if (group) { params.push(group); extra = ` AND category_group = $${params.length}`; }
+  const r = await query(
+    `SELECT id, name, category, category_group, phone, website, latitude, longitude, matched_company_id
+       FROM osm_places
+      WHERE latitude BETWEEN $1 AND $2 AND longitude BETWEEN $3 AND $4${extra}`,
+    params).catch(() => ({ rows: [] }));
+  return r.rows
+    .map((p) => ({ id: p.id, name: p.name, category: p.category, group: p.category_group,
+      phone: p.phone, website: p.website, company_id: p.matched_company_id || null,
+      distance_m: Math.round(haversine(lat, lng, Number(p.latitude), Number(p.longitude))) }))
+    .filter((p) => p.distance_m <= radiusM)
+    .sort((a, c) => a.distance_m - c.distance_m)
+    .slice(0, limit);
+}
+
 /** GIS buildings/landmarks within radiusM of (lat,lng), nearest first. */
 export async function buildingsNear(lat, lng, radiusM, limit = 20) {
   const b = bboxFor(lat, lng, radiusM);

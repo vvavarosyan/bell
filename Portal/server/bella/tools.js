@@ -13,7 +13,7 @@
 // flag on each definition is the hook the brain already honors.
 
 import { query } from '../db.js';
-import { resolveCenter, companiesNear, buildingsNear, landAt } from '../gis/nearby.js';
+import { resolveCenter, companiesNear, buildingsNear, landAt, placesNear } from '../gis/nearby.js';
 import { planSteps, planSummary } from './plan.js';
 import openstatsRouter from '../routes/openstats.js';
 import companiesRouter from '../routes/companies.js';
@@ -33,6 +33,7 @@ import accountRouter   from '../routes/account.js';
 import billingRouter   from '../routes/billing.js';
 import openDataRouter  from '../routes/open_data.js';
 import publicNewsRouter from '../routes/public_news.js';
+import osmRouter       from '../routes/osm.js';
 import { SECTOR_GROUPS } from '../lib/industry_groups.js';
 import * as store from './store.js';
 import { formatQatar, parseQatarLocal } from '../lib/qatar_time.js';
@@ -600,7 +601,7 @@ export const TOOLS = [
   {
     definition: {
       name: 'map_nearby',
-      description: 'MAP AWARENESS — what is physically NEAR a place, from Bell\'s own geodata. Give a center as company_id (a company you found), OR a place/building name, OR lat+lng. Returns the geocoded companies AND the registered GIS buildings/landmarks within the radius, each with its distance in metres, nearest first. Use for "which companies are near X", "what\'s around this building", "who are their neighbours". All Qatar; coordinates are Bell\'s stored geocodes.',
+      description: 'MAP AWARENESS — what is physically NEAR a place, from Bell\'s own geodata. Give a center as company_id (a company you found), OR a place/building name, OR lat+lng. Returns the geocoded companies, the registered GIS buildings/landmarks, AND the OpenStreetMap places (restaurants, shops, clinics, hotels…) within the radius, each with its distance in metres, nearest first. Use for "which companies are near X", "what\'s around this building", "restaurants near here", "who are their neighbours". All Qatar; coordinates are Bell\'s stored geodata.',
       input_schema: {
         type: 'object',
         properties: {
@@ -609,7 +610,8 @@ export const TOOLS = [
           lat:        { type: 'number' },
           lng:        { type: 'number' },
           radius_m:   { type: 'integer', description: 'Search radius in metres, 50–5000 (default 1000).' },
-          include:    { type: 'string', description: 'companies | buildings | both (default both).' },
+          include:    { type: 'string', description: 'companies | buildings | places | all (default all).' },
+          place_group:{ type: 'string', description: 'Filter OSM places to a group: Food & Drink, Shopping, Health, Finance, Tourism & Hotels, Offices & Business, Leisure & Sport, Education, Automotive, Public & Community.' },
           limit:      { type: 'integer', description: 'Max per list, 1–25 (default 12).' },
         },
       },
@@ -619,13 +621,39 @@ export const TOOLS = [
       if (!center) return { error: 'Could not resolve a Qatar location — give a company_id, a known place name, or lat+lng.' };
       const radius = Math.min(Math.max(Number(args.radius_m) || 1000, 50), 5000);
       const limit = Math.min(Math.max(Number(args.limit) || 12, 1), 25);
-      const inc = String(args.include || 'both').toLowerCase();
+      const inc = String(args.include || 'all').toLowerCase();
       const out = { center: center.label, center_lat: center.lat, center_lng: center.lng, radius_m: radius };
-      if (inc !== 'buildings') out.companies = await companiesNear(center.lat, center.lng, radius, limit);
-      if (inc !== 'companies') out.buildings = await buildingsNear(center.lat, center.lng, radius, limit);
+      if (inc === 'all' || inc === 'companies') out.companies = await companiesNear(center.lat, center.lng, radius, limit);
+      if (inc === 'all' || inc === 'buildings') out.buildings = await buildingsNear(center.lat, center.lng, radius, limit);
+      if (inc === 'all' || inc === 'places')    out.places    = await placesNear(center.lat, center.lng, radius, limit, args.place_group || null);
       return out;
     },
-    summarize: (args, r) => `near ${r?.center || 'point'}: ${(r?.companies || []).length} companies, ${(r?.buildings || []).length} buildings`,
+    summarize: (args, r) => `near ${r?.center || 'point'}: ${(r?.companies || []).length} companies, ${(r?.buildings || []).length} buildings, ${(r?.places || []).length} places`,
+  },
+
+  {
+    definition: {
+      name: 'search_places',
+      description: 'Search Qatar POINTS OF INTEREST from OpenStreetMap — restaurants, cafes, shops, malls, clinics, pharmacies, banks, hotels, schools, offices and more. This is BROADER than the Bell company database: it covers named establishments whether or not they are registered companies. Use for "restaurants in Qatar", "pharmacies near West Bay", "hotels", "coffee shops". Returns name, category, phone, website, hours and address where OSM has them, plus company_id when the place is also a Bell company. For "companies in Bell" use search_companies; for "any place on the map" use this.',
+      input_schema: {
+        type: 'object',
+        properties: {
+          q:     { type: 'string', description: 'Name/category text, e.g. "pizza", "pharmacy", "Kulud".' },
+          group: { type: 'string', description: 'One of: Food & Drink, Shopping, Health, Finance, Tourism & Hotels, Offices & Business, Leisure & Sport, Education, Automotive, Public & Community.' },
+          near:  { type: 'string', description: 'Optional "lng,lat" to sort by nearest.' },
+          limit: { type: 'integer', description: 'Max results, 1–50 (default 20).' },
+        },
+      },
+    },
+    async execute(args, ctx) {
+      const limit = Math.min(Math.max(Number(args.limit) || 20, 1), 50);
+      const { payload } = await internalCall(osmRouter, 'GET', '/search', ctx, {
+        query: { q: args.q, group: args.group, near: args.near, limit },
+      });
+      const rows = (payload && payload.rows) || [];
+      return { count: rows.length, places: rows.map((p) => pick(p, ['id', 'name', 'category', 'category_group', 'phone', 'website', 'opening_hours', 'address', 'matched_company_id'])) };
+    },
+    summarize: (args, r) => `places: ${r?.count ?? 0}${args.q ? ` for "${args.q}"` : ''}`,
   },
 
   {
