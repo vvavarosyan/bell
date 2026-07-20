@@ -108,6 +108,34 @@ export function industryKeywordsIn(label) {
   return out;
 }
 
+// ---------------------------------------------------------------------------
+// Name-contradiction guard (2026-07-20). A company literally named
+// "…Barbershop" / "…Dry Cleaning" IS that trade — an unambiguous fact. QCCI
+// sometimes mis-files these (a salon under "Investment" → Banking & Finance, a
+// dry-cleaner under "Petroleum Services" → Oil & Gas). When a DECISIVE name
+// signal fires, it overrides source-derived industries that a neighbourhood
+// consumer trade essentially cannot be. STRICT phrases only — never a bare
+// "salon"/"oil" that appears inside an unrelated name — so it never mis-vetoes.
+const CORE_INCOMPAT = ['Oil & Gas', 'Banking & Finance', 'Agriculture & Fisheries', 'Mining', 'Telecommunications', 'Insurance'];
+const NAME_TRADE_SIGNALS = [
+  { rx: /\b(?:barber ?shop|barbershop|barber|hair ?cut(?:ting)?|hairdress(?:er|ing)?|beauty salo{1,2}n|ladies salo{1,2}n|gents salo{1,2}n|men'?s salo{1,2}n|salon (?:and|&) spa|spa (?:and|&) salon)\b/i,
+    canon: 'Beauty & Wellness',      incompatible: [...CORE_INCOMPAT, 'Aviation & Aerospace', 'Real Estate', 'Automotive'] },
+  { rx: /\b(?:dry ?clean(?:ing|er|ers)?|laundr(?:y|ies)|launderette|laundromat)\b/i,
+    canon: 'Facilities & Cleaning',  incompatible: [...CORE_INCOMPAT, 'Aviation & Aerospace'] },
+  { rx: /\bpharmac(?:y|ies)\b/i,
+    canon: 'Healthcare',             incompatible: [...CORE_INCOMPAT, 'Aviation & Aerospace', 'Real Estate'] },
+  { rx: /\b(?:restaurant|cafeteria|bakery|patisserie)\b/i,
+    canon: 'Hospitality & F&B',      incompatible: CORE_INCOMPAT },   // conservative: keep Aviation (airline catering), Real Estate
+];
+
+/** The decisive consumer-trade signal a company NAME carries, or null. Returns
+ *  { canon, incompatible } so the caller can veto contradicting industries. */
+export function nameTradeSignal(name = '', legalName = '') {
+  const n = ' ' + (String(name) + ' ' + String(legalName)).toLowerCase().replace(/&/g, ' & ').replace(/\s+/g, ' ') + ' ';
+  for (const s of NAME_TRADE_SIGNALS) if (s.rx.test(n)) return s;
+  return null;
+}
+
 function arrText(v) {
   if (v == null) return '';
   if (Array.isArray(v)) return v.join(', ');
@@ -230,6 +258,23 @@ export function deriveIndustries(c = {}) {
     if (!TRADE_VOCAB || TRADE_VOCAB.has(spec)) specific.push(spec);
   }
 
-  const tags = [...broad, ...specific];
-  return { primary: broad[0] || specific[0] || null, tags };
+  let tags = [...broad, ...specific];
+  let primary = broad[0] || specific[0] || null;
+
+  // Name-contradiction guard: a decisive consumer-trade name overrides an
+  // incompatible source-derived industry (QCCI mis-categorisation). Drops the
+  // incompatible broad canonical AND any specific trade that maps to one (so
+  // "Petroleum Services" leaves a dry-cleaner, "Investment" leaves a salon),
+  // then makes the name trade the primary. Rule 2.1: only fires on unambiguous
+  // name phrases, so it corrects — never guesses.
+  const sig = nameTradeSignal(c.name, c.legal_name);
+  if (sig) {
+    const bad = new Set(sig.incompatible);
+    const incompat = (t) => bad.has(t) || mapLabelToCanonical(t).some((cc) => bad.has(cc));
+    tags = tags.filter((t) => !incompat(t));
+    if (!tags.includes(sig.canon)) tags.unshift(sig.canon);
+    primary = sig.canon;
+  }
+
+  return { primary, tags };
 }
