@@ -346,6 +346,25 @@ async function fetchParcels(map) {
   } catch { /* ignore */ }
 }
 
+// OSM places (restaurants/shops/clinics…) — viewport-lazy, like parcels but shown
+// a bit earlier since POIs are the reason to look. Filtered client-side to Qatar.
+let placesFetchSeq = 0;
+async function fetchPlaces(map) {
+  if (map.getZoom() < 12) {
+    if (map.getSource('osm-places')) map.getSource('osm-places').setData({ type: 'FeatureCollection', features: [] });
+    return;
+  }
+  const b = map.getBounds();
+  const bbox = [b.getWest(), b.getSouth(), b.getEast(), b.getNorth()].join(',');
+  const seq = ++placesFetchSeq;
+  try {
+    const gj = await api.osmPlaces({ bbox, limit: 6000 });
+    if (seq === placesFetchSeq && map.getSource('osm-places')) {
+      map.getSource('osm-places').setData(gj && gj.type ? gj : { type: 'FeatureCollection', features: [] });
+    }
+  } catch { /* ignore */ }
+}
+
 // --- Component ------------------------------------------------------------
 
 export function MapTab() {
@@ -368,6 +387,8 @@ export function MapTab() {
   const [showBuildings, setShowBuildings] = useState(false); // Real Estate: named buildings
   const [showParcels,  setShowParcels]  = useState(false);  // Real Estate: land parcels (viewport-lazy)
   const showParcelsRef = useRef(false);
+  const [showPlaces,   setShowPlaces]   = useState(false);  // OpenStreetMap places (viewport-lazy)
+  const showPlacesRef  = useRef(false);
   const [toolsOpen,    setToolsOpen]    = useState(true);   // collapsible toolbox
   const [activeSources, setActiveSources] = useState(new Set(SOURCES));
   const [yearRange,    setYearRange]    = useState({ min: 1950, max: new Date().getFullYear() });
@@ -398,10 +419,13 @@ export function MapTab() {
     setLayerVisibility(map, 're-parcels-fill', showParcels);
     setLayerVisibility(map, 're-parcels-line', showParcels);
     setLayerVisibility(map, 're-land', showParcels);
+    setLayerVisibility(map, 'osm-place-points', showPlaces);
+    showPlacesRef.current = showPlaces;
+    if (showPlaces) fetchPlaces(map);
     if ((showREPrices || showBuildings) && map.getSource('re-districts')) loadREData(map);
     showParcelsRef.current = showParcels;
     if (showParcels) fetchParcels(map);
-  }, [showHeatmap, showTraffic, showWeather, showSignals, showCompanies, showREPrices, showBuildings, showParcels, activeSources, yearRange]);
+  }, [showHeatmap, showTraffic, showWeather, showSignals, showCompanies, showREPrices, showBuildings, showParcels, showPlaces, activeSources, yearRange]);
 
   // ---- Boot -------------------------------------------------------------
   useEffect(() => {
@@ -738,6 +762,36 @@ export function MapTab() {
           map.addSource('re-parcels', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
           map.addLayer({ id: 're-parcels-fill', type: 'fill', source: 're-parcels', layout: { visibility: 'none' }, paint: { 'fill-color': '#5b8cff', 'fill-opacity': 0.07 } });
           map.addLayer({ id: 're-parcels-line', type: 'line', source: 're-parcels', layout: { visibility: 'none' }, paint: { 'line-color': '#7ea6ff', 'line-width': 0.6, 'line-opacity': 0.55 } });
+
+          // OpenStreetMap places — viewport-lazy POI dots, coloured by group.
+          map.addSource('osm-places', { type: 'geojson', data: { type: 'FeatureCollection', features: [] } });
+          map.addLayer({
+            id: 'osm-place-points', type: 'circle', source: 'osm-places', layout: { visibility: 'none' },
+            paint: {
+              'circle-radius': ['interpolate', ['linear'], ['zoom'], 12, 3, 16, 6, 18, 9],
+              'circle-color': ['match', ['get', 'group'],
+                'Food & Drink', '#fb923c', 'Health', '#34d399', 'Shopping', '#f472b6',
+                'Finance', '#60a5fa', 'Tourism & Hotels', '#a78bfa', 'Education', '#facc15',
+                'Automotive', '#94a3b8', 'Offices & Business', '#22d3ee', 'Leisure & Sport', '#4ade80',
+                '#cbd5e1'],
+              'circle-opacity': 0.9, 'circle-stroke-color': '#0d1018', 'circle-stroke-width': 1,
+            },
+          });
+          map.on('click', 'osm-place-points', (e) => {
+            const p = e.features[0]?.properties || {};
+            const esc = (s) => String(s || '').replace(/[<>&]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c]));
+            const rows = [
+              p.category ? `<div style="font:11px system-ui;color:#555">${esc(p.category)} · ${esc(p.group)}</div>` : '',
+              p.address ? `<div style="font:11px system-ui;color:#333;margin-top:2px">${esc(p.address)}</div>` : '',
+              p.phone ? `<div style="font:11px system-ui;color:#333">${esc(p.phone)}</div>` : '',
+              p.opening_hours ? `<div style="font:11px system-ui;color:#777;margin-top:2px">${esc(p.opening_hours)}</div>` : '',
+              p.company_id ? `<div style="font:11px system-ui;color:#5b8cff;margin-top:2px">✓ In Bell (company #${esc(p.company_id)})</div>` : '',
+            ].join('');
+            new mapboxgl.Popup({ offset: 6 }).setLngLat(e.lngLat)
+              .setHTML(`<div style="font:600 13px system-ui;color:#111;max-width:240px">${esc(p.name)}</div>${rows}`).addTo(map);
+          });
+          map.on('mouseenter', 'osm-place-points', () => { map.getCanvas().style.cursor = 'pointer'; });
+          map.on('mouseleave', 'osm-place-points', () => { map.getCanvas().style.cursor = ''; });
           map.on('click', 're-land', (e) => {
             const p = e.features[0]?.properties || {};
             new mapboxgl.Popup({ offset: 6 }).setLngLat(e.lngLat)
@@ -779,6 +833,7 @@ export function MapTab() {
             map.on('mouseleave', layer, () => { map.getCanvas().style.cursor = ''; });
           });
           map.on('moveend', () => { if (showParcelsRef.current) fetchParcels(map); });
+          map.on('moveend', () => { if (showPlacesRef.current) fetchPlaces(map); });
           // Eager-load RE districts + buildings so they're searchable + instant to
           // toggle (layers stay hidden until switched on).
           loadREData(map);
@@ -1066,6 +1121,12 @@ export function MapTab() {
               <input type="checkbox" checked=${showParcels}
                 onChange=${e => setShowParcels(e.target.checked)} />
               <span>Land parcels</span>
+              <span class="map-toggle-hint">zoom in</span>
+            </label>
+            <label class="map-toggle">
+              <input type="checkbox" checked=${showPlaces}
+                onChange=${e => setShowPlaces(e.target.checked)} />
+              <span>Places (OSM)</span>
               <span class="map-toggle-hint">zoom in</span>
             </label>
           </div>
