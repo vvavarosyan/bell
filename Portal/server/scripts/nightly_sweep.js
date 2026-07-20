@@ -16,6 +16,7 @@
 //   BELL_NIGHTLY_CHUNK   companies per round (default 300)
 
 import { runHarvestSweep } from '../enrichment/orchestrator.js';
+import { recomputeBellScores } from '../assembly/bell_score.js';
 import { pool } from '../db.js';
 
 const MAX_MS = Number(process.env.BELL_NIGHTLY_MAX_MS || 6.5 * 3600 * 1000);
@@ -49,6 +50,12 @@ const log = (m) => console.log(`[${new Date().toISOString()}] ${m}`);
       }
     }
   } finally {
+    // Safety net: heal any Bell Scores that drifted (writers that forgot to
+    // rescore, bulk backfills). Scoped — only rows whose score actually changed.
+    try {
+      const healed = await recomputeBellScores((m) => log(m));
+      log(`✓ Bell Score heal: ${healed.companies} companies, ${healed.people} people corrected.`);
+    } catch (err) { log(`✗ Bell Score heal failed: ${err.message}`); }
     const reason = Date.now() >= deadline ? 'time budget reached' : 'complete';
     log(`▸▸▸ Nightly Harvest Sweep finished (${reason}) — ${rounds} round(s), ${totalFound} found, ${totalHarvested} harvested total.`);
     try { await pool.end(); } catch {}

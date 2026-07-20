@@ -14,6 +14,7 @@
 import { query } from '../db.js';
 import { runSync } from './clients/apify.js';
 import { packRaw } from '../tenders/raw.js';
+import { recomputeBellScoreForCompany } from '../assembly/bell_score.js';
 
 export const ACTORS = {
   compass: 'compass/crawler-google-places',
@@ -113,8 +114,16 @@ export async function matchPlaces({ limit = 500 } = {}) {
            latitude = COALESCE(latitude, $5), longitude = COALESCE(longitude, $6)
          WHERE id=$1`,
         [companyId, p.place_id, p.rating, p.reviews_count, p.latitude, p.longitude]).catch(() => {});
+      // Google's stated business categories (e.g. "Gift shop", "Hair salon") — consumer
+      // phrasing the registry sources never use; the business-type search reads this key.
+      const cats = [...new Set([...(Array.isArray(p.raw?.categories) ? p.raw.categories : []), p.category]
+        .filter((c) => typeof c === 'string' && c.trim()))];
+      if (cats.length) await query(
+        `UPDATE companies SET extra_fields = COALESCE(extra_fields, '{}'::jsonb) || jsonb_build_object('gmaps_categories', $2::jsonb) WHERE id=$1`,
+        [companyId, JSON.stringify(cats)]).catch(() => {});
       if (p.email) await import('../lib/contacts.js').then(({ upsertContact }) =>
         upsertContact('company', companyId, { type: 'email', value: p.email, source: 'gmaps-sweep', source_url: p.website || null })).catch(() => {});
+      await recomputeBellScoreForCompany(companyId).catch(() => {});
       matched += 1;
     } else {
       await query(`UPDATE gmaps_places SET status='candidate_new', updated_at=now() WHERE id=$1`, [p.id]);

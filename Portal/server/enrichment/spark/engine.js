@@ -22,6 +22,7 @@ import { SPARK_SCHEMA, buildPrompt, fitBatch } from './schema.js';
 import { upsertContact } from '../../lib/contacts.js';
 import { packRaw } from '../../tenders/raw.js';
 import { getState, setState } from '../../outreach/machine.js';
+import { recomputeBellScoreForCompany } from '../../assembly/bell_score.js';
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -228,6 +229,7 @@ export async function runOneBatch({ onProgress = () => {}, batchOverride = null 
     const facts = await ingestCompany(c, out);
     ingestedFacts += facts;
     await query(`UPDATE companies SET spark_status=$2, spark_at=now() WHERE id=$1`, [c.id, facts > 0 ? 'done' : 'empty']);
+    if (facts > 0) await recomputeBellScoreForCompany(c.id).catch(() => {});
   }
   // Companies the agent never returned go back to pending — they were not researched.
   const missing = [...byId.keys()];

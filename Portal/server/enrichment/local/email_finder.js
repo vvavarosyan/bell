@@ -23,6 +23,7 @@ import { verifyEmail, emailDomain } from './emailverify.js';
 import { decodeFormat, emailFromFormat, inferStructuralFormat, splitName } from './email_patterns.js';
 import { recordReject } from './rejects.js';
 import { recordSearch } from './ledger.js';
+import { recomputeBellScoreForPerson } from '../../assembly/bell_score.js';
 
 const PER_COMPANY_CAP = Number(process.env.BELL_EMAIL_PER_COMPANY || 25);
 
@@ -98,7 +99,7 @@ export async function enrichCompany(company) {
           type: 'email', value: e, source: 'stage10-observed',
           source_label: 'Website email matched to person', is_verified: true,
         });
-        if (r) { observedWritten++; assigned.add(p.id); }
+        if (r) { observedWritten++; assigned.add(p.id); await recomputeBellScoreForPerson(p.id).catch(() => {}); }
         consider(fmt, 'high', e);
         matched = true;
         break;
@@ -139,7 +140,7 @@ export async function enrichCompany(company) {
           source_label: `Pattern ${learned.format} (verified)`, is_verified: true,
           extra_fields: { pattern: learned.format, verify: v.method || 'smtp' },
         });
-        if (r) { patternWritten++; assigned.add(p.id); }
+        if (r) { patternWritten++; assigned.add(p.id); await recomputeBellScoreForPerson(p.id).catch(() => {}); }
       } else {
         await recordReject(company.id, 'email', 'email', gen, `verification: ${v.result}${v.detail ? ` (${v.detail})` : ''}`);
       }

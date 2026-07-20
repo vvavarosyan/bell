@@ -17,8 +17,9 @@ import { revealOne, revealBulk, getRevealedSet, bypassesCredits, markRevealed } 
 import { denyUnlessLocalEngine } from '../lib/auth.js';
 import { addRevealedToCrm } from '../lib/crm.js';
 import { normalizeName } from '../ingest/normalize.js';
-import { mapLabelToCanonical, industryKeywordsIn } from '../lib/industry.js';
+import { mapLabelToCanonical } from '../lib/industry.js';
 import { getIndustryGroups } from '../lib/industry_groups.js';
+import { matchBusinessTypes, listBusinessTypes, businessTypeCondition, businessTypeFilterCondition, queryNamesIndustry } from '../lib/business_types.js';
 
 // Escape LIKE wildcards in user input so a literal % or _ doesn't widen the match.
 function likeEscape(s) { return String(s).replace(/[\\%_]/g, '\\$&'); }
@@ -119,38 +120,52 @@ router.get('/', async (req, res, next) => {
     // and partial spellings still surface the intended company.
     // Default: most-complete records first (Bell Score), then newest.
     let orderSql = 'ORDER BY companies.bell_score DESC, id DESC';
+    let matchedTypes = null;
     if (q) {
       const qLower = q.toLowerCase();
       const qNorm = normalizeName(q) || qLower;
-      params.push('%' + likeEscape(qLower) + '%');
-      const pLike = params.length;
       params.push(qNorm);
       const pNorm = params.length;
-      // Industry/sector-aware matching: drop filler words and de-pluralize so a
-      // query like "all banks", "beauty industry" or "beauty salons" matches the
-      // industry/sector text held in search_blob ("banking & finance", "beauty &
-      // wellness"). Each remaining token must appear in the blob (AND), which
-      // keeps multi-word searches precise.
+      // Whole-phrase match. A bare substring on a 1-2 char query matches most of
+      // the database ("it" hit 73% of all companies), so short queries use a
+      // word-boundary regex instead.
+      let phraseCond;
+      if (qLower.length >= 3) {
+        params.push('%' + likeEscape(qLower) + '%');
+        phraseCond = `companies.search_blob LIKE $${params.length}`;
+      } else {
+        params.push('\\m' + qLower.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '\\M');
+        phraseCond = `companies.search_blob ~* $${params.length}`;
+      }
+      // Token matching: drop filler words and de-pluralize so "all banks" or
+      // "beauty salons" matches blob text. Each token ≥3 chars must appear in
+      // the blob (AND), which keeps multi-word searches precise; shorter tokens
+      // only participate in the type/industry branches below.
       const STOP = new Set(['all','the','in','of','and','or','to','for','qatar','industry','industries','sector','sectors','company','companies','business','businesses','list','show','me','find','any','with','that','are','our','their']);
       const tokens = qLower.split(/[^a-z0-9&]+/)
         .filter((t) => t.length >= 2 && !STOP.has(t))
         .map((t) => (t.length > 3 && t.endsWith('s') && !t.endsWith('ss')) ? t.slice(0, -1) : t);
       const tokenConds = [];
-      for (const t of tokens) { params.push('%' + likeEscape(t) + '%'); tokenConds.push(`companies.search_blob LIKE $${params.length}`); }
+      for (const t of tokens.filter((t) => t.length >= 3)) { params.push('%' + likeEscape(t) + '%'); tokenConds.push(`companies.search_blob LIKE $${params.length}`); }
       const tokenBranch = tokenConds.length ? ` OR (${tokenConds.join(' AND ')})` : '';
-      // Industry-synonym matching: when the query reads as a CATEGORY (every
-      // meaningful token is an industry word or a generic category word — e.g.
-      // "beauty salons", "all law firms", "oil and gas companies"), also match
-      // companies TAGGED with that industry (reusing the industry label-mapper).
-      // Skipped for name-like queries (a distinctive token like "doha"/"faisal"
-      // isn't a category word), so a company-name search doesn't explode into
-      // its whole sector.
-      const CATEGORY_RX = /^(firm|establish|agenc|servic|provider|shop|store|cent|outlet|vendor|supplier|dealer|enterprise)/;
-      const synInd = mapLabelToCanonical(qLower);
-      const synKws = industryKeywordsIn(qLower);
-      const isCategoryToken = (t) => CATEGORY_RX.test(t) || mapLabelToCanonical(t).length > 0 || synKws.some((k) => k.includes(t));
+      // Stated business types: bridge the user's wording ("haircut salon",
+      // "laundries") to the source's wording ("Ladies Beauty Saloons", "Clothes
+      // Laundry & Iron", Google "Gift shop"). Applied only when EVERY meaningful
+      // token matched the stated vocabulary (directly or via a synonym), so a
+      // company-NAME search never explodes into a whole trade.
+      const bt = await matchBusinessTypes(qLower);
+      let typeCond = '';
+      if (bt.full && bt.types.length) {
+        typeCond = businessTypeCondition(bt.types, params);
+        matchedTypes = bt.types;
+      }
+      const typeBranch = typeCond ? ` OR ${typeCond}` : '';
+      // Whole-industry match ONLY when the query names the industry itself
+      // ("construction", "IT") — a trade word ("pharmacy") must not pull in its
+      // entire parent industry (that once made "pharmacy" return all of Healthcare).
+      const synInd = mapLabelToCanonical(qLower).filter((canon) => queryNamesIndustry(canon, qLower));
       let synBranch = '';
-      if (synInd.length && tokens.length > 0 && tokens.every(isCategoryToken)) {
+      if (synInd.length) {
         const ors = [];
         for (const it of synInd) {
           params.push(it); ors.push(`companies.industries @> ARRAY[$${params.length}]::text[]`);
@@ -159,16 +174,18 @@ router.get('/', async (req, res, next) => {
         synBranch = ` OR ${ors.join(' OR ')}`;
       }
       where.push(
-        `(companies.search_blob LIKE $${pLike}` +
-        `${tokenBranch}${synBranch} ` +
+        `(${phraseCond}` +
+        `${tokenBranch}${synBranch}${typeBranch} ` +
         `OR (char_length($${pNorm}) >= 3 AND companies.name_normalized % $${pNorm}))`
       );
-      // Rank: exact normalized name, then substring hits, then fuzzy closeness.
+      // Rank: exact normalized name, then substring hits, then stated-type hits,
+      // then fuzzy closeness; most-complete records (Bell Score) break ties.
       orderSql =
         `ORDER BY (companies.name_normalized = $${pNorm}) DESC, ` +
-        `(companies.search_blob LIKE $${pLike}) DESC, ` +
+        `(${phraseCond}) DESC, ` +
+        (typeCond ? `(${typeCond}) DESC, ` : '') +
         `similarity(companies.name_normalized, $${pNorm}) DESC, ` +
-        `companies.name ASC`;
+        `companies.bell_score DESC, companies.name ASC`;
     }
     if (status) {
       params.push(status);
@@ -206,6 +223,13 @@ router.get('/', async (req, res, next) => {
     if (indList.length) {
       params.push(indList);
       where.push(`(companies.industries && $${params.length}::text[] OR companies.industry = ANY($${params.length}::text[]))`);
+    }
+    // multi-select business types — exact stated values (QCCI sub-category in
+    // sector, trade tags, Google categories), from the Business-type facet.
+    const btList = csv(req.query.business_types);
+    if (btList.length) {
+      const cond = businessTypeFilterCondition(btList, params);
+      if (cond) where.push(cond);
     }
     // multi-select status
     const statusList = csv(req.query.statuses);
@@ -324,6 +348,7 @@ router.get('/', async (req, res, next) => {
     res.json({
       total: countResult.rows[0].total,
       limit, offset,
+      matched_types: matchedTypes || undefined,
       rows: rowsResult.rows,
     });
   } catch (err) { next(err); }
@@ -430,6 +455,15 @@ router.get('/:id/locations', async (req, res, next) => {
 // GET /api/companies/:id — full row including extra_fields + linked sources
 // Includes raw_payload from EVERY source so the detail drawer shows every
 // JSON field that was ever scraped.
+// GET /api/companies/business-types?q= — the stated fine-grained business-type
+// vocabulary (QCCI sub-categories, trade tags, Google categories) with counts,
+// for the Business-type facet. With q, returns the types the query names.
+router.get('/business-types', async (req, res, next) => {
+  try {
+    res.json({ types: await listBusinessTypes(String(req.query.q || '')) });
+  } catch (err) { next(err); }
+});
+
 // Distinct industries (for the companies-list filter dropdown), most-common first.
 router.get('/industries', async (req, res, next) => {
   try {

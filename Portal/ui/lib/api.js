@@ -160,6 +160,7 @@ export const api = {
 
   companies:              (q = {}) => request('/api/companies?' + new URLSearchParams(q)),
   companyIndustries:      () => request('/api/companies/industries'),
+  companyBusinessTypes:   (q) => request('/api/companies/business-types' + (q ? '?q=' + encodeURIComponent(q) : '')),
   companiesMap:           () => request('/api/companies/map'),
   publicToken:            (name) => request('/api/settings/public-token/' + name),
   company:                (id) => request('/api/companies/' + id),

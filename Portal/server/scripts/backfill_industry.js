@@ -26,6 +26,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { deriveIndustries } from '../lib/industry.js';
+import { recomputeBellScores } from '../assembly/bell_score.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const BATCH = 1000;
@@ -150,5 +151,8 @@ function selfTest() {
 const isMain = process.argv[1] && process.argv[1].endsWith('backfill_industry.js');
 if (isMain) {
   if (process.argv.includes('--self-test')) selfTest();
-  else run().then(() => process.exit(0)).catch((e) => { console.error('backfill failed:', e); process.exit(1); });
+  else run()
+    .then(() => recomputeBellScores((m) => console.log(m)))   // industry feeds the score
+    .then(() => process.exit(0))
+    .catch((e) => { console.error('backfill failed:', e); process.exit(1); });
 }

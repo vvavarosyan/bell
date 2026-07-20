@@ -114,7 +114,9 @@ async function applyPlace(companyId, place) {
     lng,
     JSON.stringify({
       gmaps_title:        nz(place.title),
-      gmaps_categories:   place.categories || null,
+      // Only ever store an ARRAY here (or omit) — a JSON-null value breaks the
+      // business-type vocabulary query (jsonb_array_elements_text on a scalar).
+      ...(Array.isArray(place.categories) && place.categories.length ? { gmaps_categories: place.categories } : {}),
       gmaps_category:     nz(place.categoryName),
       gmaps_raw_features: place.additionalInfo || null,
     }),

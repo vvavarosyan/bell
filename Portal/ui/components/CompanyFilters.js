@@ -15,7 +15,7 @@ const COMPLETE    = [['hasEmail', 'Email'], ['hasPhone', 'Phone'], ['hasLinkedin
 const WEBSITE_OPTS = [['has', 'Has website'], ['none', 'No website']];
 
 export const EMPTY_FILTERS = {
-  industries: [], statuses: [], sources: [], empBuckets: [],
+  industries: [], businessTypes: [], statuses: [], sources: [], empBuckets: [],
   city: '', ageMin: '', ageMax: '', scoreMin: '', website: '',
   capitalMinQar: '', capitalMaxQar: '',
   hasEmail: false, hasPhone: false, hasLinkedin: false, hasPeople: false,
@@ -23,7 +23,7 @@ export const EMPTY_FILTERS = {
 
 export function countActiveFilters(f) {
   if (!f) return 0;
-  return f.industries.length + f.statuses.length + f.sources.length + f.empBuckets.length
+  return f.industries.length + (f.businessTypes || []).length + f.statuses.length + f.sources.length + f.empBuckets.length
     + (String(f.city).trim() ? 1 : 0) + (f.ageMin ? 1 : 0) + (f.ageMax ? 1 : 0) + (f.scoreMin ? 1 : 0)
     + (f.website ? 1 : 0) + (f.capitalMinQar ? 1 : 0) + (f.capitalMaxQar ? 1 : 0)
     + COMPLETE.reduce((n, [k]) => n + (f[k] ? 1 : 0), 0);
@@ -74,8 +74,66 @@ function IndustryPicker({ options, selected, onToggle, synonyms = {} }) {
     </div>`;
 }
 
+// Searchable multi-select over the STATED business-type vocabulary (QCCI
+// sub-categories like "Ladies Beauty Saloons", trade tags, Google categories).
+// Matching happens server-side with the same wording bridge as the search box,
+// so typing "haircut salons" or "laundries" finds the source's own labels.
+function BusinessTypePicker({ selected, onToggle }) {
+  const [open, setOpen] = useState(false);
+  const [q, setQ] = useState('');
+  const [opts, setOpts] = useState([]);
+  useEffect(() => {
+    if (!open) return undefined;
+    let dead = false;
+    const t = setTimeout(() => {
+      api.companyBusinessTypes(q.trim())
+        .then((r) => { if (!dead) setOpts(r.types || []); })
+        .catch(() => { /* facet hides its options on error */ });
+    }, 250);
+    return () => { dead = true; clearTimeout(t); };
+  }, [open, q]);
+  // The same label can be stated by several sources (registry + tag) — show it
+  // once with its biggest count.
+  const byLabel = new Map();
+  for (const o of opts) {
+    const prev = byLabel.get(o.label);
+    if (!prev || o.count > prev.count) byLabel.set(o.label, o);
+  }
+  const options = [...byLabel.values()];
+  return html`
+    <div class="bdi-ms">
+      <button type="button" class="bdi-ms-trigger" onClick=${() => setOpen((o) => !o)}>
+        <span>${selected.length ? `${selected.length} selected` : 'Select business types…'}</span>
+        <span class="bdi-ms-caret">${open ? '▴' : '▾'}</span>
+      </button>
+      ${open ? html`
+        <div class="bdi-ms-panel">
+          <input class="bdi-ms-search" type="text" placeholder="Try “gift shops”, “haircut salons”, “laundries”…" value=${q} onChange=${(e) => setQ(e.target.value)} />
+          <div class="bdi-ms-list">
+            ${options.length === 0 ? html`<div class="muted small" style=${{ padding: '8px' }}>No stated type matches.</div>` : null}
+            ${options.map((o) => {
+              const on = selected.includes(o.label);
+              return html`<label class=${'bdi-ms-opt' + (on ? ' on' : '')} key=${o.label}>
+                <input type="checkbox" checked=${on} onChange=${() => onToggle(o.label)} />
+                <span>${o.label}</span><span class="bdi-ms-n">${o.count}</span>
+              </label>`;
+            })}
+          </div>
+        </div>` : null}
+      ${selected.length ? html`<div class="bdi-ms-chips">
+        ${selected.map((s) => html`<span class="bdi-ms-chip" key=${s}>${s}<button type="button" onClick=${() => onToggle(s)}>×</button></span>`)}
+      </div>` : null}
+    </div>`;
+}
+
 export function CompanyFilters({ value, industries = [], onApply, onClose }) {
   const [d, setD] = useState(() => ({ ...EMPTY_FILTERS, ...(value || {}) }));
+  // Re-seed the draft when the committed filters change from OUTSIDE the panel
+  // (e.g. a matched-type chip sets businessTypes while this panel is open) — else
+  // Apply would commit a stale draft and silently revert that change. `value` is
+  // the parent's filters state: a stable reference during in-panel editing (only
+  // Apply/chips call setFilters), so this fires only on genuine external changes.
+  useEffect(() => { setD({ ...EMPTY_FILTERS, ...(value || {}) }); }, [value]);
   // Sector umbrella groups + tag synonyms (A3 findability) — fetched once,
   // cached server-side, harmless if unavailable (section simply hides).
   const [sectors, setSectors] = useState({ groups: [], synonyms: {} });
@@ -113,6 +171,7 @@ export function CompanyFilters({ value, industries = [], onApply, onClose }) {
           ${sectors.groups.length ? sec('Sector', html`<div class="bdi-chiprow">
             ${sectors.groups.map((g) => chip(sectorOn(g), `${g.label}${g.count ? ` · ${Number(g.count).toLocaleString()}` : ''}`, () => toggleSector(g)))}
           </div>`, true) : null}
+          ${sec('Business type (exact, source-stated)', html`<${BusinessTypePicker} selected=${d.businessTypes || []} onToggle=${(v) => toggle('businessTypes', v)} />`, true)}
           ${sec('Industry', html`<${IndustryPicker} options=${industries} selected=${d.industries} onToggle=${(v) => toggle('industries', v)} synonyms=${sectors.synonyms} />`, true)}
           ${sec('Status', html`<div class="bdi-chiprow">${STATUS_OPTS.map((s) => chip(d.statuses.includes(s), s, () => toggle('statuses', s)))}</div>`)}
           ${sec('Source', html`<div class="bdi-chiprow">${SOURCE_OPTS.map((s) => chip(d.sources.includes(s), s, () => toggle('sources', s)))}</div>`)}

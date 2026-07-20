@@ -30,6 +30,7 @@ export function MarketingTab() {
   const [machine, setMachine] = useState(null);     // breaker / preflight / holiday
   const [hotLeads, setHotLeads] = useState([]);
   const [stats, setStats] = useState(null);         // {campaign, funnel, arms} for the stats drawer
+  const [recipients, setRecipients] = useState(null); // per-campaign target list for the stats drawer
   const [loading, setLoading] = useState(true);
   const [busy, setBusy] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
@@ -119,7 +120,12 @@ export function MarketingTab() {
   };
   const openStats = async (c) => {
     setBusy(true);
-    try { const r = await api.mktStats(c.id); setStats({ campaign: c, ...r }); }
+    setRecipients(null);
+    try {
+      const [r, t] = await Promise.all([api.mktStats(c.id), api.mktTargets(c.id, '', 500).catch(() => ({ targets: [] }))]);
+      setStats({ campaign: c, ...r });
+      setRecipients(t.targets || []);
+    }
     catch (err) { toast('Stats failed: ' + err.message, 'error'); }
     finally { setBusy(false); }
   };
@@ -483,11 +489,11 @@ export function MarketingTab() {
     ];
     const maxV = Math.max(1, ...stages.map((s) => s[1] || 0));
     return html`
-      <div onClick=${() => setStats(null)} style=${{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 60, display: 'flex', justifyContent: 'flex-end' }}>
+      <div onClick=${() => { setStats(null); setRecipients(null); }} style=${{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.45)', zIndex: 60, display: 'flex', justifyContent: 'flex-end' }}>
         <div onClick=${(ev) => ev.stopPropagation()} style=${{ width: 'min(620px,100%)', background: 'var(--bg)', height: '100%', overflowY: 'auto', padding: '18px', boxShadow: '-8px 0 24px rgba(0,0,0,0.3)' }}>
           <div style=${{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
             <div style=${{ fontWeight: 700 }}>${stats.campaign.name} — funnel</div>
-            <button class="btn btn-sm" onClick=${() => setStats(null)}>Close</button>
+            <button class="btn btn-sm" onClick=${() => { setStats(null); setRecipients(null); }}>Close</button>
           </div>
           ${stages.map(([label, v, tint]) => html`
             <div key=${label} style=${{ display: 'flex', alignItems: 'center', gap: '10px', marginBottom: '7px' }}>
@@ -509,6 +515,24 @@ export function MarketingTab() {
               </div>
               <div class="muted small" style=${{ marginTop: '3px' }}>${a.angle}</div>
             </div>`)}
+
+          <div class="section-title" style=${{ margin: '16px 0 8px' }}>Recipients${recipients ? ` (${recipients.length})` : ''}</div>
+          ${recipients === null ? html`<div class="muted small">Loading…</div>`
+            : recipients.length === 0 ? html`<div class="muted small">No recipients queued yet. Click Plan (or ＋ recipient) to add targets.</div>`
+            : html`<div style=${{ border: '1px solid var(--border)', borderRadius: '10px', overflow: 'hidden' }}>
+              ${recipients.map((t, i) => html`
+                <div key=${t.id} style=${{ display: 'flex', alignItems: 'center', gap: '8px', padding: '8px 10px', borderTop: i ? '1px solid var(--border)' : 'none', flexWrap: 'wrap' }}>
+                  <div style=${{ flex: '1 1 220px', minWidth: 0 }}>
+                    <div style=${{ fontWeight: 600, wordBreak: 'break-all' }}>${t.email}</div>
+                    <div class="muted small">${t.company_name || '—'}${t.address_class === 'manual' ? ' · manual test' : ''}${t.lang && t.lang !== 'en' ? ' · ' + t.lang.toUpperCase() : ''}</div>
+                  </div>
+                  <div style=${{ textAlign: 'right' }}>
+                    <span class="pill" style=${{ background: (STATUS_TINT[t.status] || 'var(--muted)') + '22', color: STATUS_TINT[t.status] || 'var(--muted)', fontWeight: 700, fontSize: '11px', padding: '2px 8px', borderRadius: '999px' }}>${t.status}</span>
+                    <div class="muted small" style=${{ marginTop: '2px' }}>${t.sent_at ? 'sent ' + qtime(t.sent_at) : (t.skip_reason ? t.skip_reason : '')}</div>
+                  </div>
+                </div>`)}
+            </div>`}
+          <div class="muted small" style=${{ marginTop: '8px' }}>Times shown in Qatar time. Every recipient's send, delivery, open and reply is also in Marketing → Mail and the email log.</div>
         </div>
       </div>`;
   })() : null;

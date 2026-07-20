@@ -82,6 +82,7 @@ export function CompaniesTab({ archivedMode: initialArchived = false, mode = 'lo
   const [q, setQ] = useState('');
   const [filters, setFilters] = useState(EMPTY_FILTERS);
   const [showFilters, setShowFilters] = useState(false);
+  const [matchedTypes, setMatchedTypes] = useState(null);   // stated types the search matched
   const [industries, setIndustries] = useState([]);
   const [loading, setLoading] = useState(false);
   const [selected, setSelected] = useState(() => new Set());
@@ -100,6 +101,7 @@ export function CompaniesTab({ archivedMode: initialArchived = false, mode = 'lo
       if (q.trim())   params.q = q.trim();
       const f = filters;
       if (f.industries.length) params.industries = f.industries.join(',');
+      if ((f.businessTypes || []).length) params.business_types = f.businessTypes.join(',');
       if (f.statuses.length)   params.statuses   = f.statuses.join(',');
       if (f.sources.length)    params.sources    = f.sources.join(',');
       if (f.empBuckets.length) params.emp_buckets = f.empBuckets.join(',');
@@ -122,6 +124,7 @@ export function CompaniesTab({ archivedMode: initialArchived = false, mode = 'lo
       const r = await api.companies(params);
       setRows(r.rows);
       setTotal(r.total);
+      setMatchedTypes(params.q ? (r.matched_types || null) : null);
     } catch (err) { toast('Load failed: ' + err.message, 'error'); }
     finally { if (!silent) setLoading(false); }
   }, [limit, offset, q, filters, archivedMode, reviewMode]);
@@ -385,6 +388,17 @@ export function CompaniesTab({ archivedMode: initialArchived = false, mode = 'lo
       </div>
     ` : null}
 
+    ${q.trim() && matchedTypes && matchedTypes.length ? html`
+      <div style=${{ display: 'flex', flexWrap: 'wrap', gap: '6px', margin: '8px 0 0', alignItems: 'center', fontSize: '12px', color: 'var(--text-muted)' }}>
+        <span>Matched business types:</span>
+        ${dedupeTypes(matchedTypes).slice(0, 8).map((t) => html`
+          <button key=${t.label} title=${'Show exactly these ' + t.count + ' companies'}
+            onClick=${() => { setFilters((s) => ({ ...s, businessTypes: [t.label] })); setQ(''); setOffset(0); }}
+            style=${{ fontSize: '11.5px', border: '1px solid var(--border)', borderRadius: '999px', padding: '2px 10px', background: 'transparent', cursor: 'pointer', color: 'var(--text)' }}
+          >${t.label} · ${t.count.toLocaleString()}</button>`)}
+      </div>
+    ` : null}
+
     ${finderAudit ? html`
       <div class="audit-panel" style=${{ margin: '8px 0', padding: '10px 12px', border: '1px solid var(--border)', borderRadius: '8px', background: 'var(--surface-2, rgba(0,0,0,0.03))' }}>
         <div style=${{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
@@ -561,12 +575,24 @@ function chipEl(label, onRemove) {
     <button onClick=${onRemove} title="Remove" style=${{ background: 'transparent', border: 'none', color: 'var(--text-dim)', cursor: 'pointer', fontSize: '13px', lineHeight: 1, padding: 0 }}>×</button>
   </span>`;
 }
+// A stated type can arrive from several sources (registry + tag, same label) —
+// show each label once with its biggest count.
+function dedupeTypes(types) {
+  const byLabel = new Map();
+  for (const t of types) {
+    const prev = byLabel.get(t.label);
+    if (!prev || t.count > prev.count) byLabel.set(t.label, t);
+  }
+  return [...byLabel.values()];
+}
+
 function buildChips(f, setFilters, setOffset) {
   const out = [];
   const after = () => setOffset(0);
   const rmFromArr = (key, v) => () => { setFilters((s) => ({ ...s, [key]: s[key].filter((x) => x !== v) })); after(); };
   const clearKey = (key, empty) => () => { setFilters((s) => ({ ...s, [key]: empty })); after(); };
   for (const v of f.industries) out.push(chipEl(v, rmFromArr('industries', v)));
+  for (const v of (f.businessTypes || [])) out.push(chipEl('type: ' + v, rmFromArr('businessTypes', v)));
   for (const v of f.statuses)   out.push(chipEl('status: ' + v, rmFromArr('statuses', v)));
   for (const v of f.sources)    out.push(chipEl('source: ' + v, rmFromArr('sources', v)));
   for (const v of f.empBuckets) out.push(chipEl(v + ' emp', rmFromArr('empBuckets', v)));

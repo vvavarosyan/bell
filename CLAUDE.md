@@ -6,12 +6,17 @@ Val is the founder and sole operator. He is **not** a developer and does not rea
 
 ---
 
-## ⏳ OPEN CHECKLIST — as of 2026‑07‑19 (the outreach‑machine + data‑completeness sessions)
+## ⏳ OPEN CHECKLIST — as of 2026‑07‑20 (calibration day + Bell Score / find‑anything‑search session)
 
 **Ask him where he is in this list at the start of the session. Do not assume it's done.**
 Full detail lives in memory: [[self-marketing-outreach]] and [[data-completeness-program]].
 
-- [ ] **1.** `Reharvest No-Email Companies.command` — was RUNNING 2026‑07‑19 (the ~8,600 harvested‑but‑no‑email cohort through the upgraded extractor; hours, resumable). Val will paste the closing lines ("Cohort: X → Y"). When done: **Claude runs the DATA push himself** (runPush) — do not send Val to `Push Changes.command` for data.
+**VAL'S MORNING STEPS (a one‑time scheduled reminder fires 2026‑07‑21 08:00 Doha — task `val-morning-steps-2026-07-21`):**
+- [ ] **a.** app.bell.qa → Marketing → Stats on "Bella outreach": expect **Emailed 1 / Delivered 1** (first real MyWeb send, fires inside Sat–Thu 07:00–17:00 Doha). All‑zeros after 09:00 Doha = tell Claude, needs investigating.
+- [ ] **b.** Double‑click `Run Spark Enrichment.command` (daily): expect batch 10 → 12 → HOLDS at 12, **no "max credits"** (refusal‑ceiling memory shipped cce2716; queue is no‑website companies first). Paste closing lines to Claude.
+- [ ] **c.** If the reharvest finished: paste its closing lines → Claude runs the data push → then Val double‑clicks `Geocode Companies.command` once more.
+
+- [ ] **1.** `Reharvest No-Email Companies.command` — was RUNNING 2026‑07‑19/20 (the ~8,600 harvested‑but‑no‑email cohort through the upgraded extractor; hours, resumable). Val will paste the closing lines ("Cohort: X → Y"). When done: **Claude runs the DATA push himself** (runPush) — do not send Val to `Push Changes.command` for data. (Interim pushes are fine and have run — 2026‑07‑20 morning push: 98 rows, 0 errors.)
 - [ ] **2.** After step 1: `Geocode Companies.command` once more — newly harvested structured addresses convert the "unparseable" pile into map pins (first runs: 11 → 410 coords, 7.3k unparseable awaiting better addresses). It pushes to prod itself.
 - [ ] **3.** THE OUTREACH MACHINE IS ARMED (BDI_OUTREACH_SCHEDULER=1 + BDI_OUTREACH_ENABLED=1 on app.bell.qa) and the **"Bella outreach" campaign is ACTIVE with MyWeb Systems** — first real cold send lands the next Qatar working window (Sat–Thu 07:00–17:00). Val checks admin.bell.qa → Marketing → Stats/Mail log. Weekly digest auto‑sends Sundays ≥09:00 (confirmed firing).
 - [ ] **4.** Ramp‑up to the full ~5,400 role‑mailbox campaign: plan approved (tender‑heavy industries first — prioritization is coded into Plan), waiting on a few days of MyWeb/engine results before Val activates a bulk campaign.
@@ -167,7 +172,9 @@ Data/Companies/1. Data Gathering/Directories/   MOCI, QFC, QFZ, QSTP scrapers (P
 
 **DATA COMPLETENESS Tracks A+B (2026‑07‑19, DEPLOYED):** harvester upgrade — role emails on external domains KEPT (Doha Clinic case → info@dchqatar.com captured, proven live), Cloudflare/entity/at‑dot de‑obfuscation, WhatsApp contacts (type 'whatsapp', shown in UI), locations/branches + /en /ar pages, per‑page render escalation, multi‑address capture, doctors/staff (admin‑locked via the existing people lockdown) · migration 098 `company_locations` (mirrored) · **$0 QARS geocoder** (Qatar's own GIS locator, INWANI zone/street/building codes, EXACT‑or‑nothing, built‑in ground‑truth proof pass that refuses to run under 85% agreement) · branch pins + sibling tie‑lines on the Map · "Locations (N)" drawer block · Bella get_company includes locations/WhatsApp. Val's commands: `Reharvest No-Email Companies.command` (the 8.6k no‑email cohort) + `Geocode Companies.command` (first runs took the map from 11 → 410 coordinates).
 
-~191K companies, ~76K active, ~16K with websites. Latest migration = **098**. Deep memory: [[self-marketing-outreach]], [[data-completeness-program]].
+**BELL SCORE v2 + FIND-ANYTHING SEARCH (2026-07-20):** score formula rebuilt (19 components = 100; now counts WhatsApp/locations/coordinates/financials/tech/ownership) and made LIVE — every enrichment writer rescores per record, nightly_sweep heals drift (scoped `IS DISTINCT FROM` — never touch updated_at needlessly, it's the sync watermark), one-time rescore corrected 189,928 companies + 28,526 people (people scores had been frozen 5 weeks; "pharmacy" search had returned all of Healthcare; "IT" had returned 73% of the DB). Business-type search: `lib/business_types.js` bridges user wording to STATED vocabulary (QCCI sub-categories in companies.sector — 571 fine trades, industries[] tags, extra_fields.gmaps_categories) — "haircut salon" → Ladies Beauty Saloons (338), "gift shop" 64→527, name searches unaffected; matched-type chips + Business-type facet in Companies UI; Bella benefits automatically. Deep memory: [[bellscore-and-search]].
+
+~191K companies, ~76K active, ~16K with websites. Latest migration = **100**. Deep memory: [[self-marketing-outreach]], [[data-completeness-program]], [[bellscore-and-search]].
 
 ### ⏳ Immediately pending — see the OPEN CHECKLIST at the top
 Reharvest running → Claude runs the DATA push himself → Geocode again → watch MyWeb first send → ramp decision → lawyer.

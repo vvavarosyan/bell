@@ -11,6 +11,7 @@
 
 import { query } from '../db.js';
 import { classifyCompany } from '../enrichment/local/industry_classify.js';
+import { recomputeBellScores } from '../assembly/bell_score.js';
 
 const apply = process.argv.includes('--apply');
 
@@ -50,5 +51,9 @@ const apply = process.argv.includes('--apply');
     } catch (e) { console.log(`  [err] co#${w.id}: ${e.message}`); }
   }
   console.log(`\n→ assigned an industry to ${done.toLocaleString()} companies (marked "derived"). Publishes on the next data push.`);
+  // Industry counts toward the Bell Score — rescore what this run changed
+  // (this exact omission left 14,142 companies understated on 2026-07-20).
+  const healed = await recomputeBellScores((m) => console.log(m));
+  console.log(`→ Bell Score healed on ${healed.companies} companies.`);
   process.exit(0);
 })().catch((e) => { console.error('Stopped:', e.message); process.exit(1); });

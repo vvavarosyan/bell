@@ -12,6 +12,7 @@ import {
 import { revealOne, revealBulk, getRevealedSet, bypassesCredits, markRevealed } from '../lib/credits.js';
 import { denyUnlessLocalEngine } from '../lib/auth.js';
 import { addRevealedToCrm } from '../lib/crm.js';
+import { recomputeBellScoreForPerson } from '../assembly/bell_score.js';
 
 const router = Router();
 
@@ -273,6 +274,7 @@ router.post('/:id/contacts', async (req, res, next) => {
       is_verified:   body.is_verified === true,
     });
     if (!row) return res.status(400).json({ error: 'invalid_or_junk_value' });
+    await recomputeBellScoreForPerson(id).catch(() => {});
     res.json({ contact: row });
   } catch (err) { next(err); }
 });
@@ -296,6 +298,7 @@ router.delete('/:id/contacts/:cid', async (req, res, next) => {
     const cid = Number(req.params.cid);
     const ok  = await deleteContact('person', id, cid);
     if (!ok) return res.status(404).json({ error: 'not_found' });
+    await recomputeBellScoreForPerson(id).catch(() => {});
     res.json({ ok: true });
   } catch (err) { next(err); }
 });
