@@ -370,7 +370,7 @@ router.get('/map', async (req, res, next) => {
              c.industry, c.city, c.country,
              c.linkedin_url, c.website,
              c.latitude, c.longitude, c.archived,
-             c.founded_year,
+             c.founded_year, c.parent_company_id,
              EXTRACT(YEAR FROM c.incorporation_date)::int AS incorporation_year,
              -- Area DERIVED from the pin's coordinate (nearest GIS district), so the
              -- popup label always matches where the dot actually is. companies.city
@@ -405,6 +405,9 @@ router.get('/map', async (req, res, next) => {
         sources:  row.sources || [],
         website:  row.website,
         linkedin_url: row.linkedin_url,
+        // parent_company_id lets the client draw a tie-line from a branch pin to
+        // its parent company (the branch-network layer).
+        parent_company_id: row.parent_company_id || null,
         // Prefer founded_year; fall back to year from incorporation_date.
         year: row.founded_year || row.incorporation_year || null,
       },
@@ -435,6 +438,8 @@ router.get('/map', async (req, res, next) => {
           geometry: { type: 'Point', coordinates: [Number(row.longitude), Number(row.latitude)] },
           properties: {
             id: row.company_id, location_id: row.location_id, location_label: row.label || 'Branch',
+            // The location belongs to company_id — that's the pin it ties back to.
+            parent_company_id: row.company_id, is_branch: true,
             bin: row.bin, name: row.name, is_active: row.is_active, status: row.status_normalized,
             industry: row.industry, city: row.city, sources: row.sources || [],
             website: row.website, linkedin_url: row.linkedin_url,
@@ -443,6 +448,39 @@ router.get('/map', async (req, res, next) => {
         });
       }
     } catch { /* table may not exist on a stale boot — the base map still works */ }
+
+    // Branch model (migration 101): ARCHIVED child companies that carry their own
+    // coordinate are real facilities of a parent operator. The two queries above
+    // filter archived=false, so these never render — add them here as branch pins
+    // tied to their parent. Latent until the branch geocode backfills coords, but
+    // the render path must exist. Same Qatar-bbox guard.
+    try {
+      const kids = await query(`
+        SELECT c.id, c.bin, c.name, c.is_active, c.status_normalized, c.industry, c.city,
+               c.linkedin_url, c.website, c.founded_year, c.parent_company_id,
+               c.latitude, c.longitude,
+               EXTRACT(YEAR FROM c.incorporation_date)::int AS incorporation_year,
+               (SELECT array_agg(DISTINCT cs.source ORDER BY cs.source)
+                FROM company_sources cs WHERE cs.company_id = c.id) AS sources
+          FROM companies c
+         WHERE c.parent_company_id IS NOT NULL
+           AND c.latitude IS NOT NULL AND c.longitude IS NOT NULL
+           AND c.longitude BETWEEN 50.55 AND 51.85 AND c.latitude BETWEEN 24.40 AND 26.30`);
+      for (const row of kids.rows) {
+        features.push({
+          type: 'Feature',
+          geometry: { type: 'Point', coordinates: [Number(row.longitude), Number(row.latitude)] },
+          properties: {
+            id: row.id, parent_company_id: row.parent_company_id, is_branch: true,
+            location_label: 'Branch',
+            bin: row.bin, name: row.name, is_active: row.is_active, status: row.status_normalized,
+            industry: row.industry, city: row.city, sources: row.sources || [],
+            website: row.website, linkedin_url: row.linkedin_url,
+            year: row.founded_year || row.incorporation_year || null,
+          },
+        });
+      }
+    } catch { /* pre-101 boot — column may not exist yet; base map still works */ }
 
     res.json({
       type: 'FeatureCollection',

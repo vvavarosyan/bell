@@ -180,6 +180,33 @@ function arcCoords(a, b, steps = 32) {
   return pts;
 }
 
+// Always-on branch network: every branch pin (a company_locations point or an
+// archived child company) draws a tie-line back to its parent company's pin, so a
+// multi-location business reads as one connected constellation. Built once from the
+// /map FeatureCollection. Guards (Rule 2.1 / task #82): both endpoints inside Qatar,
+// non-zero length, and the parent must actually have a pin — no Null-Island lines.
+function buildBranchNetwork(features) {
+  const parentCoord = new Map();
+  for (const f of features || []) {
+    const p = f.properties || {};
+    if (p.location_id || p.is_branch) continue;             // only a main company pin can anchor
+    const c = f.geometry && f.geometry.coordinates;
+    if (c && inQatar(c[0], c[1])) parentCoord.set(p.id, c);
+  }
+  const lines = [];
+  for (const f of features || []) {
+    const p = f.properties || {};
+    if (!(p.location_id || p.is_branch)) continue;          // only branches draw a line
+    const pid = p.parent_company_id != null ? p.parent_company_id : p.id;
+    const origin = parentCoord.get(pid);
+    const bc = f.geometry && f.geometry.coordinates;
+    if (!origin || !bc || !inQatar(bc[0], bc[1])) continue;
+    if (Math.abs(origin[0] - bc[0]) < 1e-6 && Math.abs(origin[1] - bc[1]) < 1e-6) continue;
+    lines.push({ type: 'Feature', geometry: { type: 'LineString', coordinates: arcCoords(origin, bc) }, properties: { name: p.name || '' } });
+  }
+  return { type: 'FeatureCollection', features: lines };
+}
+
 let arcAnimTimer = null;
 function clearNetwork(map) {
   if (arcAnimTimer) { clearInterval(arcAnimTimer); arcAnimTimer = null; }
@@ -362,6 +389,9 @@ export function MapTab() {
     setLayerVisibility(map, 'company-points',  showCompanies);
     setLayerVisibility(map, 'clusters',        showCompanies);
     setLayerVisibility(map, 'cluster-count',   showCompanies);
+    // Branch-network tie-lines ride the Companies toggle.
+    setLayerVisibility(map, 'branch-net-glow', showCompanies);
+    setLayerVisibility(map, 'branch-net-line', showCompanies);
     // Real Estate layers
     setLayerVisibility(map, 're-districts',    showREPrices);
     setLayerVisibility(map, 're-buildings',    showBuildings);
@@ -535,6 +565,22 @@ export function MapTab() {
           map.addSource('companies', {
             type: 'geojson', data: geo,
             cluster: true, clusterMaxZoom: 14, clusterRadius: 50,
+          });
+
+          // Branch network — ambient parent→branch tie-lines (added first so they
+          // render UNDER the pins). Toggled with the Companies layer. A faint teal
+          // constellation; the orange click-highlight (showBranchTies) still layers
+          // on top when a company is selected.
+          map.addSource('branch-net-src', { type: 'geojson', data: buildBranchNetwork(geo.features) });
+          map.addLayer({
+            id: 'branch-net-glow', type: 'line', source: 'branch-net-src',
+            layout: { visibility: 'none', 'line-cap': 'round', 'line-join': 'round' },
+            paint: { 'line-color': '#22d3ee', 'line-width': 3, 'line-opacity': 0.10, 'line-blur': 2 },
+          });
+          map.addLayer({
+            id: 'branch-net-line', type: 'line', source: 'branch-net-src',
+            layout: { visibility: 'none', 'line-cap': 'round', 'line-join': 'round' },
+            paint: { 'line-color': '#22d3ee', 'line-width': 1.1, 'line-opacity': 0.5 },
           });
 
           map.addLayer({
