@@ -242,14 +242,27 @@ export function BellaVoice({ onClose, onOpenChat }) {
       // for his own interruption.
       const wasInterrupted = run.stopped;
       run.stop();
-      if (!wasInterrupted) toast('Bella: ' + errored, 'error');
-      setLine(''); setSt('listening'); return;
+      if (!wasInterrupted) {
+        // Voice must never fail SILENTLY (Val 2026-07-20): speak a short apology
+        // out loud, not just a toast he can't hear. Speaking also resets the mic
+        // idle timer, so voice won't auto-close right after the failure.
+        toast('Bella: ' + errored, 'error');
+        await speak('Sorry, something went wrong on my end. Could you try that again?');
+      } else { setLine(''); setSt('listening'); }
+      return;
     }
     // Flush whatever remains after the stream ended (choices tail is UI-only).
     const rest = speechBuf.replace(CHOICES_RX, '').trim();
     if (rest && !run.stopped) run.push(rest);
     run.finish();
     await run.done;
+    // A3: if the whole turn produced NO speakable text (empty server turn or a
+    // cut stream) and Val didn't interrupt, say a fallback — never revert to
+    // Listening in silence.
+    if (aliveRef.current && !run.stopped && !finalText.replace(CHOICES_RX, '').trim()) {
+      await speak('Sorry — I didn’t catch that. Could you say it again?');
+      return;
+    }
     if (aliveRef.current && !run.stopped) { setLine(''); setSt('listening'); }
   };
 

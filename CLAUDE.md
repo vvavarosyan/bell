@@ -11,6 +11,10 @@ Val is the founder and sole operator. He is **not** a developer and does not rea
 **Ask him where he is in this list at the start of the session. Do not assume it's done.**
 Full detail lives in memory: [[self-marketing-outreach]] and [[data-completeness-program]].
 
+**CURRENT FOCUS (2026‑07‑20 eve): PERFECT BELLA** — Val's 3 complaints: (1) slow to think/respond, (2) errors on hard multi‑step tasks, (3) VOICE drops a long‑thinking turn without answering → switches Thinking→Listening→voice OFF, forcing a manual restart. Investigating + fixing. **Then:** Bella test round → the deeper DOC location‑data investigation (wrong "Lusail" city, duplicate DOC records, branch modeling — parked from a session‑limit interruption).
+
+**PENDING (Val's click, no rush) — DISCOVERY REVIEW:** local Portal (127.0.0.1:3939) → nav "Discovery Review" → work the 542 Maps candidates + 110 Qatar Spark discoveries: Approve real Qatar businesses (creates a full company + map pin, dedup‑guarded), Reject junk; 52 foreign are admin‑only (Dismiss). Tell Claude after a batch → Claude pushes. Detail: [[discovery-review-queue]].
+
 **VAL'S MORNING STEPS (a one‑time scheduled reminder fires 2026‑07‑21 08:00 Doha — task `val-morning-steps-2026-07-21`):**
 - [ ] **a.** app.bell.qa → Marketing → Stats on "Bella outreach": expect **Emailed 1 / Delivered 1** (first real MyWeb send, fires inside Sat–Thu 07:00–17:00 Doha). All‑zeros after 09:00 Doha = tell Claude, needs investigating.
 - [ ] **b.** Double‑click `Run Spark Enrichment.command` (daily): expect batch 10 → 12 → HOLDS at 12, **no "max credits"** (refusal‑ceiling memory shipped cce2716; queue is no‑website companies first). Paste closing lines to Claude.

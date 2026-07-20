@@ -27,7 +27,7 @@ import { formatQatar } from '../lib/qatar_time.js';
 import * as store from './store.js';
 
 const MODEL       = process.env.BDI_BELLA_MODEL || 'claude-sonnet-5';
-const MAX_TOKENS  = 2048;
+const MAX_TOKENS  = 4096;     // 2048 was too tight — a long email/plan tool input
 const MAX_ROUNDS  = 6;        // model-call rounds per user turn (tool loop bound)
 const HISTORY_MAX = 60;       // hard fetch cap; store.js quantises it to a cacheable window
 
@@ -67,15 +67,19 @@ export function friendlyAnthropicError(status, body) {
 // stop_reason, and usage; forwards text deltas via onToken.
 // ---------------------------------------------------------------------------
 
-async function streamModelResponse({ apiKey, system, messages, signal, onToken }) {
+async function streamModelResponse({ apiKey, system, messages, signal, onToken, toolChoice = null }) {
   // Watchdog: a turn may NEVER hang silently (Val hit an endless "…" on
-  // 2026-07-03). Own controller chained to the client-disconnect signal +
-  // a hard 90s cap on the whole model call, streaming included.
+  // 2026-07-03). Own controller chained to the client-disconnect signal. The
+  // 90s cap fires only on TRUE silence — it's re-armed on every stream event
+  // below, so a legitimately long round (heavy tools, cold model) that keeps
+  // streaming is never killed mid-work (Val 2026-07-20: "thinks a bit long").
   const ctrl = new AbortController();
   let timedOut = false;
   const chain = () => ctrl.abort();
   if (signal) { if (signal.aborted) ctrl.abort(); else signal.addEventListener('abort', chain, { once: true }); }
-  const watchdog = setTimeout(() => { timedOut = true; ctrl.abort(); }, 90_000);
+  let watchdog;
+  const armWatchdog = () => { clearTimeout(watchdog); watchdog = setTimeout(() => { timedOut = true; ctrl.abort(); }, 90_000); };
+  armWatchdog();
 
   try {
   const res = await fetch('https://api.anthropic.com/v1/messages', {
@@ -94,6 +98,9 @@ async function streamModelResponse({ apiKey, system, messages, signal, onToken }
       stream: true,
       system,
       tools: TOOL_DEFINITIONS,
+      // The forced wrap-up call passes {type:'none'} so the model must ANSWER,
+      // not call another tool. Tools array stays present (keeps the cache prefix).
+      ...(toolChoice ? { tool_choice: toolChoice } : {}),
       messages,
     }),
   });
@@ -112,6 +119,7 @@ async function streamModelResponse({ apiKey, system, messages, signal, onToken }
   let streamError = null;
 
   const feed = createSSEFeeder((event, data) => {
+    armWatchdog();   // any stream event = still alive → reset the silence timer
     if (event === 'message_start') {
       const u = data?.message?.usage || {};
       inputTokens = (u.input_tokens || 0) + (u.cache_read_input_tokens || 0) + (u.cache_creation_input_tokens || 0);
@@ -172,10 +180,15 @@ async function streamModelResponse({ apiKey, system, messages, signal, onToken }
       if (b._partial !== undefined) delete b._partial;
       return b;
     });
-  return {
-    blocks: cleaned.length ? cleaned : [{ type: 'text', text: '(no answer this round — please ask again)' }],
-    stopReason, inputTokens, cacheReadTokens, outputTokens,
-  };
+  if (!cleaned.length) {
+    // A round that produced no usable content. The fallback used to be saved but
+    // NEVER streamed (onToken only fires on live deltas), so voice heard silence.
+    // Emit it as a real token so the client always gets SOMETHING to show/speak.
+    const msg = 'Sorry — I didn’t catch that. Could you say it again?';
+    try { onToken(msg); } catch { /* ignore */ }
+    return { blocks: [{ type: 'text', text: msg }], stopReason, inputTokens, cacheReadTokens, outputTokens };
+  }
+  return { blocks: cleaned, stopReason, inputTokens, cacheReadTokens, outputTokens };
   } catch (err) {
     if (timedOut) throw new Error('the model did not answer within 90 seconds — please try again');
     throw err;
@@ -408,12 +421,17 @@ export async function runBellaTurn({ ctx, conversationId, userText, clientContex
   userSaved.catch(() => { /* real failure is surfaced by the await inside the loop */ });
 
   let totalIn = 0, totalOut = 0, totalCacheRead = 0;
+  // Track whether the user ever received text this turn, so a turn NEVER ends
+  // in silence (voice reverts to Listening with no answer otherwise — Val).
+  let anyText = false;
+  const emitToken = (t) => { if (t) anyText = true; send('token', { t }); };
   try {
-    const maxRounds = grant ? 10 : MAX_ROUNDS;   // an approved plan runs many steps
+    const maxRounds = grant ? 12 : MAX_ROUNDS;   // an approved plan runs many steps
+    let answered = false;
     for (let round = 0; round < maxRounds; round++) {
       setHistoryCacheBreakpoint(messages);
       const { blocks, stopReason, inputTokens, cacheReadTokens, outputTokens } =
-        await streamModelResponse({ apiKey, system, messages, signal, onToken: (t) => send('token', { t }) });
+        await streamModelResponse({ apiKey, system, messages, signal, onToken: emitToken });
       // The user row must land before any assistant row (history replays ORDER BY id).
       // Resolved already after round 1 — free, and it overlapped the model's first token.
       await userSaved;
@@ -421,10 +439,17 @@ export async function runBellaTurn({ ctx, conversationId, userText, clientContex
 
       const toolUses = blocks.filter((b) => b.type === 'tool_use');
       if (stopReason !== 'tool_use' || toolUses.length === 0) {
+        // A5: 'max_tokens' can end a round mid-tool_use — the model wanted a tool
+        // but was cut off, so we're NOT executing it. Persisting that dangling
+        // tool_use bricks the next turn (no tool_result → HTTP 400). Strip any
+        // un-executed tool_use blocks from the answer we save.
+        const finalBlocks = toolUses.length ? blocks.filter((b) => b.type !== 'tool_use') : blocks;
+        const safeBlocks = finalBlocks.length ? finalBlocks : [{ type: 'text', text: 'Done.' }];
         await store.addMessage(convId, tenantId, userId, {
-          role: 'assistant', content: textOf(blocks), contentJson: blocks,
+          role: 'assistant', content: textOf(safeBlocks), contentJson: safeBlocks,
           usage: { input_tokens: inputTokens, output_tokens: outputTokens },
         });
+        answered = true;
         break;
       }
 
@@ -505,7 +530,30 @@ export async function runBellaTurn({ ctx, conversationId, userText, clientContex
       messages.push({ role: 'user', content: results });
     }
 
-    send('done', { conversation_id: convId, usage: { input_tokens: totalIn, output_tokens: totalOut }, turns_today: budget.turns });
+    // A1: the loop hit its round cap while still calling tools — the work RAN but
+    // the model never got a turn to summarize, so the turn would end silently.
+    // Force ONE tool-free reply so she ALWAYS says what she did. sonnet-5, no
+    // temperature (§2.8); tools array kept, tool_choice 'none' (rare tail-only
+    // cache miss — acceptable). If even this fails, still say something.
+    if (!answered) {
+      try {
+        setHistoryCacheBreakpoint(messages);
+        const wrap = await streamModelResponse({
+          apiKey, system, messages, signal, onToken: emitToken, toolChoice: { type: 'none' },
+        });
+        totalIn += wrap.inputTokens; totalOut += wrap.outputTokens; totalCacheRead += wrap.cacheReadTokens;
+        await store.addMessage(convId, tenantId, userId, {
+          role: 'assistant', content: textOf(wrap.blocks), contentJson: wrap.blocks,
+          usage: { input_tokens: wrap.inputTokens, output_tokens: wrap.outputTokens },
+        });
+      } catch (e) {
+        const msg = 'I ran several steps but hit my limit before I could wrap up — ask me to continue and I’ll pick up where I left off.';
+        emitToken(msg);
+        await store.addMessage(convId, tenantId, userId, { role: 'assistant', content: msg, contentJson: [{ type: 'text', text: msg }] }).catch(() => {});
+      }
+    }
+
+    send('done', { conversation_id: convId, had_text: anyText, usage: { input_tokens: totalIn, output_tokens: totalOut }, turns_today: budget.turns });
     console.log(`[bella] turn ok · in=${totalIn} (cache_read=${totalCacheRead}, ${totalIn ? Math.round((totalCacheRead / totalIn) * 100) : 0}%) · out=${totalOut}`);
   } catch (err) {
     if (err?.name === 'AbortError' && signal?.aborted) return;   // client left — nothing to report
