@@ -54,6 +54,21 @@ export async function pendingCount() {
   return r.rows[0].n;
 }
 
+// Atomically claim the next `limit` pending companies — mark them 'submitted' in
+// the SAME statement so concurrent runs never grab overlapping sets. FOR UPDATE
+// SKIP LOCKED hands each caller a disjoint batch (enables parallel daily runs).
+async function claimPending(limit) {
+  const r = await query(
+    `UPDATE companies SET spark_status='submitted', spark_at=now()
+      WHERE id IN (
+        SELECT id FROM companies
+         WHERE spark_status IS NULL AND is_active = true AND COALESCE(archived, false) = false
+         ORDER BY (website IS NOT NULL), bell_score DESC NULLS LAST, id
+         LIMIT $1 FOR UPDATE SKIP LOCKED)
+      RETURNING id, name, primary_registration_no AS cr, city, website`, [limit]);
+  return r.rows;
+}
+
 // ---------------------------------------------------------------------------
 // Ingest one company's result object. Returns the number of facts written.
 // ---------------------------------------------------------------------------
@@ -161,16 +176,20 @@ async function ingestCompany(c, out) {
 // ---------------------------------------------------------------------------
 export async function runOneBatch({ onProgress = () => {}, batchOverride = null } = {}) {
   const size = batchOverride || await currentBatchSize();
-  const candidates = await pickPending(size);
-  if (!candidates.length) return { status: 'no_pending' };
-  const rows = fitBatch(candidates);
+  // Atomic claim (marks 'submitted') so parallel runs never overlap.
+  const claimed = await claimPending(size);
+  if (!claimed.length) return { status: 'no_pending' };
+  const rows = fitBatch(claimed);
+  // Release any claimed-but-dropped (didn't fit the prompt budget) back to pending.
+  const keep = new Set(rows.map((r) => Number(r.id)));
+  const dropped = claimed.filter((c) => !keep.has(Number(c.id)));
+  if (dropped.length) await query(`UPDATE companies SET spark_status=NULL WHERE id = ANY($1)`, [dropped.map((c) => c.id)]);
   const prompt = buildPrompt(rows);
   onProgress(`submitting ${rows.length} companies (prompt ${prompt.length} chars)…`);
 
   const run = (await query(
     `INSERT INTO spark_runs (batch_size, company_ids) VALUES ($1,$2) RETURNING id`,
     [rows.length, rows.map((r) => r.id)])).rows[0];
-  await query(`UPDATE companies SET spark_status='submitted', spark_at=now() WHERE id = ANY($1)`, [rows.map((r) => r.id)]);
 
   let jobId;
   try {

@@ -5,6 +5,9 @@
 import { query } from '../db.js';
 import { runOneBatch, pendingCount, currentBatchSize } from '../enrichment/spark/engine.js';
 
+// Firecrawl's free tier allows 5 agent runs/day. We calibrate with 1, then run
+// the remaining 4 concurrently — each claims a disjoint company batch atomically.
+
 const MAX_RUNS = 5;
 
 async function tablesReady() {
@@ -26,27 +29,47 @@ async function main() {
   console.log('Running up to ' + MAX_RUNS + ' agent runs (the free daily budget). Each takes ~2-10 minutes.');
   console.log('');
 
-  let totalFacts = 0, totalCompanies = 0;
-  for (let i = 1; i <= MAX_RUNS; i += 1) {
-    console.log('— Run ' + i + '/' + MAX_RUNS + ' —');
+  let totalFacts = 0, totalCompanies = 0, runsUsed = 0, calibrated = false, stop = false;
+
+  const okLine = (tag, r) =>
+    console.log(`  ✓ ${tag}${r.returned}/${r.submitted} researched · ${r.facts} facts · ${r.empty} nothing findable · coverage ${r.coverage}% (next batch: ${r.next_batch})`);
+
+  // PHASE 1 — calibrate: run sequentially until ONE run succeeds. This is cheap
+  // insurance: if the batch size is too big for a free run, only one run refuses
+  // (not all 5 at once), and the remembered ceiling shrinks it before we fan out.
+  while (runsUsed < MAX_RUNS && !calibrated && !stop) {
+    runsUsed += 1;
+    console.log('— Calibration run ' + runsUsed + '/' + MAX_RUNS + ' —');
     const r = await runOneBatch({ onProgress: (m) => console.log('  ' + m) });
-    if (r.status === 'no_pending') { console.log('  Nothing left to submit — every company has been through Spark. 🎉'); break; }
-    if (r.status === 'shrunk') {
-      console.log('  Batch was too big for one free run ("max credits") — shrinking to ' + r.next_batch + ' and retrying with the next run.');
-      continue;
-    }
+    if (r.status === 'no_pending') { console.log('  Nothing left to submit — every company has been through Spark. 🎉'); stop = true; break; }
+    if (r.status === 'shrunk') { console.log('  Too big for one free run — shrinking to ' + r.next_batch + ' and retrying.'); continue; }
     if (r.status === 'submit_failed' || r.status === 'run_failed') {
       console.log('  STOPPED: ' + (r.error || r.status));
-      if (/quota|limit|429|payment|insufficient/i.test(String(r.error || ''))) {
-        console.log('  → Looks like today\'s free runs are used up. Re-run tomorrow — it continues automatically.');
-      } else {
-        console.log('  → Re-run this command to retry (the batch went back to pending). If it repeats, copy this output to Claude.');
-      }
-      break;
+      console.log(/quota|limit|429|payment|insufficient/i.test(String(r.error || ''))
+        ? '  → Today\'s free runs look used up. Re-run tomorrow — it continues automatically.'
+        : '  → Re-run this command to retry (the batch went back to pending). If it repeats, copy this to Claude.');
+      stop = true; break;
     }
-    console.log(`  ✓ ${r.returned}/${r.submitted} companies researched · ${r.facts} facts ingested · ${r.empty} had nothing findable · coverage ${r.coverage}% (next batch: ${r.next_batch})`);
-    totalFacts += r.facts;
-    totalCompanies += r.returned;
+    okLine('', r); totalFacts += r.facts; totalCompanies += r.returned; calibrated = true;
+  }
+
+  // PHASE 2 — parallel: spend the remaining daily budget concurrently (Val:
+  // "cant it send 5 directly? we can run agents simultaneously"). Each run claims
+  // a DISJOINT batch atomically (FOR UPDATE SKIP LOCKED), so they never overlap.
+  const remaining = MAX_RUNS - runsUsed;
+  if (calibrated && !stop && remaining > 0 && (await pendingCount()) > 0) {
+    console.log('');
+    console.log('— Running ' + remaining + ' more agent' + (remaining === 1 ? '' : 's') + ' in parallel —');
+    const settled = await Promise.all(
+      Array.from({ length: remaining }, (_, i) =>
+        runOneBatch({ onProgress: (m) => console.log('  [agent ' + (i + 2) + '] ' + m) })
+          .catch((e) => ({ status: 'error', error: e.message }))));
+    for (const r of settled) {
+      if (r.status === 'completed') { okLine('[parallel] ', r); totalFacts += r.facts; totalCompanies += r.returned; }
+      else if (r.status === 'no_pending') console.log('  [parallel] nothing left to submit.');
+      else if (r.status === 'shrunk') console.log('  [parallel] one run hit "max credits" — its companies went back to pending (retry next time).');
+      else console.log('  [parallel] ' + r.status + ': ' + (r.error || '') + ' — its companies went back to pending.');
+    }
   }
 
   const left = await pendingCount();

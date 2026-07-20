@@ -34,6 +34,19 @@ const DRAW_CSS_URL     = `https://api.mapbox.com/mapbox-gl-js/plugins/mapbox-gl-
 // Doha center for fly-to + isochrone default
 const DOHA = [51.5310, 25.2854];
 
+// Qatar bounding box (lng min, lat min, lng max, lat max). ALL Bell data is Qatar,
+// so a coordinate outside this box is bad data. Guards against the "Null Island"
+// trap: Number(null) === 0 (which is finite!), so an unchecked null coordinate
+// renders a pin/line at [0,0] — the Gulf of Guinea. inQatar() rejects null, ''
+// (also →0), non-finite, AND any coordinate outside the country.
+const QATAR_BBOX = [50.55, 24.40, 51.85, 26.30];
+function inQatar(lng, lat) {
+  if (lng == null || lat == null || lng === '' || lat === '') return false;
+  const x = Number(lng), y = Number(lat);
+  return Number.isFinite(x) && Number.isFinite(y)
+    && x >= QATAR_BBOX[0] && x <= QATAR_BBOX[2] && y >= QATAR_BBOX[1] && y <= QATAR_BBOX[3];
+}
+
 // Per-source colors
 const SOURCE_COLOR = {
   QFC:  '#8bb0ff',
@@ -180,7 +193,7 @@ async function showNetwork(map, companyId, origin) {
     const r = await api.companyMapNetwork(companyId);
     clearNetwork(map);
     const all = r.edges || [];
-    const edges = all.filter((e) => Number.isFinite(Number(e.t_lng)) && Number.isFinite(Number(e.t_lat)));
+    const edges = all.filter((e) => inQatar(e.t_lng, e.t_lat));
     if (!edges.length) {
       if (all.length) toast(`${all.length} network link${all.length === 1 ? '' : 's'} known — none with map coordinates yet.`);
       return;
@@ -232,7 +245,7 @@ async function showBranchTies(map, companyId, origin) {
     const r = await api.companyLocations(companyId);
     clearBranchTies(map);
     const sibs = (r.locations || []).filter((l) =>
-      Number.isFinite(Number(l.latitude)) && Number.isFinite(Number(l.longitude)) &&
+      inQatar(l.longitude, l.latitude) &&
       (Math.abs(Number(l.longitude) - origin[0]) > 1e-6 || Math.abs(Number(l.latitude) - origin[1]) > 1e-6));
     if (!sibs.length) return;
     const fc = {
@@ -273,8 +286,8 @@ async function loadREData(map) {
   reDataLoading = true;
   try {
     const d = await api.realEstateMap();
-    const districts = { type: 'FeatureCollection', features: (d.districts || []).filter((x) => x.lat != null && x.avg_sqm != null).map((x) => ({ type: 'Feature', geometry: { type: 'Point', coordinates: [Number(x.lng), Number(x.lat)] }, properties: { ename: x.ename, deals: x.deals || 0, avg_sqm: x.avg_sqm || 0 } })) };
-    const buildings = { type: 'FeatureCollection', features: (d.buildings || []).filter((x) => x.lat != null).map((x) => ({ type: 'Feature', geometry: { type: 'Point', coordinates: [Number(x.lng), Number(x.lat)] }, properties: { ename: x.ename || '', category: x.subcategory_name || x.category || '', district: x.district_ename || '', street: x.street_ename || '', zone_no: x.zone_no ?? '', phone: x.phone || '', company_id: x.company_id ?? '', company_name: x.company_name || '' } })) };
+    const districts = { type: 'FeatureCollection', features: (d.districts || []).filter((x) => inQatar(x.lng, x.lat) && x.avg_sqm != null).map((x) => ({ type: 'Feature', geometry: { type: 'Point', coordinates: [Number(x.lng), Number(x.lat)] }, properties: { ename: x.ename, deals: x.deals || 0, avg_sqm: x.avg_sqm || 0 } })) };
+    const buildings = { type: 'FeatureCollection', features: (d.buildings || []).filter((x) => inQatar(x.lng, x.lat)).map((x) => ({ type: 'Feature', geometry: { type: 'Point', coordinates: [Number(x.lng), Number(x.lat)] }, properties: { ename: x.ename || '', category: x.subcategory_name || x.category || '', district: x.district_ename || '', street: x.street_ename || '', zone_no: x.zone_no ?? '', phone: x.phone || '', company_id: x.company_id ?? '', company_name: x.company_name || '' } })) };
     if (map.getSource('re-districts')) map.getSource('re-districts').setData(districts);
     if (map.getSource('re-buildings')) map.getSource('re-buildings').setData(buildings);
     reBuildingsData = buildings.features;
@@ -312,7 +325,8 @@ export function MapTab() {
   const [showHeatmap,  setShowHeatmap]  = useState(false);
   const [showTraffic,  setShowTraffic]  = useState(false);
   const [showWeather,  setShowWeather]  = useState(false);
-  const [showSignals,  setShowSignals]  = useState(true);   // Phase D — live signal pins
+  const [showSignals,  setShowSignals]  = useState(false);  // Phase D — live signal pins (off by default, Val 2026-07-20)
+  const [showCompanies, setShowCompanies] = useState(false); // company dots/clusters — off by default; user turns them on
   const [showREPrices, setShowREPrices] = useState(false);  // Real Estate: price-by-area heat
   const [showBuildings, setShowBuildings] = useState(false); // Real Estate: named buildings
   const [showParcels,  setShowParcels]  = useState(false);  // Real Estate: land parcels (viewport-lazy)
@@ -334,6 +348,10 @@ export function MapTab() {
     setLayerVisibility(map, 'weather-radar',   showWeather);
     setLayerVisibility(map, 'signal-rings',    showSignals);
     setLayerVisibility(map, 'signal-points',   showSignals);
+    // Company dots/clusters — user-toggled, hidden until switched on.
+    setLayerVisibility(map, 'company-points',  showCompanies);
+    setLayerVisibility(map, 'clusters',        showCompanies);
+    setLayerVisibility(map, 'cluster-count',   showCompanies);
     // Real Estate layers
     setLayerVisibility(map, 're-districts',    showREPrices);
     setLayerVisibility(map, 're-buildings',    showBuildings);
@@ -342,7 +360,7 @@ export function MapTab() {
     if ((showREPrices || showBuildings) && map.getSource('re-districts')) loadREData(map);
     showParcelsRef.current = showParcels;
     if (showParcels) fetchParcels(map);
-  }, [showHeatmap, showTraffic, showWeather, showSignals, showREPrices, showBuildings, showParcels, activeSources, yearRange]);
+  }, [showHeatmap, showTraffic, showWeather, showSignals, showCompanies, showREPrices, showBuildings, showParcels, activeSources, yearRange]);
 
   // ---- Boot -------------------------------------------------------------
   useEffect(() => {
@@ -385,12 +403,20 @@ export function MapTab() {
         setStats({ total: geo.total });
         const sigGeo = {
           type: 'FeatureCollection',
-          features: (sigData.rows || []).map((s) => ({
+          features: (sigData.rows || []).filter((s) => inQatar(s.longitude, s.latitude)).map((s) => ({
             type: 'Feature',
             geometry: { type: 'Point', coordinates: [Number(s.longitude), Number(s.latitude)] },
             properties: { kind: s.kind, title: s.title, company_id: s.company_id, company_name: s.company_name },
           })),
         };
+        // Guard the companies source too: a stored foreign coordinate (bad geocode)
+        // would otherwise render a pin outside Qatar. Filter to the country bbox.
+        if (Array.isArray(geo.features)) {
+          geo.features = geo.features.filter((f) => {
+            const c = f?.geometry?.coordinates;
+            return Array.isArray(c) && inQatar(c[0], c[1]);
+          });
+        }
 
         // Compute year bounds from data for slider
         const years = (geo.features || [])
@@ -523,6 +549,7 @@ export function MapTab() {
           map.addLayer({
             id: 'clusters', type: 'circle', source: 'companies',
             filter: ['has', 'point_count'],
+            layout: { visibility: 'none' },   // off by default — user toggles Companies on
             paint: {
               'circle-color': '#5b8cff',
               'circle-opacity': 0.85,
@@ -534,12 +561,13 @@ export function MapTab() {
           map.addLayer({
             id: 'cluster-count', type: 'symbol', source: 'companies',
             filter: ['has', 'point_count'],
-            layout: { 'text-field': '{point_count_abbreviated}', 'text-font': ['Open Sans Bold', 'Arial Unicode MS Bold'], 'text-size': 12 },
+            layout: { visibility: 'none', 'text-field': '{point_count_abbreviated}', 'text-font': ['Open Sans Bold', 'Arial Unicode MS Bold'], 'text-size': 12 },
             paint: { 'text-color': '#ffffff' },
           });
           map.addLayer({
             id: 'company-points', type: 'circle', source: 'companies',
             filter: ['!', ['has', 'point_count']],
+            layout: { visibility: 'none' },   // off by default — user toggles Companies on
             paint: {
               'circle-radius': ['interpolate', ['linear'], ['zoom'], 9, 5, 14, 9, 18, 14],
               'circle-color': [
@@ -608,6 +636,7 @@ export function MapTab() {
           map.addSource('signals', { type: 'geojson', data: sigGeo });
           map.addLayer({
             id: 'signal-rings', type: 'circle', source: 'signals',
+            layout: { visibility: 'none' },   // off by default (Val 2026-07-20)
             paint: {
               'circle-radius': ['interpolate', ['linear'], ['zoom'], 8, 9, 14, 16],
               'circle-color': sigColorExpr(),
@@ -616,6 +645,7 @@ export function MapTab() {
           });
           map.addLayer({
             id: 'signal-points', type: 'circle', source: 'signals',
+            layout: { visibility: 'none' },   // off by default (Val 2026-07-20)
             paint: {
               'circle-radius': ['interpolate', ['linear'], ['zoom'], 8, 3.5, 14, 5.5],
               'circle-color': sigColorExpr(),
@@ -921,6 +951,12 @@ export function MapTab() {
           ${toolsOpen ? html`
           <div class="map-controls-section">
             <div class="map-controls-label">Layers</div>
+            <label class="map-toggle">
+              <input type="checkbox" checked=${showCompanies}
+                onChange=${e => setShowCompanies(e.target.checked)} />
+              <span>Companies</span>
+              <span class="map-toggle-hint">${stats?.total ? Number(stats.total).toLocaleString() + ' pins' : 'dots'}</span>
+            </label>
             <label class="map-toggle">
               <input type="checkbox" checked=${showSignals}
                 onChange=${e => setShowSignals(e.target.checked)} />

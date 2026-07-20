@@ -378,6 +378,10 @@ router.get('/map', async (req, res, next) => {
       WHERE c.latitude IS NOT NULL
         AND c.longitude IS NOT NULL
         AND c.archived = false
+        -- All Bell data is Qatar; a coordinate outside the country bbox is a bad
+        -- geocode (e.g. stage5 resolving a bare company name to a foreign place).
+        -- Never emit it as a map pin — to any consumer (map, Bella, exports).
+        AND c.longitude BETWEEN 50.55 AND 51.85 AND c.latitude BETWEEN 24.40 AND 26.30
     `);
     const features = r.rows.map(row => ({
       type: 'Feature',
