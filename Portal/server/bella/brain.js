@@ -21,7 +21,7 @@
 import { getKey } from '../keychain.js';
 import { buildSystem } from './prompt.js';
 import { TOOL_DEFINITIONS, getTool, executeTool, requiresApproval } from './tools.js';
-import { buildPlanGrant, takeGrant, planApprovedNote } from './plan.js';
+import { buildPlanGrant, takeGrant, planApprovedNote, planSteps } from './plan.js';
 import { freshSignalsBrief } from './context.js';
 import { formatQatar } from '../lib/qatar_time.js';
 import * as store from './store.js';
@@ -320,6 +320,7 @@ export async function runBellaTurn({ ctx, conversationId, userText, clientContex
   // step. The grant never outlives the turn and never covers tools the plan
   // didn't name. (Val's multi-action autonomy spec, 2026-07-08.)
   let grant = null;
+  let grantSteps = 0;   // step count of an approved plan → scales the round budget
   // Fill-miss feedback (Val 2026-07-12: "she said it is done but it did not
   // happen — she lied"). When a fill_field dispatch finds no matching field on
   // screen, the client reports it back here with the fields that ARE present,
@@ -352,6 +353,7 @@ export async function runBellaTurn({ ctx, conversationId, userText, clientContex
           let args = action.args;
           if (typeof args === 'string') { try { args = JSON.parse(args); } catch { args = {}; } }
           grant = buildPlanGrant(args, (name) => !!getTool(name));
+          grantSteps = planSteps(args).length;
           effectiveText = planApprovedNote(action.id, args);
         }
       } else if (action.status === 'denied') {
@@ -380,6 +382,7 @@ export async function runBellaTurn({ ctx, conversationId, userText, clientContex
       if (typeof args === 'string') { try { args = JSON.parse(args); } catch { args = {}; } }
       if (a.tool === 'propose_plan') {
         grant = buildPlanGrant(args, (name) => !!getTool(name));
+        grantSteps = planSteps(args).length;
         await store.setActionStatus(a.id, 'done', 'approved by voice/chat').catch(() => {});
         effectiveText = planApprovedNote(a.id, args);
       } else {
@@ -435,7 +438,10 @@ export async function runBellaTurn({ ctx, conversationId, userText, clientContex
   let anyText = false;
   const emitToken = (t) => { if (t) anyText = true; send('token', { t }); };
   try {
-    const maxRounds = grant ? 12 : MAX_ROUNDS;   // an approved plan runs many steps
+    // An approved plan runs many steps — give it enough rounds for read+act per
+    // step (a step may need a lookup then the action), capped. Non-plan turns use
+    // the small default (the forced wrap-up still makes hitting it graceful).
+    const maxRounds = grant ? Math.min(24, Math.max(12, grantSteps + 8)) : MAX_ROUNDS;
     let answered = false;
     for (let round = 0; round < maxRounds; round++) {
       setHistoryCacheBreakpoint(messages);
@@ -476,6 +482,17 @@ export async function runBellaTurn({ ctx, conversationId, userText, clientContex
       for (let i = 0; i < toolUses.length; i++) {
         const tu = toolUses[i];
         const tool = getTool(tu.name);
+
+        // Mid-plan over-budget: a gated tool the approved plan did NOT cover
+        // (the model called it more times than planned, or one the plan never
+        // named). Raising a fresh card here breaks the one-card promise (Val
+        // 2026-07-20). Hand back a narratable result instead — the tool did NOT
+        // run, and Bella tells the user honestly + can re-propose if they want it.
+        if (grant && !autonomous && requiresApproval(tool, approvalMode) && !takeGrant(grant, tu.name)) {
+          slots[i] = { type: 'tool_result', tool_use_id: tu.id, content: JSON.stringify({ status: 'not_in_approved_plan', note: 'This action was NOT part of the plan the user approved, so it was NOT run (no email/spend happened). Tell the user plainly which step is beyond the approved plan; do not claim it ran. If they want it, offer to propose it separately.' }) };
+          metaSlots[i] = { name: tu.name, summary: 'skipped — not in the approved plan' };
+          continue;
+        }
 
         // Approval gate (Val's D2): 'always' tools gate in every mode;
         // 'act'/'spend' gate unless the user chose no-approval in Settings.
