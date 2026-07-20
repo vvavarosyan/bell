@@ -42,9 +42,15 @@ async function fetchJson(url) {
 // Zone 24", "BUILDING NO 24, STREET NO 810, ZONE 66", "zone91-street2001-bulding170",
 // Arabic labels, and common typos (bulding/bldng).
 // ---------------------------------------------------------------------------
-const Z_RX = /(?:zone|منطقة)\s*(?:no\.?|#|:)?\s*[-.]?\s*(\d{1,2})\b/i;
-const S_RX = /(?:street|st\.?|شارع)\s*(?:no\.?|#|:)?\s*[-.]?\s*(\d{1,4})\b/i;
-const B_RX = /(?:building|bu?i?ldi?n?g|bldg?|مبنى)\s*(?:no\.?|#|:)?\s*[-.]?\s*(\d{1,4})\b/i;
+// Label + optional "no/number/#/:" + the digits. Qatar sites use "Area" for Zone
+// and "…number …" as often as "…no. …" (proven on live data 2026-07-20 — this
+// recovers ~94 addresses that already carry a valid code). Still exact-or-nothing:
+// a wrong parse just makes a wrong code that the national locator rejects (score
+// < 100 → null), so the added synonyms can't create a false pin (Rule 2.1).
+const NO_RX = '(?:no\\.?|number|#|:)?';
+const Z_RX = new RegExp(`(?:zone|area|منطقة)\\s*${NO_RX}\\s*[-.]?\\s*(\\d{1,2})\\b`, 'i');
+const S_RX = new RegExp(`(?:street|st\\.?|شارع)\\s*${NO_RX}\\s*[-.]?\\s*(\\d{1,4})\\b`, 'i');
+const B_RX = new RegExp(`(?:building|bu?i?ldi?n?g|bldg?|مبنى)\\s*${NO_RX}\\s*[-.]?\\s*(\\d{1,4})\\b`, 'i');
 
 export function parseInwani(text) {
   const t = String(text || '');
