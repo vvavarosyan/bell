@@ -372,6 +372,14 @@ router.get('/map', async (req, res, next) => {
              c.latitude, c.longitude, c.archived,
              c.founded_year,
              EXTRACT(YEAR FROM c.incorporation_date)::int AS incorporation_year,
+             -- Area DERIVED from the pin's coordinate (nearest GIS district), so the
+             -- popup label always matches where the dot actually is. companies.city
+             -- is unreliable (LinkedIn HQ = a branch, blanket 'Doha' hardcodes) — it
+             -- made an Al Sadd pin read "Lusail" (Val 2026-07-20). Read off the pin,
+             -- not guessed → Rule 2.1-safe.
+             (SELECT d.ename FROM gis_districts d WHERE d.centroid_lat IS NOT NULL
+               ORDER BY (d.centroid_lat - c.latitude)^2 + (d.centroid_lng - c.longitude)^2
+               LIMIT 1) AS derived_area,
              (SELECT array_agg(DISTINCT cs.source ORDER BY cs.source)
               FROM company_sources cs WHERE cs.company_id = c.id) AS sources
       FROM companies c
@@ -393,7 +401,7 @@ router.get('/map', async (req, res, next) => {
         is_active: row.is_active,
         status:   row.status_normalized,
         industry: row.industry,
-        city:     row.city,
+        city:     row.derived_area || row.city,
         sources:  row.sources || [],
         website:  row.website,
         linkedin_url: row.linkedin_url,
@@ -417,7 +425,10 @@ router.get('/map', async (req, res, next) => {
           JOIN companies c ON c.id = l.company_id
          WHERE l.latitude IS NOT NULL AND l.longitude IS NOT NULL
            AND l.is_primary = false
-           AND c.archived = false`);
+           AND c.archived = false
+           -- Same Qatar-bbox guard as the main pins (P6 hardening) — a bad branch
+           -- geocode must never render off-country for any consumer.
+           AND l.longitude BETWEEN 50.55 AND 51.85 AND l.latitude BETWEEN 24.40 AND 26.30`);
       for (const row of locs.rows) {
         features.push({
           type: 'Feature',

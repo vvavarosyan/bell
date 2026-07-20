@@ -11,7 +11,9 @@ Val is the founder and sole operator. He is **not** a developer and does not rea
 **Ask him where he is in this list at the start of the session. Do not assume it's done.**
 Full detail lives in memory: [[self-marketing-outreach]] and [[data-completeness-program]].
 
-**CURRENT FOCUS (2026‑07‑20 eve): PERFECT BELLA** — Val's 3 complaints: (1) slow to think/respond, (2) errors on hard multi‑step tasks, (3) VOICE drops a long‑thinking turn without answering → switches Thinking→Listening→voice OFF, forcing a manual restart. Investigating + fixing. **Then:** Bella test round → the deeper DOC location‑data investigation (wrong "Lusail" city, duplicate DOC records, branch modeling — parked from a session‑limit interruption).
+**PERFECT BELLA — SHIPPED 2026‑07‑20 eve** (deep memory [[bella-perfection]]): silent‑no‑answer/voice‑drop chain fixed (forced honest wrap‑up, streamed fallback, watchdog reset, voice speaks on error); first‑token latency; HONESTY (no false "Done" — forced summary states what did/didn't complete); ORB "working" pulse; BELLA KNOWS THE MAP (map_nearby + land_info tools, 69 tools); voice polish (spoken "working on it" progress, no self‑interrupt, no overlapping turns); plan round‑budget scales to step count + no surprise mid‑plan card. **Remaining Bella polish (low pri):** C4 key‑prewarm (local‑only), C3 atomic tool‑pair, B5 batch‑tools (structural latency cure). **Awaiting Val's test.**
+
+**IN PROGRESS: deeper DOC location‑data investigation** (wrong "Lusail" city, duplicate DOC records, branch modeling, dedup, harvest gap) — 4 agents re‑running after the earlier session‑limit cut; ship safe fixes + present the branch‑modeling architecture decision to Val. Map render fixes + reliable DB‑backed land layer already DONE ([[map-location-quality]]).
 
 **PENDING (Val's click, no rush) — DISCOVERY REVIEW:** local Portal (127.0.0.1:3939) → nav "Discovery Review" → work the 542 Maps candidates + 110 Qatar Spark discoveries: Approve real Qatar businesses (creates a full company + map pin, dedup‑guarded), Reject junk; 52 foreign are admin‑only (Dismiss). Tell Claude after a batch → Claude pushes. Detail: [[discovery-review-queue]].
 
