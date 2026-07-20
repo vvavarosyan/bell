@@ -523,7 +523,7 @@ export function CompanyDetail({ companyId, onMutated, onDeleted, canHardDelete =
       </div>
 
       <div class="detail-body" ref=${bodyRef}>
-        ${tab === 'company' ? html`<${CompanyTab} company=${c} extra=${extra} similar=${similar} relationships=${rels} contacts=${data.contacts || []} onReload=${reload} needsReveal=${needsReveal} onReveal=${revealContacts} isUser=${isUser} isLocalEngine=${isLocalEngine} />` : null}
+        ${tab === 'company' ? html`<${CompanyTab} company=${c} extra=${extra} similar=${similar} relationships=${rels} contacts=${data.contacts || []} branches=${data.branches || []} parentCompany=${data.parent_company || null} onReload=${reload} needsReveal=${needsReveal} onReveal=${revealContacts} isUser=${isUser} isLocalEngine=${isLocalEngine} />` : null}
         ${tab === 'people'  ? (data.people_locked
           ? html`<${PeopleLockedBanner} count=${data.people_count ?? 0} compact=${true} />`
           : html`<${PeopleView}  people=${data.people} isUser=${isUser} onReveal=${revealPerson} />`) : null}
@@ -602,7 +602,7 @@ function CompanyNotes({ companyId }) {
     </section>`;
 }
 
-function CompanyTab({ company, extra, similar, relationships, contacts, onReload, needsReveal = false, onReveal, isUser = false, isLocalEngine = false }) {
+function CompanyTab({ company, extra, similar, relationships, contacts, branches = [], parentCompany = null, onReload, needsReveal = false, onReveal, isUser = false, isLocalEngine = false }) {
   const saveField = async (field, value) => {
     try {
       await api.updateCompany(company.id, { [field]: value });
@@ -787,6 +787,28 @@ function CompanyTab({ company, extra, similar, relationships, contacts, onReload
       ` : null}
 
       <${LocationsBlock} companyId=${company.id} />
+
+      ${parentCompany ? html`
+        <section class="group" key="branch-of">
+          <h3>Part of a group</h3>
+          <p style=${{ margin: '2px 0 0', color: 'var(--text-muted)', fontSize: '13px' }}>
+            This is a branch / facility of <strong style=${{ color: 'var(--text)' }}>${parentCompany.name}</strong>.
+          </p>
+        </section>
+      ` : null}
+
+      ${branches && branches.length ? html`
+        <section class="group" key="branches">
+          <h3>Branches &amp; facilities (${branches.length})</h3>
+          <div style=${{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginTop: '4px' }}>
+            ${branches.map((b) => html`
+              <span key=${b.id} title=${b.city || ''} style=${{ display: 'inline-block', padding: '3px 9px', borderRadius: '999px', background: 'var(--bg-elev-2)', border: '1px solid var(--border)', fontSize: '12px', color: 'var(--text)' }}>
+                ${b.name}
+              </span>
+            `)}
+          </div>
+        </section>
+      ` : null}
 
       ${Object.keys(linkedinExtras).length > 0 ? html`
         <section class="group" key="more-linkedin">

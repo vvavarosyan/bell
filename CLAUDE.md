@@ -13,14 +13,15 @@ Full detail lives in memory: [[self-marketing-outreach]] and [[data-completeness
 
 **PERFECT BELLA — SHIPPED 2026‑07‑20 eve** (deep memory [[bella-perfection]]): silent‑no‑answer/voice‑drop chain fixed (forced honest wrap‑up, streamed fallback, watchdog reset, voice speaks on error); first‑token latency; HONESTY (no false "Done" — forced summary states what did/didn't complete); ORB "working" pulse; BELLA KNOWS THE MAP (map_nearby + land_info tools, 69 tools); voice polish (spoken "working on it" progress, no self‑interrupt, no overlapping turns); plan round‑budget scales to step count + no surprise mid‑plan card. **Remaining Bella polish (low pri):** C4 key‑prewarm (local‑only), C3 atomic tool‑pair, B5 batch‑tools (structural latency cure). **Awaiting Val's test.**
 
-**IN PROGRESS: deeper DOC location‑data investigation** (wrong "Lusail" city, duplicate DOC records, branch modeling, dedup, harvest gap) — 4 agents re‑running after the earlier session‑limit cut; ship safe fixes + present the branch‑modeling architecture decision to Val. Map render fixes + reliable DB‑backed land layer already DONE ([[map-location-quality]]).
+**BRANCH MODEL — SHIPPED 2026‑07‑20 (deep memory [[branch-model]]):** migration 101 `parent_company_id` + exact‑or‑review matcher (`server/enrichment/branch_link.js`) that collapses empty MoPH facility shells into their ONE registered parent (the DOC fix). Word‑preserving key + genericness guard — caught a real Rule‑2.1 bug (stored `name_normalized` is lossy: "Al Jaber Holding Company"→"al jaber" wrongly swallowed "Al Jaber & Partners"). Live: **851 shells → 276 parents** collapse, 62 skipped (generic name, left alone), 0 legal‑branch links (foreign parents). Val's clicks: **Preview Branch Model.command** then **Apply Branch Model.command** (Apply archives shells reversibly + pushes to prod itself). Drawer shows "Branches & facilities (N)" / "Part of a group"; Bella `get_company` now surfaces locations + branches. Independent of the reharvest/geocode steps. Map render fixes + DB‑backed land layer already DONE ([[map-location-quality]]).
 
 **PENDING (Val's click, no rush) — DISCOVERY REVIEW:** local Portal (127.0.0.1:3939) → nav "Discovery Review" → work the 542 Maps candidates + 110 Qatar Spark discoveries: Approve real Qatar businesses (creates a full company + map pin, dedup‑guarded), Reject junk; 52 foreign are admin‑only (Dismiss). Tell Claude after a batch → Claude pushes. Detail: [[discovery-review-queue]].
 
-**VAL'S MORNING STEPS (a one‑time scheduled reminder fires 2026‑07‑21 08:00 Doha — task `val-morning-steps-2026-07-21`):**
-- [ ] **a.** app.bell.qa → Marketing → Stats on "Bella outreach": expect **Emailed 1 / Delivered 1** (first real MyWeb send, fires inside Sat–Thu 07:00–17:00 Doha). All‑zeros after 09:00 Doha = tell Claude, needs investigating.
-- [ ] **b.** Double‑click `Run Spark Enrichment.command` (daily): expect batch 10 → 12 → HOLDS at 12, **no "max credits"** (refusal‑ceiling memory shipped cce2716; queue is no‑website companies first). Paste closing lines to Claude.
-- [ ] **c.** If the reharvest finished: paste its closing lines → Claude runs the data push → then Val double‑clicks `Geocode Companies.command` once more.
+**VAL'S PENDING STEPS (as of 2026‑07‑20 eve — all Bella + map + DOC‑safe fixes tested PERFECT by Val):**
+- [ ] **a.** `Reharvest for Locations.command` is RUNNING (9,689 website companies incl. DOC, captures branch addresses + Google‑Maps‑link exact coords; hours, resumable). ⚠️ Do NOT run Spark or Geocode alongside it (8 GB Mac). When it finishes → Val pastes the closing summary → **Claude runs the data push himself** → then Val runs `Geocode Companies.command`. THAT is when DOC's website branches land on the map.
+- [ ] **b.** `Run Spark Enrichment.command` (daily) — Val runs later; expect batch holds ~12, no "max credits". Paste closing lines.
+- [ ] **c.** BRANCH MODEL — ✅ BUILT + DEPLOYED (see banner above). Val's action: double‑click **Preview Branch Model.command** (shows 851→276 collapse, writes `Branch Model — Preview.tsv`), then **Apply Branch Model.command** (applies + pushes to prod itself). Anytime — independent of a/b. Detail: [[branch-model]].
+- [ ] **d.** Remaining safe DOC cleanups queued: dedup registration‑conflict guard (before dedup ever re‑runs), ~198 junk‑address cleanup, stop city guesses at source. Geocode Tier‑1 parser fix + wrong‑city display already SHIPPED.
 
 - [ ] **1.** `Reharvest No-Email Companies.command` — was RUNNING 2026‑07‑19/20 (the ~8,600 harvested‑but‑no‑email cohort through the upgraded extractor; hours, resumable). Val will paste the closing lines ("Cohort: X → Y"). When done: **Claude runs the DATA push himself** (runPush) — do not send Val to `Push Changes.command` for data. (Interim pushes are fine and have run — 2026‑07‑20 morning push: 98 rows, 0 errors.)
 - [ ] **2.** After step 1: `Geocode Companies.command` once more — newly harvested structured addresses convert the "unparseable" pile into map pins (first runs: 11 → 410 coords, 7.3k unparseable awaiting better addresses). It pushes to prod itself.
@@ -159,7 +160,7 @@ Portal/
     routes/         express routers
     scripts/        one‑shot + diagnostic scripts run by .command files
     tests/          node test files (run with plain `node`)
-  migrations/       NNN_name.sql, applied in order at Portal boot. Latest = 098.
+  migrations/       NNN_name.sql, applied in order at Portal boot. Latest = 101.
   ui/components/    React 18 (esm.sh import map) + htm tagged templates. No build step.
 Data/Companies/1. Data Gathering/Directories/   MOCI, QFC, QFZ, QSTP scrapers (Python)
 *.command                                        Val's entry points

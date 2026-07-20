@@ -178,6 +178,16 @@ function companyDetailOut(payload) {
         currency: e.currency || null, confidence: e.confidence || null, estimated: !!e.estimated };
     });
   }
+  // Physical locations (head office + branches) so she can say "your Lusail branch".
+  if (Array.isArray(payload?.locations) && payload.locations.length) {
+    out.locations = payload.locations.slice(0, 20).map((l) => pick(l, ['label', 'address', 'latitude', 'longitude', 'is_primary']));
+  }
+  // Branch model (migration 101): the operator's group structure. If this company
+  // is itself a branch, part_of names the parent; branches lists its facilities.
+  if (payload?.parent_company) out.part_of = pick(payload.parent_company, ['id', 'name']);
+  if (Array.isArray(payload?.branches) && payload.branches.length) {
+    out.branches = payload.branches.slice(0, 40).map((b) => pick(b, ['id', 'name', 'city']));
+  }
   return out;
 }
 const JOB_KEYS = ['id', 'title', 'company_name', 'company_id', 'location_text', 'employment_type', 'workplace_type', 'seniority_level', 'posted_at', 'effective_active'];

@@ -550,6 +550,17 @@ router.get('/:id', async (req, res, next) => {
       .then((r) => r.rows).catch(() => []);
     if (!company.rows.length) return res.status(404).json({ error: 'not_found' });
     const row = company.rows[0];
+    // Branch model (migration 101): a company may be the PARENT of collapsed
+    // facility shells, or itself be a branch pointing at a parent. Fail-soft
+    // pre-101 (the column may not exist yet).
+    const parentCompany = row.parent_company_id
+      ? await query(`SELECT id, name FROM companies WHERE id = $1`, [row.parent_company_id])
+          .then((r) => r.rows[0] || null).catch(() => null)
+      : null;
+    const branches = await query(
+      `SELECT id, name, city, latitude, longitude FROM companies
+         WHERE parent_company_id = $1 ORDER BY name`, [id])
+      .then((r) => r.rows).catch(() => []);
     const efSnapshot = row.extra_fields || {};   // capture before masking may strip it
     row.contacts = contacts;             // gate company + its contacts together
     await maskCompanies(req, [row]);
@@ -594,6 +605,8 @@ router.get('/:id', async (req, res, next) => {
       rejects:      rejects,
       tech:         tech.rows,
       locations,
+      parent_company: parentCompany,
+      branches,
     });
   } catch (err) { next(err); }
 });
