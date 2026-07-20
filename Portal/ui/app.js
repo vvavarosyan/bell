@@ -29,6 +29,7 @@ import { StatsTab }      from './components/StatsTab.js';
 import { AdminUsersTab } from './components/AdminUsersTab.js';
 import { ResearchTab }   from './components/ResearchTab.js';
 import { ResearchApprovalsTab } from './components/ResearchApprovalsTab.js';
+import { ReviewQueueTab } from './components/ReviewQueueTab.js';
 import { DeepDataTab }   from './components/DeepDataTab.js';
 import { RealEstateTab } from './components/RealEstateTab.js';
 import { EconomicsTab } from './components/EconomicsTab.js';
@@ -92,6 +93,7 @@ const VIEWS = {
   'recent-jobs': { Component: RecentJobsTab },
   'research':    { Component: ResearchTab },
   'approvals':   { Component: ResearchApprovalsTab },
+  'discovery-review': { Component: ReviewQueueTab },
   'detail-requests': { Component: DetailRequestsTab },
   'website-candidates': { Component: WebsiteCandidatesTab },
   'contributions': { Component: ContributionsTab },
@@ -124,6 +126,7 @@ const LABELS = {
   'crm': 'CRM',
   'research': 'Research',
   'approvals': 'Research Approvals',
+  'discovery-review': 'Discovery Review',
   'detail-requests': 'Detail Requests',
   'website-candidates': 'Website Review',
   'contributions': 'Contributions',
