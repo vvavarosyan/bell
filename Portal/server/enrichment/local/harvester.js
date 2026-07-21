@@ -29,7 +29,7 @@ import { renderPage, rendererAvailable, closeRenderer } from './render.js';
 import { recordReject } from './rejects.js';
 import { recordSearch } from './ledger.js';
 import { contentIdentity } from './content_identity.js';
-import { extractMapLinks } from './maplinks.js';
+import { extractMapLinks, resolveShortLinks } from './maplinks.js';
 import {
   findEmails, findCfEmails, findPhones, findSocials, findWhatsApp, preferOwnEmails,
   guessAddress, guessAddresses, extractTeam, extractPartners, pickLogo,
@@ -248,10 +248,26 @@ export async function enrichCompany(company) {
   // map pin with no INWANI codes needed. Each distinct pin → a location with
   // lat/lng already set (Qatar-bbox validated inside extractMapLinks).
   const mapPins = [];
+  const shortPending = [];
+  const shortSeen = new Set();
   for (const p of pages) {
     if (p.kind !== 'contact' && p.kind !== 'location' && p.kind !== 'home') continue;
-    const { coords } = extractMapLinks(p.page.html, p.page.links);
+    const { coords, shortLinks } = extractMapLinks(p.page.html, p.page.links);
     for (const c of coords) mapPins.push({ ...c, source_url: p.url });
+    // Shortened share links (maps.app.goo.gl / goo.gl/maps) carry NO inline
+    // coordinates — the pin only exists after the redirect. These were being
+    // discarded, which is why sites that link their branches with share links
+    // (DOC Medical Center's three branches) produced no branch pins at all.
+    for (const s of shortLinks || []) {
+      if (shortSeen.has(s)) continue;
+      shortSeen.add(s);
+      shortPending.push({ short: s, source_url: p.url });
+    }
+  }
+  // Resolve them once per company, politely, capped.
+  if (shortPending.length) {
+    const resolved = await resolveShortLinks(shortPending.map((x) => x.short), { max: 12 });
+    for (const c of resolved) mapPins.push({ ...c, source_url: (shortPending.find((x) => x.short === c.short) || {}).source_url || null });
   }
   const seenPin = new Set();
   for (const pin of mapPins) {

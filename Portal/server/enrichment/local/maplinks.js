@@ -61,6 +61,42 @@ function placeName(url) {
   catch { return m[1].replace(/\+/g, ' ').trim().slice(0, 120) || null; }
 }
 
+/**
+ * Follow a shortened Google-Maps link and read the coordinates out of the URL it
+ * lands on. Short links carry no inline coordinates — the pin only exists after
+ * the redirect — which is why they were surfaced separately and (until now)
+ * dropped. This is EXACT: the coordinates are Google's own pin for that place,
+ * not a name lookup. Returns { lat, lng, url } or null; never guesses.
+ * Proven on DOC Medical Center's three branch links (2026-07-21).
+ */
+export async function resolveShortLink(shortUrl, { timeoutMs = 12000 } = {}) {
+  const url = String(shortUrl || '').startsWith('//') ? 'https:' + shortUrl : String(shortUrl || '');
+  if (!/^https?:\/\//i.test(url)) return null;
+  const ctrl = new AbortController();
+  const timer = setTimeout(() => ctrl.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, {
+      redirect: 'follow',
+      signal: ctrl.signal,
+      headers: { 'User-Agent': 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) BellDataIntelligence/1.0' },
+    });
+    const c = extractMapCoords(res.url);          // qatarPair() inside already bbox-guards
+    return c ? { ...c, url: res.url, short: url } : null;
+  } catch { return null; }
+  finally { clearTimeout(timer); }
+}
+
+/** Resolve a batch of short links politely, in order, skipping failures. */
+export async function resolveShortLinks(shortLinks = [], { max = 12, delayMs = 250 } = {}) {
+  const out = [];
+  for (const s of shortLinks.slice(0, max)) {
+    const c = await resolveShortLink(s);
+    if (c) out.push(c);
+    await new Promise((r) => setTimeout(r, delayMs));
+  }
+  return out;
+}
+
 /** Scan page HTML (+ any already-extracted link list) for Google-Maps links and
  *  return { coords: [{lat,lng,url}], shortLinks: [url] }. Deduped by rounded
  *  coordinate so the same branch pinned twice yields one location. */
