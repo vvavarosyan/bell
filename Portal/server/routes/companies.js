@@ -430,6 +430,14 @@ router.get('/map', async (req, res, next) => {
                l.id AS location_id, l.company_id, l.label, l.is_primary, l.latitude, l.longitude,
                c.bin, c.name, c.is_active, c.status_normalized, c.industry, c.city,
                c.linkedin_url, c.website, c.founded_year,
+               -- Area read off THIS PIN's own coordinate, exactly like the main pins above.
+               -- Branch pins used to inherit companies.city, so every DOC branch read
+               -- "Lusail" — including the one in Izghawa and the one in Al Sadd (Val,
+               -- 2026-07-21). Wrong on 544 of 1,090 branch pins. A pin is labelled by
+               -- where it IS, never by a field that describes a different site.
+               (SELECT d.ename FROM gis_districts d WHERE d.centroid_lat IS NOT NULL
+                 ORDER BY (d.centroid_lat - l.latitude)^2 + (d.centroid_lng - l.longitude)^2
+                 LIMIT 1) AS derived_area,
                EXTRACT(YEAR FROM c.incorporation_date)::int AS incorporation_year,
                (SELECT array_agg(DISTINCT cs.source ORDER BY cs.source)
                 FROM company_sources cs WHERE cs.company_id = c.id) AS sources
@@ -443,6 +451,14 @@ router.get('/map', async (req, res, next) => {
            -- Same Qatar-bbox guard as the main pins (P6 hardening) — a bad branch
            -- geocode must never render off-country for any consumer.
            AND l.longitude BETWEEN 50.55 AND 51.85 AND l.latitude BETWEEN 24.40 AND 26.30
+           -- NOT the same spot as the company's own main pin. The harvester stores a
+           -- map-link coordinate as its own row even when a row already sits there, so
+           -- the head office rendered TWICE — two dots stacked exactly (Val spotted it
+           -- on DOC: an "Al Sadd" dot and a second one on top of it). 461 across the DB.
+           -- 0.0002 deg is about 22 m: the same doorway, not the neighbouring building.
+           AND NOT (c.latitude IS NOT NULL AND c.longitude IS NOT NULL
+                    AND abs(l.latitude - c.latitude) < 0.0002
+                    AND abs(l.longitude - c.longitude) < 0.0002)
          -- Prefer the registered / richest company as the surviving pin.
          ORDER BY l.latitude, l.longitude, site_key,
                   (c.primary_registration_no IS NOT NULL) DESC, c.bell_score DESC NULLS LAST, c.id`);
@@ -455,7 +471,7 @@ router.get('/map', async (req, res, next) => {
             // The location belongs to company_id — that's the pin it ties back to.
             parent_company_id: row.company_id, is_branch: true,
             bin: row.bin, name: row.name, is_active: row.is_active, status: row.status_normalized,
-            industry: row.industry, city: row.city, sources: row.sources || [],
+            industry: row.industry, city: row.derived_area || row.city, sources: row.sources || [],
             website: row.website, linkedin_url: row.linkedin_url,
             year: row.founded_year || row.incorporation_year || null,
           },
@@ -473,6 +489,10 @@ router.get('/map', async (req, res, next) => {
         SELECT c.id, c.bin, c.name, c.is_active, c.status_normalized, c.industry, c.city,
                c.linkedin_url, c.website, c.founded_year, c.parent_company_id,
                c.latitude, c.longitude,
+               -- Same rule as every other pin: label it by where it actually is.
+               (SELECT d.ename FROM gis_districts d WHERE d.centroid_lat IS NOT NULL
+                 ORDER BY (d.centroid_lat - c.latitude)^2 + (d.centroid_lng - c.longitude)^2
+                 LIMIT 1) AS derived_area,
                EXTRACT(YEAR FROM c.incorporation_date)::int AS incorporation_year,
                (SELECT array_agg(DISTINCT cs.source ORDER BY cs.source)
                 FROM company_sources cs WHERE cs.company_id = c.id) AS sources
@@ -488,7 +508,7 @@ router.get('/map', async (req, res, next) => {
             id: row.id, parent_company_id: row.parent_company_id, is_branch: true,
             location_label: 'Branch',
             bin: row.bin, name: row.name, is_active: row.is_active, status: row.status_normalized,
-            industry: row.industry, city: row.city, sources: row.sources || [],
+            industry: row.industry, city: row.derived_area || row.city, sources: row.sources || [],
             website: row.website, linkedin_url: row.linkedin_url,
             year: row.founded_year || row.incorporation_year || null,
           },
