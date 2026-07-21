@@ -37,6 +37,7 @@ import jobRunsRouter           from './routes/job_runs.js';
 import researchRouter          from './routes/research.js';
 import researchCandidatesRouter from './routes/research_candidates.js';
 import discoveryReviewRouter from './routes/discovery_review.js';
+import addressReviewRouter from './routes/address_review.js';
 import { userRouter as zeroRiskRouter, adminRouter as zeroRiskAdminRouter } from './routes/zero_risk.js';
 import { startPoller as startResearchPoller } from './research/poller.js';
 import openDataRouter          from './routes/open_data.js';
@@ -249,6 +250,7 @@ app.use('/api/job-runs',            ...localTools, jobRunsRouter);
 // Research approval queue — promoting discoveries is canonical curation.
 app.use('/api/research-candidates', ...localTools, researchCandidatesRouter);
 app.use('/api/discovery',           ...localTools, discoveryReviewRouter);
+app.use('/api/address-review',       ...localTools, addressReviewRouter);
 
 // Admin tools — admin.bell.qa + local engine (read/observe prod).
 app.use('/api/similar-companies',  ...adminOnly, similarCompaniesRouter);

@@ -110,6 +110,10 @@ export const MIRROR_TABLES = [
   // soft ref (id-mirror, no remap needed).
   { name: 'osm_places',               watermark: 'updated_at' },
   { name: 'osm_streets',              watermark: 'updated_at' },
+
+  // Address verdicts (migration 104). MANDATORY to mirror: the outreach engine runs on
+  // app.bell.qa, so targeting.js executes on PROD. A verdict that stays local changes nothing.
+  { name: 'address_verdicts',         watermark: 'updated_at' },
 ];
 
 export const MIRROR_TABLE_NAMES = new Set(MIRROR_TABLES.map((t) => t.name));

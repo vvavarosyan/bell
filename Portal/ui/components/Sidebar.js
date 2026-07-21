@@ -61,6 +61,7 @@ export const NAV_SECTIONS = [
       { id: 'manual-lookup', label: 'Manual Lookup', icon: 'search', placeholder: false, visibility: ['platform_admin'] },
       { id: 'approvals',   label: 'Research Approvals', icon: 'research', placeholder: false, visibility: ['platform_admin'] },
       { id: 'discovery-review', label: 'Discovery Review', icon: 'inbox', placeholder: false, visibility: ['platform_admin'] },
+      { id: 'address-review', label: 'Address Review', icon: 'inbox', placeholder: false, visibility: ['platform_admin'] },
       { id: 'recent-jobs', label: 'Recent Jobs', icon: 'history',  placeholder: false, visibility: ['platform_admin'] },
       { id: 'engine', label: 'Local Engines', icon: 'database', placeholder: false, visibility: ['platform_admin'] },
       { id: 'harvest-history', label: 'Harvest History', icon: 'history', placeholder: false, visibility: ['platform_admin'] },
@@ -78,7 +79,7 @@ export const NAV_SECTIONS = [
 // we also hide them from the nav to avoid dead 403 links — even for a
 // platform_admin who happens to be on app.bell.qa.
 export const ADMIN_ONLY_NAV_IDS = new Set([
-  'sources', 'db-stats', 'economics', 'admin-users', 'recent-jobs', 'sync', 'settings', 'dedup-queue', 'announcements', 'email-templates', 'contributions', 'zero-risk-admin', 'discovery-review',
+  'sources', 'db-stats', 'economics', 'admin-users', 'recent-jobs', 'sync', 'settings', 'dedup-queue', 'announcements', 'email-templates', 'contributions', 'zero-risk-admin', 'discovery-review', 'address-review',
 ]);
 
 // LOCAL-ENGINE-ONLY tools. These read local directory files and/or originate
@@ -88,7 +89,7 @@ export const ADMIN_ONLY_NAV_IDS = new Set([
 // tier in server/lib/capabilities.js.
 export const LOCAL_ENGINE_NAV_IDS = new Set([
   'sources', 'recent-jobs', 'sync', 'dedup-queue', 'approvals', 'website-candidates',
-  'manual-lookup', 'harvest-history', 'engine', 'discovery-review',
+  'manual-lookup', 'harvest-history', 'engine', 'discovery-review', 'address-review',
 ]);
 
 /** True if an item should be shown to a user with the given role, in this mode. */

@@ -30,6 +30,7 @@ import { AdminUsersTab } from './components/AdminUsersTab.js';
 import { ResearchTab }   from './components/ResearchTab.js';
 import { ResearchApprovalsTab } from './components/ResearchApprovalsTab.js';
 import { ReviewQueueTab } from './components/ReviewQueueTab.js';
+import { AddressReviewTab } from './components/AddressReviewTab.js';
 import { DeepDataTab }   from './components/DeepDataTab.js';
 import { RealEstateTab } from './components/RealEstateTab.js';
 import { EconomicsTab } from './components/EconomicsTab.js';
@@ -94,6 +95,7 @@ const VIEWS = {
   'research':    { Component: ResearchTab },
   'approvals':   { Component: ResearchApprovalsTab },
   'discovery-review': { Component: ReviewQueueTab },
+  'address-review': { Component: AddressReviewTab },
   'detail-requests': { Component: DetailRequestsTab },
   'website-candidates': { Component: WebsiteCandidatesTab },
   'contributions': { Component: ContributionsTab },

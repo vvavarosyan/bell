@@ -186,6 +186,14 @@ export const api = {
   discoveryOsm:           (limit = 200) => request('/api/discovery/osm?limit=' + limit),
   discoveryOsmGroups:     () => request('/api/discovery/osm/groups'),
   approveOsmGroup:        (group, limit = 300) => request('/api/discovery/osm/approve-group', { method: 'POST', body: JSON.stringify({ group, limit }) }),
+
+  // Address Review — who owns a mailbox (local engine only).
+  addrSummary:            () => request('/api/address-review/summary'),
+  addrQueue:              (bucket = 'suggested', limit = 150) => request(`/api/address-review/queue?bucket=${encodeURIComponent(bucket)}&limit=${limit}`),
+  addrDecide:             (body) => request('/api/address-review/decide', { method: 'POST', body: JSON.stringify(body) }),
+  addrDecideRule:         (rule_id, verdict) => request('/api/address-review/decide-rule', { method: 'POST', body: JSON.stringify({ rule_id, verdict }) }),
+  addrAutoRun:            (apply = false) => request('/api/address-review/auto-run', { method: 'POST', body: JSON.stringify({ apply }) }),
+  addrUndo:               (email) => request('/api/address-review/undo', { method: 'POST', body: JSON.stringify({ email }) }),
   promoteOsm:             (id) => request(`/api/discovery/osm/${id}/promote`, { method: 'POST', body: '{}' }),
   ignoreOsm:              (id) => request(`/api/discovery/osm/${id}/ignore`, { method: 'POST', body: '{}' }),
   resetEnrichment:        (id) => request(`/api/companies/${id}/reset-enrichment`, { method: 'POST', body: '{}' }),

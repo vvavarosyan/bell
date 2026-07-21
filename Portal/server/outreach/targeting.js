@@ -13,6 +13,10 @@ import { query } from '../db.js';
 import { classifyAddress } from './address_rules.js';
 
 const norm = (e) => String(e || '').trim().toLowerCase();
+
+// Only these two tiers may ever be mailed. 'unclassified' means Bell cannot tell who owns
+// the mailbox, and 'all' is not an audience — it is the absence of one.
+export const SENDABLE_TIERS = new Set(['role_mailbox', 'named_person']);
 const VALID_EMAIL_RX = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 
 // Pull candidate (company, email) pairs. One row per (company, address).
@@ -64,6 +68,16 @@ async function withdrawnSet(emails) {
   return new Set(r.rows.map((x) => x.email));
 }
 
+/**
+ * Recorded verdicts, loaded ONCE per build into a Map. address_rules.js is documented pure +
+ * deterministic and runs per row in a 16k loop, so it must never query — the verdict is passed in.
+ */
+async function verdictMap() {
+  const r = await query(`SELECT lower(email) AS email, verdict FROM address_verdicts`)
+    .catch(() => ({ rows: [] }));   // table arrives with migration 104; absent = no verdicts yet
+  return new Map(r.rows.map((x) => [x.email, x.verdict]));
+}
+
 async function suppressedSet(emails) {
   if (!emails.length) return new Set();
   const r = await query(`SELECT email FROM email_suppressions WHERE email = ANY($1)`, [emails]);
@@ -86,15 +100,26 @@ async function alreadyQueued(campaignId, emails) {
  *                   excluded_withdrawn,excluded_bounced,excluded_dupe,selected} }.
  * Nothing is sent here — this only decides WHO. lang defaults to campaign lang_mode.
  */
-export async function buildTargets({ tier = 'role_mailbox', lang = 'en', campaignId = null, max = 100000 } = {}) {
+export async function buildTargets({ tier = 'role_mailbox', lang = 'en', campaignId = null, max = 100000, countOnly = false } = {}) {
+  // WHICH TIERS MAY ACTUALLY RECEIVE MAIL.
+  // 'unclassified' and 'all' used to be selectable in the campaign form and allowed by the
+  // migration-095 CHECK, and the filter below read `if (tier !== 'all' …)` — so a campaign on
+  // 'all' sent to EVERY tier, and one on 'unclassified' sent to 6,330 addresses Bell explicitly
+  // cannot vouch for. address_rules.js's whole doctrine is that unclassified means "we cannot
+  // tell" and silence is not permission; that promise was not actually enforced anywhere.
+  // Rule 2.1: an unknown option fails loudly, it never falls back to the permissive default.
+  if (!countOnly && !SENDABLE_TIERS.has(tier)) {
+    throw new Error(`outreach: refusing to build targets for tier "${tier}" — only ${[...SENDABLE_TIERS].join(' / ')} may be mailed`);
+  }
   const rows = await candidateRows({ limit: max });
   const emails = [...new Set(rows.map((r) => norm(r.email)).filter((e) => VALID_EMAIL_RX.test(e)))];
-  const [supp, withdrawn, queued] = await Promise.all([
-    suppressedSet(emails), withdrawnSet(emails), alreadyQueued(campaignId, emails),
+  const [supp, withdrawn, queued, verdicts] = await Promise.all([
+    suppressedSet(emails), withdrawnSet(emails), alreadyQueued(campaignId, emails), verdictMap(),
   ]);
 
   const counts = {
     candidates: rows.length, role_mailbox: 0, named_person: 0, unclassified: 0,
+    not_a_company_address: 0,
     excluded_suppressed: 0, excluded_withdrawn: 0, excluded_bounced: 0, excluded_dupe: 0, selected: 0,
   };
   const seen = new Set();     // de-dupe addresses within this build
@@ -103,11 +128,12 @@ export async function buildTargets({ tier = 'role_mailbox', lang = 'en', campaig
   for (const row of rows) {
     const email = norm(row.email);
     if (!VALID_EMAIL_RX.test(email)) continue;
-    const cls = classifyAddress({ email, hasLinkedPerson: row.has_linked_person });
+    const cls = classifyAddress({ email, hasLinkedPerson: row.has_linked_person, verdict: verdicts.get(email) });
     counts[cls.outcome] += 1;
 
-    // Tier filter (unless 'all').
-    if (tier !== 'all' && cls.outcome !== tier) continue;
+    // Tier filter. countOnly (the admin summary) counts every tier but returns no targets.
+    if (countOnly) continue;
+    if (cls.outcome !== tier) continue;
 
     // Honest exclusions — order matters only for the counter attribution.
     if (supp.has(email)) { counts.excluded_suppressed += 1; continue; }
@@ -129,6 +155,7 @@ export async function buildTargets({ tier = 'role_mailbox', lang = 'en', campaig
 
 /** Cheap summary for the admin console: how much of the DB is each tier, and how much is sendable. */
 export async function targetingSummary() {
-  const { counts } = await buildTargets({ tier: 'all' });
+  // countOnly: tallies every tier for the console WITHOUT ever producing a sendable list.
+  const { counts } = await buildTargets({ tier: 'role_mailbox', countOnly: true });
   return counts;
 }

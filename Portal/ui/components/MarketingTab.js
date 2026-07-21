@@ -306,8 +306,6 @@ export function MarketingTab() {
             <select class="input" value=${form.audience_tier} onChange=${(ev) => setForm({ ...form, audience_tier: ev.target.value })}>
               <option value="role_mailbox">Role mailboxes (safest)</option>
               <option value="named_person">Named person</option>
-              <option value="unclassified">Unclassified</option>
-              <option value="all">All</option>
             </select></label>
           <label class="small">Language
             <select class="input" value=${form.lang_mode} onChange=${(ev) => setForm({ ...form, lang_mode: ev.target.value })}>
