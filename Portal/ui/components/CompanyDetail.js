@@ -786,7 +786,7 @@ function CompanyTab({ company, extra, similar, relationships, contacts, branches
         </section>
       ` : null}
 
-      <${LocationsBlock} companyId=${company.id} />
+      <${LocationsBlock} companyId=${company.id} branches=${branches} />
 
       ${parentCompany ? html`
         <section class="group" key="branch-of">
@@ -797,18 +797,7 @@ function CompanyTab({ company, extra, similar, relationships, contacts, branches
         </section>
       ` : null}
 
-      ${branches && branches.length ? html`
-        <section class="group" key="branches">
-          <h3>Branches &amp; facilities (${branches.length})</h3>
-          <div style=${{ display: 'flex', flexWrap: 'wrap', gap: '6px', marginTop: '4px' }}>
-            ${branches.map((b) => html`
-              <span key=${b.id} title=${b.city || ''} style=${{ display: 'inline-block', padding: '3px 9px', borderRadius: '999px', background: 'var(--bg-elev-2)', border: '1px solid var(--border)', fontSize: '12px', color: 'var(--text)' }}>
-                ${b.name}
-              </span>
-            `)}
-          </div>
-        </section>
-      ` : null}
+
 
       ${Object.keys(linkedinExtras).length > 0 ? html`
         <section class="group" key="more-linkedin">

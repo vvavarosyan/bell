@@ -186,6 +186,8 @@ function arcCoords(a, b, steps = 32) {
 // a single dot no matter how far you zoom. Fans a coincident group out in a
 // phyllotaxis (sunflower) spiral whose radius grows with the count. Deterministic,
 // so pins don't jump between reloads. Only touches groups of 2+.
+let introPlayed = false;            // globe intro: once per app session
+let branchAnimFrame = null;         // in-flight spread animation
 const displacedIndex = new Map();   // 'companyId:locationId|primary' -> displaced [lng,lat]
 function deOverlap(features) {
   displacedIndex.clear();
@@ -270,6 +272,7 @@ async function showNetwork(map, companyId, origin) {
 // SEPARATE source/layer ids + timer from the company-network arcs (they use
 // module-global state; sharing ids would break each other's cleanup).
 function clearBranchTies(map) {
+  if (branchAnimFrame) { cancelAnimationFrame(branchAnimFrame); branchAnimFrame = null; }
   for (const id of ['branch-tie-dots', 'branch-ties', 'branch-ties-glow']) {
     try { if (map.getLayer(id)) map.removeLayer(id); } catch { /* ignore */ }
   }
@@ -358,42 +361,61 @@ async function showBranchTies(map, companyId, origin) {
     spokes.sort((a, b) => Math.atan2(a.coord[1] - hubCoord[1], a.coord[0] - hubCoord[0])
       - Math.atan2(b.coord[1] - hubCoord[1], b.coord[0] - hubCoord[0]));
 
-    const ties = { type: 'FeatureCollection', features: spokes.map((site, i) => ({
+    // Pre-compute the full arcs, then reveal them outward from the hub so the
+    // network visibly SPREADS on click instead of snapping into existence.
+    const arcs = spokes.map((site, i) => metricArc(hubCoord, site.coord, i % 2 ? 1 : -1));
+    const tiesAt = (p) => ({ type: 'FeatureCollection', features: arcs.map((pts, i) => ({
       type: 'Feature',
-      geometry: { type: 'LineString', coordinates: metricArc(hubCoord, site.coord, i % 2 ? 1 : -1) },
-      properties: { label: site.labels[0] || '' },
-    })) };
-    const dots = { type: 'FeatureCollection', features: spokes.map((site) => ({
-      type: 'Feature', geometry: { type: 'Point', coordinates: site.coord },
-      properties: { label: site.labels[0] || '' },
-    })) };
+      geometry: { type: 'LineString', coordinates: pts.slice(0, Math.max(2, Math.ceil(pts.length * p))) },
+      properties: { label: spokes[i].labels[0] || '' },
+    })) });
+    const dotsAt = (p) => ({ type: 'FeatureCollection', features: spokes
+      .filter((_, i) => (i + 1) / spokes.length <= p + 0.001 || p >= 1)
+      .map((site) => ({ type: 'Feature', geometry: { type: 'Point', coordinates: site.coord },
+        properties: { label: site.labels[0] || '' } })) });
 
-    map.addSource('branch-ties-src', { type: 'geojson', data: ties });
-    map.addSource('branch-tie-dots-src', { type: 'geojson', data: dots });
+    map.addSource('branch-ties-src', { type: 'geojson', data: tiesAt(0.02) });
+    map.addSource('branch-tie-dots-src', { type: 'geojson', data: dotsAt(0) });
     // Under the pins, above the basemap.
     const under = map.getLayer('clusters') ? 'clusters' : undefined;
     map.addLayer({
       id: 'branch-ties-glow', type: 'line', source: 'branch-ties-src',
       layout: { 'line-cap': 'round', 'line-join': 'round' },
-      paint: { 'line-color': '#7ea6ff', 'line-width': 6, 'line-opacity': 0.13, 'line-blur': 4 },
+      paint: { 'line-color': '#5b8cff', 'line-width': 11, 'line-opacity': 0.30, 'line-blur': 5 },
     }, under);
     map.addLayer({
       id: 'branch-ties', type: 'line', source: 'branch-ties-src',
       layout: { 'line-cap': 'round', 'line-join': 'round' },
       paint: {
-        'line-color': '#9dc0ff',
-        'line-width': ['interpolate', ['linear'], ['zoom'], 9, 1, 14, 1.6, 18, 2.2],
-        'line-opacity': 0.85,
+        'line-color': '#cfe0ff',
+        'line-width': ['interpolate', ['linear'], ['zoom'], 9, 2.2, 14, 3, 18, 4],
+        'line-opacity': 0.98,
       },
     }, under);
     map.addLayer({
       id: 'branch-tie-dots', type: 'circle', source: 'branch-tie-dots-src',
       paint: {
-        'circle-radius': ['interpolate', ['linear'], ['zoom'], 9, 3, 14, 4.5, 18, 6],
-        'circle-color': '#dbe7ff', 'circle-stroke-color': '#5b8cff', 'circle-stroke-width': 1.5,
-        'circle-opacity': 0.95,
+        'circle-radius': ['interpolate', ['linear'], ['zoom'], 9, 5, 14, 6.5, 18, 8],
+        'circle-color': '#ffffff', 'circle-stroke-color': '#5b8cff', 'circle-stroke-width': 2.5,
+        'circle-opacity': 1,
       },
     }, under);
+
+    // Ease the reveal outward (easeOutCubic), ~700ms.
+    const t0 = (typeof performance !== 'undefined' ? performance.now() : Date.now());
+    const DUR = 700;
+    const step = () => {
+      const now = (typeof performance !== 'undefined' ? performance.now() : Date.now());
+      const raw = Math.min(1, (now - t0) / DUR);
+      const eased = 1 - Math.pow(1 - raw, 3);
+      const line = map.getSource('branch-ties-src');
+      const dot = map.getSource('branch-tie-dots-src');
+      if (!line || !dot) { branchAnimFrame = null; return; }
+      try { line.setData(tiesAt(eased)); dot.setData(dotsAt(eased)); }
+      catch { branchAnimFrame = null; return; }
+      branchAnimFrame = raw < 1 ? requestAnimationFrame(step) : null;
+    };
+    branchAnimFrame = requestAnimationFrame(step);
 
     const n = spokes.length + 1;
     toast(`${n} location${n === 1 ? '' : 's'} for this company`);
@@ -697,15 +719,23 @@ export function MapTab() {
         map.on('load', () => {
           if (cancelled) return;
 
-          stopSpin = startGlobeSpin(map, 16);
-          setTimeout(() => {
-            if (cancelled) return;
-            stopSpin?.();
-            map.flyTo({
-              center: DOHA, zoom: 9, pitch: 35, bearing: 0,
-              duration: 4500, curve: 1.42, speed: 1.2, essential: true,
-            });
-          }, 2500);
+          // The globe intro plays ONCE per app session. Coming back to the Map
+          // from another section shouldn't replay it (Val 2026-07-21) — a full
+          // page reload counts as a fresh visit and plays it again.
+          if (introPlayed) {
+            map.jumpTo({ center: DOHA, zoom: 9, pitch: 35, bearing: 0 });
+          } else {
+            introPlayed = true;
+            stopSpin = startGlobeSpin(map, 16);
+            setTimeout(() => {
+              if (cancelled) return;
+              stopSpin?.();
+              map.flyTo({
+                center: DOHA, zoom: 9, pitch: 35, bearing: 0,
+                duration: 4500, curve: 1.42, speed: 1.2, essential: true,
+              });
+            }, 2500);
+          }
 
           // ---- Companies source + layers ------------------------------
           map.addSource('companies', {
