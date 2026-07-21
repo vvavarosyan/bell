@@ -20,13 +20,14 @@ import { navigateTo } from '../lib/router.js';
 const TABS = [
   { key: 'gmaps',   label: 'Maps candidates',  blurb: 'New businesses Google Maps found that matched no company. Approve → a Qatar company with its rating, phone and map pin.' },
   { key: 'osm',     label: 'OSM places',       blurb: 'Named Qatar businesses OpenStreetMap knows that Bell doesn\'t have yet. Approve → a real Qatar company with its location (and contact where the site states one). Dedup-guarded: a match links to the existing company instead of duplicating. Use the category buttons to approve in bulk.' },
+  { key: 'locpairs', label: 'Location pairs',  blurb: 'A map pin with no written address, next to a surveyed government building whose name appears in one of the company\'s own addresses. Confirm → the pin gets the company\'s real address; Not the same place → never asked again.' },
   { key: 'qatar',   label: 'Spark · Qatar',    blurb: 'Qatar companies Spark discovered while researching others. Approve → a real Qatar company.' },
   { key: 'foreign', label: 'Spark · foreign',  blurb: 'Non-Qatar companies — kept admin-only for future Middle-East expansion. Never enter Bell.' },
 ];
 
 export function ReviewQueueTab() {
   const [tab, setTab] = useState('gmaps');
-  const [counts, setCounts] = useState({ gmaps_candidates: 0, spark_qatar: 0, spark_foreign: 0, osm_candidates: 0 });
+  const [counts, setCounts] = useState({ gmaps_candidates: 0, spark_qatar: 0, spark_foreign: 0, osm_candidates: 0, loc_pairs: 0 });
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState(null);
@@ -34,7 +35,10 @@ export function ReviewQueueTab() {
   const [bulkBusy, setBulkBusy] = useState('');   // category currently being approved
 
   const loadCounts = useCallback(async () => {
-    try { setCounts(await api.discoverySummary()); } catch { /* non-fatal */ }
+    try {
+      const [d, lp] = await Promise.all([api.discoverySummary(), api.locPairsSummary().catch(() => ({ pairs: 0 }))]);
+      setCounts({ ...d, loc_pairs: lp.pairs || 0 });
+    } catch { /* non-fatal */ }
   }, []);
 
   const load = useCallback(async ({ silent = false } = {}) => {
@@ -42,6 +46,7 @@ export function ReviewQueueTab() {
     try {
       const r = tab === 'gmaps' ? await api.discoveryGmaps(200)
         : tab === 'osm' ? await api.discoveryOsm(200)
+        : tab === 'locpairs' ? await api.locPairs(100)
         : await api.discoverySpark(tab, 200);
       setRows(r.rows || []);
     } catch (err) { if (!silent) toast('Load failed: ' + err.message, 'error'); }
@@ -89,8 +94,21 @@ export function ReviewQueueTab() {
   const promote = (id) => act('promote', id, promoteFn, 'approve');
   const ignore  = (id) => act('ignore', id, ignoreFn, 'reject');
 
+  // Location pairs: confirm puts the company's own written address onto the pin;
+  // reject is remembered on the pin row so the pair is never proposed again.
+  const pairAct = async (pair, keepId, approve) => {
+    setBusyId(pair.drop_id);
+    try {
+      if (approve) { await api.locPairApprove(pair.drop_id, keepId); toast('Confirmed — the pin now carries the written address.', 'success'); }
+      else { await api.locPairReject(pair.drop_id, keepId); toast('Noted — this pair will not be asked again.'); }
+      setRows((rs) => rs.filter((x) => x.drop_id !== pair.drop_id));
+      loadCounts();
+    } catch (err) { toast('Failed: ' + err.message, 'error'); }
+    finally { setBusyId(null); }
+  };
+
   const chip = (t) => {
-    const n = t.key === 'gmaps' ? counts.gmaps_candidates : t.key === 'osm' ? counts.osm_candidates : t.key === 'qatar' ? counts.spark_qatar : counts.spark_foreign;
+    const n = t.key === 'gmaps' ? counts.gmaps_candidates : t.key === 'osm' ? counts.osm_candidates : t.key === 'locpairs' ? counts.loc_pairs : t.key === 'qatar' ? counts.spark_qatar : counts.spark_foreign;
     return html`<button key=${t.key} class=${'toolbar-toggle' + (tab === t.key ? ' accent' : '')}
       onClick=${() => setTab(t.key)} style=${{ whiteSpace: 'nowrap' }}>${t.label}${n ? ` · ${Number(n).toLocaleString()}` : ''}</button>`;
   };
@@ -126,6 +144,32 @@ export function ReviewQueueTab() {
 
       ${loading ? html`<div class="muted" style=${{ padding: '20px' }}>Loading…</div>`
         : rows.length === 0 ? html`<div class="muted" style=${{ padding: '20px' }}>Nothing waiting here. 🎉</div>`
+        : tab === 'locpairs' ? html`<div style=${{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: 'calc(100vh - 230px)', overflowY: 'auto', paddingRight: '4px' }}>
+            ${rows.filter((p) => Array.isArray(p.candidates)).map((p) => html`
+              <div key=${p.drop_id} style=${{ border: '1px solid var(--border)', borderRadius: '10px', padding: '10px 12px' }}>
+                <div style=${{ fontWeight: 700 }}>${p.company_name}</div>
+                <div class="muted small" style=${{ marginTop: '3px', display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                  <span>📍 pin at ${Number(p.latitude).toFixed(5)}, ${Number(p.longitude).toFixed(5)} — no written address</span>
+                  <span style=${{ color: 'var(--accent, #7dd3fc)' }}>🏛 the surveyed building here is “${p.landmark}” (${p.landmark_m} m away${p.zone_no ? `, zone ${p.zone_no}` : ''})</span>
+                </div>
+                <div class="muted small" style=${{ margin: '8px 0 4px' }}>
+                  This company's own written address${p.candidates.length > 1 ? 'es mention' : ' mentions'} that building — is it the same place?
+                </div>
+                <div style=${{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                  ${p.candidates.map((c) => html`
+                    <div key=${c.id} style=${{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap', border: '1px solid var(--border)', borderRadius: '8px', padding: '6px 10px' }}>
+                      <div style=${{ flex: '1 1 300px', minWidth: 0 }}>
+                        <span style=${{ fontWeight: 600 }}>${c.address}</span>
+                        <span class="muted small">  (${c.source}${c.label && c.label !== 'Branch' ? ` · “${c.label}”` : ''})</span>
+                      </div>
+                      <button class="btn btn-sm btn-primary" disabled=${busyId === p.drop_id}
+                        onClick=${() => pairAct(p, c.id, true)}>Same place — use this address</button>
+                      <button class="btn btn-sm" disabled=${busyId === p.drop_id}
+                        onClick=${() => pairAct(p, c.id, false)}>Not the same</button>
+                    </div>`)}
+                </div>
+              </div>`)}
+          </div>`
         : html`<div style=${{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: 'calc(100vh - 230px)', overflowY: 'auto', paddingRight: '4px' }}>
             ${rows.map((r) => html`
               <div key=${r.id} style=${{ border: '1px solid var(--border)', borderRadius: '10px', padding: '10px 12px', display: 'flex', gap: '12px', alignItems: 'flex-start', flexWrap: 'wrap' }}>

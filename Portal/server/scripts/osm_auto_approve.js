@@ -83,12 +83,14 @@ async function main() {
           latitude: p.latitude, longitude: p.longitude, country: 'Qatar',
           source: 'osm', sourceRecordId: 'osm:' + p.osm_type + '/' + p.osm_id, raw: p.tags,
         });
+        // Label = the OSM place's own stated name — 'Head office' was a fabricated claim
+        // (no source says which site is a head office; 534 rows carried it, 20 on one company).
         await client.query(
           `INSERT INTO company_locations (company_id, label, address, latitude, longitude, source, geocode_status, updated_at)
-           VALUES ($1,'Head office',$2,$3,$4,'osm-auto','osm', now())
+           VALUES ($1,$5,$2,$3,$4,'osm-auto','osm', now())
            ON CONFLICT (company_id, lower(address)) DO NOTHING`,
           [r.companyId, (p.address || (Number(p.latitude).toFixed(5) + ', ' + Number(p.longitude).toFixed(5))).slice(0, 300),
-           Number(p.latitude), Number(p.longitude)]);
+           Number(p.latitude), Number(p.longitude), (p.name_en || p.name || 'Location').slice(0, 120)]);
         await client.query(
           `UPDATE osm_places SET matched_company_id=$2, review_status='promoted', updated_at=now() WHERE id=$1`,
           [p.id, r.companyId]);

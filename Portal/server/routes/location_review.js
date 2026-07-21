@@ -1,0 +1,187 @@
+// /api/location-review — pair a nameless map pin with the company's own written address.
+//
+// The harvester stores two rows from the same website and never links them: a PINNED row
+// whose "address" is just the coordinate ("25.38433, 51.52486") and an UNPINNED row with the
+// company's real words ("Marina 50 Tower, 1st Floor, Lusail City, Lusail"). Joining them
+// automatically was adversarially REFUTED — the strongest signal (a surveyed landmark's name
+// appearing in the text) also pairs neighbours in the same tower. So Bell only PROPOSES,
+// showing the evidence, and Val confirms. His click is the merge authority.
+//
+// Evidence per proposal: the nearest SURVEYED government landmark to the pin (gis_landmarks,
+// 7,227 points), its distance in metres, and the exact name token that appears in the text
+// address. DOC's Lusail pin is 6.8 m from the surveyed point literally named "Marina 50".
+//
+// Local engine only — it mutates canonical data; prod is a mirror.
+
+import { Router } from 'express';
+import { query, withTransaction } from '../db.js';
+import { recomputeBellScoreForCompany } from '../assembly/bell_score.js';
+import { isCoordinateAddress } from '../lib/location_display.js';
+
+const router = Router();
+
+// Words that appear in nearly every Qatar address/landmark — matching on one of these would
+// pair anything with anything (the loose-name-matching trap that set thousands of wrong
+// websites once). A token must be specific to count as evidence.
+const GENERIC = new Set(['tower', 'towers', 'center', 'centre', 'building', 'complex', 'street',
+  'plaza', 'mall', 'doha', 'qatar', 'lusail', 'west', 'east', 'north', 'south', 'bay', 'area',
+  'zone', 'road', 'gate', 'floor', 'office', 'shop', 'villa', 'hotel', 'city', 'district',
+  'company', 'trading', 'group', 'medical', 'clinic', 'branch', 'main', 'first', 'second']);
+
+const tokens = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9\s]/g, ' ').split(/\s+/).filter(Boolean);
+const specificTokens = (s) => tokens(s).filter((t) => t.length >= 5 && !GENERIC.has(t) && !/^\d+$/.test(t));
+
+const MAX_LANDMARK_M = 60;   // beyond this the "nearest building" is a different building
+
+/**
+ * Build the proposals: one card per nameless pin, with every same-company text row whose
+ * words contain a specific token of the surveyed landmark at that pin.
+ */
+async function buildPairs() {
+  // Nameless pins + their nearest surveyed landmark, one LATERAL pass.
+  const bare = (await query(`
+    SELECT l.id, l.company_id, c.name AS company_name, l.latitude, l.longitude,
+           l.geocode_status, l.source AS pin_source, l.raw,
+           lm.ename AS landmark, lm.zone_no, lm.district_ename, lm.m AS landmark_m
+      FROM company_locations l
+      JOIN companies c ON c.id = l.company_id AND COALESCE(c.archived,false) = false
+      LEFT JOIN LATERAL (
+        SELECT g.ename, g.zone_no, g.district_ename,
+               round((6371000*acos(least(1,
+                 cos(radians(l.latitude))*cos(radians(g.latitude))*cos(radians(g.longitude)-radians(l.longitude))
+                 + sin(radians(l.latitude))*sin(radians(g.latitude)))))::numeric, 1) AS m
+          FROM gis_landmarks g
+         WHERE g.latitude IS NOT NULL
+         ORDER BY (g.latitude - l.latitude)^2 + (g.longitude - l.longitude)^2
+         LIMIT 1
+      ) lm ON true
+     WHERE l.latitude IS NOT NULL
+       AND btrim(l.address) ~ '^-?[0-9]{1,3}\\.[0-9]+\\s*,\\s*-?[0-9]{1,3}\\.[0-9]+$'`)).rows;
+
+  const companyIds = [...new Set(bare.map((b) => Number(b.company_id)))];
+  if (!companyIds.length) return [];
+  // Unpinned rows holding a real written address for those companies.
+  const texts = (await query(`
+    SELECT id, company_id, label, address, source
+      FROM company_locations
+     WHERE company_id = ANY($1) AND latitude IS NULL
+       AND address IS NOT NULL AND btrim(address) <> ''`, [companyIds])).rows
+    .filter((t) => !isCoordinateAddress(t.address));
+  const textByCo = new Map();
+  for (const t of texts) {
+    const k = Number(t.company_id);
+    if (!textByCo.has(k)) textByCo.set(k, []);
+    textByCo.get(k).push(t);
+  }
+
+  const pairs = [];
+  for (const b of bare) {
+    if (!b.landmark || Number(b.landmark_m) > MAX_LANDMARK_M) continue;
+    const marks = specificTokens(b.landmark);
+    if (!marks.length) continue;
+    const rejected = new Set(((b.raw || {}).pair_rejected || []).map((r) => `${r.keep_id}`));
+    const candidates = [];
+    for (const t of textByCo.get(Number(b.company_id)) || []) {
+      if (rejected.has(String(t.id))) continue;
+      const addr = ' ' + tokens(t.address).join(' ') + ' ';
+      const hit = marks.find((m) => addr.includes(' ' + m + ' ') || addr.includes(' ' + m));
+      if (hit) candidates.push({ ...t, matched_token: hit });
+    }
+    if (!candidates.length) continue;
+    pairs.push({
+      drop_id: b.id, company_id: Number(b.company_id), company_name: b.company_name,
+      latitude: Number(b.latitude), longitude: Number(b.longitude),
+      pin_source: b.pin_source, geocode_status: b.geocode_status,
+      landmark: b.landmark, landmark_m: Number(b.landmark_m),
+      zone_no: b.zone_no, district: b.district_ename,
+      candidates,
+    });
+  }
+  pairs.sort((a, b) => a.landmark_m - b.landmark_m);
+  return pairs;
+}
+
+let cache = null;
+const CACHE_MS = 120_000;
+const invalidate = () => { cache = null; };
+async function getPairs() {
+  if (cache && Date.now() - cache.at < CACHE_MS) return cache.data;
+  const data = await buildPairs();
+  cache = { at: Date.now(), data };
+  return data;
+}
+
+router.get('/summary', async (_req, res, next) => {
+  try { const p = await getPairs(); res.json({ pairs: p.length }); } catch (e) { next(e); }
+});
+
+router.get('/pairs', async (req, res, next) => {
+  try {
+    const limit = Math.min(200, Math.max(1, Number(req.query.limit) || 100));
+    const p = await getPairs();
+    res.json({ total: p.length, rows: p.slice(0, limit) });
+  } catch (e) { next(e); }
+});
+
+// Approve: the written address gains the pin's coordinates; the nameless pin row is
+// tombstoned and deleted. Val's click IS the evidence that they are one site.
+router.post('/approve', async (req, res, next) => {
+  try {
+    const dropId = Number(req.body?.drop_id), keepId = Number(req.body?.keep_id);
+    if (!dropId || !keepId) return res.status(400).json({ error: 'ids_required' });
+    const out = await withTransaction(async (client) => {
+      // Re-verify the shape under lock — never merge on a stale proposal.
+      const rows = (await client.query(
+        `SELECT id, company_id, label, address, latitude, longitude, geocode_status, geocode_method, source, source_url, raw
+           FROM company_locations WHERE id = ANY($1) FOR UPDATE`, [[dropId, keepId]])).rows;
+      const drop = rows.find((r) => Number(r.id) === dropId);
+      const keep = rows.find((r) => Number(r.id) === keepId);
+      if (!drop || !keep) return { error: 'row_gone' };
+      if (Number(drop.company_id) !== Number(keep.company_id)) return { error: 'different_companies' };
+      if (drop.latitude == null || !isCoordinateAddress(drop.address)) return { error: 'not_a_bare_pin' };
+      if (keep.latitude != null) return { error: 'already_pinned' };
+
+      await client.query(`
+        UPDATE company_locations
+           SET latitude = $2, longitude = $3,
+               geocode_status = COALESCE($4, geocode_status),
+               geocode_method = 'pair-confirmed', geocoded_at = now(),
+               raw = COALESCE(raw,'{}'::jsonb) || jsonb_build_object('merged_from',
+                 COALESCE(raw->'merged_from','[]'::jsonb) || jsonb_build_object(
+                   'id', $5::bigint, 'source', $6::text, 'source_url', $7::text,
+                   'geocode_status', $4::text, 'confirmed_by', 'val', 'at', now()::text)),
+               updated_at = now()
+         WHERE id = $1`,
+        [keepId, drop.latitude, drop.longitude, drop.geocode_status, dropId, drop.source, drop.source_url]);
+      // company_locations has NO delete trigger — tombstone BEFORE delete, or prod keeps it.
+      await client.query(`INSERT INTO sync_deletions (table_name, row_id) VALUES ('company_locations', $1)`, [dropId]);
+      await client.query(`DELETE FROM company_locations WHERE id = $1`, [dropId]);
+      return { ok: true, company_id: Number(drop.company_id) };
+    });
+    if (out.error) return res.status(409).json(out);
+    invalidate();
+    await recomputeBellScoreForCompany(out.company_id).catch(() => {});
+    res.json(out);
+  } catch (e) { next(e); }
+});
+
+// Reject: remembered on the PIN row keyed by the text row's id, so the pair is never
+// re-proposed — and because it lives on the row, a re-harvest that re-mints the pin
+// (pre-guard rows) starts fresh, which is correct: the evidence deserves a second look
+// only if the data actually changed.
+router.post('/reject', async (req, res, next) => {
+  try {
+    const dropId = Number(req.body?.drop_id), keepId = Number(req.body?.keep_id);
+    if (!dropId || !keepId) return res.status(400).json({ error: 'ids_required' });
+    await query(`
+      UPDATE company_locations
+         SET raw = COALESCE(raw,'{}'::jsonb) || jsonb_build_object('pair_rejected',
+               COALESCE(raw->'pair_rejected','[]'::jsonb) || jsonb_build_object('keep_id', $2::bigint, 'at', now()::text)),
+             updated_at = now()
+       WHERE id = $1`, [dropId, keepId]);
+    invalidate();
+    res.json({ ok: true });
+  } catch (e) { next(e); }
+});
+
+export default router;

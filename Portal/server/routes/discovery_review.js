@@ -132,7 +132,10 @@ export async function promoteToCompany(client, { name, website, phone, email, ci
                               gmaps_place_id, gmaps_rating, gmaps_reviews_count, extra_fields)
        VALUES ($1,$2,$3,$4,$5,true,false,'unknown',$6,$7::text[],$8,$9,$10,$11,$12,$13::jsonb)
        RETURNING id`,
-      [name, norm, website || null, city || 'Doha', country || 'Qatar', primary, tags,
+      // city: NULL when no source states one — never default to 'Doha'. The same guess was
+      // already purged from the QFC ingest and Stage-2 (several "Doha" companies were
+      // actually in Lusail); a promote must not reintroduce it.
+      [name, norm, website || null, city || null, country || 'Qatar', primary, tags,
        hasCoords ? Number(latitude) : null, hasCoords ? Number(longitude) : null,
        place_id || null, rating ?? null, reviews_count ?? null,
        JSON.stringify({ promoted_from: source })]);
@@ -166,12 +169,16 @@ router.post('/gmaps/:id/promote', async (req, res, next) => {
         country: 'Qatar', source: 'gmaps', sourceRecordId: 'gmaps:' + p.place_id, raw: p.raw,
       });
       // Location (coords from the place) — safe inside the txn (raw SQL via client).
+      // Label = the place's own STATED name, never 'Head office' — no source says which
+      // site is a head office, and the hardcoded label put "Head office" on 534 rows
+      // including 20 on one company (Rule 2.1: a fabricated label is a guess).
       if (Number.isFinite(Number(p.latitude)) && Number.isFinite(Number(p.longitude))) {
         await client.query(
           `INSERT INTO company_locations (company_id, label, address, latitude, longitude, source, geocode_status, updated_at)
-           VALUES ($1,'Head office',$2,$3,$4,'gmaps-review','website-maplink', now())
+           VALUES ($1,$5,$2,$3,$4,'gmaps-review','website-maplink', now())
            ON CONFLICT (company_id, lower(address)) DO NOTHING`,
-          [companyId, (p.address || (Number(p.latitude).toFixed(5) + ', ' + Number(p.longitude).toFixed(5))).slice(0, 300), Number(p.latitude), Number(p.longitude)]);
+          [companyId, (p.address || (Number(p.latitude).toFixed(5) + ', ' + Number(p.longitude).toFixed(5))).slice(0, 300),
+           Number(p.latitude), Number(p.longitude), (p.title || 'Location').slice(0, 120)]);
       }
       await client.query(
         `UPDATE gmaps_places SET status='matched', matched_company_id=$2, match_method=$3, updated_at=now() WHERE id=$1`,
@@ -285,11 +292,13 @@ router.post('/osm/:id/promote', async (req, res, next) => {
         source: 'osm', sourceRecordId: 'osm:' + p.osm_type + '/' + p.osm_id, raw: p.tags,
       });
       if (Number.isFinite(Number(p.latitude)) && Number.isFinite(Number(p.longitude))) {
+        // Label = the OSM place's own stated name — 'Head office' was a fabricated claim.
         await client.query(
           `INSERT INTO company_locations (company_id, label, address, latitude, longitude, source, geocode_status, updated_at)
-           VALUES ($1,'Head office',$2,$3,$4,'osm-review','osm', now())
+           VALUES ($1,$5,$2,$3,$4,'osm-review','osm', now())
            ON CONFLICT (company_id, lower(address)) DO NOTHING`,
-          [companyId, (p.address || (Number(p.latitude).toFixed(5) + ', ' + Number(p.longitude).toFixed(5))).slice(0, 300), Number(p.latitude), Number(p.longitude)]);
+          [companyId, (p.address || (Number(p.latitude).toFixed(5) + ', ' + Number(p.longitude).toFixed(5))).slice(0, 300),
+           Number(p.latitude), Number(p.longitude), (p.name_en || p.name || 'Location').slice(0, 120)]);
       }
       await client.query(`UPDATE osm_places SET matched_company_id=$2, review_status='promoted', updated_at=now() WHERE id=$1`, [id, companyId]);
       return { promoted: id, company_id: companyId, created, phone: p.phone, matchedMethod };
@@ -331,7 +340,7 @@ router.post('/osm/approve-group', async (req, res, next) => {
     }
     const limit = Math.min(Math.max(Number(req.body?.limit) || 300, 1), 500);
     const rows = (await query(
-      `SELECT id, osm_type, osm_id, name, category, address, phone, website, latitude, longitude, tags
+      `SELECT id, osm_type, osm_id, name, name_en, category, address, phone, website, latitude, longitude, tags
          FROM osm_places
         WHERE matched_company_id IS NULL AND review_status IS NULL
           AND name IS NOT NULL AND latitude IS NOT NULL
@@ -354,12 +363,13 @@ router.post('/osm/approve-group', async (req, res, next) => {
             source: 'osm', sourceRecordId: 'osm:' + p.osm_type + '/' + p.osm_id, raw: p.tags,
           });
           if (Number.isFinite(Number(p.latitude)) && Number.isFinite(Number(p.longitude))) {
+            // Label = the OSM place's own stated name — 'Head office' was a fabricated claim.
             await client.query(
               `INSERT INTO company_locations (company_id, label, address, latitude, longitude, source, geocode_status, updated_at)
-               VALUES ($1,'Head office',$2,$3,$4,'osm-review','osm', now())
+               VALUES ($1,$5,$2,$3,$4,'osm-review','osm', now())
                ON CONFLICT (company_id, lower(address)) DO NOTHING`,
               [r.companyId, (p.address || (Number(p.latitude).toFixed(5) + ', ' + Number(p.longitude).toFixed(5))).slice(0, 300),
-               Number(p.latitude), Number(p.longitude)]);
+               Number(p.latitude), Number(p.longitude), (p.name_en || p.name || 'Location').slice(0, 120)]);
           }
           await client.query(
             `UPDATE osm_places SET matched_company_id=$2, review_status='promoted', updated_at=now() WHERE id=$1`,

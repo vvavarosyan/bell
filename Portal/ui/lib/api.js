@@ -194,6 +194,12 @@ export const api = {
   addrDecideRule:         (rule_id, verdict) => request('/api/address-review/decide-rule', { method: 'POST', body: JSON.stringify({ rule_id, verdict }) }),
   addrAutoRun:            (apply = false) => request('/api/address-review/auto-run', { method: 'POST', body: JSON.stringify({ apply }) }),
   addrUndo:               (email) => request('/api/address-review/undo', { method: 'POST', body: JSON.stringify({ email }) }),
+
+  // Location pairs — pair a nameless map pin with the company's own written address.
+  locPairsSummary:        () => request('/api/location-review/summary'),
+  locPairs:               (limit = 100) => request(`/api/location-review/pairs?limit=${limit}`),
+  locPairApprove:         (drop_id, keep_id) => request('/api/location-review/approve', { method: 'POST', body: JSON.stringify({ drop_id, keep_id }) }),
+  locPairReject:          (drop_id, keep_id) => request('/api/location-review/reject', { method: 'POST', body: JSON.stringify({ drop_id, keep_id }) }),
   promoteOsm:             (id) => request(`/api/discovery/osm/${id}/promote`, { method: 'POST', body: '{}' }),
   ignoreOsm:              (id) => request(`/api/discovery/osm/${id}/ignore`, { method: 'POST', body: '{}' }),
   resetEnrichment:        (id) => request(`/api/companies/${id}/reset-enrichment`, { method: 'POST', body: '{}' }),
