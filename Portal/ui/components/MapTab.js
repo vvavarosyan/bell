@@ -273,7 +273,7 @@ async function showNetwork(map, companyId, origin) {
 // module-global state; sharing ids would break each other's cleanup).
 function clearBranchTies(map) {
   if (branchAnimFrame) { cancelAnimationFrame(branchAnimFrame); branchAnimFrame = null; }
-  for (const id of ['branch-tie-dots', 'branch-ties', 'branch-ties-glow']) {
+  for (const id of ['branch-tie-dots', 'branch-ties', 'branch-ties-casing', 'branch-ties-glow']) {
     try { if (map.getLayer(id)) map.removeLayer(id); } catch { /* ignore */ }
   }
   for (const src of ['branch-ties-src', 'branch-tie-dots-src']) {
@@ -378,25 +378,38 @@ async function showBranchTies(map, companyId, origin) {
     map.addSource('branch-tie-dots-src', { type: 'geojson', data: dotsAt(0) });
     // Under the pins, above the basemap.
     const under = map.getLayer('clusters') ? 'clusters' : undefined;
+    // Three stacked strokes so the tie reads on ANY basemap (dark, satellite,
+    // streets): a soft halo, a DARK CASING that separates it from whatever is
+    // behind, and a bright core on top. Val 2026-07-21: the single blue line was
+    // blending into the environment.
     map.addLayer({
       id: 'branch-ties-glow', type: 'line', source: 'branch-ties-src',
       layout: { 'line-cap': 'round', 'line-join': 'round' },
-      paint: { 'line-color': '#5b8cff', 'line-width': 11, 'line-opacity': 0.30, 'line-blur': 5 },
+      paint: { 'line-color': '#38bdf8', 'line-width': 16, 'line-opacity': 0.22, 'line-blur': 8 },
+    }, under);
+    map.addLayer({
+      id: 'branch-ties-casing', type: 'line', source: 'branch-ties-src',
+      layout: { 'line-cap': 'round', 'line-join': 'round' },
+      paint: {
+        'line-color': '#0b1020',
+        'line-width': ['interpolate', ['linear'], ['zoom'], 9, 7, 14, 9, 18, 12],
+        'line-opacity': 0.85,
+      },
     }, under);
     map.addLayer({
       id: 'branch-ties', type: 'line', source: 'branch-ties-src',
       layout: { 'line-cap': 'round', 'line-join': 'round' },
       paint: {
-        'line-color': '#cfe0ff',
-        'line-width': ['interpolate', ['linear'], ['zoom'], 9, 2.2, 14, 3, 18, 4],
-        'line-opacity': 0.98,
+        'line-color': '#7dd3fc',
+        'line-width': ['interpolate', ['linear'], ['zoom'], 9, 3, 14, 4.5, 18, 6],
+        'line-opacity': 1,
       },
     }, under);
     map.addLayer({
       id: 'branch-tie-dots', type: 'circle', source: 'branch-tie-dots-src',
       paint: {
-        'circle-radius': ['interpolate', ['linear'], ['zoom'], 9, 5, 14, 6.5, 18, 8],
-        'circle-color': '#ffffff', 'circle-stroke-color': '#5b8cff', 'circle-stroke-width': 2.5,
+        'circle-radius': ['interpolate', ['linear'], ['zoom'], 9, 6, 14, 7.5, 18, 9],
+        'circle-color': '#7dd3fc', 'circle-stroke-color': '#0b1020', 'circle-stroke-width': 3,
         'circle-opacity': 1,
       },
     }, under);
