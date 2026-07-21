@@ -8,6 +8,7 @@ import { query, withTransaction } from '../../db.js';
 import { hostOf, fetchPage } from './http.js';
 import { recomputeBellScoreForCompany } from '../../assembly/bell_score.js';
 import { corroborates } from './finder.js';
+import { resyncContactColumns } from '../../lib/contacts.js';
 
 /** Pending candidates with their company, newest first. */
 export async function listCandidates(status = 'pending', limit = 200) {
@@ -135,7 +136,9 @@ export async function undoAutoApprovals({ jobLog = null } = {}) {
              stage7_status = NULL, stage7_at = NULL,
              stage8_status = NULL, stage8_at = NULL,
              stage9_at = NULL, stage10_at = NULL, stage11_at = NULL,
-             extra_fields = (extra_fields - 'website_found')
+             extra_fields = (extra_fields - 'website_found' - 'stage7_found'
+                             - 'stage7_pages' - 'stage7_scraped_at' - 'stage7_rendered'
+                             - 'stage7_page_renders' - 'stage7_shell_unrendered')
        WHERE id = $1 AND website = $2
     `, [r.company_id, r.candidate_url]);
     if (up.rowCount) {
@@ -148,6 +151,11 @@ export async function undoAutoApprovals({ jobLog = null } = {}) {
         [r.company_id],
       ).catch(() => ({ rowCount: 0 }));
       stats.contacts_removed += dc.rowCount || 0;
+      // The legacy companies.email/phone columns are what outreach, CSV export, CRM
+      // reveal and Bella's send read. A bulk DELETE bypasses deleteContact(), so
+      // without this the column KEEPS the wrong-company address we just removed —
+      // and the machine can cold-email a stranger under this company's name.
+      if (dc.rowCount) await resyncContactColumns('company', r.company_id).catch(() => {});
       await recomputeBellScoreForCompany(r.company_id).catch(() => {});
     } else stats.kept++;
     // Return the candidate to the human review queue.

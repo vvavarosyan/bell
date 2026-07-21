@@ -12,6 +12,7 @@
 
 import { query } from '../db.js';
 import { isPlaceholderName, decodeCloudflareEmail } from '../lib/dataquality.js';
+import { resyncContactColumns } from '../lib/contacts.js';
 
 const apply = process.argv.includes('--apply');
 const trunc = (s, n = 40) => { s = String(s || ''); return s.length > n ? s.slice(0, n) + '…' : s; };
@@ -62,6 +63,14 @@ const trunc = (s, n = 40) => { s = String(s || ''); return s.length > n ? s.slic
   for (const r of pc) { const dec = showFix('person_contact', r.id, r.value);
     if (apply) { if (dec) { try { await query(`UPDATE person_contacts SET value=$2, value_display=$2, updated_at=now() WHERE id=$1`, [r.id, dec]); } catch { await query(`DELETE FROM person_contacts WHERE id=$1`, [r.id]); } }
                  else await query(`DELETE FROM person_contacts WHERE id=$1`, [r.id]); } }
+
+  // Bulk deletes above bypass deleteContact(); re-derive the legacy columns so a
+  // removed junk address cannot survive on companies.email/phone.
+  if (apply) {
+    for (const id of [...new Set(cc.map((r) => r.company_id).filter(Boolean))]) {
+      await resyncContactColumns('company', id).catch(() => {});
+    }
+  }
 
   console.log(`\n${apply ? 'Done — changes written. They publish to the live site on the next data push.' : 'Preview only. Re-run with --apply (via "Apply Bad-Record Cleanup.command") to write.'}`);
   process.exit(0);

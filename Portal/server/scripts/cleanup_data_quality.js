@@ -36,6 +36,7 @@ import {
   normalizePhone, parseSocialUrl, cleanCompanySocials, rankCompanyEmails,
   looksLikeName, isSingularExecTitle, cleanWebsiteUrl, isFakePerson,
 } from '../lib/dataquality.js';
+import { resyncContactColumns } from '../lib/contacts.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const BATCH = 500;
@@ -303,6 +304,10 @@ async function applyCompanyPlan(withTransaction, tombstone, companyId, plan) {
       await client.query(`UPDATE companies SET website=$2, updated_at=now() WHERE id=$1`, [companyId, plan.websiteUpdate]);
     }
   });
+  // Deleting rows by id bypasses deleteContact(), which is what keeps the legacy
+  // companies.email/phone columns honest. Re-derive them from whatever survived —
+  // otherwise a rejected address lives on in outreach, CSV export and CRM reveal.
+  if (delIds.length) await resyncContactColumns('company', companyId).catch(() => {});
 }
 
 // ---------------------------------------------------------------------------

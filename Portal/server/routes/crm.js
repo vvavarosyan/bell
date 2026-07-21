@@ -485,7 +485,22 @@ router.post('/records/:id/email', async (req, res, next) => {
     if (!rec.rows.length) return res.status(404).json({ error: 'not_found' });
     const r0 = rec.rows[0];
 
-    const to = String(req.body?.to || (r0.entity_type === 'company' ? r0.company_email : r0.person_email) || '').trim();
+    // Prefer the contacts table over the legacy companies.email / people.email column.
+    // The legacy column is only ever the mirror of a primary contact, and 44 companies
+    // have an email in company_contacts with the column still NULL — those used to come
+    // back as "no email on file" even though Bell holds a perfectly good address.
+    let onFile = r0.entity_type === 'company' ? r0.company_email : r0.person_email;
+    if (!req.body?.to) {
+      const tbl = r0.entity_type === 'company' ? 'company_contacts' : 'person_contacts';
+      const col = r0.entity_type === 'company' ? 'company_id' : 'person_id';
+      const best = await query(
+        `SELECT COALESCE(value_display, value) AS v FROM ${tbl}
+          WHERE ${col} = $1 AND type = 'email'
+          ORDER BY is_primary DESC, is_verified DESC, created_at ASC LIMIT 1`,
+        [r0.entity_id]).catch(() => ({ rows: [] }));
+      if (best.rows[0]?.v) onFile = best.rows[0].v;
+    }
+    const to = String(req.body?.to || onFile || '').trim();
     if (!to) return res.status(400).json({ error: 'no_recipient', reason: 'No email address on file — enter one.' });
     const limit = await checkDailyLimit(tenantId(req), req.tenant?.plan);
     if (!limit.allowed) return res.status(429).json({ error: 'daily_limit', reason: `You've hit today's sending limit (${limit.limit}/day). It resets tomorrow — or upgrade your plan for more.` });

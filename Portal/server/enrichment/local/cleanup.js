@@ -23,6 +23,7 @@ import { query, withTransaction } from '../../db.js';
 import { hostOf } from './http.js';
 import { significantTokens, distinctiveGuess, REDIRECT_TRAP_HOSTS, GENERIC_WORDS } from './finder.js';
 import { recomputeBellScoreForCompany } from '../../assembly/bell_score.js';
+import { resyncContactColumns } from '../../lib/contacts.js';
 
 // Decide a company's bucket from stored fields only (no fetch).
 function classify(co, hasContacts, hasPeople) {
@@ -155,6 +156,9 @@ async function purgeOne(companyId) {
                 true)
         WHERE id = $1`, [companyId, badHost]);
   });
+  // The bulk DELETE above bypasses deleteContact(), so companies.email/phone would
+  // keep the wrong-site value that outreach, CSV export and Bella's send all read.
+  if (removedContacts) await resyncContactColumns('company', companyId).catch(() => {});
   await recomputeBellScoreForCompany(companyId);
   return { removedContacts, removedPeople };
 }

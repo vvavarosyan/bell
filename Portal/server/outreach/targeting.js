@@ -1,7 +1,7 @@
 // Outreach targeting — WHO Bell may contact, and the honest exclusions.
 //
-// Source of company emails: company_contacts (type='email') + companies.email, de-duplicated
-// per company. Each address is classified (address_rules.js) and then filtered HARD against:
+// Source of company emails: company_contacts (type='email') — the ONLY source. Each address
+// is classified (address_rules.js) and then filtered HARD against:
 //   - the global suppression list (bounced / complained / previously unsubscribed),
 //   - the outreach_consent ledger (anyone whose latest event is 'withdrawn'),
 //   - bounced email_status on the contact row,
@@ -15,8 +15,20 @@ import { classifyAddress } from './address_rules.js';
 const norm = (e) => String(e || '').trim().toLowerCase();
 const VALID_EMAIL_RX = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 
-// Pull candidate (company, email) pairs from both stores. One row per (company, address).
+// Pull candidate (company, email) pairs. One row per (company, address).
 // hasLinkedPerson: does a person_contacts row carry this exact address? (→ named_person tier).
+//
+// company_contacts is the SINGLE source. The legacy companies.email column used to be
+// UNIONed in here, stamped `true` into the is_verified slot — asserting verification with
+// zero evidence (Rule 2.1) and leaving email_status NULL so the bounced/complained
+// exclusion below could never fire on it. Worse: 593 of those 732 legacy addresses are
+// ones Bell had ALREADY REJECTED — 297 role mailboxes harvested from a website later
+// judged to belong to a different company (Anya Aviation QFZ carried the London handbag
+// brand's wholesale@ address). Deleting the contact row never cleared the legacy column,
+// so the machine could cold-email a stranger under a Qatar company's name.
+// Anything genuinely reachable is backfilled INTO company_contacts by
+// `Preview/Apply Legacy Contact Repair.command`, where it faces the same quality gate as
+// every other address. Do not re-add a second source here.
 async function candidateRows({ limit = 100000 } = {}) {
   const r = await query(
     `WITH emails AS (
@@ -26,12 +38,6 @@ async function candidateRows({ limit = 100000 } = {}) {
           FROM company_contacts cc
           JOIN companies c ON c.id = cc.company_id
          WHERE cc.type = 'email'
-           AND c.is_active = true AND COALESCE(c.archived,false) = false
-        UNION
-        SELECT c.id, c.name, c.industry, c.industries, c.city, c.website, lower(c.email),
-               true, NULL
-          FROM companies c
-         WHERE c.email IS NOT NULL AND c.email <> ''
            AND c.is_active = true AND COALESCE(c.archived,false) = false
      )
      SELECT e.*,

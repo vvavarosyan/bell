@@ -319,3 +319,32 @@ async function syncPrimaryToParent(kind, refId, type) {
     WHERE id = $1
   `, [refId, type]);
 }
+
+/**
+ * Re-derive the legacy email/phone columns from whatever contact rows SURVIVE.
+ *
+ * Call this after any bulk `DELETE FROM company_contacts` — those bypass
+ * deleteContact() entirely, so the legacy column kept the deleted value. That is
+ * how 373 companies ended up still carrying an email harvested from a website
+ * Bell had since judged to belong to a different company: the contact row was
+ * correctly removed, the column was not, and outreach/export/CRM read the column.
+ *
+ * Deletes also leave a type with rows but no primary (the deleted row WAS the
+ * primary), so promote one first — otherwise the sync below would read no primary
+ * and null a column that still has perfectly good contacts behind it.
+ */
+export async function resyncContactColumns(kind, refId) {
+  const table  = kind === 'company' ? 'company_contacts' : 'person_contacts';
+  const refCol = kind === 'company' ? 'company_id'       : 'person_id';
+  for (const type of ['email', 'phone']) {
+    await query(`
+      UPDATE ${table} SET is_primary = true
+       WHERE id = (SELECT id FROM ${table}
+                    WHERE ${refCol} = $1 AND type = $2
+                    ORDER BY is_verified DESC, created_at ASC LIMIT 1)
+         AND NOT EXISTS (SELECT 1 FROM ${table}
+                          WHERE ${refCol} = $1 AND type = $2 AND is_primary = true)
+    `, [refId, type]);
+    await syncPrimaryToParent(kind, refId, type);
+  }
+}

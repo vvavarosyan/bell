@@ -28,10 +28,16 @@ async function foundVsStored() {
                          AND NOT EXISTS (SELECT 1 FROM company_locations l WHERE l.company_id = c.id))::int AS saw_loc_none_stored,
       count(*) FILTER (WHERE (extra_fields->'stage7_found'->>'emails')::int > 0)::int AS saw_email,
       count(*) FILTER (WHERE (extra_fields->'stage7_found'->>'emails')::int > 0
-                         AND NOT EXISTS (SELECT 1 FROM company_contacts k WHERE k.company_id = c.id AND k.type='email'))::int AS saw_email_none_stored,
+                         AND NOT EXISTS (SELECT 1 FROM company_contacts k WHERE k.company_id = c.id AND k.type='email')
+                         AND NOT (c.website IS NULL AND c.stage7_status IS NULL
+                              AND EXISTS (SELECT 1 FROM website_candidates w WHERE w.company_id = c.id)))::int AS saw_email_none_stored,
+      count(*) FILTER (WHERE extra_fields ? 'stage7_found' AND (c.website IS NULL AND c.stage7_status IS NULL
+                              AND EXISTS (SELECT 1 FROM website_candidates w WHERE w.company_id = c.id)))::int AS reversed_harvest,
       count(*) FILTER (WHERE (extra_fields->'stage7_found'->>'phones')::int > 0)::int AS saw_phone,
       count(*) FILTER (WHERE (extra_fields->'stage7_found'->>'phones')::int > 0
-                         AND NOT EXISTS (SELECT 1 FROM company_contacts k WHERE k.company_id = c.id AND k.type='phone'))::int AS saw_phone_none_stored
+                         AND NOT EXISTS (SELECT 1 FROM company_contacts k WHERE k.company_id = c.id AND k.type='phone')
+                         AND NOT (c.website IS NULL AND c.stage7_status IS NULL
+                              AND EXISTS (SELECT 1 FROM website_candidates w WHERE w.company_id = c.id)))::int AS saw_phone_none_stored
     FROM companies c WHERE extra_fields ? 'stage7_found'`)).rows[0];
   line('sites where a location was seen', rows.saw_loc);
   line('  …but NO location stored', rows.saw_loc_none_stored, rows.saw_loc_none_stored ? '← investigate' : 'ok');
@@ -39,6 +45,11 @@ async function foundVsStored() {
   line('  …but NO email stored', rows.saw_email_none_stored, rows.saw_email_none_stored ? '← investigate' : 'ok');
   line('sites where a phone was seen', rows.saw_phone);
   line('  …but NO phone stored', rows.saw_phone_none_stored, rows.saw_phone_none_stored ? '← investigate' : 'ok');
+  // NOT a gap: the wrong-website reversal deliberately deletes contacts harvested from
+  // a site that turned out to belong to someone else. stage7_found is a WRITE counter
+  // (harvester.js only increments it when the row was actually stored), so without this
+  // line every correct deletion would read as "found but discarded" forever.
+  line('harvest reversed — contacts removed on purpose', rows.reversed_harvest, 'not a gap');
   console.log('');
 }
 
@@ -105,9 +116,13 @@ export async function collectGaps() {
       count(*) FILTER (WHERE (extra_fields->'stage7_found'->>'locations')::int > 0
                          AND NOT EXISTS (SELECT 1 FROM company_locations l WHERE l.company_id = c.id))::int AS loc_lost,
       count(*) FILTER (WHERE (extra_fields->'stage7_found'->>'emails')::int > 0
-                         AND NOT EXISTS (SELECT 1 FROM company_contacts k WHERE k.company_id = c.id AND k.type='email'))::int AS email_lost,
+                         AND NOT EXISTS (SELECT 1 FROM company_contacts k WHERE k.company_id = c.id AND k.type='email')
+                         AND NOT (c.website IS NULL AND c.stage7_status IS NULL
+                              AND EXISTS (SELECT 1 FROM website_candidates w WHERE w.company_id = c.id)))::int AS email_lost,
       count(*) FILTER (WHERE (extra_fields->'stage7_found'->>'phones')::int > 0
-                         AND NOT EXISTS (SELECT 1 FROM company_contacts k WHERE k.company_id = c.id AND k.type='phone'))::int AS phone_lost
+                         AND NOT EXISTS (SELECT 1 FROM company_contacts k WHERE k.company_id = c.id AND k.type='phone')
+                         AND NOT (c.website IS NULL AND c.stage7_status IS NULL
+                              AND EXISTS (SELECT 1 FROM website_candidates w WHERE w.company_id = c.id)))::int AS phone_lost
     FROM companies c WHERE extra_fields ? 'stage7_found'`)).rows[0];
   const held = (await query(`
     SELECT

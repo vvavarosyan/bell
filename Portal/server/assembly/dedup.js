@@ -710,8 +710,11 @@ export async function healStrandedChildren() {
       FROM company_contacts cc JOIN companies c ON c.id = cc.company_id
      WHERE c.merge_status = 'merged_into' AND c.canonical_id IS NOT NULL
     ON CONFLICT (company_id, type, value) DO NOTHING`);
+  // Same guard as the INSERT above: only delete rows whose contacts were actually
+  // re-parented. Without `canonical_id IS NOT NULL` a merged_into row with no canonical
+  // target loses its contacts outright — delete with no home to move to.
   const cDel = await query(`DELETE FROM company_contacts cc USING companies c
-     WHERE cc.company_id = c.id AND c.merge_status = 'merged_into'`);
+     WHERE cc.company_id = c.id AND c.merge_status = 'merged_into' AND c.canonical_id IS NOT NULL`);
 
   await query(`
     UPDATE company_sources cs SET company_id = c.canonical_id
