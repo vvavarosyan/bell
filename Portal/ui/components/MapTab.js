@@ -186,7 +186,9 @@ function arcCoords(a, b, steps = 32) {
 // a single dot no matter how far you zoom. Fans a coincident group out in a
 // phyllotaxis (sunflower) spiral whose radius grows with the count. Deterministic,
 // so pins don't jump between reloads. Only touches groups of 2+.
+const displacedIndex = new Map();   // 'companyId:locationId|primary' -> displaced [lng,lat]
 function deOverlap(features) {
+  displacedIndex.clear();
   const groups = new Map();
   for (const f of features) {
     const c = f.geometry && f.geometry.coordinates;
@@ -204,8 +206,11 @@ function deOverlap(features) {
       const t = i + 0.5;
       const r = 0.00012 * Math.sqrt(t);       // ~13 m × √index; 60 pts → ~100 m radius
       const ang = t * 2.399963;               // golden angle → even sunflower spread
-      out.push({ ...f, geometry: { type: 'Point', coordinates: [lng0 + (r * Math.sin(ang)) / cosLat, lat0 + r * Math.cos(ang)] },
-        properties: { ...f.properties, stacked: arr.length } });
+      const moved = [lng0 + (r * Math.sin(ang)) / cosLat, lat0 + r * Math.cos(ang)];
+      const pr = f.properties || {};
+      displacedIndex.set(pr.id + ':' + (pr.location_id || 'primary'), moved);
+      out.push({ ...f, geometry: { type: 'Point', coordinates: moved },
+        properties: { ...pr, stacked: arr.length } });
     });
   }
   return out;
@@ -264,47 +269,134 @@ async function showNetwork(map, companyId, origin) {
 // Click any pin of a multi-location company → tie-lines to its sibling locations.
 // SEPARATE source/layer ids + timer from the company-network arcs (they use
 // module-global state; sharing ids would break each other's cleanup).
-let branchAnimTimer = null;
 function clearBranchTies(map) {
-  if (branchAnimTimer) { clearInterval(branchAnimTimer); branchAnimTimer = null; }
-  try { if (map.getLayer('branch-ties')) map.removeLayer('branch-ties'); } catch { /* ignore */ }
-  try { if (map.getLayer('branch-ties-glow')) map.removeLayer('branch-ties-glow'); } catch { /* ignore */ }
-  try { if (map.getSource('branch-ties-src')) map.removeSource('branch-ties-src'); } catch { /* ignore */ }
+  for (const id of ['branch-tie-dots', 'branch-ties', 'branch-ties-glow']) {
+    try { if (map.getLayer(id)) map.removeLayer(id); } catch { /* ignore */ }
+  }
+  for (const src of ['branch-ties-src', 'branch-tie-dots-src']) {
+    try { if (map.getSource(src)) map.removeSource(src); } catch { /* ignore */ }
+  }
 }
 
+// Metres <-> degrees around an anchor, so curves are computed in real distance
+// rather than raw degrees (a degree of longitude is ~0.9 of a degree of latitude
+// at Qatar's latitude, which is what made the old arcs look skewed).
+function metricArc(a, b, side, steps = 48) {
+  const k = Math.cos((a[1] * Math.PI) / 180) || 1;
+  const dx = (b[0] - a[0]) * 111320 * k;
+  const dy = (b[1] - a[1]) * 110540;
+  const chord = Math.hypot(dx, dy) || 1;
+  // A lean, not a loop: 6% of the chord, clamped so short hops still bend a
+  // little and long ones never balloon across the city.
+  const sag = Math.max(40, Math.min(600, chord * 0.06)) * side;
+  const nx = (-dy / chord) * sag * 1.33;
+  const ny = (dx / chord) * sag * 1.33;
+  const c1 = [dx * 0.25 + nx, dy * 0.25 + ny];
+  const c2 = [dx * 0.75 + nx, dy * 0.75 + ny];
+  const pts = [];
+  for (let i = 0; i <= steps; i += 1) {
+    const t = i / steps, u = 1 - t;
+    const x = 3 * u * u * t * c1[0] + 3 * u * t * t * c2[0] + t * t * t * dx;
+    const y = 3 * u * u * t * c1[1] + 3 * u * t * t * c2[1] + t * t * t * dy;
+    pts.push([a[0] + x / (111320 * k), a[1] + y / 110540]);
+  }
+  return pts;
+}
+
+const metresBetween = (a, b) => {
+  const k = Math.cos((a[1] * Math.PI) / 180) || 1;
+  return Math.hypot((b[0] - a[0]) * 111320 * k, (b[1] - a[1]) * 110540);
+};
+
+// Click-driven "constellation": the selected company's OWN sites, connected.
+// Sites are deduped by coordinate first — the harvester copies a website's branch
+// coords onto every company row sharing that site, so the raw list contains many
+// rows for one physical place. Endpoints snap to the RENDERED pin (deOverlap moves
+// coincident pins), so a line always lands on a dot instead of empty space.
 async function showBranchTies(map, companyId, origin) {
   try {
     const r = await api.companyLocations(companyId);
     clearBranchTies(map);
-    const sibs = (r.locations || []).filter((l) =>
-      inQatar(l.longitude, l.latitude) &&
-      (Math.abs(Number(l.longitude) - origin[0]) > 1e-6 || Math.abs(Number(l.latitude) - origin[1]) > 1e-6));
-    if (!sibs.length) return;
-    const fc = {
-      type: 'FeatureCollection',
-      features: sibs.map((l) => ({
-        type: 'Feature',
-        geometry: { type: 'LineString', coordinates: arcCoords(origin, [Number(l.longitude), Number(l.latitude)]) },
-        properties: { label: l.label || 'Branch' },
-      })),
-    };
-    map.addSource('branch-ties-src', { type: 'geojson', data: fc });
+
+    const sites = new Map();
+    for (const l of (r.locations || [])) {
+      const lng = Number(l.longitude), lat = Number(l.latitude);
+      if (!inQatar(lng, lat)) continue;
+      const key = lat.toFixed(5) + ',' + lng.toFixed(5);
+      if (!sites.has(key)) sites.set(key, { lng, lat, ids: [], labels: [], records: 0 });
+      const site = sites.get(key);
+      site.records += 1;
+      site.ids.push(l.id);
+      const lab = String(l.label || '').trim();
+      if (lab && !/^(branch|location)$/i.test(lab)) site.labels.push(lab);
+    }
+    if (!sites.size) return;
+
+    // Snap each site onto the pin the user actually sees.
+    const snapped = [...sites.values()].map((site) => {
+      let coord = [site.lng, site.lat];
+      for (const id of site.ids) {
+        const moved = displacedIndex.get(companyId + ':' + id);
+        if (moved) { coord = moved; break; }
+      }
+      return { ...site, coord };
+    });
+
+    // The hub is the site nearest the click (120 m tolerates the pin displacement)
+    // — this is what stops the company drawing a stub arc to itself.
+    let hub = null, best = 120;
+    for (const site of snapped) {
+      const d = metresBetween(origin, site.coord);
+      if (d < best) { best = d; hub = site; }
+    }
+    const hubCoord = hub ? hub.coord : origin;
+    const spokes = snapped.filter((site) => site !== hub);
+    if (!spokes.length) { toast('This company has one mapped location.'); return; }
+
+    // Sort by bearing and alternate the bow side so the fan reads symmetric
+    // instead of curling one way like a pinwheel.
+    spokes.sort((a, b) => Math.atan2(a.coord[1] - hubCoord[1], a.coord[0] - hubCoord[0])
+      - Math.atan2(b.coord[1] - hubCoord[1], b.coord[0] - hubCoord[0]));
+
+    const ties = { type: 'FeatureCollection', features: spokes.map((site, i) => ({
+      type: 'Feature',
+      geometry: { type: 'LineString', coordinates: metricArc(hubCoord, site.coord, i % 2 ? 1 : -1) },
+      properties: { label: site.labels[0] || '' },
+    })) };
+    const dots = { type: 'FeatureCollection', features: spokes.map((site) => ({
+      type: 'Feature', geometry: { type: 'Point', coordinates: site.coord },
+      properties: { label: site.labels[0] || '' },
+    })) };
+
+    map.addSource('branch-ties-src', { type: 'geojson', data: ties });
+    map.addSource('branch-tie-dots-src', { type: 'geojson', data: dots });
+    // Under the pins, above the basemap.
+    const under = map.getLayer('clusters') ? 'clusters' : undefined;
     map.addLayer({
       id: 'branch-ties-glow', type: 'line', source: 'branch-ties-src',
-      paint: { 'line-color': '#f97316', 'line-width': 5, 'line-opacity': 0.18, 'line-blur': 3 },
-    });
+      layout: { 'line-cap': 'round', 'line-join': 'round' },
+      paint: { 'line-color': '#7ea6ff', 'line-width': 6, 'line-opacity': 0.13, 'line-blur': 4 },
+    }, under);
     map.addLayer({
       id: 'branch-ties', type: 'line', source: 'branch-ties-src',
-      paint: { 'line-color': '#f97316', 'line-width': 1.8, 'line-opacity': 0.9, 'line-dasharray': [0, 4, 3] },
-    });
-    const seq = [[0, 4, 3], [1, 4, 2], [2, 4, 1], [3, 4, 0]];
-    let step = 0;
-    branchAnimTimer = setInterval(() => {
-      step = (step + 1) % seq.length;
-      try { map.setPaintProperty('branch-ties', 'line-dasharray', seq[step]); }
-      catch { clearInterval(branchAnimTimer); branchAnimTimer = null; }
-    }, 110);
-    toast(`Locations: ${sibs.length + 1} sites of this company connected`);
+      layout: { 'line-cap': 'round', 'line-join': 'round' },
+      paint: {
+        'line-color': '#9dc0ff',
+        'line-width': ['interpolate', ['linear'], ['zoom'], 9, 1, 14, 1.6, 18, 2.2],
+        'line-opacity': 0.85,
+      },
+    }, under);
+    map.addLayer({
+      id: 'branch-tie-dots', type: 'circle', source: 'branch-tie-dots-src',
+      paint: {
+        'circle-radius': ['interpolate', ['linear'], ['zoom'], 9, 3, 14, 4.5, 18, 6],
+        'circle-color': '#dbe7ff', 'circle-stroke-color': '#5b8cff', 'circle-stroke-width': 1.5,
+        'circle-opacity': 0.95,
+      },
+    }, under);
+
+    const n = spokes.length + 1;
+    toast(`${n} location${n === 1 ? '' : 's'} for this company`);
   } catch { /* soft */ }
 }
 

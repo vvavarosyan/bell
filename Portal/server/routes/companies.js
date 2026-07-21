@@ -417,8 +417,17 @@ router.get('/map', async (req, res, next) => {
     // already shows via companies.latitude, which the geocoder fills). Each branch carries the
     // parent's sources/year so the map's source-chip + year filters keep working on them.
     try {
+      // ONE pin per real SITE per website. The harvester writes a website's branch
+      // coordinates onto EVERY company row sharing that website (16 "Yateem
+      // Optician*" rows each got the same 5 pins = 80 stacked features), so
+      // rendering them raw piles dozens of phantom dots on one spot. Deduping by
+      // (coord, normalized website) collapses one chain's copies to its real sites
+      // while KEEPING two genuinely different companies at the same mall — they
+      // have different websites. Companies with no website fall back to their own
+      // id, so they are never merged with each other. Render-only: no data deleted.
       const locs = await query(`
-        SELECT l.id AS location_id, l.company_id, l.label, l.is_primary, l.latitude, l.longitude,
+        SELECT DISTINCT ON (l.latitude, l.longitude, site_key)
+               l.id AS location_id, l.company_id, l.label, l.is_primary, l.latitude, l.longitude,
                c.bin, c.name, c.is_active, c.status_normalized, c.industry, c.city,
                c.linkedin_url, c.website, c.founded_year,
                EXTRACT(YEAR FROM c.incorporation_date)::int AS incorporation_year,
@@ -426,12 +435,17 @@ router.get('/map', async (req, res, next) => {
                 FROM company_sources cs WHERE cs.company_id = c.id) AS sources
           FROM company_locations l
           JOIN companies c ON c.id = l.company_id
+          CROSS JOIN LATERAL (SELECT COALESCE(NULLIF(lower(regexp_replace(regexp_replace(btrim(c.website::text),
+                        '^https?://(www\\.)?', '', 'i'), '/+$', '')), ''), 'c' || c.id) AS site_key) sk
          WHERE l.latitude IS NOT NULL AND l.longitude IS NOT NULL
            AND l.is_primary = false
            AND c.archived = false
            -- Same Qatar-bbox guard as the main pins (P6 hardening) — a bad branch
            -- geocode must never render off-country for any consumer.
-           AND l.longitude BETWEEN 50.55 AND 51.85 AND l.latitude BETWEEN 24.40 AND 26.30`);
+           AND l.longitude BETWEEN 50.55 AND 51.85 AND l.latitude BETWEEN 24.40 AND 26.30
+         -- Prefer the registered / richest company as the surviving pin.
+         ORDER BY l.latitude, l.longitude, site_key,
+                  (c.primary_registration_no IS NOT NULL) DESC, c.bell_score DESC NULLS LAST, c.id`);
       for (const row of locs.rows) {
         features.push({
           type: 'Feature',
