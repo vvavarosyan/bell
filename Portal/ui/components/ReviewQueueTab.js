@@ -19,7 +19,7 @@ import { navigateTo } from '../lib/router.js';
 
 const TABS = [
   { key: 'gmaps',   label: 'Maps candidates',  blurb: 'New businesses Google Maps found that matched no company. Approve → a Qatar company with its rating, phone and map pin.' },
-  { key: 'osm',     label: 'OSM places',       blurb: 'Named Qatar businesses OpenStreetMap knows (with a phone or website) that Bell doesn\'t have yet. Approve → a Qatar company with its location and contact. Dedup-guarded.' },
+  { key: 'osm',     label: 'OSM places',       blurb: 'Named Qatar businesses OpenStreetMap knows that Bell doesn\'t have yet. Approve → a real Qatar company with its location (and contact where the site states one). Dedup-guarded: a match links to the existing company instead of duplicating. Use the category buttons to approve in bulk.' },
   { key: 'qatar',   label: 'Spark · Qatar',    blurb: 'Qatar companies Spark discovered while researching others. Approve → a real Qatar company.' },
   { key: 'foreign', label: 'Spark · foreign',  blurb: 'Non-Qatar companies — kept admin-only for future Middle-East expansion. Never enter Bell.' },
 ];
@@ -30,6 +30,8 @@ export function ReviewQueueTab() {
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState(null);
+  const [groups, setGroups] = useState([]);      // OSM: candidates per category
+  const [bulkBusy, setBulkBusy] = useState('');   // category currently being approved
 
   const loadCounts = useCallback(async () => {
     try { setCounts(await api.discoverySummary()); } catch { /* non-fatal */ }
@@ -47,6 +49,27 @@ export function ReviewQueueTab() {
   }, [tab]);
 
   useEffect(() => { load(); loadCounts(); }, [load, loadCounts]);
+
+  // OSM only: how many candidates sit in each category (drives Approve-all).
+  const loadGroups = useCallback(async () => {
+    if (tab !== 'osm') { setGroups([]); return; }
+    try { const r = await api.discoveryOsmGroups(); setGroups(r.groups || []); }
+    catch { setGroups([]); }
+  }, [tab]);
+  useEffect(() => { loadGroups(); }, [loadGroups]);
+
+  // Approve a whole category. Runs in capped batches server-side; press again to
+  // continue. Each row still goes through the same dedup guard as the single
+  // Approve button, so an existing company is LINKED, never duplicated.
+  const approveGroup = async (g) => {
+    setBulkBusy(g.group);
+    try {
+      const r = await api.approveOsmGroup(g.group, 300);
+      toast(`${g.group}: ${r.created} added, ${r.linked} linked to existing` + (r.remaining ? ` · ${r.remaining} left` : ' · done'), 'success');
+      await Promise.all([load({ silent: true }), loadCounts(), loadGroups()]);
+    } catch (err) { toast('Approve all failed: ' + err.message, 'error'); }
+    finally { setBulkBusy(''); }
+  };
 
   const act = async (kind, id, fn, verb) => {
     setBusyId(id);
@@ -83,6 +106,23 @@ export function ReviewQueueTab() {
         <button onClick=${() => { load(); loadCounts(); }}>Refresh</button>
       </div>
       <div class="muted small" style=${{ margin: '8px 4px 12px' }}>${blurb}</div>
+
+      ${tab === 'osm' && groups.length ? html`
+        <div style=${{ border: '1px solid var(--border)', borderRadius: '10px', padding: '10px 12px', margin: '0 0 12px' }}>
+          <div style=${{ fontWeight: 700, fontSize: '13px' }}>Approve a whole category</div>
+          <div class="muted small" style=${{ margin: '2px 0 8px' }}>
+            Adds them as real Qatar companies with their location — 300 at a time, press again to continue.
+            Anything that matches an existing company is linked to it, never duplicated.
+          </div>
+          <div style=${{ display: 'flex', flexWrap: 'wrap', gap: '6px' }}>
+            ${groups.map((g) => html`
+              <button key=${g.group} class="btn btn-sm" disabled=${!!bulkBusy}
+                onClick=${() => approveGroup(g)}
+                title=${`${g.with_contact} of ${g.n} have a phone or website`}>
+                ${bulkBusy === g.group ? 'Approving…' : `Approve all ${Number(g.n).toLocaleString()} · ${g.group}`}
+              </button>`)}
+          </div>
+        </div>` : null}
 
       ${loading ? html`<div class="muted" style=${{ padding: '20px' }}>Loading…</div>`
         : rows.length === 0 ? html`<div class="muted" style=${{ padding: '20px' }}>Nothing waiting here. 🎉</div>`

@@ -184,6 +184,8 @@ export const api = {
   promoteSpark:           (id) => request(`/api/discovery/spark/${id}/promote`, { method: 'POST', body: '{}' }),
   ignoreSpark:            (id) => request(`/api/discovery/spark/${id}/ignore`, { method: 'POST', body: '{}' }),
   discoveryOsm:           (limit = 200) => request('/api/discovery/osm?limit=' + limit),
+  discoveryOsmGroups:     () => request('/api/discovery/osm/groups'),
+  approveOsmGroup:        (group, limit = 300) => request('/api/discovery/osm/approve-group', { method: 'POST', body: JSON.stringify({ group, limit }) }),
   promoteOsm:             (id) => request(`/api/discovery/osm/${id}/promote`, { method: 'POST', body: '{}' }),
   ignoreOsm:              (id) => request(`/api/discovery/osm/${id}/ignore`, { method: 'POST', body: '{}' }),
   resetEnrichment:        (id) => request(`/api/companies/${id}/reset-enrichment`, { method: 'POST', body: '{}' }),

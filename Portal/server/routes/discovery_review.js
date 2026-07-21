@@ -302,6 +302,88 @@ router.post('/osm/:id/promote', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+// GET /osm/groups — how many candidates wait in each category (drives the
+// "Approve all in <category>" buttons).
+router.get('/osm/groups', async (_req, res, next) => {
+  try {
+    const rows = (await query(
+      `SELECT category_group AS group, count(*)::int AS n,
+              count(*) FILTER (WHERE website IS NOT NULL OR phone IS NOT NULL)::int AS with_contact
+         FROM osm_places
+        WHERE matched_company_id IS NULL AND review_status IS NULL
+          AND name IS NOT NULL AND latitude IS NOT NULL
+          AND category_group = ANY($1)
+        GROUP BY 1 ORDER BY n DESC`, [OSM_BUSINESS_GROUPS])).rows;
+    res.json({ groups: rows });
+  } catch (err) { next(err); }
+});
+
+// POST /osm/approve-group  { group: 'Food & Drink', limit?: 500 }
+// Approve a whole category in one click (Val 2026-07-21 — 7k+ rows is not
+// clickable one at a time). Same dedup guard per row as the single button, so a
+// candidate matching an existing company LINKS instead of duplicating. Capped per
+// call so the request stays responsive; press again to continue.
+router.post('/osm/approve-group', async (req, res, next) => {
+  try {
+    const group = String(req.body?.group || '').trim();
+    if (!group || !OSM_BUSINESS_GROUPS.includes(group)) {
+      return res.status(400).json({ error: 'unknown_group', allowed: OSM_BUSINESS_GROUPS });
+    }
+    const limit = Math.min(Math.max(Number(req.body?.limit) || 300, 1), 500);
+    const rows = (await query(
+      `SELECT id, osm_type, osm_id, name, category, address, phone, website, latitude, longitude, tags
+         FROM osm_places
+        WHERE matched_company_id IS NULL AND review_status IS NULL
+          AND name IS NOT NULL AND latitude IS NOT NULL
+          AND category_group = $1
+        ORDER BY ((website IS NOT NULL)::int + (phone IS NOT NULL)::int) DESC, id
+        LIMIT $2`, [group, limit])).rows;
+
+    let created = 0, linked = 0, failed = 0;
+    const done = [];
+    for (const p of rows) {
+      try {
+        const out = await withTransaction(async (client) => {
+          const cur = await client.query(
+            `SELECT matched_company_id, review_status FROM osm_places WHERE id=$1 FOR UPDATE`, [p.id]);
+          const c = cur.rows[0];
+          if (!c || c.matched_company_id || c.review_status) return null;
+          const r = await promoteToCompany(client, {
+            name: p.name, website: p.website, phone: p.phone, category: p.category,
+            latitude: p.latitude, longitude: p.longitude, country: 'Qatar',
+            source: 'osm', sourceRecordId: 'osm:' + p.osm_type + '/' + p.osm_id, raw: p.tags,
+          });
+          if (Number.isFinite(Number(p.latitude)) && Number.isFinite(Number(p.longitude))) {
+            await client.query(
+              `INSERT INTO company_locations (company_id, label, address, latitude, longitude, source, geocode_status, updated_at)
+               VALUES ($1,'Head office',$2,$3,$4,'osm-review','osm', now())
+               ON CONFLICT (company_id, lower(address)) DO NOTHING`,
+              [r.companyId, (p.address || (Number(p.latitude).toFixed(5) + ', ' + Number(p.longitude).toFixed(5))).slice(0, 300),
+               Number(p.latitude), Number(p.longitude)]);
+          }
+          await client.query(
+            `UPDATE osm_places SET matched_company_id=$2, review_status='promoted', updated_at=now() WHERE id=$1`,
+            [p.id, r.companyId]);
+          return r;
+        });
+        if (!out) continue;
+        if (out.created) created += 1; else linked += 1;
+        done.push({ companyId: out.companyId, phone: p.phone });
+      } catch { failed += 1; }
+    }
+    // Contacts + rescore after commit (they use the pool, not the txn client).
+    for (const d of done) {
+      if (d.phone) await upsertContact('company', d.companyId, { type: 'phone', value: d.phone, source: 'osm-review' }).catch(() => {});
+      await recomputeBellScoreForCompany(d.companyId).catch(() => {});
+    }
+    const left = (await query(
+      `SELECT count(*)::int n FROM osm_places
+        WHERE matched_company_id IS NULL AND review_status IS NULL
+          AND name IS NOT NULL AND latitude IS NOT NULL AND category_group = $1`, [group])).rows[0].n;
+    res.json({ group, processed: rows.length, created, linked, failed, remaining: left });
+  } catch (err) { next(err); }
+});
+
 // POST /osm/:id/ignore
 router.post('/osm/:id/ignore', async (req, res, next) => {
   try {
