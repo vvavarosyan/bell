@@ -28,13 +28,24 @@ export function extractMapCoords(url) {
   const u = String(url || '');
   if (!/google\.[a-z.]+\/maps|maps\.google|\/maps\/embed|!3d[0-9]/i.test(u)) return null;
 
+  // THE PLACE PIN: /maps/place/…/data=…!3d<lat>!4d<lng>. This is the authoritative
+  // coordinate of the business itself and MUST be preferred over "@", which is only
+  // where the camera happened to sit. They are NOT the same point — DOC Medical
+  // Center's Lusail share link puts the camera 259 m from the pin, which planted it
+  // in the wrong tower (Val 2026-07-21). Always try 3d/4d first.
+  let m = u.match(/!3d(-?\d{1,3}\.\d+)!4d(-?\d{1,3}\.\d+)/);
+  if (m) { const p = qatarPair(m[1], m[2]); if (p) return p; }
+  m = u.match(/!4d(-?\d{1,3}\.\d+)!3d(-?\d{1,3}\.\d+)/);
+  if (m) { const p = qatarPair(m[2], m[1]); if (p) return p; }   // reorder to (lat,lng)
+
   // Embed iframe pb string: !3d<lat>!2d<lng> (3d is ALWAYS latitude, 2d longitude).
-  let m = u.match(/!3d(-?\d{1,3}\.\d+)!2d(-?\d{1,3}\.\d+)/);
+  m = u.match(/!3d(-?\d{1,3}\.\d+)!2d(-?\d{1,3}\.\d+)/);
   if (m) { const p = qatarPair(m[1], m[2]); if (p) return p; }
   m = u.match(/!2d(-?\d{1,3}\.\d+)!3d(-?\d{1,3}\.\d+)/);
   if (m) { const p = qatarPair(m[2], m[1]); if (p) return p; }   // reorder to (lat,lng)
 
-  // /@lat,lng,zoom
+  // /@lat,lng,zoom — LAST RESORT. This is the map viewport centre, not the place;
+  // only use it when the URL carries no explicit place coordinate at all.
   m = u.match(/@(-?\d{1,3}\.\d+),(-?\d{1,3}\.\d+)/);
   if (m) { const p = qatarPair(m[1], m[2]); if (p) return p; }
 

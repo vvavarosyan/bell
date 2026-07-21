@@ -29,6 +29,19 @@ const COHORT = `c.website IS NOT NULL AND btrim(c.website) <> ''
   AND NOT EXISTS (SELECT 1 FROM company_locations l
                    WHERE l.company_id = c.id AND l.latitude IS NOT NULL)`;
 
+
+// Machine-generated map pins carry a bare "lat, lng" string as their address, so
+// they are fully re-derivable from the site. Clear them before re-harvesting a
+// company: otherwise a corrected coordinate lands as a SECOND row (the dedupe key
+// is the address text) and the old, wrong pin stays on the map forever.
+const BARE_PIN = `source='stage7-website' AND geocode_status='website-maplink'
+                  AND address ~ '^[0-9.,+-]+\\s*,\\s*[0-9.,+-]+$'`;
+async function clearStalePins(ids) {
+  if (!ids.length) return 0;
+  const r = await query(`DELETE FROM company_locations WHERE company_id = ANY($1) AND ${BARE_PIN}`, [ids]);
+  return r.rowCount || 0;
+}
+
 const countCohort = async () =>
   (await query(`SELECT count(*)::int n FROM companies c WHERE ${COHORT}`)).rows[0].n;
 
@@ -49,6 +62,8 @@ async function main() {
     if (!rows.length) { console.log('No such company.'); return; }
     console.log('Company: ' + rows[0].name + '  (' + rows[0].website + ')');
     const before = await mappedFor([rows[0].id]);
+    const cleared = await clearStalePins([rows[0].id]);
+    if (cleared) console.log('   cleared ' + cleared + ' stale map pin(s) — they will be re-derived');
     await enrichCompanies(rows, (m) => console.log('   ' + m));
     const after = await mappedFor([rows[0].id]);
     console.log('');
@@ -82,6 +97,7 @@ async function main() {
       `SELECT c.* FROM companies c WHERE ${COHORT} ORDER BY c.id LIMIT $1`, [BATCH])).rows;
     if (!batch.length) break;
     const ids = batch.map((b) => b.id);
+    await clearStalePins(ids);            // re-derive rather than duplicate
     const before = await mappedFor(ids);
     await enrichCompanies(batch, () => {});
     gained += (await mappedFor(ids)) - before;
