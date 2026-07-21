@@ -449,6 +449,7 @@ export const api = {
   realEstateLand:         (q = {}) => request('/api/real-estate/land?' + new URLSearchParams(q)),
   osmPlaces:              (q = {}) => request('/api/osm/places?' + new URLSearchParams(q)),
   osmStats:               () => request('/api/osm/stats'),
+  osmContext:             (q = {}) => request('/api/osm/context?' + new URLSearchParams(q)),
   // ---- Qatar Knowledge (Phase 6 · official Qatar sources + laws) ----
   knowledgeStats:         () => request('/api/knowledge/stats'),
   knowledgeSources:       () => request('/api/knowledge/sources'),

@@ -93,6 +93,39 @@ router.get('/stats', async (_req, res, next) => {
   } catch (err) { next(err); }
 });
 
+// GET /api/osm/context?lat=&lng= — what else is AT this point: the registered
+// building (Real-Estate landmark) it sits in, and the OSM places inside it. Used
+// by both map popups so a place links to its building and a building lists its
+// places (Val 2026-07-21). Cheap bbox + planar sort; Qatar is small.
+router.get('/context', async (req, res, next) => {
+  try {
+    const lat = Number(req.query.lat), lng = Number(req.query.lng);
+    if (!Number.isFinite(lat) || !Number.isFinite(lng)) return res.json({ building: null, places: [] });
+    const d = 0.0009;   // ~100 m box
+    // NB: cast every param — bare "$1-$3" on untyped params makes Postgres throw
+    // "operator is not unique: unknown - unknown".
+    const building = (await query(
+      `SELECT id, ename, category, phone, email, street_ename, district_ename, zone_no, building_no, company_id,
+              ((latitude-$1::float8)^2 + (longitude-$2::float8)^2) AS d2
+         FROM gis_landmarks
+        WHERE latitude  BETWEEN $1::float8-$3::float8 AND $1::float8+$3::float8
+          AND longitude BETWEEN $2::float8-$3::float8 AND $2::float8+$3::float8
+        ORDER BY d2 LIMIT 1`, [lat, lng, d])).rows[0] || null;
+    const places = (await query(
+      `SELECT id, name, category, category_group, phone, website, matched_company_id,
+              ((latitude-$1::float8)^2 + (longitude-$2::float8)^2) AS d2
+         FROM osm_places
+        WHERE latitude  BETWEEN $1::float8-$3::float8 AND $1::float8+$3::float8
+          AND longitude BETWEEN $2::float8-$3::float8 AND $2::float8+$3::float8
+        ORDER BY d2 LIMIT 12`, [lat, lng, 0.0006])).rows;
+    let company = null;
+    if (building && building.company_id) {
+      company = (await query(`SELECT id, name FROM companies WHERE id=$1`, [building.company_id])).rows[0] || null;
+    }
+    res.json({ building: building ? { ...building, d2: undefined } : null, company, places: places.map((p) => ({ ...p, d2: undefined })) });
+  } catch (err) { next(err); }
+});
+
 // GET /api/osm/streets?q= — street-name lookup (geocoder aid + Bella).
 router.get('/streets', async (req, res, next) => {
   try {

@@ -211,32 +211,6 @@ function deOverlap(features) {
   return out;
 }
 
-// Always-on branch network: every branch pin (a company_locations point or an
-// archived child company) draws a tie-line back to its parent company's pin, so a
-// multi-location business reads as one connected constellation. Built once from the
-// /map FeatureCollection. Guards (Rule 2.1 / task #82): both endpoints inside Qatar,
-// non-zero length, and the parent must actually have a pin — no Null-Island lines.
-function buildBranchNetwork(features) {
-  const parentCoord = new Map();
-  for (const f of features || []) {
-    const p = f.properties || {};
-    if (p.location_id || p.is_branch) continue;             // only a main company pin can anchor
-    const c = f.geometry && f.geometry.coordinates;
-    if (c && inQatar(c[0], c[1])) parentCoord.set(p.id, c);
-  }
-  const lines = [];
-  for (const f of features || []) {
-    const p = f.properties || {};
-    if (!(p.location_id || p.is_branch)) continue;          // only branches draw a line
-    const pid = p.parent_company_id != null ? p.parent_company_id : p.id;
-    const origin = parentCoord.get(pid);
-    const bc = f.geometry && f.geometry.coordinates;
-    if (!origin || !bc || !inQatar(bc[0], bc[1])) continue;
-    if (Math.abs(origin[0] - bc[0]) < 1e-6 && Math.abs(origin[1] - bc[1]) < 1e-6) continue;
-    lines.push({ type: 'Feature', geometry: { type: 'LineString', coordinates: arcCoords(origin, bc) }, properties: { name: p.name || '' } });
-  }
-  return { type: 'FeatureCollection', features: lines };
-}
 
 let arcAnimTimer = null;
 function clearNetwork(map) {
@@ -377,6 +351,31 @@ async function fetchParcels(map) {
   } catch { /* ignore */ }
 }
 
+// Fill a popup's "context" slot: which registered building this point sits in
+// (Real-Estate landmark, with its phone + linked company) and which other OSM
+// places share it. Links the two map layers in both directions (Val 2026-07-21).
+async function fillMapContext(slot, lat, lng, { skipPlaceId = null, wantPlaces = true, wantBuilding = true } = {}) {
+  try {
+    const ctx = await api.osmContext({ lat, lng });
+    const esc = (s) => String(s || '').replace(/[<>&]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c]));
+    const bits = [];
+    if (wantBuilding && ctx.building && ctx.building.ename) {
+      const tel = String(ctx.building.phone || '').replace(/[^\d+]/g, '');
+      bits.push(`<div style="margin-top:5px;padding-top:5px;border-top:1px solid #e5e7eb">`
+        + `<div style="font:11px system-ui;color:#555">🏢 In building: <strong>${esc(ctx.building.ename)}</strong></div>`
+        + (ctx.building.phone ? `<div style="font:11px system-ui">☎ <a href="tel:${esc(tel)}" style="color:#5b8cff;text-decoration:none">${esc(ctx.building.phone)}</a></div>` : '')
+        + `</div>`);
+    }
+    if (ctx.company) bits.push(`<div style="font:11px system-ui;color:#2f9e57">🏢 ${esc(ctx.company.name)}</div>`);
+    const others = wantPlaces ? (ctx.places || []).filter((p) => String(p.id) !== String(skipPlaceId)) : [];
+    if (others.length) {
+      bits.push(`<div style="font:11px system-ui;color:#555;margin-top:4px">📍 Also here: `
+        + others.slice(0, 6).map((p) => esc(p.name)).join(', ') + (others.length > 6 ? ` +${others.length - 6}` : '') + `</div>`);
+    }
+    if (bits.length && slot) slot.innerHTML = bits.join('');
+  } catch { /* context is a bonus — never break the popup */ }
+}
+
 // OSM places (restaurants/shops/clinics…) — viewport-lazy, like parcels but shown
 // a bit earlier since POIs are the reason to look. Filtered client-side to Qatar.
 let placesFetchSeq = 0;
@@ -420,7 +419,6 @@ export function MapTab() {
   const showParcelsRef = useRef(false);
   const [showPlaces,   setShowPlaces]   = useState(false);  // OpenStreetMap places (viewport-lazy)
   const showPlacesRef  = useRef(false);
-  const [showBranchNet, setShowBranchNet] = useState(false); // parent↔branch tie-lines + branch pins
   const [toolsOpen,    setToolsOpen]    = useState(true);   // collapsible toolbox
   const [activeSources, setActiveSources] = useState(new Set(SOURCES));
   const [yearRange,    setYearRange]    = useState({ min: 1950, max: new Date().getFullYear() });
@@ -442,11 +440,6 @@ export function MapTab() {
     setLayerVisibility(map, 'company-points',  showCompanies);
     setLayerVisibility(map, 'clusters',        showCompanies);
     setLayerVisibility(map, 'cluster-count',   showCompanies);
-    // Branch network — its own toggle (tie-lines + branch pins), so it's findable
-    // and visible without turning on all companies.
-    setLayerVisibility(map, 'branch-net-glow', showBranchNet);
-    setLayerVisibility(map, 'branch-net-line', showBranchNet);
-    setLayerVisibility(map, 'branch-pins',     showBranchNet);
     // Real Estate layers
     setLayerVisibility(map, 're-districts',    showREPrices);
     setLayerVisibility(map, 're-buildings',    showBuildings);
@@ -459,7 +452,7 @@ export function MapTab() {
     if ((showREPrices || showBuildings) && map.getSource('re-districts')) loadREData(map);
     showParcelsRef.current = showParcels;
     if (showParcels) fetchParcels(map);
-  }, [showHeatmap, showTraffic, showWeather, showSignals, showCompanies, showREPrices, showBuildings, showParcels, showPlaces, showBranchNet, activeSources, yearRange]);
+  }, [showHeatmap, showTraffic, showWeather, showSignals, showCompanies, showREPrices, showBuildings, showParcels, showPlaces, activeSources, yearRange]);
 
   // ---- Boot -------------------------------------------------------------
   useEffect(() => {
@@ -628,31 +621,10 @@ export function MapTab() {
             cluster: true, clusterMaxZoom: 14, clusterRadius: 50,
           });
 
-          // Branch network — parent→branch tie-lines (added first so they render
-          // UNDER the pins). Its own "Branch network" toggle. Teal constellation;
-          // the orange click-highlight (showBranchTies) still layers on top.
-          map.addSource('branch-net-src', { type: 'geojson', data: buildBranchNetwork(geo.features) });
-          map.addLayer({
-            id: 'branch-net-glow', type: 'line', source: 'branch-net-src',
-            layout: { visibility: 'none', 'line-cap': 'round', 'line-join': 'round' },
-            paint: { 'line-color': '#22d3ee', 'line-width': 5, 'line-opacity': 0.16, 'line-blur': 3 },
-          });
-          map.addLayer({
-            id: 'branch-net-line', type: 'line', source: 'branch-net-src',
-            layout: { visibility: 'none', 'line-cap': 'round', 'line-join': 'round' },
-            paint: { 'line-color': '#2dd4bf', 'line-width': 1.6, 'line-opacity': 0.8 },
-          });
-          // Branch pins themselves (the location/child points), highlighted when the
-          // Branch network toggle is on so the constellation reads clearly.
-          map.addLayer({
-            id: 'branch-pins', type: 'circle', source: 'companies',
-            filter: ['all', ['!', ['has', 'point_count']], ['any', ['has', 'location_id'], ['==', ['get', 'is_branch'], true]]],
-            layout: { visibility: 'none' },
-            paint: {
-              'circle-radius': ['interpolate', ['linear'], ['zoom'], 9, 3.5, 14, 6, 18, 9],
-              'circle-color': '#f97316', 'circle-stroke-color': '#0d1018', 'circle-stroke-width': 1.5, 'circle-opacity': 0.95,
-            },
-          });
+          // NOTE: no ambient branch-network layer. The branch spread is CLICK-driven
+          // (showBranchTies) — selecting a company/place/building fans out its own
+          // locations. An always-on constellation was visual noise and its extra pin
+          // layer swallowed clicks on the dots underneath (Val 2026-07-21).
 
           map.addLayer({
             id: 'company-heatmap', type: 'heatmap', source: 'companies',
@@ -825,20 +797,35 @@ export function MapTab() {
             },
           });
           map.on('click', 'osm-place-points', (e) => {
-            const p = e.features[0]?.properties || {};
+            const f = e.features[0]; if (!f) return;
+            const p = f.properties || {};
             const esc = (s) => String(s || '').replace(/[<>&]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c]));
+            const tel = String(p.phone || '').replace(/[^\d+]/g, '');
             const rows = [
-              p.category ? `<div style="font:11px system-ui;color:#555">${esc(p.category)} · ${esc(p.group)}</div>` : '',
+              p.category ? `<div style="font:11px system-ui;color:#555">${esc(p.category)}${p.group ? ' · ' + esc(p.group) : ''}</div>` : '',
               p.address ? `<div style="font:11px system-ui;color:#333;margin-top:2px">${esc(p.address)}</div>` : '',
-              p.phone ? `<div style="font:11px system-ui;color:#333">${esc(p.phone)}</div>` : '',
-              p.opening_hours ? `<div style="font:11px system-ui;color:#777;margin-top:2px">${esc(p.opening_hours)}</div>` : '',
-              p.company_id ? `<div style="font:11px system-ui;color:#5b8cff;margin-top:2px">✓ In Bell (company #${esc(p.company_id)})</div>` : '',
+              p.phone ? `<div style="font:11px system-ui;margin-top:2px">📞 <a href="tel:${esc(tel)}" style="color:#5b8cff;text-decoration:none">${esc(p.phone)}</a></div>` : '',
+              p.website ? `<div style="font:11px system-ui"><a href="${esc(p.website)}" target="_blank" rel="noreferrer" style="color:#5b8cff">🔗 website</a></div>` : '',
+              p.opening_hours ? `<div style="font:11px system-ui;color:#777;margin-top:2px">🕒 ${esc(p.opening_hours)}</div>` : '',
+              p.company_id ? `<div style="font:11px system-ui;color:#5b8cff;margin-top:3px">✓ In Bell — company #${esc(p.company_id)}</div>` : '',
             ].join('');
-            new mapboxgl.Popup({ offset: 6 }).setLngLat(e.lngLat)
-              .setHTML(`<div style="font:600 13px system-ui;color:#111;max-width:240px">${esc(p.name)}</div>${rows}`).addTo(map);
+            const el = document.createElement('div');
+            el.style.cssText = 'max-width:250px';
+            el.innerHTML = `<div style="font:600 13px system-ui;color:#111">${esc(p.name)}</div>${rows}`;
+            const slot = document.createElement('div');
+            el.appendChild(slot);
+            new mapboxgl.Popup({ offset: 6 }).setLngLat(e.lngLat).setDOMContent(el).addTo(map);
+            fillMapContext(slot, e.lngLat.lat, e.lngLat.lng, { skipPlaceId: p.id });
+            // Selecting a place that IS a Bell company fans out that company's
+            // other locations — the same click-driven spread as a company pin.
+            if (p.company_id) showBranchTies(map, p.company_id, [e.lngLat.lng, e.lngLat.lat]);
           });
           map.on('mouseenter', 'osm-place-points', () => { map.getCanvas().style.cursor = 'pointer'; });
           map.on('mouseleave', 'osm-place-points', () => { map.getCanvas().style.cursor = ''; });
+          // OSM is a REFERENCE layer — keep it UNDER Bell's own company dots and
+          // buildings, otherwise its pins sit on top and swallow their clicks
+          // (Val 2026-07-21: "many dots are not clickable").
+          try { map.moveLayer('osm-place-points', 'company-heatmap'); } catch { /* layer order is best-effort */ }
           map.on('click', 're-land', (e) => {
             const p = e.features[0]?.properties || {};
             new mapboxgl.Popup({ offset: 6 }).setLngLat(e.lngLat)
@@ -865,7 +852,7 @@ export function MapTab() {
             el.innerHTML = `${p.category ? `<div style="text-transform:uppercase;font-size:9px;letter-spacing:.06em;font-weight:700;color:#3b64c4">${esc(p.category)}</div>` : ''}`
               + `<div style="font-weight:600;margin:2px 0 4px;color:#111">${esc(p.ename) || 'Building'}</div>`
               + `${addr ? `<div style="color:#333">${addr}</div>` : ''}`
-              + `${p.phone ? `<div style="color:#333">☎ ${esc(p.phone)}</div>` : ''}`;
+              + `${p.phone ? `<div>☎ <a href="tel:${esc(String(p.phone).replace(/[^\d+]/g, ''))}" style="color:#5b8cff;text-decoration:none">${esc(p.phone)}</a></div>` : ''}`;
             if (p.company_id) {
               const btn = document.createElement('button');
               btn.textContent = '🏢 ' + (p.company_name || 'Open company') + ' →';
@@ -873,7 +860,14 @@ export function MapTab() {
               btn.onclick = () => navigateTo('companies', Number(p.company_id));
               el.appendChild(btn);
             }
+            const bslot = document.createElement('div');
+            el.appendChild(bslot);
             new mapboxgl.Popup({ offset: 8 }).setLngLat(f.geometry.coordinates).setDOMContent(el).addTo(map);
+            // Which OSM places sit in this building (links the two layers).
+            fillMapContext(bslot, f.geometry.coordinates[1], f.geometry.coordinates[0], { wantPlaces: true, wantBuilding: false });
+            // Selecting a building that hosts a Bell company fans out that
+            // company's other locations (same click-driven spread).
+            if (p.company_id) showBranchTies(map, Number(p.company_id), f.geometry.coordinates);
           });
           ['re-districts', 're-parcels-fill', 're-buildings'].forEach((layer) => {
             map.on('mouseenter', layer, () => { map.getCanvas().style.cursor = 'pointer'; });
@@ -1175,11 +1169,6 @@ export function MapTab() {
                 onChange=${e => setShowPlaces(e.target.checked)} />
               <span>Places (OSM)</span>
               <span class="map-toggle-hint">zoom in</span>
-            </label>
-            <label class="map-toggle">
-              <input type="checkbox" checked=${showBranchNet}
-                onChange=${e => setShowBranchNet(e.target.checked)} />
-              <span>Branch network</span>
             </label>
           </div>
           <div class="map-controls-section">

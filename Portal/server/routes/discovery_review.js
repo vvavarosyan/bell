@@ -69,7 +69,7 @@ router.get('/summary', async (_req, res, next) => {
     const o = await query(
       `SELECT count(*)::int AS candidates FROM osm_places
         WHERE matched_company_id IS NULL AND review_status IS NULL
-          AND name IS NOT NULL AND (phone IS NOT NULL OR website IS NOT NULL)
+          AND name IS NOT NULL
           AND category_group = ANY($1) AND latitude IS NOT NULL`, [OSM_BUSINESS_GROUPS]).catch(() => ({ rows: [{ candidates: 0 }] }));
     res.json({ gmaps_candidates: g.rows[0].candidates, spark_qatar: s.rows[0].qatar, spark_foreign: s.rows[0].foreign, osm_candidates: o.rows[0].candidates });
   } catch (err) { next(err); }
@@ -238,8 +238,9 @@ router.post('/spark/:id/ignore', async (req, res, next) => {
 
 // --- OpenStreetMap place candidates ---------------------------------------
 // Named Qatar businesses OSM knows that Bell doesn't (unmatched + reachable).
-// review_status: NULL candidate → 'promoted' | 'ignored'. Business-y groups only,
-// and a contact (phone/website) so a promoted company is actually useful.
+// review_status: NULL candidate → 'promoted' | 'ignored'. Business-y groups only.
+// Contact info is NOT required (Val 2026-07-21) — enrichment fills phones/emails
+// in later and those flow onto the promoted company automatically.
 const OSM_BUSINESS_GROUPS = ['Food & Drink', 'Shopping', 'Health', 'Finance', 'Offices & Business', 'Tourism & Hotels', 'Automotive', 'Education'];
 
 // GET /osm — candidates, newest first, with a name-match hint.
@@ -251,10 +252,12 @@ router.get('/osm', async (req, res, next) => {
          FROM osm_places
         WHERE matched_company_id IS NULL AND review_status IS NULL
           AND name IS NOT NULL
-          AND (phone IS NOT NULL OR website IS NOT NULL)
           AND category_group = ANY($1)
           AND latitude IS NOT NULL
-        ORDER BY id DESC LIMIT $2`, [OSM_BUSINESS_GROUPS, limit])).rows;
+        -- Richest first: a place with a website AND phone is the best use of a
+        -- review click; bare name+location entries sort last.
+        ORDER BY ((website IS NOT NULL)::int + (phone IS NOT NULL)::int) DESC, id DESC
+        LIMIT $2`, [OSM_BUSINESS_GROUPS, limit])).rows;
     for (const r of rows) {
       const norm = normalizeName(r.name || '');
       if (norm) {
