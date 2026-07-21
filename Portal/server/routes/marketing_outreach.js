@@ -18,6 +18,7 @@ import {
   breakerStatus, resetBreaker, preflight, isQatarHolidayToday, getState,
 } from '../outreach/machine.js';
 import { isQatarWorkingHour, formatQatar } from '../lib/qatar_time.js';
+import { displayAddressSql } from '../lib/location_display.js';
 
 const router = express.Router();
 
@@ -158,8 +159,13 @@ router.get('/letter', async (req, res) => {
         ['%' + String(req.query.q).trim() + '%', String(req.query.q).trim()])).rows[0];
     }
     if (!co) return res.status(404).send('<p style="font-family:sans-serif">Company not found. Use ?company_id=… or ?q=name</p>');
+    // A coordinate is not a postal address — this one gets PRINTED on a real envelope,
+    // so a row whose "address" is "25.27792, 51.50532" must fall through to the next
+    // candidate rather than be posted. Picks the first row that states a real address.
     const loc = (await query(
-      `SELECT address FROM company_locations WHERE company_id=$1 ORDER BY is_primary DESC, id LIMIT 1`, [co.id]))
+      `SELECT ${displayAddressSql('address')} AS address FROM company_locations
+        WHERE company_id=$1 AND ${displayAddressSql('address')} IS NOT NULL
+        ORDER BY is_primary DESC, id LIMIT 1`, [co.id]))
       .rows[0]?.address || co.address || (co.city ? co.city + ', Qatar' : 'Doha, Qatar');
     const industry = co.industry || (Array.isArray(co.industries) ? co.industries[0] : null);
     const today = new Date().toLocaleDateString('en-GB', { timeZone: 'Asia/Qatar', day: 'numeric', month: 'long', year: 'numeric' });

@@ -20,6 +20,7 @@ import { normalizeName } from '../ingest/normalize.js';
 import { mapLabelToCanonical } from '../lib/industry.js';
 import { getIndustryGroups } from '../lib/industry_groups.js';
 import { matchBusinessTypes, listBusinessTypes, businessTypeCondition, businessTypeFilterCondition, queryNamesIndustry } from '../lib/business_types.js';
+import { displayAddressSql } from '../lib/location_display.js';
 
 // Escape LIKE wildcards in user input so a literal % or _ doesn't widen the match.
 function likeEscape(s) { return String(s).replace(/[\\%_]/g, '\\$&'); }
@@ -531,7 +532,8 @@ router.get('/:id/locations', async (req, res, next) => {
     const id = Number(req.params.id);
     if (!Number.isFinite(id)) return res.json({ locations: [] });
     const r = await query(
-      `SELECT id, label, address, zone_no, street_no, building_no, latitude, longitude,
+      `SELECT id, label, ${displayAddressSql('address')} AS address,
+              zone_no, street_no, building_no, latitude, longitude,
               is_primary, source, geocode_status, geocode_method, geocoded_at
          FROM company_locations WHERE company_id=$1
         ORDER BY is_primary DESC, id`, [id]);
@@ -617,7 +619,8 @@ router.get('/:id', async (req, res, next) => {
     // Track B: physical locations (head office + branches) — also feeds Bella's get_company so
     // she can personalize with "your Lusail branch". Fail-soft pre-098.
     const locations = await query(
-      `SELECT id, label, address, latitude, longitude, is_primary, source, geocode_status
+      `SELECT id, label, ${displayAddressSql('address')} AS address,
+              latitude, longitude, is_primary, source, geocode_status
          FROM company_locations WHERE company_id = $1 ORDER BY is_primary DESC, id`, [id])
       .then((r) => r.rows).catch(() => []);
     if (!company.rows.length) return res.status(404).json({ error: 'not_found' });

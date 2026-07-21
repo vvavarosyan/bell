@@ -60,3 +60,19 @@ test('outreach refuses every tier except the two it can defend', async () => {
   assert.ok(!SENDABLE_TIERS.has('unclassified'), 'unclassified must never be mailable');
   assert.ok(!SENDABLE_TIERS.has('all'), '"all" is not an audience');
 });
+
+// --- location display: a coordinate must never be shown where an address is expected ---
+test('a coordinate-shaped address is suppressed, a real address is not', async () => {
+  const { isCoordinateAddress, displayAddress } = await import('../lib/location_display.js');
+  for (const v of ['25.27792, 51.50532', '-25.3, 51.4', '7HC2+5X Doha', '7HCX+9W Al Wakrah']) {
+    assert.equal(isCoordinateAddress(v), true, `${v} states a point, not a place`);
+    assert.equal(displayAddress(v), null);
+  }
+  for (const v of ['27 Al Kinana St, Doha, Qatar', 'Marina 50 Tower, 1st Floor, Lusail City, Lusail',
+                   'Zone 69, Street 315, Building 1', 'C Ring Road, Doha', '', null]) {
+    assert.equal(isCoordinateAddress(v), false, `${v} must still be shown`);
+  }
+  // The Open Location Code alphabet includes W and X — a first attempt excluded them and
+  // let the real code "7HC2+5X" through as if it were a street address.
+  assert.equal(isCoordinateAddress('7HC2+5X'), true);
+});

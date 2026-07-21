@@ -31,6 +31,7 @@ import { recordSearch } from './ledger.js';
 import { contentIdentity } from './content_identity.js';
 import { extractMapLinks, resolveShortLinks } from './maplinks.js';
 import { locationsFromHtml } from './jsonld.js';
+import { isCoordinateAddress, displayAddressSql } from '../../lib/location_display.js';
 import {
   findEmails, findCfEmails, findPhones, findSocials, findWhatsApp, preferOwnEmails,
   guessAddress, guessAddresses, extractTeam, extractPartners, pickLogo,
@@ -388,6 +389,24 @@ export async function enrichCompany(company) {
   for (const loc of locationCandidates.slice(0, 12)) {
     try {
       const hasCoords = Number.isFinite(loc.latitude) && Number.isFinite(loc.longitude);
+      // DON'T MINT A SECOND ROW FOR A SITE THIS COMPANY ALREADY STATES.
+      // When a map link carries no place name, the address written above is the
+      // coordinate string itself — so the UNIQUE key (company_id, lower(address))
+      // can never collide with the row that holds the real street address for the
+      // same doorway, and every re-harvest adds another. That is how DOC ended up
+      // with 7 rows for 3 clinics, and why simply deleting the extras is a
+      // treadmill: the next harvest mints them again under a new id.
+      // Only skips when the coordinate is ALREADY on a row that states a real
+      // address — no information is lost, and a genuinely new pin still lands.
+      if (hasCoords && isCoordinateAddress(loc.address)) {
+        const dup = await query(
+          `SELECT 1 FROM company_locations
+            WHERE company_id = $1 AND latitude IS NOT NULL
+              AND abs(latitude - $2) < 0.0002 AND abs(longitude - $3) < 0.0002
+              AND ${displayAddressSql('address')} IS NOT NULL
+            LIMIT 1`, [companyId, loc.latitude, loc.longitude]).catch(() => ({ rowCount: 0 }));
+        if (dup.rowCount) continue;
+      }
       const r = await query(
         `INSERT INTO company_locations (company_id, label, address, latitude, longitude, source, source_url, geocode_status, updated_at)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8, now())
