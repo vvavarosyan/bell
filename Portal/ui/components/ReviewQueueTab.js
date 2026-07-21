@@ -86,7 +86,7 @@ export function ReviewQueueTab() {
 
       ${loading ? html`<div class="muted" style=${{ padding: '20px' }}>Loading…</div>`
         : rows.length === 0 ? html`<div class="muted" style=${{ padding: '20px' }}>Nothing waiting here. 🎉</div>`
-        : html`<div style=${{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+        : html`<div style=${{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: 'calc(100vh - 230px)', overflowY: 'auto', paddingRight: '4px' }}>
             ${rows.map((r) => html`
               <div key=${r.id} style=${{ border: '1px solid var(--border)', borderRadius: '10px', padding: '10px 12px', display: 'flex', gap: '12px', alignItems: 'flex-start', flexWrap: 'wrap' }}>
                 <div style=${{ flex: '1 1 320px', minWidth: 0 }}>

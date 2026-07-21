@@ -35,7 +35,7 @@ const isQatar = (c) => /qatar|qa\b/i.test(String(c || '')) || String(c || '').tr
 
 // Find an existing company that this candidate is really the same as — phone
 // (last 8 digits) → website domain → exact normalised name. Returns id or null.
-async function findExisting(client, { phone, website, name }) {
+export async function findExisting(client, { phone, website, name }) {
   const ph = digits(phone);
   if (ph.length === 8) {
     const r = await client.query(
@@ -116,7 +116,7 @@ router.get('/spark', async (req, res, next) => {
 });
 
 // Shared: create OR link a Qatar company, attach contacts/location, rescore.
-async function promoteToCompany(client, { name, website, phone, email, city, category, latitude, longitude,
+export async function promoteToCompany(client, { name, website, phone, email, city, category, latitude, longitude,
   place_id, rating, reviews_count, country, source, sourceRecordId, raw }) {
   const existing = await findExisting(client, { phone, website, name });
   let companyId = existing?.id || null;
@@ -241,7 +241,7 @@ router.post('/spark/:id/ignore', async (req, res, next) => {
 // review_status: NULL candidate → 'promoted' | 'ignored'. Business-y groups only.
 // Contact info is NOT required (Val 2026-07-21) — enrichment fills phones/emails
 // in later and those flow onto the promoted company automatically.
-const OSM_BUSINESS_GROUPS = ['Food & Drink', 'Shopping', 'Health', 'Finance', 'Offices & Business', 'Tourism & Hotels', 'Automotive', 'Education'];
+export const OSM_BUSINESS_GROUPS = ['Food & Drink', 'Shopping', 'Health', 'Finance', 'Offices & Business', 'Tourism & Hotels', 'Automotive', 'Education'];
 
 // GET /osm — candidates, newest first, with a name-match hint.
 router.get('/osm', async (req, res, next) => {
