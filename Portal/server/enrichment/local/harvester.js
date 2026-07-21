@@ -30,6 +30,7 @@ import { recordReject } from './rejects.js';
 import { recordSearch } from './ledger.js';
 import { contentIdentity } from './content_identity.js';
 import { extractMapLinks, resolveShortLinks } from './maplinks.js';
+import { locationsFromHtml } from './jsonld.js';
 import {
   findEmails, findCfEmails, findPhones, findSocials, findWhatsApp, preferOwnEmails,
   guessAddress, guessAddresses, extractTeam, extractPartners, pickLogo,
@@ -242,6 +243,24 @@ export async function enrichCompany(company) {
   for (const p of pages) {
     if (p.kind !== 'contact' && p.kind !== 'location' && p.kind !== 'home') continue;
     for (const a of guessAddresses(p.page.text)) locationCandidates.push({ ...a, source_url: p.url });
+  }
+  // schema.org (JSON-LD): the site's OWN machine-readable business card — the
+  // structured address Google reads. Bell ignored it entirely until 2026-07-21.
+  // Stated verbatim by the company, so it outranks a guessed text line; deduped
+  // against the text candidates by address.
+  const ldSeen = new Set(locationCandidates.map((a) => String(a.address || '').trim().toLowerCase()));
+  for (const p of pages) {
+    for (const l of locationsFromHtml(p.page.html)) {
+      const key = String(l.address || '').trim().toLowerCase();
+      if (!key || ldSeen.has(key)) continue;
+      ldSeen.add(key);
+      locationCandidates.push({
+        label: l.label || null,
+        address: l.address,
+        latitude: l.lat, longitude: l.lng,
+        source_url: p.url, from_jsonld: true,
+      });
+    }
   }
   // Track B+: Google-Maps links the company pins on its OWN site carry EXACT
   // coordinates (the company stated them — not a guess), so a branch becomes a
