@@ -95,4 +95,39 @@ async function main() {
   console.log('');
 }
 
-main().then(() => process.exit(0)).catch((e) => { console.error(e.stack || e); process.exit(1); });
+/**
+ * The same numbers as structured data, for the weekly emailed report. Kept in one
+ * place so the console audit and the email can never drift apart.
+ */
+export async function collectGaps() {
+  const seen = (await query(`
+    SELECT
+      count(*) FILTER (WHERE (extra_fields->'stage7_found'->>'locations')::int > 0
+                         AND NOT EXISTS (SELECT 1 FROM company_locations l WHERE l.company_id = c.id))::int AS loc_lost,
+      count(*) FILTER (WHERE (extra_fields->'stage7_found'->>'emails')::int > 0
+                         AND NOT EXISTS (SELECT 1 FROM company_contacts k WHERE k.company_id = c.id AND k.type='email'))::int AS email_lost,
+      count(*) FILTER (WHERE (extra_fields->'stage7_found'->>'phones')::int > 0
+                         AND NOT EXISTS (SELECT 1 FROM company_contacts k WHERE k.company_id = c.id AND k.type='phone'))::int AS phone_lost
+    FROM companies c WHERE extra_fields ? 'stage7_found'`)).rows[0];
+  const held = (await query(`
+    SELECT
+      (SELECT count(*) FROM company_locations WHERE latitude IS NULL
+         AND address IS NOT NULL AND btrim(address) <> '')::int AS addr_no_pin,
+      (SELECT count(*) FROM companies WHERE website IS NOT NULL AND btrim(website::text) <> ''
+         AND COALESCE(archived,false)=false
+         AND NOT EXISTS (SELECT 1 FROM company_locations l WHERE l.company_id=companies.id AND l.latitude IS NOT NULL))::int AS site_no_pin,
+      (SELECT count(*) FROM osm_places WHERE matched_company_id IS NULL AND review_status IS NULL)::int AS osm_unreviewed,
+      (SELECT count(*) FROM company_locations WHERE latitude IS NOT NULL)::int AS pinned,
+      (SELECT count(*) FROM company_locations)::int AS locations`)).rows[0];
+  return {
+    lost: { locations: seen.loc_lost, emails: seen.email_lost, phones: seen.phone_lost },
+    held,
+    coverage_pct: held.locations ? Math.round((held.pinned / held.locations) * 100) : 0,
+  };
+}
+
+// Only run the console report when invoked directly, not when imported.
+const invokedDirectly = process.argv[1] && process.argv[1].endsWith('data_gap_audit.js');
+if (invokedDirectly) {
+  main().then(() => process.exit(0)).catch((e) => { console.error(e.stack || e); process.exit(1); });
+}
