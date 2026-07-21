@@ -21,13 +21,14 @@ const TABS = [
   { key: 'gmaps',   label: 'Maps candidates',  blurb: 'New businesses Google Maps found that matched no company. Approve → a Qatar company with its rating, phone and map pin.' },
   { key: 'osm',     label: 'OSM places',       blurb: 'Named Qatar businesses OpenStreetMap knows that Bell doesn\'t have yet. Approve → a real Qatar company with its location (and contact where the site states one). Dedup-guarded: a match links to the existing company instead of duplicating. Use the category buttons to approve in bulk.' },
   { key: 'locpairs', label: 'Location pairs',  blurb: 'A map pin with no written address, next to a surveyed government building whose name appears in one of the company\'s own addresses. Confirm → the pin gets the company\'s real address; Not the same place → never asked again.' },
+  { key: 'loctwins', label: 'Address twins',  blurb: 'The same site written twice — two of a company\'s own addresses that clearly describe one place. Pick which written form survives; it inherits the other\'s map pin. Different sites → never asked again.' },
   { key: 'qatar',   label: 'Spark · Qatar',    blurb: 'Qatar companies Spark discovered while researching others. Approve → a real Qatar company.' },
   { key: 'foreign', label: 'Spark · foreign',  blurb: 'Non-Qatar companies — kept admin-only for future Middle-East expansion. Never enter Bell.' },
 ];
 
 export function ReviewQueueTab() {
   const [tab, setTab] = useState('gmaps');
-  const [counts, setCounts] = useState({ gmaps_candidates: 0, spark_qatar: 0, spark_foreign: 0, osm_candidates: 0, loc_pairs: 0 });
+  const [counts, setCounts] = useState({ gmaps_candidates: 0, spark_qatar: 0, spark_foreign: 0, osm_candidates: 0, loc_pairs: 0, loc_twins: 0 });
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState(null);
@@ -36,8 +37,8 @@ export function ReviewQueueTab() {
 
   const loadCounts = useCallback(async () => {
     try {
-      const [d, lp] = await Promise.all([api.discoverySummary(), api.locPairsSummary().catch(() => ({ pairs: 0 }))]);
-      setCounts({ ...d, loc_pairs: lp.pairs || 0 });
+      const [d, lp] = await Promise.all([api.discoverySummary(), api.locPairsSummary().catch(() => ({ pairs: 0, twins: 0 }))]);
+      setCounts({ ...d, loc_pairs: lp.pairs || 0, loc_twins: lp.twins || 0 });
     } catch { /* non-fatal */ }
   }, []);
 
@@ -47,6 +48,7 @@ export function ReviewQueueTab() {
       const r = tab === 'gmaps' ? await api.discoveryGmaps(200)
         : tab === 'osm' ? await api.discoveryOsm(200)
         : tab === 'locpairs' ? await api.locPairs(100)
+        : tab === 'loctwins' ? await api.locTwins(100)
         : await api.discoverySpark(tab, 200);
       setRows(r.rows || []);
     } catch (err) { if (!silent) toast('Load failed: ' + err.message, 'error'); }
@@ -107,8 +109,23 @@ export function ReviewQueueTab() {
     finally { setBusyId(null); }
   };
 
+  // Address twins: keep one written form; it inherits the other's pin. Both actions
+  // remove the card; reject is remembered on both rows.
+  const twinKey = (t) => t.rows.map((r) => r.id).join('-');
+  const twinAct = async (t, keepId, approve) => {
+    const [a, b] = t.rows;
+    setBusyId(twinKey(t));
+    try {
+      if (approve) { await api.locTwinApprove(keepId, keepId === a.id ? b.id : a.id); toast('Merged — one address, the pin kept.', 'success'); }
+      else { await api.locTwinReject(a.id, b.id); toast('Noted — kept as two separate sites.'); }
+      setRows((rs) => rs.filter((x) => !Array.isArray(x.rows) || twinKey(x) !== twinKey(t)));
+      loadCounts();
+    } catch (err) { toast('Failed: ' + err.message, 'error'); }
+    finally { setBusyId(null); }
+  };
+
   const chip = (t) => {
-    const n = t.key === 'gmaps' ? counts.gmaps_candidates : t.key === 'osm' ? counts.osm_candidates : t.key === 'locpairs' ? counts.loc_pairs : t.key === 'qatar' ? counts.spark_qatar : counts.spark_foreign;
+    const n = t.key === 'gmaps' ? counts.gmaps_candidates : t.key === 'osm' ? counts.osm_candidates : t.key === 'locpairs' ? counts.loc_pairs : t.key === 'loctwins' ? counts.loc_twins : t.key === 'qatar' ? counts.spark_qatar : counts.spark_foreign;
     return html`<button key=${t.key} class=${'toolbar-toggle' + (tab === t.key ? ' accent' : '')}
       onClick=${() => setTab(t.key)} style=${{ whiteSpace: 'nowrap' }}>${t.label}${n ? ` · ${Number(n).toLocaleString()}` : ''}</button>`;
   };
@@ -167,6 +184,30 @@ export function ReviewQueueTab() {
                       <button class="btn btn-sm" disabled=${busyId === p.drop_id}
                         onClick=${() => pairAct(p, c.id, false)}>Not the same</button>
                     </div>`)}
+                </div>
+              </div>`)}
+          </div>`
+        : tab === 'loctwins' ? html`<div style=${{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: 'calc(100vh - 230px)', overflowY: 'auto', paddingRight: '4px' }}>
+            ${rows.filter((t) => Array.isArray(t.rows)).map((t) => html`
+              <div key=${twinKey(t)} style=${{ border: '1px solid var(--border)', borderRadius: '10px', padding: '10px 12px' }}>
+                <div style=${{ fontWeight: 700 }}>${t.company_name}</div>
+                <div class="muted small" style=${{ marginTop: '3px', display: 'flex', flexWrap: 'wrap', gap: '8px' }}>
+                  <span>evidence: ${t.strength}${t.shared_tokens?.length ? ` — “${t.shared_tokens.join('”, “')}”` : ''}</span>
+                  ${t.distance_m != null ? html`<span>pins ${t.distance_m} m apart</span>` : null}
+                </div>
+                <div class="muted small" style=${{ margin: '8px 0 4px' }}>Two written addresses for what looks like one place — keep which?</div>
+                <div style=${{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                  ${t.rows.map((r) => html`
+                    <div key=${r.id} style=${{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap', border: '1px solid var(--border)', borderRadius: '8px', padding: '6px 10px' }}>
+                      <div style=${{ flex: '1 1 300px', minWidth: 0 }}>
+                        <span style=${{ fontWeight: 600 }}>${r.address}</span>
+                        <span class="muted small">  (${r.source}${r.pinned ? ' · on the map' : ''}${r.label && r.label !== 'Branch' ? ` · “${r.label}”` : ''})</span>
+                      </div>
+                      <button class="btn btn-sm btn-primary" disabled=${busyId === twinKey(t)}
+                        onClick=${() => twinAct(t, r.id, true)}>Keep this one</button>
+                    </div>`)}
+                  <div><button class="btn btn-sm" disabled=${busyId === twinKey(t)}
+                    onClick=${() => twinAct(t, null, false)}>These are different sites</button></div>
                 </div>
               </div>`)}
           </div>`

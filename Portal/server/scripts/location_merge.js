@@ -51,6 +51,49 @@ async function findPairs() {
   return (await query(PAIRS_SQL, [BARE, PLUS])).rows;
 }
 
+// Two rows of the same company whose addresses are IDENTICAL once punctuation and
+// whitespace are collapsed ("Zone 36 ," vs "Zone 36,"; an en-dash vs a hyphen). The
+// harvester's unique key is (company_id, lower(address)), so each wording variant minted
+// a new row. Mechanical, not judgment — but three guards, each from a real refutation:
+//   >= 12 normalized chars   an all-Arabic address normalizes to '' and must never match
+//   NOT both-pinned >150 m   two real sites 53 km apart once collided on empty text
+//   survivor = the PINNED row first  keep-lowest-id once destroyed a verified geocode
+const TWINS_SQL = `
+  WITH t AS (
+    SELECT l.id, l.company_id, c.name AS company_name, l.label, l.address, l.source,
+           l.latitude, l.longitude, l.is_primary, l.geocode_status, l.geocode_method, l.created_at,
+           btrim(regexp_replace(lower(l.address), '[^a-z0-9]+', ' ', 'g')) AS norm
+      FROM company_locations l
+      JOIN companies c ON c.id = l.company_id
+     WHERE l.address IS NOT NULL
+       AND btrim(l.address) !~ $1 AND btrim(l.address) !~* $2
+  )
+  SELECT a.id AS keep_id, b.id AS drop_id, a.company_id, a.company_name,
+         a.address AS keep_address, b.address AS drop_address,
+         b.label AS drop_label, b.source AS drop_source,
+         b.latitude AS drop_lat, b.longitude AS drop_lng,
+         b.geocode_status AS drop_gs, b.geocode_method AS drop_gm, b.is_primary AS drop_primary
+    FROM t a JOIN t b
+      ON b.company_id = a.company_id AND b.id <> a.id AND b.norm = a.norm
+   WHERE length(a.norm) >= 12
+     -- survivor precedence: pinned > primary > older (lower id). The JOIN keeps only
+     -- ordered winners so each normalized group collapses deterministically.
+     AND ( (a.latitude IS NOT NULL AND b.latitude IS NULL)
+        OR (COALESCE(a.latitude IS NOT NULL, false) = COALESCE(b.latitude IS NOT NULL, false)
+            AND a.is_primary AND NOT b.is_primary)
+        OR (COALESCE(a.latitude IS NOT NULL, false) = COALESCE(b.latitude IS NOT NULL, false)
+            AND a.is_primary = b.is_primary AND a.id < b.id) )
+     -- both pinned AND far apart = two real sites sharing one wording; leave alone
+     AND NOT (a.latitude IS NOT NULL AND b.latitude IS NOT NULL
+              AND (6371000*acos(least(1, cos(radians(a.latitude))*cos(radians(b.latitude))
+                   *cos(radians(b.longitude)-radians(a.longitude))
+                   + sin(radians(a.latitude))*sin(radians(b.latitude))))) > 150)
+   ORDER BY a.company_id, a.id, b.id`;
+
+async function findTwins() {
+  return (await query(TWINS_SQL, [BARE, PLUS])).rows;
+}
+
 async function main() {
   console.log('');
   console.log('BELL — LOCATION MERGE' + (apply ? '   (APPLYING)' : '   (PREVIEW — nothing is written)'));
@@ -58,6 +101,7 @@ async function main() {
   console.log('');
 
   const pairs = await findPairs();
+  const twins = await findTwins();
   console.log(`${pairs.length} row(s) state only a coordinate that another row already states with a real address.`);
   console.log('');
   for (const p of pairs) {
@@ -66,6 +110,14 @@ async function main() {
     console.log(`     keep id=${p.keep_id}  "${trunc(p.keep_label, 16)}"  ${trunc(p.keep_address, 52)}`);
   }
   if (!pairs.length) console.log('  Nothing to merge — the harvester guard is holding.');
+  console.log('');
+  console.log(`${twins.length} pair(s) of rows say the SAME address twice with different punctuation.`);
+  for (const t of twins.slice(0, 10)) {
+    console.log(`  #${t.company_id} ${trunc(t.company_name, 40)}`);
+    console.log(`     keep id=${t.keep_id}  ${trunc(t.keep_address, 56)}`);
+    console.log(`     fold id=${t.drop_id}  ${trunc(t.drop_address, 56)}`);
+  }
+  if (twins.length > 10) console.log(`  …and ${twins.length - 10} more`);
   console.log('');
   console.log('The kept row gains the dropped row\'s provenance under raw.merged_from, so nothing');
   console.log('is lost silently. Map pins do not change: both rows sat on the same point.');
@@ -86,7 +138,8 @@ async function main() {
   try {
     await client.query('BEGIN');
     const live = (await client.query(PAIRS_SQL, [BARE, PLUS])).rows;
-    if (live.length !== pairs.length) {
+    const liveTwins = (await client.query(TWINS_SQL, [BARE, PLUS])).rows;
+    if (live.length !== pairs.length || liveTwins.length !== twins.length) {
       await client.query('ROLLBACK');
       console.log(`STOPPED: the set changed since the preview (${pairs.length} → ${live.length}).`);
       console.log('A harvest is probably still running. Re-run the Preview, then Apply again.');
@@ -113,6 +166,29 @@ async function main() {
       await client.query(`DELETE FROM company_locations WHERE id = $1`, [p.drop_id]);
       merged += 1;
       touched.add(p.company_id);
+    }
+    const seen = new Set();
+    for (const t of liveTwins) {
+      if (seen.has(t.drop_id) || seen.has(t.keep_id)) continue;   // a row folds at most once per run
+      seen.add(t.drop_id);
+      await client.query(`
+        UPDATE company_locations
+           SET latitude  = COALESCE(latitude,  $2),
+               longitude = COALESCE(longitude, $3),
+               geocode_status = CASE WHEN latitude IS NULL THEN $4 ELSE geocode_status END,
+               geocode_method = CASE WHEN latitude IS NULL THEN $5 ELSE geocode_method END,
+               is_primary = is_primary OR $6,
+               raw = COALESCE(raw,'{}'::jsonb) || jsonb_build_object('merged_from',
+                 COALESCE(raw->'merged_from','[]'::jsonb) || jsonb_build_object(
+                   'id', $7::bigint, 'address', $8::text, 'label', $9::text, 'source', $10::text, 'at', now()::text)),
+               updated_at = now()
+         WHERE id = $1`,
+        [t.keep_id, t.drop_lat, t.drop_lng, t.drop_gs, t.drop_gm, t.drop_primary === true,
+         t.drop_id, t.drop_address, t.drop_label, t.drop_source]);
+      await client.query(`INSERT INTO sync_deletions (table_name, row_id) VALUES ('company_locations', $1)`, [t.drop_id]);
+      await client.query(`DELETE FROM company_locations WHERE id = $1`, [t.drop_id]);
+      merged += 1;
+      touched.add(t.company_id);
     }
     await client.query('COMMIT');
   } catch (e) {

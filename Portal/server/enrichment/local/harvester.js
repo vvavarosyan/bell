@@ -386,9 +386,23 @@ export async function enrichCompany(company) {
   // 5b) Branch/location rows (Track B). One row per distinct address line; re-harvest updates
   // (unique on company_id + lower(address)), never duplicates. Geocoding happens later via
   // "Geocode Companies.command" — coordinates stay NULL here (Rule 2.1).
+  // Addresses this company ALREADY states, normalized (lowercase, punctuation collapsed).
+  // The UNIQUE key is (company_id, lower(address)), so "Street 820 , Zone 36" and
+  // "Street 820, Zone 36" are different keys — every re-harvest minted the variant as a
+  // new row (187 such twins measured). >= 12 chars so an Arabic address that normalizes
+  // to '' can never swallow another (the trap that collided 3 sites 53 km apart).
+  const normAddr = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+  const statedAddrs = new Set(
+    (await query(`SELECT address FROM company_locations WHERE company_id = $1`, [companyId])
+      .catch(() => ({ rows: [] }))).rows
+      .map((r) => normAddr(r.address)).filter((a) => a.length >= 12));
+
   for (const loc of locationCandidates.slice(0, 12)) {
     try {
       const hasCoords = Number.isFinite(loc.latitude) && Number.isFinite(loc.longitude);
+      const nc = normAddr(loc.address);
+      if (nc.length >= 12 && statedAddrs.has(nc)) continue;   // a wording variant, not a new site
+      if (nc.length >= 12) statedAddrs.add(nc);
       // DON'T MINT A SECOND ROW FOR A SITE THIS COMPANY ALREADY STATES.
       // When a map link carries no place name, the address written above is the
       // coordinate string itself — so the UNIQUE key (company_id, lower(address))
