@@ -393,7 +393,7 @@ export async function enrichCompany(company) {
   // to '' can never swallow another (the trap that collided 3 sites 53 km apart).
   const normAddr = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
   const statedAddrs = new Set(
-    (await query(`SELECT address FROM company_locations WHERE company_id = $1`, [companyId])
+    (await query(`SELECT address FROM company_locations WHERE company_id = $1`, [company.id])
       .catch(() => ({ rows: [] }))).rows
       .map((r) => normAddr(r.address)).filter((a) => a.length >= 12));
 
@@ -418,7 +418,7 @@ export async function enrichCompany(company) {
             WHERE company_id = $1 AND latitude IS NOT NULL
               AND abs(latitude - $2) < 0.0002 AND abs(longitude - $3) < 0.0002
               AND ${displayAddressSql('address')} IS NOT NULL
-            LIMIT 1`, [companyId, loc.latitude, loc.longitude]).catch(() => ({ rowCount: 0 }));
+            LIMIT 1`, [company.id, loc.latitude, loc.longitude]).catch(() => ({ rowCount: 0 }));
         if (dup.rowCount) continue;
       }
       const r = await query(

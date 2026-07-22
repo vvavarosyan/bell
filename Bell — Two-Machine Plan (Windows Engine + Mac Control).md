@@ -142,9 +142,10 @@ your complete instruction set; the Mac session that wrote it cannot help you liv
    from the Mac session side-by-side; do not proceed on any mismatch:
    companies, company_contacts, company_locations, people, tenders, company_sources
    (`SELECT count(*) FROM <table>`), plus `SELECT count(*) FROM companies WHERE archived=false`.
-6. **Smoke test one engine:** harvest a single known company
-   (`node server/scripts/… --company=51641` style paths exist; DOC Medical Center id 51641
-   is the canonical test subject) and confirm rows write. Chrome is installed; the renderer
+6. **Smoke test one engine:** `node Portal/server/scripts/harvest_one.js --company=51641`
+   (DOC Medical Center — the canonical test subject). ✅ Correct: "COMPLETED … status: done"
+   with contact/location counts. Run it through the keys-loading wrapper so the environment
+   is set. Chrome is installed; the renderer
    works on Windows. Anything macOS-specific (`caffeinate`, launchd, `.command` files) does
    not exist here — Task Scheduler and `.bat` are the equivalents, and they are YOUR job to
    create, never Val's.
