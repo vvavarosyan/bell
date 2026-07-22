@@ -39,6 +39,7 @@ import researchCandidatesRouter from './routes/research_candidates.js';
 import discoveryReviewRouter from './routes/discovery_review.js';
 import addressReviewRouter from './routes/address_review.js';
 import locationReviewRouter from './routes/location_review.js';
+import chainsRouter from './routes/chains.js';
 import { userRouter as zeroRiskRouter, adminRouter as zeroRiskAdminRouter } from './routes/zero_risk.js';
 import { startPoller as startResearchPoller } from './research/poller.js';
 import openDataRouter          from './routes/open_data.js';
@@ -253,6 +254,7 @@ app.use('/api/research-candidates', ...localTools, researchCandidatesRouter);
 app.use('/api/discovery',           ...localTools, discoveryReviewRouter);
 app.use('/api/address-review',       ...localTools, addressReviewRouter);
 app.use('/api/location-review',      ...localTools, locationReviewRouter);
+app.use('/api/chains',               ...localTools, chainsRouter);
 
 // Admin tools — admin.bell.qa + local engine (read/observe prod).
 app.use('/api/similar-companies',  ...adminOnly, similarCompaniesRouter);

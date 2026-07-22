@@ -22,13 +22,14 @@ const TABS = [
   { key: 'osm',     label: 'OSM places',       blurb: 'Named Qatar businesses OpenStreetMap knows that Bell doesn\'t have yet. Approve → a real Qatar company with its location (and contact where the site states one). Dedup-guarded: a match links to the existing company instead of duplicating. Use the category buttons to approve in bulk.' },
   { key: 'locpairs', label: 'Location pairs',  blurb: 'A map pin with no written address, next to a surveyed government building whose name appears in one of the company\'s own addresses. Confirm → the pin gets the company\'s real address; Not the same place → never asked again.' },
   { key: 'loctwins', label: 'Address twins',  blurb: 'The same site written twice — two of a company\'s own addresses that clearly describe one place. Pick which written form survives; it inherits the other\'s map pin. Different sites → never asked again.' },
+  { key: 'chains', label: 'Chains',  blurb: 'One brand, many branch records sharing the operator\'s website — Yateem-style. Link → every branch keeps its own record and registration, but the profile, drawer and map show ONE family. Not a chain → never asked again.' },
   { key: 'qatar',   label: 'Spark · Qatar',    blurb: 'Qatar companies Spark discovered while researching others. Approve → a real Qatar company.' },
   { key: 'foreign', label: 'Spark · foreign',  blurb: 'Non-Qatar companies — kept admin-only for future Middle-East expansion. Never enter Bell.' },
 ];
 
 export function ReviewQueueTab() {
   const [tab, setTab] = useState('gmaps');
-  const [counts, setCounts] = useState({ gmaps_candidates: 0, spark_qatar: 0, spark_foreign: 0, osm_candidates: 0, loc_pairs: 0, loc_twins: 0 });
+  const [counts, setCounts] = useState({ gmaps_candidates: 0, spark_qatar: 0, spark_foreign: 0, osm_candidates: 0, loc_pairs: 0, loc_twins: 0, chain_groups: 0 });
   const [rows, setRows] = useState([]);
   const [loading, setLoading] = useState(true);
   const [busyId, setBusyId] = useState(null);
@@ -37,8 +38,10 @@ export function ReviewQueueTab() {
 
   const loadCounts = useCallback(async () => {
     try {
-      const [d, lp] = await Promise.all([api.discoverySummary(), api.locPairsSummary().catch(() => ({ pairs: 0, twins: 0 }))]);
-      setCounts({ ...d, loc_pairs: lp.pairs || 0, loc_twins: lp.twins || 0 });
+      const [d, lp, ch] = await Promise.all([api.discoverySummary(),
+        api.locPairsSummary().catch(() => ({ pairs: 0, twins: 0 })),
+        api.chainsSummary().catch(() => ({ groups: 0 }))]);
+      setCounts({ ...d, loc_pairs: lp.pairs || 0, loc_twins: lp.twins || 0, chain_groups: ch.groups || 0 });
     } catch { /* non-fatal */ }
   }, []);
 
@@ -49,6 +52,7 @@ export function ReviewQueueTab() {
         : tab === 'osm' ? await api.discoveryOsm(200)
         : tab === 'locpairs' ? await api.locPairs(100)
         : tab === 'loctwins' ? await api.locTwins(100)
+        : tab === 'chains' ? await api.chainsGroups(50)
         : await api.discoverySpark(tab, 200);
       setRows(r.rows || []);
     } catch (err) { if (!silent) toast('Load failed: ' + err.message, 'error'); }
@@ -124,8 +128,20 @@ export function ReviewQueueTab() {
     finally { setBusyId(null); }
   };
 
+  // Chains: link the whole family or single branches; reject remembers per member.
+  const chainAct = async (g, memberIds, approve) => {
+    setBusyId('chain:' + g.head.id);
+    try {
+      if (approve) { const r = await api.chainsApprove(g.head.id, memberIds); toast(`${r.linked} branch(es) linked under ${g.head.name}.`, 'success'); }
+      else { await api.chainsReject(g.head.id, memberIds); toast('Noted — not a chain; will not be asked again.'); }
+      setRows((rs) => rs.filter((x) => !x.head || x.head.id !== g.head.id));
+      loadCounts();
+    } catch (err) { toast('Failed: ' + err.message, 'error'); }
+    finally { setBusyId(null); }
+  };
+
   const chip = (t) => {
-    const n = t.key === 'gmaps' ? counts.gmaps_candidates : t.key === 'osm' ? counts.osm_candidates : t.key === 'locpairs' ? counts.loc_pairs : t.key === 'loctwins' ? counts.loc_twins : t.key === 'qatar' ? counts.spark_qatar : counts.spark_foreign;
+    const n = t.key === 'gmaps' ? counts.gmaps_candidates : t.key === 'osm' ? counts.osm_candidates : t.key === 'locpairs' ? counts.loc_pairs : t.key === 'loctwins' ? counts.loc_twins : t.key === 'chains' ? counts.chain_groups : t.key === 'qatar' ? counts.spark_qatar : counts.spark_foreign;
     return html`<button key=${t.key} class=${'toolbar-toggle' + (tab === t.key ? ' accent' : '')}
       onClick=${() => setTab(t.key)} style=${{ whiteSpace: 'nowrap' }}>${t.label}${n ? ` · ${Number(n).toLocaleString()}` : ''}</button>`;
   };
@@ -184,6 +200,37 @@ export function ReviewQueueTab() {
                       <button class="btn btn-sm" disabled=${busyId === p.drop_id}
                         onClick=${() => pairAct(p, c.id, false)}>Not the same</button>
                     </div>`)}
+                </div>
+              </div>`)}
+          </div>`
+        : tab === 'chains' ? html`<div style=${{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: 'calc(100vh - 230px)', overflowY: 'auto', paddingRight: '4px' }}>
+            ${rows.filter((g) => g.head && Array.isArray(g.branches)).map((g) => html`
+              <div key=${g.head.id} style=${{ border: '1px solid var(--border)', borderRadius: '10px', padding: '10px 12px' }}>
+                <div style=${{ fontWeight: 700 }}>${g.head.name}
+                  <span class="muted small">  ${g.head.reg ? `CR ${g.head.reg} · ` : ''}${g.label}${g.clean ? '' : ' · ⚠ mixed group'}</span>
+                </div>
+                <div class="muted small" style=${{ margin: '4px 0 6px' }}>
+                  ${g.branches.length} record(s) share this website and extend the brand name — link them as branches?
+                  Every record keeps its own registration; this only draws the family tie.
+                </div>
+                <div style=${{ display: 'flex', flexDirection: 'column', gap: '4px' }}>
+                  ${g.branches.slice(0, 8).map((b) => html`
+                    <div key=${b.id} class="small" style=${{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+                      <span style=${{ flex: '1 1 auto' }}>${b.name}${b.reg ? html`<span class="muted">  (${b.reg})</span>` : ''}${b.city ? html`<span class="muted"> · ${b.city}</span>` : ''}</span>
+                      <button class="btn btn-sm" disabled=${busyId === 'chain:' + g.head.id}
+                        onClick=${() => chainAct(g, [b.id], true)}>Link</button>
+                    </div>`)}
+                  ${g.branches.length > 8 ? html`<div class="muted small">…and ${g.branches.length - 8} more</div>` : null}
+                </div>
+                ${g.strangers?.length ? html`<div class="small" style=${{ marginTop: '6px', color: 'var(--amber, #b7791f)' }}>
+                  ⚠ Not offered (own registration or different name): ${g.strangers.slice(0, 3).map((x) => x.name).join(' · ')}${g.strangers.length > 3 ? ` +${g.strangers.length - 3}` : ''}
+                </div>` : null}
+                <div style=${{ display: 'flex', gap: '6px', marginTop: '8px' }}>
+                  <button class="btn btn-sm btn-primary" disabled=${busyId === 'chain:' + g.head.id}
+                    onClick=${() => chainAct(g, g.branches.map((b) => b.id), true)}>
+                    ${busyId === 'chain:' + g.head.id ? 'Linking…' : `Link all ${g.branches.length} as branches`}</button>
+                  <button class="btn btn-sm" disabled=${busyId === 'chain:' + g.head.id}
+                    onClick=${() => chainAct(g, g.branches.map((b) => b.id), false)}>Not a chain</button>
                 </div>
               </div>`)}
           </div>`

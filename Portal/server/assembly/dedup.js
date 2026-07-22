@@ -400,6 +400,17 @@ export async function mergeCompanies(canonicalId, duplicateId, jobLog = null) {
       jobLog?.(`    ⚠ skip #${duplicateId} → #${canonicalId}: registration conflict ${regA} vs ${regB} (distinct legal entities — not merged)`);
       throw Object.assign(new Error('registration_conflict'), { code: 'registration_conflict', regA, regB });
     }
+    // SIBLING BRANCH REGISTRATIONS (chain model, 2026-07-22): 42828/2 and 42828/3
+    // share a base but are TWO registrations of TWO branches — the registry's own
+    // /n numbering says so. Merging them would collapse two real shops into one
+    // record. Only a DIFFERENT suffix blocks: base↔suffix (42828 vs 42828/2) keeps
+    // merging, because MOCI does list the same head office both ways.
+    const sfx = (s) => (String(s || '').match(/\/(\d+)\s*$/) || [])[1] || null;
+    const sA = sfx(cr?.primary_registration_no), sB = sfx(dr?.primary_registration_no);
+    if (regA && regA === regB && sA && sB && sA !== sB) {
+      jobLog?.(`    ⚠ skip #${duplicateId} → #${canonicalId}: sibling branch registrations ${regA}/${sA} vs ${regB}/${sB} — two branches of one firm, not duplicates`);
+      throw Object.assign(new Error('sibling_branches'), { code: 'sibling_branches', regA, sA, sB });
+    }
   }
 
   // Per-step timer + error logger. Logs through jobLog AND console whenever
