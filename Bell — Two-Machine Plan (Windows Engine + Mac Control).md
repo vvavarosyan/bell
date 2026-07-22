@@ -116,6 +116,49 @@ email-verification hunting, deeper directory rescans.
 
 ---
 
+## Technical appendix — for the Claude session on the ROG (setup night)
+
+*You are Claude Code running on Val's Windows ROG. Val is not a developer. This section is
+your complete instruction set; the Mac session that wrote it cannot help you live.*
+
+1. **Clone:** `git clone https://github.com/vvavarosyan/bell.git` into `C:\bell` (Git for
+   Windows opens a browser window — Val logs into GitHub once). ⭐ Two branches only,
+   develop + main; never create others. Read `CLAUDE.md` fully before anything else.
+2. **Postgres:** Val installed PostgreSQL 16 and wrote down the password. Create the
+   database `bell_intel`, then import Val's USB file:
+   `pg_restore -d bell_intel --no-owner "<path to bell-database-export-*.dump>"`
+   (createdb first; the dump is custom format `-Fc`; several minutes for ~4 GB).
+3. **Keys:** the USB also carries `bell-keys-for-windows.env` — lines of `BDI_KEY_*=…`.
+   `server/keychain.js` already reads env vars named `BDI_KEY_<NAME>` on non-Mac platforms
+   (macOS Keychain does not exist here). There is NO dotenv loader — you must make every
+   Bell process inherit these variables: store the file at `C:\bell\keys.env`, and write
+   `.bat` wrappers that load it (`for /f "usebackq tokens=*" %%a in ("C:\bell\keys.env") do set %%a`)
+   before invoking node. Same for Task Scheduler entries. Then have Val DELETE the keys
+   file from the USB and the Mac Desktop.
+4. **Also set** `PGDATABASE=bell_intel` plus `PGUSER`/`PGPASSWORD` for the local Postgres
+   (db.js defaults target a local socket; Windows installs listen on localhost:5432 with
+   the password Val wrote down).
+5. **Verify BEFORE anything flips** — run these counts and have Val read the SAME numbers
+   from the Mac session side-by-side; do not proceed on any mismatch:
+   companies, company_contacts, company_locations, people, tenders, company_sources
+   (`SELECT count(*) FROM <table>`), plus `SELECT count(*) FROM companies WHERE archived=false`.
+6. **Smoke test one engine:** harvest a single known company
+   (`node server/scripts/… --company=51641` style paths exist; DOC Medical Center id 51641
+   is the canonical test subject) and confirm rows write. Chrome is installed; the renderer
+   works on Windows. Anything macOS-specific (`caffeinate`, launchd, `.command` files) does
+   not exist here — Task Scheduler and `.bat` are the equivalents, and they are YOUR job to
+   create, never Val's.
+7. **Schedules (Windows Task Scheduler, all wrappers loading keys.env):** continuous sweep
+   (always-on; 16 GB allows raising BELL_HARVESTER_CONCURRENCY moderately — start at 10),
+   nightly sweep (midnight; includes the chain auto-link), daily tender scan, data push to
+   app.bell.qa twice daily (`sync-token` key carries auth), weekly gap-report email.
+8. **The flip (only after step 5 passes):** on the MAC side Val's session repoints the
+   Mac's Portal + `.command` files at the ROG's database and permanently disables the Mac's
+   engines. Until that session confirms, the Mac remains source of truth — write NOTHING
+   to production from the ROG before the flip.
+9. **PDPPL + Rule 2.1 apply identically here.** The ROG never pushes code; only the Mac
+   deploys code. The ROG pushes DATA on schedule after the flip.
+
 ## Rules that never change, whichever machine
 
 - The 100%-verified bar, Rule 2.1 (never guess), Preview → Apply for anything destructive.
