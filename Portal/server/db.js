@@ -8,6 +8,7 @@
 
 import pg from 'pg';
 import os from 'os';
+import fs from 'fs';
 
 const { Pool } = pg;
 
@@ -25,6 +26,22 @@ pg.types.setTypeParser(1016, (v) => v === null ? null                       // _
 
 // Detect environment: production = on Railway / managed host.
 const isProduction = process.env.NODE_ENV === 'production';
+
+// TWO-MACHINE FLIP (2026-07-22): when the database lives on the ROG (the always-home
+// Windows engine room), the Mac points at it through ONE file — Portal/server/.db-target,
+// a single line: postgres://user:password@<rog-ip>:5432/bell_intel
+// Every consumer (Portal, scripts, Val's .command files) imports db.js, so writing that
+// file flips the whole Mac at once; deleting it rolls back to the local database.
+// A real DATABASE_URL env var (Railway) always wins, so production is untouched.
+// The file is gitignored — it carries a password and a home-network address.
+let fileTarget = null;
+try {
+  const raw = fs.readFileSync(new URL('./.db-target', import.meta.url), 'utf8').trim();
+  const line = raw.split('\n').map((l) => l.trim()).find((l) => l && !l.startsWith('#'));
+  if (line) fileTarget = line.replace(/^DATABASE_URL=/, '');
+} catch { /* no file → local database, today's default */ }
+
+if (!process.env.DATABASE_URL && fileTarget) process.env.DATABASE_URL = fileTarget;
 const hasDatabaseUrl = !!process.env.DATABASE_URL;
 
 const poolConfig = hasDatabaseUrl
