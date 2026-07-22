@@ -16,6 +16,7 @@
 //   BELL_NIGHTLY_CHUNK   companies per round (default 300)
 
 import { runHarvestSweep } from '../enrichment/orchestrator.js';
+import { autoLinkRegistryChains } from '../enrichment/chain_link.js';
 import { recomputeBellScores } from '../assembly/bell_score.js';
 import { pool } from '../db.js';
 
@@ -50,6 +51,13 @@ const log = (m) => console.log(`[${new Date().toISOString()}] ${m}`);
       }
     }
   } finally {
+    // Registry-stated chain links (Val's standing instruction 2026-07-22: a matching
+    // base CR links automatically). New MOCI branch registrations picked up by the
+    // sweep join their parent the same night.
+    try {
+      const c = await autoLinkRegistryChains((m) => log(m));
+      if (c.written) log(`✓ Chain links: ${c.written} branch registration(s) auto-linked across ${c.firms} firm(s).`);
+    } catch (err) { log(`✗ Chain auto-link failed: ${err.message}`); }
     // Safety net: heal any Bell Scores that drifted (writers that forgot to
     // rescore, bulk backfills). Scoped — only rows whose score actually changed.
     try {

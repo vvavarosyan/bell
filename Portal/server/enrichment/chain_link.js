@@ -187,3 +187,29 @@ export async function findBrandChains() {
   groups.sort((a, b) => (a.clean === b.clean ? b.branches.length - a.branches.length : a.clean ? -1 : 1));
   return groups;
 }
+
+/**
+ * Auto-apply Tier 1. Val's standing instruction (2026-07-22, after reviewing the Chains
+ * queue): "if CR number is matching let it link automatically." Registry-stated evidence
+ * + founder authorization = no per-run click needed. All Tier-1 gates still apply
+ * (MOCI/QCCI source both ends, unique bare-base parent, never overwrite a different
+ * link) — this changes WHO clicks, not what qualifies. Tier 2 (brand evidence, no CR)
+ * stays human-only in the Chains tab.
+ */
+export async function autoLinkRegistryChains(jobLog = null) {
+  const { link } = await findRegistryChains();
+  let written = 0;
+  const parents = new Set();
+  for (const g of link) {
+    for (const m of g.members) {
+      // Only write a REAL change: updated_at is the sync watermark, and rewriting an
+      // already-correct link every night would re-push thousands of unchanged rows.
+      const r = await query(`
+        UPDATE companies SET parent_company_id = $2, updated_at = now()
+         WHERE id = $1 AND COALESCE(archived,false) = false
+           AND parent_company_id IS NULL`, [m.id, g.parent.id]);
+      if (r.rowCount) { written += 1; parents.add(g.parent.id); jobLog?.(`  ⛓ #${m.id} "${m.name}" → #${g.parent.id} "${g.parent.name}" (CR ${g.base})`); }
+    }
+  }
+  return { written, firms: parents.size };
+}
