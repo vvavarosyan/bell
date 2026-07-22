@@ -152,7 +152,7 @@ export function TendersTab({ embedded = false } = {}) {
 
   const openDetail = useCallback((id) => {
     setSelected(id); setDetailLoading(true); setDetail(null);
-    api.tenderItem(id).then((r) => setDetail(r.tender)).catch(() => {}).finally(() => setDetailLoading(false));
+    api.tenderItem(id).then((r) => setDetail(r.tender ? { ...r.tender, twin: r.twin || null } : null)).catch(() => {}).finally(() => setDetailLoading(false));
   }, []);
   const closeDetail = () => { setSelected(null); setDetail(null); };
 
@@ -255,6 +255,8 @@ export function TendersTab({ embedded = false } = {}) {
             <div style=${{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '5px' }}>
               <span style=${{ fontSize: '10.5px', fontWeight: 700, letterSpacing: '.05em', textTransform: 'uppercase', color: 'var(--text-dim, #9ca5b9)' }}>${srcLabel(t.source)}</span>
               ${t.source_ref ? html`<span class="muted small">#${t.source_ref}</span>` : null}
+              ${t.also_on_kahramaa ? html`<span class="small" title=${'Kahramaa publishes this same tender as ' + (t.also_on_kahramaa.source_ref || '') + ' — one tender, two portals, shown once'}
+                style=${{ fontSize: '10.5px', fontWeight: 600, borderRadius: '999px', padding: '1px 8px', border: '1px solid var(--border)', color: 'var(--text-dim, #9ca5b9)' }}>also on Kahramaa</span>` : null}
               <span style=${{ flex: 1 }}></span>
               ${!t.has_detail ? html`<span class="muted small" title="Full detail (activity codes, contact) is still being backfilled" style=${{ opacity: 0.7 }}>detail pending</span>` : null}
               <${StatusBadge} status=${t.status} />
@@ -315,6 +317,10 @@ export function TendersTab({ embedded = false } = {}) {
             return html`
               <div style=${{ fontSize: '15px', fontWeight: 700, color: 'var(--text)', lineHeight: 1.35, marginBottom: '12px' }}>${detail.title}</div>
               ${detail.source_ref ? html`<div class="muted small" style=${{ marginBottom: '8px' }}>Reference #${detail.source_ref}${raw.entity_ref ? ' · buyer ref ' + raw.entity_ref : ''}</div>` : null}
+              ${detail.twin ? html`<div class="small" style=${{ marginBottom: '10px', padding: '6px 10px', border: '1px solid var(--border)', borderRadius: '8px' }}>
+                One tender, two portals — also published by ${srcLabel(detail.twin.source)} as
+                <a href="#" onClick=${(e) => { e.preventDefault(); openDetail(detail.twin.id); }}> #${detail.twin.source_ref}</a>
+              </div>` : null}
               <${FreshnessStamp} sourceName=${srcLabel(detail.source)} date=${detail.published_at || detail.awarded_at} dateLabel="published" fallbackLabel="Qatar's official tender portal" style=${{ marginBottom: '12px' }} />
               ${raw.kahramaa ? html`
                 <div style=${{ fontSize: '12px', border: '1px solid var(--border)', borderRadius: '8px', padding: '8px 10px', margin: '0 0 14px', background: 'var(--bg-elev, rgba(255,255,255,0.02))' }}>

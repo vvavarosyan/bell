@@ -34,6 +34,27 @@ const LIST_COLS = `
   -- carry value_amount directly, so this stays a fallback (never overrides value_amount).
   nullif(regexp_replace(coalesce(raw->>'tender_bond',''), '[^0-9]', '', 'g'), '')::bigint AS bond_amount`;
 
+// CROSS-SOURCE TWIN (display only, nothing deleted): Kahramaa publishes through the
+// central Monaqasat portal too, and its OWN payload states the Monaqasat number
+// verbatim (raw->>'monaqasat_number'). 80 live tenders therefore appear twice in the
+// list — once per source — which reads as double-counting. The Monaqasat row leads
+// (the central portal), the Kahramaa row is suppressed from the LIST ONLY and rides
+// along as also_on_* fields. The Kahramaa row itself stays untouched and fully
+// reachable by id/detail — Kahramaa-only facts (winners, ICV) are never lost.
+// Zero-stripped comparison because Monaqasat refs sometimes carry leading zeros.
+const KM_TWIN = `regexp_replace(t2.source_ref,'^0+','') = regexp_replace(tenders.raw->>'monaqasat_number','^0+','')`;
+const TWIN_SUPPRESS = `NOT (tenders.source = 'kahramaa'
+  AND COALESCE(tenders.raw->>'monaqasat_number','') NOT IN ('','null')
+  AND EXISTS (SELECT 1 FROM tenders t2 WHERE t2.source = 'monaqasat' AND ${KM_TWIN}))`;
+const TWIN_DECOR = `(
+  SELECT jsonb_build_object('id', k.id, 'source_ref', k.source_ref,
+                            'winners', k.raw->'winners', 'award_category', k.raw->>'award_category')
+    FROM tenders k
+   WHERE tenders.source = 'monaqasat' AND k.source = 'kahramaa'
+     AND COALESCE(k.raw->>'monaqasat_number','') NOT IN ('','null')
+     AND regexp_replace(tenders.source_ref,'^0+','') = regexp_replace(k.raw->>'monaqasat_number','^0+','')
+   LIMIT 1) AS also_on_kahramaa`;
+
 // The tenant's ICP target industries, or [] when the profile is unset.
 async function icpIndustries(req) {
   if (!req.tenant?.id) return [];
@@ -79,13 +100,18 @@ router.get('/', async (req, res, next) => {
       conds.push(`EXTRACT(YEAR FROM COALESCE(awarded_at, published_at, created_at)) = $${params.length}`);
     }
     if (req.query.linked === '1') conds.push('award_company_id IS NOT NULL');
+    // Cross-source twins collapse to their Monaqasat row — EXCEPT when the user
+    // filters source=kahramaa explicitly: then they are asking for Kahramaa's own
+    // list and every row must show (suppressing there would make Kahramaa look
+    // like it published 80 fewer tenders than it did).
+    if (String(req.query.source || '').toLowerCase() !== 'kahramaa') conds.push(TWIN_SUPPRESS);
     const where = conds.length ? 'WHERE ' + conds.join(' AND ') : '';
 
     const totalR = await query(`SELECT count(*)::int AS n FROM tenders ${where}`, params);
     params.push(limit); const lim = params.length;
     params.push(offset); const off = params.length;
     const rowsR = await query(
-      `SELECT ${LIST_COLS}
+      `SELECT ${LIST_COLS}, ${TWIN_DECOR}
          FROM tenders ${where}
         ORDER BY COALESCE(awarded_at, published_at, created_at) DESC NULLS LAST, id DESC
         LIMIT $${lim} OFFSET $${off}`,
@@ -181,11 +207,13 @@ router.get('/awards', async (req, res, next) => {
 
 router.get('/stats', async (_req, res, next) => {
   try {
+    // Counts match the deduped LIST (cross-source twins collapse to one), or the
+    // status chips disagree with the totals underneath them.
     const r = await query(`
       SELECT status, count(*)::int AS n,
              count(*) FILTER (WHERE award_company_id IS NOT NULL)::int AS linked,
              count(*) FILTER (WHERE jsonb_exists(raw, 'activities'))::int AS detailed
-        FROM tenders GROUP BY status`);
+        FROM tenders WHERE ${TWIN_SUPPRESS} GROUP BY status`);
     res.json({ rows: r.rows });
   } catch (err) { next(err); }
 });
@@ -197,7 +225,7 @@ router.get('/facets', async (_req, res, next) => {
       query(`SELECT source, count(*)::int AS n FROM tenders GROUP BY source ORDER BY n DESC`),
       query(`SELECT buyer, count(*)::int AS n FROM tenders WHERE buyer IS NOT NULL AND buyer <> '' GROUP BY buyer ORDER BY n DESC LIMIT 40`),
       query(`SELECT DISTINCT EXTRACT(YEAR FROM COALESCE(awarded_at, published_at, created_at))::int AS y FROM tenders ORDER BY y DESC`),
-      query(`SELECT status, count(*)::int AS n FROM tenders GROUP BY status ORDER BY n DESC`),
+      query(`SELECT status, count(*)::int AS n FROM tenders WHERE ${TWIN_SUPPRESS} GROUP BY status ORDER BY n DESC`),
       // Industry facet (migration 078) — unnest so a tender counts under each of
       // its lines of business. Fails soft before the migration applies.
       query(`SELECT i AS industry, count(*)::int AS n
@@ -253,7 +281,24 @@ router.get('/:id', async (req, res, next) => {
       [id],
     );
     if (!r.rows[0]) return res.status(404).json({ error: 'not_found' });
-    res.json({ tender: r.rows[0] });
+    const t = r.rows[0];
+    // Cross-source twin, both directions — the SAME tender published by Kahramaa and
+    // on the central Monaqasat portal (Kahramaa's own payload states the number).
+    let twin = null;
+    if (t.source === 'monaqasat') {
+      twin = (await query(
+        `SELECT id, source, source_ref FROM tenders
+          WHERE source = 'kahramaa' AND COALESCE(raw->>'monaqasat_number','') NOT IN ('','null')
+            AND regexp_replace(raw->>'monaqasat_number','^0+','') = regexp_replace($1,'^0+','') LIMIT 1`,
+        [t.source_ref])).rows[0] || null;
+    } else if (t.source === 'kahramaa' && t.raw?.monaqasat_number) {
+      twin = (await query(
+        `SELECT id, source, source_ref FROM tenders
+          WHERE source = 'monaqasat'
+            AND regexp_replace(source_ref,'^0+','') = regexp_replace($1,'^0+','') LIMIT 1`,
+        [String(t.raw.monaqasat_number)])).rows[0] || null;
+    }
+    res.json({ tender: t, twin });
   } catch (err) { next(err); }
 });
 
