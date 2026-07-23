@@ -35,7 +35,7 @@ import { isCoordinateAddress, displayAddressSql } from '../../lib/location_displ
 import {
   findEmails, findCfEmails, findPhones, findSocials, findWhatsApp, preferOwnEmails,
   guessAddress, guessAddresses, extractTeam, extractPartners, pickLogo,
-  inferIndustry, extractFoundedYear, bestDescription,
+  inferIndustry, extractFoundedYear, bestDescription, isParkedContent,
 } from './extract.js';
 
 export const STAGE_LABEL = 'Local Engine 2 — Website Harvester';
@@ -316,6 +316,24 @@ export async function enrichCompany(company) {
   // DIFFERENT brand and never mentions this company, store NOTHING derived from it and
   // flag for admin review. We keep the website itself (the domain matches the name; only
   // the content is wrong — a parked/hijacked/rebranded page), never wiping it.
+  // Parked-domain guard (Rule 2.1): a company's own vanity domain can resolve to a
+  // for-sale / parking page ("harbourholdings.com is for sale on GoDaddy. Own it today for
+  // $4,995"). The host looks legitimate, so only the page CONTENT reveals it. This is NOT a
+  // real website — null it (remembering the host so the Finder won't re-add it) and store
+  // nothing derived from the parking page.
+  if (isParkedContent(homeMeta.title, description, homeMeta.keywords, allText.slice(0, 2000))) {
+    await clearParkedWebsite(company.id, company.website, home.finalUrl);
+    const summary = {
+      stage7_scraped_at: new Date().toISOString(),
+      stage7_rendered: renderMode,
+      stage7_parked_domain: { was: company.website, resolved: home.finalUrl },
+      stage7_found: { emails: 0, phones: 0, socials: 0, people: 0, partners: 0 },
+    };
+    await markStage(company.id, 'done', summary);
+    await recomputeBellScoreForCompany(company.id);
+    return { status: 'done', usd: 0, note: `parked domain: ${company.website}`, found: summary.stage7_found };
+  }
+
   const idv = contentIdentity(company, { meta: homeMeta, text: allText, ok: home.ok, url: home.finalUrl });
   if (idv.verdict === 'content-conflict') {
     await flagWebsiteContentConflict(company.id, idv, home.finalUrl);
@@ -525,6 +543,27 @@ async function flagWebsiteContentConflict(companyId, idv, url) {
             review_reason = $3
       WHERE id = $1`,
     [companyId, JSON.stringify(flag), `Website content appears to be a different company (${idv.brand || 'unknown brand'}) — logo/description not stored`],
+  );
+}
+
+// A vanity domain that resolves to a parking / for-sale page is not a real website. Null it,
+// keep the removed value + host in extra_fields (nothing lost, reversible), and add the host
+// to website_rejected so the Finder never re-saves it. Also drop any placeholder logo the
+// parking page left behind. companies is a mirror → the UPDATE syncs on the next push.
+async function clearParkedWebsite(companyId, website, resolvedUrl) {
+  const host = String(website || '').replace(/^https?:\/\/(www\.)?/i, '').split(/[/?#]/)[0].toLowerCase();
+  await query(
+    `UPDATE companies
+        SET website = NULL,
+            extra_fields = (COALESCE(extra_fields,'{}'::jsonb) - 'website_logo_url')
+              || jsonb_build_object(
+                   'website_removed', jsonb_build_object('url', $2::text, 'resolved', $3::text, 'at', now()::text, 'reason', 'parked_domain'),
+                   'website_rejected', (
+                     SELECT to_jsonb(array(SELECT DISTINCT lower(h) FROM jsonb_array_elements_text(
+                       COALESCE(extra_fields->'website_rejected','[]'::jsonb) || to_jsonb($4::text)) h)))),
+            updated_at = now()
+      WHERE id = $1`,
+    [companyId, website || null, resolvedUrl || null, host],
   );
 }
 

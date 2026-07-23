@@ -402,10 +402,74 @@ export function extractPartners(html, cap = 60, { sectionOnly = false } = {}) {
 // ===========================================================================
 
 /** Pick the best logo URL from a page's meta tags. og:image preferred, icon fallback. */
+// A logo we should NEVER store: a generic CMS/parking default that isn't the company's
+// own mark. These end up shared across thousands of unrelated companies (a GoDaddy favicon
+// sat on 1,388 of them — Val caught the Harbour Holdings case, 2026-07-24). Matched by the
+// tell-tale default asset PATH, not the host (img1.wsimg.com also serves real logos).
+// Two safe signals, both zero-casualty (verified on live data 2026-07-24):
+//   (1) a default asset PATH on a shared CMS — img1.wsimg.com also serves real logos, so we
+//       match the parked/favicon path, never the host.
+//   (2) a pure parking / hosting-control-panel HOST that never serves a company's own mark.
+// We deliberately do NOT strip by "shared by N companies": a real chain (Wellcare, 27
+// pharmacies) legitimately shares one logo, and Ooredoo's mark on 26 rows is a wrong-content
+// bug handled elsewhere — never a favicon default.
+const LOGO_DEFAULT_PATH_RX = new RegExp([
+  'wsimg\\.com/ux-assets/favicon',            // GoDaddy default favicon
+  'wsimg\\.com/cdnassets/transform/bfa8cd58', // GoDaddy parked-page default image
+  'parastorage\\.com/client/pfavico',         // Wix default favicon
+  'apple-icon-\\d+x\\d+\\.png',              // generic touch-icon (never a logo)
+  '/favicon\\.(ico|png)(\\?|$)',             // a bare favicon is not a logo
+  'moci\\.gov\\.qa/.*favicon',               // MOCI's own icon, scraped in error
+].join('|'), 'i');
+
+const LOGO_DEFAULT_HOST_RX = /(^|\/\/)(static\.hugedomains\.com|hpanel\.hostinger\.com|img\.sedoparking\.com)/i;
+
+export function isPlaceholderLogo(url) {
+  const u = String(url || '');
+  return !!u && (LOGO_DEFAULT_PATH_RX.test(u) || LOGO_DEFAULT_HOST_RX.test(u));
+}
+
+// A parked / for-sale / marketplace domain is NOT the company's real website. Host-level:
+// these services only ever host parking pages (Harbour Holdings' site was one, Val 2026-07-24).
+const PARKED_WEBSITE_HOST_RX = new RegExp('(^|\\.)(' + [
+  'godaddy\\.com', 'sedo\\.com', 'hugedomains\\.com', 'dan\\.com', 'afternic\\.com',
+  'parkingcrew\\.net', 'bodis\\.com', 'sav\\.com', 'above\\.com', 'domainmarket\\.com',
+  'undeveloped\\.com', 'buydomains\\.com', 'domize\\.com',
+].join('|') + ')$', 'i');
+
+export function isParkedWebsite(url) {
+  const u = String(url || '').trim();
+  if (!u) return false;
+  const host = u.replace(/^https?:\/\/(www\.)?/i, '').split(/[/?#]/)[0].toLowerCase();
+  return PARKED_WEBSITE_HOST_RX.test(host);
+}
+
+// A vanity domain (the company's own name) can still RESOLVE to a for-sale page — the host
+// looks legitimate, only the CONTENT gives it away ("harbourholdings.com is for sale on
+// GoDaddy. Own it today for $4,995"). Matched on the page's meta description / text with
+// parking-service-specific phrases only: measured against 2,065 live rows, every hit was a
+// genuine parking page and zero real businesses matched (Rule 2.2). We deliberately avoid the
+// bare "for sale" / "this website is for sale" wording — a real broker could say that.
+const PARKED_CONTENT_RX = new RegExp([
+  'is for sale on (godaddy|sedo|dan\\.com|afternic|hugedomains|namecheap|sav\\.com)',
+  'own it today for \\$',
+  'this domain (name )?is (listed )?for sale',
+  'the domain .{0,40} is (available )?for sale',
+  'safe & secure transactions and fast & easy transfers', // GoDaddy parking boilerplate
+  // NB: we deliberately do NOT match a bare "buy this domain" — a real hosting reseller's
+  // homepage could say it. Every genuine parking page also carries one of the phrases above.
+].join('|'), 'i');
+
+export function isParkedContent(...parts) {
+  const s = parts.filter(Boolean).join(' ').replace(/&amp;/g, '&');
+  return !!s && PARKED_CONTENT_RX.test(s);
+}
+
 export function pickLogo(meta) {
   if (!meta) return null;
   const cand = meta.ogImage || meta.icon || null;
   if (!cand) return null;
+  if (isPlaceholderLogo(cand)) return null;   // a shared CMS default is worse than no logo
   if (/\.(svg|png|jpe?g|webp|ico|gif)(\?|$)/i.test(cand) || /og:image|image|logo|icon/i.test(cand)) return cand;
   return cand;  // accept anyway — better than nothing
 }

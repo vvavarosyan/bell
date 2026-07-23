@@ -19,6 +19,7 @@
 import { query } from '../../db.js';
 import { recomputeBellScoreForCompany } from '../../assembly/bell_score.js';
 import { fetchPage, hostOf, pool } from './http.js';
+import { isParkedWebsite } from './extract.js';
 import { recordSearch } from './ledger.js';
 import { searchWeb, rendererAvailable, closeRenderer, beginSearchSession, searchState } from './render.js';
 import { search as firecrawlSearch } from '../clients/firecrawl.js';
@@ -497,6 +498,13 @@ function rejectedSet(company) {
 }
 
 async function saveWebsite(company, website, method) {
+  // A parked / for-sale / marketplace domain is not a real website — storing it would
+  // hand a "GoDaddy — this domain is for sale" page to a customer as the company's site
+  // (Harbour Holdings, Val 2026-07-24). Reject at the source, never claim it.
+  if (isParkedWebsite(website)) {
+    await markStage(company.id, 'no_data', { stage8_skip_reason: 'parked_domain', stage8_parked: website });
+    return { status: 'no_data', reason: 'parked_domain' };
+  }
   // Defensive: never save a host we've already rejected for this company.
   const host = (hostOf(website) || '').toLowerCase();
   if (host && rejectedSet(company).has(host)) {
