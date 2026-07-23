@@ -1,0 +1,15 @@
+{
+  "name": "bell-qa-qse-scraper",
+  "version": "0.1.0",
+  "description": "Scrapes the Qatar Stock Exchange (QSE) listed companies into clean JSON for Bell.qa. Uses a headless browser because QSE renders its data with JavaScript.",
+  "private": true,
+  "scripts": {
+    "scrape": "node scrape_qse.js"
+  },
+  "dependencies": {
+    "playwright": "^1.48.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

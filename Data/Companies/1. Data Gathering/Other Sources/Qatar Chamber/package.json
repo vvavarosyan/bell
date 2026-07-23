@@ -1,0 +1,12 @@
+{
+  "name": "bell-qa-qatarcid-scraper",
+  "version": "1.0.0",
+  "description": "Harvests the Qatar Chamber Commercial & Industrial Directory (qatarcid.com) into clean JSON for Bell.qa. Firecrawl mode (default) is dependency-free; proxy mode (future) will use Playwright.",
+  "private": true,
+  "scripts": {
+    "scrape": "node scrape_qatarcid.js"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}

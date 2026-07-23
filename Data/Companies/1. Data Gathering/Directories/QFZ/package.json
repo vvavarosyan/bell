@@ -1,0 +1,12 @@
+{
+  "name": "bell-qa-qfz-scraper",
+  "version": "1.0.0",
+  "description": "Scrapes the QFZ (Qatar Free Zones) directory into clean JSON for upload to Bell.qa.",
+  "private": true,
+  "scripts": {
+    "scrape": "node scrape_qfz.js"
+  },
+  "engines": {
+    "node": ">=14"
+  }
+}

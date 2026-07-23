@@ -1,0 +1,2 @@
+playwright>=1.40,<2
+lxml>=5.1,<6

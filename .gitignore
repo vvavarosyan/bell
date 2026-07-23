@@ -28,7 +28,26 @@
 **/.next/
 **/Config/local/
 **/Config/secrets/
-**/Data/raw/
+**# The Data/ folder holds raw scraper OUTPUT (millions of records) — never in git.
+# But the scraper CODE is versioned (carved in 2026-07-23) so both machines stay in
+# sync via git and the ROG's nightly self-update covers the scrapers too. Pattern:
+# ignore everything under Data/, then re-open ONLY the code directories, then
+# re-ignore their output/junk. Git cannot re-include inside an excluded DIRECTORY,
+# hence the level-by-level dance.
+/Data/*
+!/Data/Companies/
+/Data/Companies/*
+!/Data/Companies/1. Data Gathering/
+/Data/Companies/1. Data Gathering/*
+!/Data/Companies/1. Data Gathering/Directories/
+!/Data/Companies/1. Data Gathering/Other Sources/
+Data/Companies/1. Data Gathering/**/scans/
+Data/Companies/1. Data Gathering/**/__pycache__/
+Data/Companies/1. Data Gathering/**/node_modules/
+Data/Companies/1. Data Gathering/**/venv/
+Data/Companies/1. Data Gathering/**/.venv/
+Data/Companies/1. Data Gathering/**/State/
+Data/Companies/1. Data Gathering/**/state/raw/
 **/Data/scans/
 **/Operations/credits/
 **/Operations/enrichment_queue/
@@ -56,7 +75,6 @@
 .next/
 .vscode/
 /Config/
-/Data/
 /Operations/
 Branch Model — Preview.tsv
 Junk Addresses — Preview.tsv

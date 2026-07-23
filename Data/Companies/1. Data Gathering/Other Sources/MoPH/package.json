@@ -1,0 +1,15 @@
+{
+  "name": "bell-qa-moph-dhp-scraper",
+  "version": "0.1.0",
+  "description": "Scrapes Qatar MoPH/DHP healthcare facilities + licensed practitioners into clean JSON for Bell.qa. Drives a real browser (Playwright) because the DHP search is an anti-bot ASP.NET WebForms page.",
+  "private": true,
+  "scripts": {
+    "scrape": "node scrape_dhp.js"
+  },
+  "dependencies": {
+    "playwright": "^1.48.0"
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
