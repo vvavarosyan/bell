@@ -71,6 +71,10 @@ async function resetOne(id, domainHint) {
         updated_at = now()
       WHERE id = $1`,
     [id, !!emailFromDomain, `Website may belong to "${wc.belongs_to || 'another company'}" — hidden from customers pending review`, WEBSITE_DERIVED_KEYS, JSON.stringify(wc)]);
+  // Tombstone BEFORE deleting or prod keeps these rows forever — and their stale ids
+  // then block every future re-detection on prod's UNIQUE (company_id, tech).
+  await query(`INSERT INTO sync_deletions (table_name, row_id)
+                 SELECT 'company_tech', id FROM company_tech WHERE company_id = $1`, [id]);
   await query(`DELETE FROM company_tech WHERE company_id = $1`, [id]);
   if (fromDomain.length) await query(`UPDATE company_contacts SET extra_fields = coalesce(extra_fields,'{}'::jsonb) || '{"hidden_conflict":true}'::jsonb, updated_at=now() WHERE id = ANY($1::bigint[])`, [fromDomain.map((k) => k.id)]);
   return { tech: tech.length, contacts: fromDomain.length };

@@ -237,6 +237,16 @@ export async function applyBatch(table, rows) {
         const r = slice[i];
         try {
           await client.query('SAVEPOINT row_sp');
+          // company_tech has the same stale-row disease: local cleanup scripts deleted
+          // rows without tombstones, prod kept them under old ids, and the UNIQUE
+          // (company_id, tech) slot blocked every re-detection forever after — 25
+          // silent rejections per push (the ROG's log surfaced it, 2026-07-23). The
+          // incoming row is the mirror's truth; the stale prod row yields.
+          if (table === 'company_tech' && r.company_id != null && r.tech != null) {
+            await client.query(
+              `DELETE FROM company_tech WHERE company_id = $1 AND tech = $2 AND id <> $3`,
+              [r.company_id, r.tech, r.id]);
+          }
           if (parentCol && r[parentCol] != null) {
             // free the (parent, type, value) slot held by a different id
             await client.query(

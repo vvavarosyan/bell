@@ -66,6 +66,10 @@ async function quarantine(id, idv, home) {
       WHERE id = $1`,
     [id, DERIVED_KEYS, JSON.stringify(wc),
      `Website content appears to be a different company (${wc.brand || 'unknown brand'}) — logo/description/tech hidden pending review`]);
+  // Tombstone BEFORE deleting or prod keeps these rows forever — and their stale ids
+  // then block every future re-detection on prod's UNIQUE (company_id, tech).
+  await query(`INSERT INTO sync_deletions (table_name, row_id)
+                 SELECT 'company_tech', id FROM company_tech WHERE company_id = $1`, [id]);
   await query(`DELETE FROM company_tech WHERE company_id = $1`, [id]);
   await query(
     `UPDATE company_contacts SET extra_fields = coalesce(extra_fields,'{}'::jsonb) || '{"hidden_conflict":true}'::jsonb, updated_at=now()
