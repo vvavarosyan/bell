@@ -374,7 +374,18 @@ const NON_PERSON_NAME_RX = /\b(google|meta|facebook|microsoft|apple|amazon|marke
 // NAME", "Required - CONTACT PERSON", "OWNER NAME") — these are blank-field labels,
 // never real people. All additions are phrases that never occur in a real name.
 const PLACEHOLDER_NAME = /\b(john|jane)\s+doe\b|lorem\s+ipsum|your\s+name\b|first\s*name|last\s*name|team\s+member\b|full\s+name\b|sample\s+(name|person)|\brequired\b|owner\s*name|contact\s*person|company\s*name|not\s+available|to\s+be\s+(updated|advised|confirmed|filled)|\btbd\b/i;
-export function isPlaceholderName(name) { return PLACEHOLDER_NAME.test(String(name || '')); }
+
+// A website navigation / call-to-action / form label scraped as a "person" — "Sign In",
+// "Get Started", "Affiliate Program", "Personal Information", "Property Owner Agent"
+// (Val's A2 cases, 2026-07-24). ANCHORED to the WHOLE name so it never fires on a real
+// name that merely contains one of these words ("Welcome Johnson", surname "Leader").
+// Verified across the full people table: 21 hits, every one a UI label, zero real people.
+const UI_LABEL_NAME = /^\s*(get started|get in touch|sign ?in|sign ?in customer|premier sign ?in|log ?in|log ?out|sign ?up|subscribe|newsletters?|monthly newsletters?|learn more|read more|click here|view (profile|more|details)|contact us|about us|our team|team members?|management team|board members?|privacy policy|terms( of (service|use))?|cookie( policy)?|welcome|home ?page|affiliate program|partner program|become a partner|my account|create( an)? account|owner portal|customer portal|personal information|(select )?property owner( agent)?|diplomatic leader|book (now|a demo)|request (a )?demo|download|menu|search)\s*$/i;
+
+export function isPlaceholderName(name) {
+  const s = String(name || '');
+  return PLACEHOLDER_NAME.test(s) || UI_LABEL_NAME.test(s);
+}
 
 // ── Junk / obfuscated emails ────────────────────────────────────────────────
 // Cloudflare "email protection" hides the address as XOR-encoded hex behind a

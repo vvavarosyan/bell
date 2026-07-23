@@ -21,6 +21,9 @@ const trunc = (s, n = 40) => { s = String(s || ''); return s.length > n ? s.slic
   console.log(`Bell — clean bad records  (${apply ? 'APPLY — writing' : 'DRY-RUN — preview only'})\n`);
 
   // ── ① placeholder people ────────────────────────────────────────────────
+  // Coarse DB prefilter (cheap), then isPlaceholderName() makes the precise, anchored
+  // decision. The label list mirrors the UI-label set in dataquality.js so the new A2 cases
+  // (Sign In / Affiliate Program / Personal Information / Property Owner Agent / …) reach it.
   const cand = (await query(`
     SELECT id, full_name FROM people
      WHERE COALESCE(archived,false)=false AND (
@@ -29,7 +32,16 @@ const trunc = (s, n = 40) => { s = String(s || ''); return s.length > n ? s.slic
        OR full_name ILIKE '%your name%' OR full_name ILIKE '%first name%' OR full_name ILIKE '%last name%'
        OR full_name ILIKE '%full name%' OR full_name ILIKE '%team member%' OR full_name ILIKE '%lorem ipsum%'
        OR full_name ILIKE '%john doe%' OR full_name ILIKE '%jane doe%' OR full_name ILIKE '%sample %'
-       OR full_name ILIKE '%to be updated%' OR full_name ILIKE '%to be advised%')`)).rows;
+       OR full_name ILIKE '%to be updated%' OR full_name ILIKE '%to be advised%'
+       OR full_name ILIKE '%sign in%' OR full_name ILIKE '%sign up%' OR full_name ILIKE '%log in%'
+       OR full_name ILIKE 'get started%' OR full_name ILIKE 'get in touch%' OR full_name ILIKE '%newsletter%'
+       OR full_name ILIKE 'affiliate program%' OR full_name ILIKE '%partner program%' OR full_name ILIKE 'become a partner%'
+       OR full_name ILIKE 'personal information%' OR full_name ILIKE '%property owner%' OR full_name ILIKE 'owner portal%'
+       OR full_name ILIKE 'customer portal%' OR full_name ILIKE 'diplomatic leader%' OR full_name ILIKE 'subscribe%'
+       OR full_name ILIKE 'welcome%' OR full_name ILIKE 'contact us%' OR full_name ILIKE 'about us%'
+       OR full_name ILIKE 'our team%' OR full_name ILIKE 'management team%' OR full_name ILIKE 'board member%'
+       OR full_name ILIKE 'privacy policy%' OR full_name ILIKE 'my account%' OR full_name ILIKE 'book now%'
+       OR full_name ILIKE 'book a demo%' OR full_name ILIKE 'request demo%' OR full_name ILIKE 'request a demo%')`)).rows;
   const junk = cand.filter((p) => isPlaceholderName(p.full_name));
   console.log(`① Placeholder people to archive: ${junk.length}`);
   const byName = {};
