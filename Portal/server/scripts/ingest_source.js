@@ -5,10 +5,13 @@
 // Scheduled registry scans run: scrape → this → done.
 
 import { pool } from '../db.js';
-import { ingestSource } from '../ingest/runner.js';
+import { ingestSource, SOURCE_KEYS } from '../ingest/runner.js';
 
-const src = String(process.argv[2] || '').toUpperCase();
-if (!src) { console.error('Usage: node scripts/ingest_source.js <QFC|QFZ|QSTP|MOCI|QSE>'); process.exit(1); }
+// Case-insensitive: MAPPERS keys are mixed-case (MoPH, Tasmu, MadeInQatar) but a
+// scheduled wrapper passes whatever case is convenient. Resolve to the canonical key.
+const raw = String(process.argv[2] || '').trim();
+const src = SOURCE_KEYS.find((k) => k.toLowerCase() === raw.toLowerCase());
+if (!src) { console.error('Usage: node scripts/ingest_source.js <' + SOURCE_KEYS.join('|') + '>'); process.exit(1); }
 try {
   const out = await ingestSource(src);
   console.log(`INGEST ${src} COMPLETE:`, JSON.stringify(out));

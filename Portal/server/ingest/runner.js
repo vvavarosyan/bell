@@ -36,12 +36,35 @@ const LATEST_FILE = {
   QFCRA: '../Other Sources/QFCRA/scans/qfcra_latest.json',
 };
 
+// Some scrapers write to their own native filename instead of the runner's canonical
+// scans/<src>_latest.json (the ROG's Wave-2 validation, 2026-07-23). Resolve tries the
+// canonical path first, then these known alternates, so a monthly task never silently
+// no-ops on a file-not-found.
+const ALT_FILES = {
+  CRA:         ['../Other Sources/CRA ICT/cra-ict.json'],
+  MadeInQatar: ['../Other Sources/Made in Qatar/made-in-qatar.json'],
+  QFCRA:       ['../Other Sources/QFCRA/qfcra.json'],
+};
+
+// Canonical, case-insensitively-resolvable source keys (exported for the CLI).
+export const SOURCE_KEYS = Object.keys(LATEST_FILE);
+
 const BATCH_SIZE = 200;
 
 /** Public entry: ingest the latest scrape for a single source. */
 export async function ingestSource(source, jobProgress) {
   if (!MAPPERS[source]) throw new Error('Unknown source: ' + source);
-  const file = path.join(DIR_ROOT, LATEST_FILE[source]);
+  let file = path.join(DIR_ROOT, LATEST_FILE[source]);
+  try { await fs.access(file); }
+  catch {
+    // canonical missing → try the scraper's native filename
+    let found = null;
+    for (const alt of (ALT_FILES[source] || [])) {
+      const cand = path.join(DIR_ROOT, alt);
+      try { await fs.access(cand); found = cand; break; } catch { /* next */ }
+    }
+    if (found) file = found;
+  }
 
   // Capture a DB-clock run-start BEFORE any upsert. Present rows get
   // last_seen_at = now() (after this), so afterwards we can tell which links
@@ -81,8 +104,21 @@ export async function ingestSource(source, jobProgress) {
   // Reconcile companies that DISAPPEARED from this upload (present last time,
   // absent now). QFZ → auto-archive (if not active elsewhere); other sources →
   // flag for admin review, never auto-delete.
-  jobProgress?.('Reconciling disappearances …');
-  const recon = await reconcileDisappearances(source, runStart);
+  // PARTIAL-SCRAPE GUARD (the ROG hit this live: a 3-of-355 Made in Qatar validation flagged
+  // 336 real companies as disappeared; a 0-company QCCI would have flagged all 41,951). If the
+  // upload covers less than 60% of what this source currently has on file, SKIP disappearance
+  // reconciliation — the upserts above still land every real row, we just don't punish the
+  // absent ones on the assumption the scrape was complete.
+  const { rows: [{ n: onFile }] } = await query(
+    `SELECT count(DISTINCT company_id)::int n FROM company_sources WHERE source = $1`, [source]);
+  let recon;
+  if (onFile >= 50 && normalized.length < onFile * 0.6) {
+    jobProgress?.(`  ⚠ partial scrape guard: upload has ${normalized.length} vs ${onFile} on file (<60%) — SKIPPING disappearance reconciliation to avoid false flags.`);
+    recon = { missing: 0, archived: 0, flagged: 0, skipped_partial: true };
+  } else {
+    jobProgress?.('Reconciling disappearances …');
+    recon = await reconcileDisappearances(source, runStart);
+  }
   jobProgress?.(`  Disappeared: ${recon.missing.toLocaleString()} · archived ${recon.archived} · flagged for review ${recon.flagged}`);
 
   // MoPH carries a companion practitioners file: after the facility companies
