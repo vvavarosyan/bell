@@ -149,12 +149,23 @@ export async function findBrandChains() {
   const groups = [];
   for (const [label, members] of byLabel) {
     if (members.length < 3) continue;                    // a chain, not a pair
-    // Head = the member whose cleaned name is the shortest core that the others extend,
-    // preferring the record that actually carries a CR (the registered operator).
-    const sorted = [...members].sort((a, b) =>
-      (b.reg ? 1 : 0) - (a.reg ? 1 : 0) || (Number(b.bell_score) || 0) - (Number(a.bell_score) || 0) ||
-      cleanName(a.name).length - cleanName(b.name).length);
+    // Head = the member whose cleaned name is the shortest core that the others extend.
+    // ORDER MATTERS, learned live (Al Misbah / Care N Cure, 2026-07-23): a record that is
+    // ITSELF someone's branch can never be head, and when both a bare CR and a suffixed CR
+    // are in the group, the BARE one is the head — the registry says so. The old sort
+    // preferred the higher-scored record, which proposed the family UPSIDE-DOWN (the parent
+    // as a branch of its own branch) and the approve guard rightly refused with a message
+    // that told Val nothing.
+    const barePref = (x) => (x.reg && !/\/\s*\d+\s*$/.test(String(x.reg)) ? 1 : 0);
+    const sorted = [...members]
+      .filter((x) => !x.parent_company_id)
+      .sort((a, b) =>
+        barePref(b) - barePref(a) ||
+        (b.reg ? 1 : 0) - (a.reg ? 1 : 0) ||
+        (Number(b.bell_score) || 0) - (Number(a.bell_score) || 0) ||
+        cleanName(a.name).length - cleanName(b.name).length);
     const head = sorted[0];
+    if (!head) continue;                                 // every member already in a family
     const core = parentCore(head.name);
     if (!core || core.split(' ').filter(Boolean).length < 2) continue;   // one-word cores are coincidence bait
 
@@ -166,6 +177,9 @@ export async function findBrandChains() {
       if (m.parent_company_id) continue;                 // already in a family
       const mBase = baseOf(m.reg), hBase = baseOf(head.reg);
       const ownDifferentCr = mBase && hBase && mBase !== hBase;
+      // Same base but the MEMBER holds the bare CR → the member is the registry's parent;
+      // proposing it as a branch would invert the family. Skip outright.
+      if (mBase && hBase && mBase === hBase && m.reg && !/\/\s*\d+\s*$/.test(String(m.reg))) continue;
       const nameExtends = cleanName(m.name).startsWith(core + ' ') || cleanName(m.name) === core;
       if (ownDifferentCr) { strangers.push({ id: m.id, name: m.name, why: 'own different registration' }); continue; }
       if (!nameExtends && !mBase) {

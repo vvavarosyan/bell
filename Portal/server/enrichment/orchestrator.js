@@ -369,7 +369,25 @@ export async function runHarvestSweep({ limit = 100, triggeredBy = null, jobLog 
         AND stage7_at IS NULL
       ORDER BY bell_score ASC, id ASC
       LIMIT $1`, [cap]);
-  const harvestIds = harvestRows.rows.map(r => r.id);
+  let harvestIds = harvestRows.rows.map(r => r.id);
+  // THE FRESHNESS CYCLE (Val's decision, 2026-07-23: "100% of the database under 100%
+  // time checking, monitoring and enrichment — nonstop"). When nothing is NEW, re-harvest
+  // the STALEST records so accuracy keeps rising forever, oldest-first. Two floors, both
+  // deliberate: a site is not re-read within 7 days (its data doesn't change hourly, and
+  // hammering the same hosts in a tight loop is impolite scraping), and a FAILED site is
+  // re-tried after 14 days (dead sites do come back to life — 1,494 sat unretried).
+  if (!harvestIds.length) {
+    const stale = await query(
+      `SELECT id FROM companies
+        WHERE COALESCE(archived, false) = false AND is_active IS NOT false
+          AND website IS NOT NULL AND btrim(website) <> ''
+          AND ( (stage7_status = 'failed' AND stage7_at < now() - interval '14 days')
+             OR (stage7_status <> 'failed' AND stage7_at < now() - interval '7 days') )
+        ORDER BY stage7_at ASC, id ASC
+        LIMIT $1`, [cap]);
+    harvestIds = stale.rows.map(r => r.id);
+    if (harvestIds.length) jobLog?.(`  Phase 2 — freshness cycle: nothing new, re-harvesting the ${harvestIds.length} stalest record(s).`);
+  }
   let harvest = { done: 0, no_data: 0, failed: 0 };
   if (harvestIds.length) {
     jobLog?.(`  Phase 2 — Engine 2 (Website Harvester) on ${harvestIds.length} company(ies) with a website…`);

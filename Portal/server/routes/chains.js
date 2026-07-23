@@ -52,7 +52,15 @@ router.post('/approve', async (req, res, next) => {
     const p = (await query(
       `SELECT id FROM companies WHERE id=$1 AND COALESCE(archived,false)=false AND parent_company_id IS NULL`,
       [parentId])).rows[0];
-    if (!p) return res.status(409).json({ error: 'parent_not_linkable' });
+    if (!p) {
+      // Say WHY in words Val can act on — 'parent_not_linkable' told him nothing.
+      const row = (await query(`SELECT archived, parent_company_id FROM companies WHERE id=$1`, [parentId])).rows[0];
+      const reason = !row ? 'That record no longer exists.'
+        : row.archived ? 'That record is archived.'
+        : row.parent_company_id ? 'That record is already a BRANCH of another family — it cannot also be a parent. The family may already be linked correctly; check the company drawer.'
+        : 'That record cannot be a parent right now.';
+      return res.status(409).json({ error: 'parent_not_linkable', reason });
+    }
     let linked = 0;
     for (const id of ids) {
       const r = await query(`
