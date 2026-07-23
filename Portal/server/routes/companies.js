@@ -671,21 +671,30 @@ router.get('/:id', async (req, res, next) => {
       await maskPeople(req, peopleRows);
     }
 
+    // SOURCE PROVENANCE IS ADMIN-ONLY (Val 2026-07-24: "users must not see the sources
+    // of any details"). A regular customer sees the FACT, never where Bell got it — that
+    // sourcing is Bell's own asset. Admins (and the local engine) keep full provenance.
+    const showSources = MODE === 'local-admin' || req.user?.role === 'platform_admin';
+    const stripSrc = (rows) => showSources ? rows
+      : (rows || []).map((r) => { const { source, source_url, source_record_id, ...rest } = r; return rest; });
+    const stripGrouped = (groups) => showSources ? groups
+      : (groups || []).map((g) => ({ ...g, entries: (g.entries || []).map((e) => { const { source, ...rest } = e; return rest; }) }));
+
     res.json({
       company:  row,
-      sources:  sources.rows,
+      sources:  showSources ? sources.rows : [],
       people:   peopleRows,
       people_locked: peopleLocked,
       people_count:  peopleCount,
       contacts: maskedContacts,
-      financials:   financials.rows,
+      financials:   stripSrc(financials.rows),
       // Clean, source-attributed, confidence-tagged view + conservative
       // interpolated estimates (Val 2026-07-12) — the reliable presentation.
-      financials_grouped: consolidateFinancials(financials.rows, { estimate: true }),
-      shareholders: shareholders.rows,
-      partnerships: partnerships.rows,
-      rejects:      rejects,
-      tech:         tech.rows,
+      financials_grouped: stripGrouped(consolidateFinancials(financials.rows, { estimate: true })),
+      shareholders: stripSrc(shareholders.rows),
+      partnerships: stripSrc(partnerships.rows),
+      rejects:      showSources ? rejects : [],
+      tech:         stripSrc(tech.rows),
       locations,
       parent_company: parentCompany,
       branches,
