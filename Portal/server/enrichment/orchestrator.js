@@ -351,7 +351,25 @@ export async function runHarvestSweep({ limit = 100, triggeredBy = null, jobLog 
         AND stage8_at IS NULL
       ORDER BY bell_score ASC, id ASC
       LIMIT $1`, [cap]);
-  const findIds = findRows.rows.map(r => r.id);
+  let findIds = findRows.rows.map(r => r.id);
+  // FIND FRESHNESS CYCLE (Val, 2026-07-24: "make sure ROG engines run on ABSOLUTELY all
+  // Bell data"). 64k+ businesses (hotels, salons, clinics — most of the OSM/Maps additions)
+  // have no website, and the Finder tries each ONCE then never again — so 78% of Bell sat
+  // permanently un-re-checked. A business that opens a website after Bell first looked was
+  // invisible forever. When nothing is newly un-checked, re-run the Finder on the stalest
+  // no-website records (30-day floor — a business rarely gets a website overnight, and this
+  // is a paid-ish search tier so we pace it). A newly-found site then flows into harvest.
+  if (!findIds.length) {
+    const staleFind = await query(
+      `SELECT id FROM companies
+        WHERE COALESCE(archived, false) = false AND is_active IS NOT false
+          AND (website IS NULL OR btrim(website) = '')
+          AND stage8_at < now() - interval '30 days'
+        ORDER BY stage8_at ASC, id ASC
+        LIMIT $1`, [cap]);
+    findIds = staleFind.rows.map(r => r.id);
+    if (findIds.length) jobLog?.(`  Phase 1 — find freshness cycle: re-checking the ${findIds.length} stalest no-website record(s) for a website.`);
+  }
   let find = { done: 0, no_data: 0, failed: 0 };
   if (findIds.length) {
     jobLog?.(`  Phase 1 — Engine 1 (Website Finder) on ${findIds.length} company(ies) with no website…`);
