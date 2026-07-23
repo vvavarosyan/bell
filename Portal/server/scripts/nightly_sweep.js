@@ -19,6 +19,7 @@ import { runHarvestSweep } from '../enrichment/orchestrator.js';
 import { autoLinkRegistryChains } from '../enrichment/chain_link.js';
 import { runTenderScan } from '../tenders/scrape.js';
 import { execFile } from 'child_process';
+import { fileURLToPath } from 'node:url';
 import { promisify } from 'util';
 const execFileP = promisify(execFile);
 import { recomputeBellScores } from '../assembly/bell_score.js';
@@ -38,7 +39,10 @@ const log = (m) => console.log(`[${new Date().toISOString()}] ${m}`);
   // engines. Fast-forward only, never on a dirty tree, and a pull failure must never stop
   // the night's work: stale code that runs beats fresh code that doesn't.
   try {
-    const repo = new URL('../../..', import.meta.url).pathname.replace(/\/$/, '');
+    // fileURLToPath, NOT .pathname: on Windows .pathname yields '/C:/bell' and
+    // git -C fails with 'Invalid argument' — the ROG proved it live (2026-07-23),
+    // which silently killed self-update on the exact machine that needs it most.
+    const repo = fileURLToPath(new URL('../../..', import.meta.url));
     const dirty = (await execFileP('git', ['-C', repo, 'status', '--porcelain'])).stdout.trim();
     if (dirty) log('▸ self-update skipped: working tree has local changes.');
     else {
