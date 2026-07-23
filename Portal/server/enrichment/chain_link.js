@@ -12,7 +12,9 @@
 //   registry's OWN convention. Measured live: 5,327 suffixed CRs. Not an inference — but
 //   it still ships as Preview/Apply so Val reads the list before anything is written.
 //   Gates (each from a measured trap):
-//     • both parent and member must carry a MOCI or QCCI source row — QFC/CRA/QFCRA
+//     • both parent and member must have their base CR NUMBER attested in a MOCI/QCCI
+//       payload (NOT just a MOCI source row — mappers.js:151 can write a CP/permit number
+//       into primary_registration_no; the adversarial review found this leak). QFC/CRA/QFCRA
 //       licence numbers COLLIDE numerically with MOCI CR bases (106 members measured);
 //     • the parent is the record holding the BARE base CR; no bare-base record → review;
 //     • a member already linked to a DIFFERENT parent → review, never overwrite.
@@ -26,10 +28,14 @@
 //   group for caution — measured: real chains have zero strangers, family-name coincidence
 //   piles have 5–15.
 //
-// The adversarial-verification pass for this design could NOT run (session limit), which
-// is exactly WHY nothing here auto-links: Tier 1 is registry-stated + Val's Apply click;
-// Tier 2 is per-card human judgment. Do not "upgrade" Tier 2 to automatic without running
-// that verification.
+// ADVERSARIAL VERIFICATION COMPLETE (2026-07-24, after two session-limit retries): the
+// registry Tier-1 SELECTION survived (both lenses) — its only real defects were (a) the
+// number-attestation leak, now closed above, and (b) it links ACTIVE companies, which broke
+// the map's archived-child pass (a double-render, fixed in routes/companies.js). Tier 1 is
+// SAFE to auto-link. Tier 2 (brand-evidence) was REFUTED for auto-linking on live data —
+// discovery-row websites are GUESSED FROM THE NAME by Bell's own finder, so shared-host +
+// name-prefix produced real wrong links. Tier 2 STAYS human-only in the Chains tab, forever.
+// Do not upgrade it.
 
 import { query } from '../db.js';
 import { cleanName, parentCore } from './branch_link.js';
@@ -66,7 +72,9 @@ export async function findRegistryChains() {
   const rows = (await query(`
     SELECT c.id, c.name, c.primary_registration_no AS reg, c.website, c.parent_company_id,
            EXISTS (SELECT 1 FROM company_sources s WHERE s.company_id = c.id
-                     AND s.source IN ('MOCI','moci','QCCI','qcci-ingest','qcci-directory')) AS registry_sourced
+                     AND s.source IN ('MOCI','moci','QCCI','qcci-ingest','qcci-directory')
+                     AND position(regexp_replace(regexp_replace(c.primary_registration_no,'/[0-9]+\\s*$','',''),'\\D','','g')
+                                  in regexp_replace(s.raw_payload::text,'\\D','','g')) > 0) AS registry_sourced
       FROM companies c
      WHERE COALESCE(c.archived,false) = false
        AND COALESCE(c.merge_status,'') <> 'merged_into'
@@ -87,7 +95,9 @@ export async function findRegistryChains() {
   const parents = (await query(`
     SELECT c.id, c.name, c.primary_registration_no AS reg, c.website,
            EXISTS (SELECT 1 FROM company_sources s WHERE s.company_id = c.id
-                     AND s.source IN ('MOCI','moci','QCCI','qcci-ingest','qcci-directory')) AS registry_sourced
+                     AND s.source IN ('MOCI','moci','QCCI','qcci-ingest','qcci-directory')
+                     AND position(regexp_replace(regexp_replace(c.primary_registration_no,'/[0-9]+\\s*$','',''),'\\D','','g')
+                                  in regexp_replace(s.raw_payload::text,'\\D','','g')) > 0) AS registry_sourced
       FROM companies c
      WHERE COALESCE(c.archived,false) = false
        AND COALESCE(c.merge_status,'') <> 'merged_into'

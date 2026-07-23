@@ -499,6 +499,13 @@ router.get('/map', async (req, res, next) => {
                 FROM company_sources cs WHERE cs.company_id = c.id) AS sources
           FROM companies c
          WHERE c.parent_company_id IS NOT NULL
+           -- ARCHIVED children only. The comment above always said "these are archived
+           -- facilities the two active passes skip" — but this filter was never written,
+           -- harmless while ONLY MoPH shells (all archived) had parents. The chain model
+           -- links ACTIVE companies, and an active child already renders as its own main
+           -- pin above, so without archived=true it drew TWICE (7 live, the chain
+           -- adversarial review caught it 2026-07-24).
+           AND c.archived = true
            AND c.latitude IS NOT NULL AND c.longitude IS NOT NULL
            AND c.longitude BETWEEN 50.55 AND 51.85 AND c.latitude BETWEEN 24.40 AND 26.30`);
       for (const row of kids.rows) {
