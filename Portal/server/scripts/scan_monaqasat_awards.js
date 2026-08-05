@@ -5,7 +5,7 @@
 //   just page 1-5: node scripts/scan_monaqasat_awards.js --pages 5
 //   re-scrape    : node scripts/scan_monaqasat_awards.js --force
 
-import { scanMonaqasatAwards } from '../tenders/scan_monaqasat_awards.js';
+import { scanMonaqasatAwards, repairThinAwards } from '../tenders/scan_monaqasat_awards.js';
 import { query } from '../db.js';
 
 const arg = (n, d) => { const i = process.argv.indexOf('--' + n); return i > -1 ? Number(process.argv[i + 1]) || d : d; };
@@ -27,6 +27,12 @@ console.log(`Tenders with a winner right now: ${before.toLocaleString()}\n`);
 
 const t = await scanMonaqasatAwards({ pages, startPage: start, force, jobLog: (m) => console.log(m) });
 
+// Complete any tender inserted before the parser read the full metadata table (Val:
+// "we need the best quality data and complete data"). Re-reads the SAME award page, so
+// it costs one fetch per incomplete row and never overwrites a value that is already set.
+console.log('\nChecking for incomplete records…');
+const rep = await repairThinAwards({ jobLog: (m) => console.log(m) });
+
 const after = (await query(
   `SELECT count(*)::int c FROM tenders WHERE source='monaqasat' AND award_company_name IS NOT NULL`)).rows[0].c;
 const linked = (await query(
@@ -38,6 +44,7 @@ console.log(`Award reports read    : ${t.reports}   (failed ${t.failed})`);
 console.log(`Existing tenders filled: ${t.updated}`);
 console.log(`New tenders added     : ${t.inserted}`);
 console.log(`Already had it (skipped): ${t.skipped}`);
+console.log(`Incomplete records completed: ${rep.fixed}`);
 console.log('');
 console.log(`TENDERS WITH A WINNER : ${before.toLocaleString()} → ${after.toLocaleString()}`);
 console.log(`Winners linked to a Bell company: ${linked.toLocaleString()}`);

@@ -118,6 +118,12 @@ export function parseAwardReport(html) {
   const out = {
     tender_number: null, ministry: null, subject: null, tender_type: null,
     entity_ref: null, awarded_at: null, awarded_amount: null, currency: null,
+    // The metadata table carries the FULL tender record, not just the award — so a tender
+    // discovered through this feed lands complete instead of as a stub (Val, 2026-08-05:
+    // "we need the best quality data and complete data"). No second page fetch needed.
+    sector: null, published_at: null, closing_at: null, envelopes: null,
+    document_value: null, tender_bond: null,
+    technical_opening_at: null, financial_opening_at: null,
     winner: null, participants: [], bids: [],
   };
   if (!html) return out;
@@ -175,9 +181,25 @@ export function parseAwardReport(html) {
           if (!k || !v) continue;
           if (k === 'tender number' && !out.tender_number) out.tender_number = v;
           else if (k === 'ministry' && !out.ministry) out.ministry = v;
-          else if (k === 'tender subject' && !out.subject) out.subject = v;
+          // A subject with no LETTER in it is not a title. Monaqasat genuinely publishes
+          // "0" as the subject of some direct agreements (verified on 4023/2026), and storing
+          // that as a tender's name shows a customer a record called "0". Treated as ABSENT so
+          // the caller falls back to the tender number — which is a fact, not an invention.
+          // \p{L} not [a-z]: most subjects are Arabic.
+          else if (k === 'tender subject' && !out.subject && /\p{L}/u.test(v)) out.subject = v;
           else if (k === 'tender type' && !out.tender_type) out.tender_type = v;
+          else if (k === 'requested sector type' && !out.sector) out.sector = v;
           else if (k === 'tender number at ministry' && !out.entity_ref) out.entity_ref = v;
+          else if (k === 'publish date' && !out.published_at) out.published_at = v;
+          else if (k === 'closing date' && !out.closing_at) out.closing_at = v;
+          else if (k === 'envelopes system' && !out.envelopes) out.envelopes = v;
+          else if (k === 'technical opening date' && !out.technical_opening_at) out.technical_opening_at = v;
+          else if (k === 'financial open date' && !out.financial_opening_at) out.financial_opening_at = v;
+          else if (k === 'document value' && out.document_value == null) out.document_value = parseMoney(v).amount;
+          // ⚠️ The TENDER BOND is the bid guarantee, NOT the contract value. Bell already
+          // shipped that confusion once (CLAUDE.md §7). It is kept as its own field and must
+          // never be written to tenders.value_amount — only the AWARDED amount goes there.
+          else if (k === 'tender bond' && out.tender_bond == null) out.tender_bond = parseMoney(v).amount;
           else if (k === 'awarded date' && !out.awarded_at) out.awarded_at = v;
           else if (k === 'awarded amount' && out.awarded_amount == null) {
             const m = parseMoney(v);

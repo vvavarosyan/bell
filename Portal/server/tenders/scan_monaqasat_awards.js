@@ -108,17 +108,86 @@ async function applyReport(id, report, { force }) {
   }
 
   // Bell never captured this tender (its Monaqasat archive starts later than the awarded
-  // feed). Insert it from what the report states — nothing inferred.
-  const raw = packRaw({ source: 'monaqasat-award', award_report: award });
+  // feed). Insert it COMPLETE from what the report states — the metadata table carries the
+  // whole tender record, so these rows are not stubs. Nothing is inferred.
+  const raw = packRaw({
+    source: 'monaqasat-award',
+    type: report.tender_type || null,
+    sector: report.sector || null,
+    entity_ref: report.entity_ref || null,
+    envelopes: report.envelopes || null,
+    document_value: report.document_value,
+    tender_bond: report.tender_bond,          // the BID GUARANTEE — never the contract value
+    technical_opening_date: report.technical_opening_at || null,
+    financial_opening_date: report.financial_opening_at || null,
+    award_report: award,
+  });
   await query(
-    `INSERT INTO tenders (source, source_ref, title, buyer, status, award_company_name,
-                          award_company_id, awarded_at, value_amount, currency, url, raw,
-                          created_at, updated_at)
-     VALUES ('monaqasat', $1, $2, $3, 'awarded', $4, $5, $6::date, $7, $8, $9, $10::jsonb, now(), now())
+    `INSERT INTO tenders (source, source_ref, title, buyer, category, status, award_company_name,
+                          award_company_id, awarded_at, published_at, deadline_at,
+                          value_amount, currency, url, raw, created_at, updated_at)
+     VALUES ('monaqasat', $1, $2, $3, $4, 'awarded', $5, $6, $7::date, $8::date, $9::date,
+             $10, $11, $12, $13::jsonb, now(), now())
      ON CONFLICT DO NOTHING`,
-    [tenderNo, report.subject || tenderNo, report.ministry || null, report.winner.name,
-     companyId, awardedAt, report.awarded_amount, report.currency, AWARD_REPORT_URL(id), raw]);
+    [tenderNo, report.subject || tenderNo, report.ministry || null, report.sector || null,
+     report.winner.name, companyId, awardedAt,
+     parseAwardDate(report.published_at), parseAwardDate(report.closing_at),
+     report.awarded_amount, report.currency, AWARD_REPORT_URL(id), raw]);
   return { status: 'inserted', linked: !!companyId };
+}
+
+/**
+ * REPAIR PASS — complete any award-feed tender that was inserted before the parser learned to
+ * read the full metadata table. Those rows carry the winner but no sector/publish/closing
+ * date. Their report id is stored, so this re-reads the SAME page and fills the gaps; it never
+ * touches a tender that already has its metadata, and never overwrites a non-null value.
+ */
+export async function repairThinAwards({ limit = 100000, jobLog = null } = {}) {
+  const log = (m) => { if (jobLog) jobLog(m); else console.log(m); };
+  const rows = (await query(
+    `SELECT id, raw->'award_report'->>'report_id' AS report_id
+       FROM tenders
+      WHERE source = 'monaqasat'
+        AND raw->>'source' = 'monaqasat-award'
+        AND raw->'award_report'->>'report_id' IS NOT NULL
+        AND (category IS NULL OR published_at IS NULL)
+      ORDER BY id
+      LIMIT $1`, [limit])).rows;
+  log(`  repair: ${rows.length} award-feed tender(s) are missing their full detail.`);
+  let fixed = 0;
+  await mapPool(rows, async (row) => {
+    const page = await fetchPage(AWARD_REPORT_URL(row.report_id), { respectRobots: false, timeoutMs: 30_000, retries: 1 });
+    if (!page.ok) return;
+    const r = parseAwardReport(String(page.html || ''));
+    if (!r.tender_number) return;
+    const cur = (await query(`SELECT raw FROM tenders WHERE id = $1`, [row.id])).rows[0];
+    const raw = packRaw({
+      ...(cur?.raw || {}),
+      type: r.tender_type || cur?.raw?.type || null,
+      sector: r.sector || cur?.raw?.sector || null,
+      entity_ref: r.entity_ref || cur?.raw?.entity_ref || null,
+      envelopes: r.envelopes || cur?.raw?.envelopes || null,
+      document_value: r.document_value ?? cur?.raw?.document_value ?? null,
+      tender_bond: r.tender_bond ?? cur?.raw?.tender_bond ?? null,
+      technical_opening_date: r.technical_opening_at || cur?.raw?.technical_opening_date || null,
+      financial_opening_date: r.financial_opening_at || cur?.raw?.financial_opening_date || null,
+    });
+    await query(
+      `UPDATE tenders
+          SET title        = CASE WHEN $2 <> '' THEN $2 ELSE title END,
+              buyer        = COALESCE(buyer, $3),
+              category     = COALESCE(category, $4),
+              published_at = COALESCE(published_at, $5::date),
+              deadline_at  = COALESCE(deadline_at, $6::date),
+              raw          = COALESCE($7::jsonb, raw),
+              updated_at   = now()
+        WHERE id = $1`,
+      [row.id, r.subject || '', r.ministry || null, r.sector || null,
+       parseAwardDate(r.published_at), parseAwardDate(r.closing_at), raw]);
+    fixed++;
+  });
+  log(`  repair: completed ${fixed} tender(s).`);
+  return { candidates: rows.length, fixed };
 }
 
 /**
