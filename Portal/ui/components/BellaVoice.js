@@ -29,6 +29,38 @@ const VOICE_IDLE_MS = 10_000; // auto-close voice after 10s of silence (saves mo
 
 const CHOICES_RX = /\n?\s*\[choices:\s*([^\]]+)\]\s*$/i;
 
+// ── Progress cue ───────────────────────────────────────────────────────────────
+// How long Bella may work in silence before she says anything at all. At 2.6s this fired on
+// almost every tool-using turn; 4.6s lets a normal answer land first, so the cue is reserved for
+// turns that genuinely take a while.
+const FILLER_MS = 4600;
+const AR_RX = /[؀-ۿ]/;
+// Short, natural, and none of them promise anything. Kept deliberately small — a long list reads
+// as a slot machine; what matters is simply not repeating the SAME sentence every time.
+const FILLERS_EN = [
+  'One moment.',
+  'Let me check.',
+  'Just a sec.',
+  'Looking now.',
+  'Give me a second.',
+  'Checking that.',
+];
+const FILLERS_AR = [
+  'لحظة من فضلك.',
+  'دعني أتحقق.',
+  'ثانية واحدة.',
+  'أبحث الآن.',
+];
+let lastFiller = '';
+/** A short "still working" line in the user's own language, never the same one twice running. */
+export function fillerPhrase(userText = '') {
+  const pool = AR_RX.test(String(userText)) ? FILLERS_AR : FILLERS_EN;
+  const choices = pool.length > 1 ? pool.filter((p) => p !== lastFiller) : pool;
+  const pick = choices[Math.floor(Math.random() * choices.length)];
+  lastFiller = pick;
+  return pick;
+}
+
 function pickMime() {
   if (typeof MediaRecorder === 'undefined') return null;
   for (const t of ['audio/webm;codecs=opus', 'audio/webm', 'audio/mp4']) {
@@ -207,13 +239,21 @@ export function BellaVoice({ onClose, onOpenChat }) {
         run.push(cut.segment);
       }
     };
-    // Progress cue (Val 2026-07-20: "user left wondering why Bella said nothing"):
-    // if she's still working after ~2.6s with nothing spoken yet (a tool-heavy
-    // turn), say a short filler so the user knows she's on it. The real answer
-    // queues right after.
+    // Progress cue. Originally (Val 2026-07-20) this stopped the user wondering why Bella had
+    // gone silent on a tool-heavy turn. But it fired at 2.6s with ONE fixed sentence, so it hit
+    // constantly and always said the same words — Val 2026-08-06: "its annoying after some time
+    // and not professional and robotic. Can she say that only when necessary and in different
+    // ways?" Three changes, all in fillerPhrase()/FILLER_MS:
+    //   · LATER  — 4.6s, so a normal turn answers before it ever speaks;
+    //   · VARIED — a small pool, never the same line twice in a row;
+    //   · IN HER USER'S LANGUAGE — the old line was always English, so an Arabic conversation
+    //     got an English interjection (and the TTS then switched voice mid-turn).
     const fillerTimer = setTimeout(() => {
-      if (!spokeAnything && !run.stopped && aliveRef.current) { spokeAnything = true; run.push('Working on it — one moment.'); }
-    }, 2600);
+      if (!spokeAnything && !run.stopped && aliveRef.current) {
+        spokeAnything = true;
+        run.push(fillerPhrase(text));
+      }
+    }, FILLER_MS);
     try {
       const stream = await api.bellaChat(
         { conversation_id: convIdRef.current, message: text, context: { section: currentRoute().tab, voice: true } },
