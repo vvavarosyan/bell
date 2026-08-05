@@ -17,13 +17,17 @@
 
 import { runHarvestSweep } from '../enrichment/orchestrator.js';
 import { autoLinkRegistryChains } from '../enrichment/chain_link.js';
-import { runTenderScan } from '../tenders/scrape.js';
+import { runTenderScan, closeExpiredTenders } from '../tenders/scrape.js';
+import { scanMonaqasatAwards, repairThinAwards } from '../tenders/scan_monaqasat_awards.js';
 import { selfUpdate } from '../ops/self_update.js';
 import { recomputeBellScores } from '../assembly/bell_score.js';
 import { pool } from '../db.js';
 
 const MAX_MS = Number(process.env.BELL_NIGHTLY_MAX_MS || 6.5 * 3600 * 1000);
 const CHUNK  = Number(process.env.BELL_NIGHTLY_CHUNK  || 300);
+// Award-list pages to re-read nightly. New awards appear at the front, so a handful covers a
+// day's worth; raise it if a backlog ever builds. The archive backfill is a separate command.
+const AWARD_PAGES = Number(process.env.BELL_NIGHTLY_AWARD_PAGES || 6);
 
 const log = (m) => console.log(`[${new Date().toISOString()}] ${m}`);
 
@@ -68,6 +72,22 @@ const log = (m) => console.log(`[${new Date().toISOString()}] ${m}`);
       log(`✓ Tender scan: ${t.total.scraped} scraped · ${t.total.inserted} new · ${t.total.updated} updated · ${t.total.linked} linked.`);
       for (const [src, r] of Object.entries(t.sources)) if (r.error) log(`  ✗ ${src}: ${r.error}`);
     } catch (err) { log(`✗ Tender scan failed: ${err.message}`); }
+    // Fresh AWARD REPORTS — who won, for how much, and who they beat. New awards land at the
+    // FRONT of Monaqasat's awarded list, so a small page walk each night keeps Bell current;
+    // the whole ~1,187-page archive is a separate one-off ("Backfill Tender Winners.command").
+    // Reports already stored are skipped, so this stays cheap forever.
+    try {
+      const a = await scanMonaqasatAwards({ pages: AWARD_PAGES, jobLog: (m) => log('  ' + m) });
+      log(`✓ Award reports: ${a.reports} read · ${a.updated} tender(s) filled · ${a.inserted} added · ${a.linked} winner(s) linked to a company.`);
+      const rep = await repairThinAwards({ limit: 500, jobLog: (m) => log('  ' + m) });
+      if (rep.fixed) log(`✓ Completed ${rep.fixed} award-feed tender(s) that were missing detail.`);
+    } catch (err) { log(`✗ Award-report scan failed: ${err.message}`); }
+    // A tender whose stated closing date has passed is not open any more. Only Kahramaa did
+    // this at scrape time, leaving 319 expired Monaqasat/Ashghal tenders showing as OPEN.
+    try {
+      const c = await closeExpiredTenders();
+      if (c.closed) log(`✓ Closed ${c.closed} tender(s) whose deadline had passed.`);
+    } catch (err) { log(`✗ Expired-tender close failed: ${err.message}`); }
     // Registry-stated chain links (Val's standing instruction 2026-07-22: a matching
     // base CR links automatically). New MOCI branch registrations picked up by the
     // sweep join their parent the same night.

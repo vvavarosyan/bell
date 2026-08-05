@@ -6,6 +6,7 @@
 // Sources are added one at a time (Val 2026-07-04): Monaqasat first, then
 // Ashghal, then QatarEnergy.
 
+import { query } from '../db.js';
 import { ingestTenders } from './ingest.js';
 import { scrapeMonaqasat } from './scrape_monaqasat.js';
 import { scrapeAshghal } from './scrape_ashghal.js';
@@ -20,6 +21,28 @@ const SCRAPERS = {
 };
 
 export function tenderSources() { return Object.keys(SCRAPERS); }
+
+/**
+ * A tender whose STATED closing date has passed is no longer open for bidding.
+ *
+ * This is arithmetic on a published fact, not an inference: the buyer printed the deadline, and
+ * the clock has passed it. Only Kahramaa's scraper did this (at scrape time), so 319 Monaqasat /
+ * Ashghal tenders sat marked "open" with the deadline behind them (measured 2026-08-05) — a
+ * customer chasing one of those is chasing a dead opportunity.
+ *
+ * Deliberately narrow: touches ONLY rows that are still 'open' AND carry a real deadline. A
+ * tender with no stated deadline is left alone — Bell does not know when it closes, and guessing
+ * would be worse than leaving it (Rule 2.1). Never downgrades 'awarded'/'cancelled'.
+ */
+export async function closeExpiredTenders() {
+  const r = await query(
+    `UPDATE tenders
+        SET status = 'closed', updated_at = now()
+      WHERE status = 'open'
+        AND deadline_at IS NOT NULL
+        AND deadline_at < now()`);
+  return { closed: r.rowCount };
+}
 
 export async function runTenderScan({ sources, pages, openPages, awardedPages, details, concurrency } = {}) {
   const keys = (Array.isArray(sources) && sources.length ? sources : Object.keys(SCRAPERS)).filter((k) => SCRAPERS[k]);
