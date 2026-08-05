@@ -22,6 +22,23 @@ import * as stage10 from './local/email_finder.js';
 import * as stage11 from './local/company_facts.js';
 import * as stage12 from './local/tech_stack.js';
 
+// FRESHNESS FLOORS — how stale a record must be before the engine re-checks it.
+//
+// These exist to stop the engine hammering a small corpus, NOT to space out a large one:
+// the freshness queries are oldest-first, which is inherently self-pacing (a record cannot be
+// revisited until every other one has been). Measured 2026-08-05, the old values were far
+// above the natural lap time and so left the box with an EMPTY frontier for days at a stretch
+// — 07-26..07-29 harvested ZERO, then 15,078 came due at once on 08-01.
+//   harvest 3d : ~16,000 healthy sites at ~1,000/day laps in ~16 days, so 3 never binds.
+//   find    7d : ~65,600 no-website records at ~5,000/day laps in ~13 days, so 7 never binds.
+//   failed 14d : DELIBERATELY HIGH — dead hosts burn the full timeout and, being the oldest
+//                rows, would otherwise sit permanently at the head of an oldest-first queue
+//                and crowd out live sites. Do not lower this one.
+// Env-tunable so pacing can be changed without a deploy.
+const FIND_FLOOR_DAYS    = Number(process.env.BELL_FIND_FLOOR_DAYS    || 7);
+const HARVEST_FLOOR_DAYS = Number(process.env.BELL_HARVEST_FLOOR_DAYS || 3);
+const FAILED_FLOOR_DAYS  = Number(process.env.BELL_FAILED_FLOOR_DAYS  || 14);
+
 const STAGES = {
   1: { module: stage1, label: 'Stage 1 — LinkedIn Discovery',         tool: 'firecrawl_spark_pro' },
   2: { module: stage2, label: 'Stage 2 — LinkedIn Company Profile',   tool: 'apify_dev_fusion_company' },
@@ -364,9 +381,9 @@ export async function runHarvestSweep({ limit = 100, triggeredBy = null, jobLog 
       `SELECT id FROM companies
         WHERE COALESCE(archived, false) = false AND is_active IS NOT false
           AND (website IS NULL OR btrim(website) = '')
-          AND stage8_at < now() - interval '30 days'
+          AND stage8_at < now() - ($2 || ' days')::interval
         ORDER BY stage8_at ASC, id ASC
-        LIMIT $1`, [cap]);
+        LIMIT $1`, [cap, FIND_FLOOR_DAYS]);
     findIds = staleFind.rows.map(r => r.id);
     if (findIds.length) jobLog?.(`  Phase 1 — find freshness cycle: re-checking the ${findIds.length} stalest no-website record(s) for a website.`);
   }
@@ -399,10 +416,10 @@ export async function runHarvestSweep({ limit = 100, triggeredBy = null, jobLog 
       `SELECT id FROM companies
         WHERE COALESCE(archived, false) = false AND is_active IS NOT false
           AND website IS NOT NULL AND btrim(website) <> ''
-          AND ( (stage7_status = 'failed' AND stage7_at < now() - interval '14 days')
-             OR (stage7_status <> 'failed' AND stage7_at < now() - interval '7 days') )
+          AND ( (stage7_status = 'failed' AND stage7_at < now() - ($2 || ' days')::interval)
+             OR (stage7_status IS DISTINCT FROM 'failed' AND stage7_at < now() - ($3 || ' days')::interval) )
         ORDER BY stage7_at ASC, id ASC
-        LIMIT $1`, [cap]);
+        LIMIT $1`, [cap, FAILED_FLOOR_DAYS, HARVEST_FLOOR_DAYS]);
     harvestIds = stale.rows.map(r => r.id);
     if (harvestIds.length) jobLog?.(`  Phase 2 — freshness cycle: nothing new, re-harvesting the ${harvestIds.length} stalest record(s).`);
   }

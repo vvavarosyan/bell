@@ -18,10 +18,7 @@
 import { runHarvestSweep } from '../enrichment/orchestrator.js';
 import { autoLinkRegistryChains } from '../enrichment/chain_link.js';
 import { runTenderScan } from '../tenders/scrape.js';
-import { execFile } from 'child_process';
-import { fileURLToPath } from 'node:url';
-import { promisify } from 'util';
-const execFileP = promisify(execFile);
+import { selfUpdate } from '../ops/self_update.js';
 import { recomputeBellScores } from '../assembly/bell_score.js';
 import { pool } from '../db.js';
 
@@ -34,22 +31,11 @@ const log = (m) => console.log(`[${new Date().toISOString()}] ${m}`);
   const deadline = Date.now() + MAX_MS;
   log(`▸▸▸ Nightly Harvest Sweep starting — budget ${(MAX_MS / 3600000).toFixed(1)}h, chunk ${CHUNK}.`);
 
-  // SELF-UPDATE (two-machine model, 2026-07-23): the ROG runs whatever code sits in its
-  // clone, and nothing pulled automatically — a fix deployed from the Mac never reached the
-  // engines. Fast-forward only, never on a dirty tree, and a pull failure must never stop
-  // the night's work: stale code that runs beats fresh code that doesn't.
-  try {
-    // fileURLToPath, NOT .pathname: on Windows .pathname yields '/C:/bell' and
-    // git -C fails with 'Invalid argument' — the ROG proved it live (2026-07-23),
-    // which silently killed self-update on the exact machine that needs it most.
-    const repo = fileURLToPath(new URL('../../..', import.meta.url));
-    const dirty = (await execFileP('git', ['-C', repo, 'status', '--porcelain'])).stdout.trim();
-    if (dirty) log('▸ self-update skipped: working tree has local changes.');
-    else {
-      const out = (await execFileP('git', ['-C', repo, 'pull', '--ff-only'], { timeout: 60_000 })).stdout.trim();
-      log('▸ self-update: ' + (out.split('\n').pop() || 'ok'));
-    }
-  } catch (err) { log('▸ self-update skipped: ' + String(err.message || '').split('\n')[0]); }
+  // SELF-UPDATE (two-machine model): the engine box runs whatever code sits in its clone.
+  // The logic now lives in ops/self_update.js, which RECORDS the outcome to job_runs instead
+  // of swallowing it — the first version skipped silently on any untracked file and left the
+  // ROG 4 commits behind for 12 days without a single visible symptom.
+  await selfUpdate({ log });
 
   let rounds = 0, totalFound = 0, totalHarvested = 0;
   try {

@@ -3,6 +3,7 @@
 import { Router } from 'express';
 import { query } from '../db.js';
 import { jobs } from '../ingest/jobs.js';
+import { lastSelfUpdate } from '../ops/self_update.js';
 import {
   runStageForCompanies,
   runFullEnrichment,
@@ -64,15 +65,20 @@ router.get('/engine-status', async (req, res) => {
     const alive = beatAgeMs != null && beatAgeMs < 3 * 60 * 1000;
     const state = c.paused ? 'paused' : (alive ? (h?.state || 'sweeping') : (h ? 'stopped' : 'off'));
     let c4up = false; try { c4up = await crawl4aiAvailable(); } catch { /* optional engine */ }
+    // Which CODE is this engine box running? A silently-failed self-update left the ROG 4
+    // commits behind for 12 days with a perfectly healthy-looking heartbeat, so 'alive' is
+    // not enough — the dashboard has to be able to say 'alive, but on stale code'.
+    const code = await lastSelfUpdate();
     res.json({
       installed: !!h, alive, paused: !!c.paused, state,
       heartbeat: h, beat_age_ms: beatAgeMs,
       control: { paused: !!c.paused, night_chunk: c.night_chunk ?? null, day_chunk: c.day_chunk ?? null },
       frontier: fr.rows[0] || {},
       crawl4ai: { up: c4up },
+      code,
     });
   } catch {
-    res.json({ installed: false, alive: false, paused: false, state: 'off', heartbeat: null, frontier: {}, control: {}, crawl4ai: { up: false } });
+    res.json({ installed: false, alive: false, paused: false, state: 'off', heartbeat: null, frontier: {}, control: {}, crawl4ai: { up: false }, code: null });
   }
 });
 

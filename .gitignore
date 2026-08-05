@@ -48,6 +48,20 @@ Data/Companies/1. Data Gathering/**/venv/
 Data/Companies/1. Data Gathering/**/.venv/
 Data/Companies/1. Data Gathering/**/State/
 Data/Companies/1. Data Gathering/**/state/raw/
+
+# Scraper OUTPUT data — regenerated every run; the scraper CODE above stays tracked.
+# This is not cosmetic: the "Other Sources" negation above deliberately un-ignores those
+# directories, so each monthly scrape left untracked .json files behind. The engine box's
+# nightly self-update skipped on ANY `git status --porcelain` output, so those files froze
+# the ROG four commits behind for 12 days with no visible symptom (2026-07-24 → 08-05).
+Data/Companies/1. Data Gathering/**/*.json
+!Data/Companies/1. Data Gathering/**/package.json
+!Data/Companies/1. Data Gathering/**/package-lock.json
+
+# Never track credentials. firecrawl.key was committed by mistake and must be rotated.
+Data/Companies/**/firecrawl.key
+**/*.key
+
 **/Data/scans/
 **/Operations/credits/
 **/Operations/enrichment_queue/
