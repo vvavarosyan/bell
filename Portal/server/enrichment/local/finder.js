@@ -32,13 +32,17 @@ const CONCURRENCY = Number(process.env.BELL_FINDER_CONCURRENCY || 8);
 const TLDS = ['com', 'com.qa', 'qa', 'net'];
 
 // Website search for the companies domain-guessing misses.
-// PRIMARY = Apify Google Maps (compass/crawler-google-places): a Maps listing
-// usually carries the official website, at far higher yield + lower cost than a
-// generic web search. On by default; set BELL_FINDER_APIFY=0 to disable.
-// Firecrawl search is now an OPT-IN fallback (set BELL_FINDER_FIRECRAWL=1) — its
-// ROI was poor (~5% of paid searches saved a site). Headless search is the $0
-// last resort. Every candidate is still verified/corroborated before saving.
-const APIFY_FINDER     = process.env.BELL_FINDER_APIFY !== '0';
+// EVERY TIER IS NOW $0 BY DEFAULT (Val, 2026-08-05: "lets switch to free please, lets see if
+// it affects the quality"). Order: domain guessing → our own headless browser search (Crawl4AI,
+// free) → nothing. Both PAID tiers are opt-in:
+//   • Apify Google Maps (compass/crawler-google-places) — set BELL_FINDER_APIFY=1. A Maps
+//     listing usually carries the official website, so this is the highest-yield tier; turning
+//     it off is expected to LOWER the website-find rate. That trade is deliberate and reversible
+//     by setting the flag back to 1.
+//   • Firecrawl search — set BELL_FINDER_FIRECRAWL=1. ROI was poor (~5% of paid searches saved
+//     a site), so it stays off.
+// Every candidate is still verified/corroborated before saving, whichever tier produced it.
+const APIFY_FINDER     = process.env.BELL_FINDER_APIFY === '1';
 const FIRECRAWL_FINDER = process.env.BELL_FINDER_FIRECRAWL === '1';
 const MAPS_ACTOR = 'compass/crawler-google-places';
 const FC = { searches: 0, credits: 0, results: 0, errors: 0, disabled: false };
@@ -511,10 +515,16 @@ async function saveWebsite(company, website, method) {
     await markStage(company.id, 'no_data', { stage8_skip_reason: 'rejected_host' });
     return { status: 'no_data', reason: 'rejected_host' };
   }
+  // Saving a website makes every website-DERIVED field stale: the stored description, logo and
+  // keywords were scraped from a DIFFERENT site. Leaving them produced 350 companies showing
+  // text about a domain they no longer use — Villaggio's page described a for-sale
+  // "villaggio.com" while its site was villaggio.com.qa (proven live 2026-08-05). Drop them
+  // here so the next harvest re-derives them from the site we actually just saved.
   await query(
     `UPDATE companies
         SET website = $2,
-            extra_fields = extra_fields || $3::jsonb
+            extra_fields = (extra_fields - 'website_description' - 'website_keywords' - 'website_logo_url')
+                           || $3::jsonb
       WHERE id = $1 AND (website IS NULL OR btrim(website) = '')`,
     [company.id, website, JSON.stringify({ website_found: { method, at: new Date().toISOString() } })],
   );

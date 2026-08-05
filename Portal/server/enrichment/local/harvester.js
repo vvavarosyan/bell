@@ -303,7 +303,9 @@ export async function enrichCompany(company) {
       source_url: pin.source_url,
     });
   }
-  const logo    = pickLogo(pages[0].page.meta);
+  // Pass the site we actually fetched: a bare favicon on the company's OWN domain is their
+  // real mark and must be kept; the same filename on a builder/CDN host is a template default.
+  const logo    = pickLogo(pages[0].page.meta, home.finalUrl || homeUrl);
   const homeMeta = pages[0].page.meta || {};
   const description = bestDescription(homeMeta, allText);
   const keywords = homeMeta.keywords || null;

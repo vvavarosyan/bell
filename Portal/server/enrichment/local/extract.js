@@ -424,9 +424,30 @@ const LOGO_DEFAULT_PATH_RX = new RegExp([
 
 const LOGO_DEFAULT_HOST_RX = /(^|\/\/)(static\.hugedomains\.com|hpanel\.hostinger\.com|img\.sedoparking\.com)/i;
 
-export function isPlaceholderLogo(url) {
+/**
+ * True when the stored logo is a template/parking DEFAULT rather than the company's own mark.
+ *
+ * `siteUrl` matters (added 2026-08-05 after a preview caught the casualty): a bare
+ * favicon.png served from the company's OWN domain IS their mark — nakilat.com/favicon.png,
+ * qatarenergylng.qa/favicon.ico, teyseergroup.com/…/favicon.png are all real and must survive.
+ * The same filename on a THIRD-PARTY builder/CDN host (img6.wsimg.com/ux-assets/favicon/…,
+ * parastorage pfavico, moci.gov.qa's icon scraped onto someone else) is a default and must go.
+ * A pure parking/panel host is always a default, own-domain or not.
+ * Real builder-hosted logos with a distinctive path (img1.wsimg.com/isteam/…/CAIA_logo.png)
+ * match no default pattern and are always kept.
+ */
+export function isPlaceholderLogo(url, siteUrl = '') {
   const u = String(url || '');
-  return !!u && (LOGO_DEFAULT_PATH_RX.test(u) || LOGO_DEFAULT_HOST_RX.test(u));
+  if (!u) return false;
+  if (LOGO_DEFAULT_HOST_RX.test(u)) return true;          // parking / hosting-panel asset
+  if (!LOGO_DEFAULT_PATH_RX.test(u)) return false;        // not a known default asset → keep
+  const logoHost = hostOfUrl(u);
+  const siteHost = hostOfUrl(siteUrl);
+  if (siteHost && logoHost &&
+      (logoHost === siteHost || logoHost.endsWith('.' + siteHost) || siteHost.endsWith('.' + logoHost))) {
+    return false;                                          // their own domain → their own icon
+  }
+  return true;
 }
 
 // A parked / for-sale / marketplace domain is NOT the company's real website. Host-level:
@@ -465,11 +486,40 @@ export function isParkedContent(...parts) {
   return !!s && PARKED_CONTENT_RX.test(s);
 }
 
-export function pickLogo(meta) {
+/**
+ * A parking page names the domain it is selling ("bluestar.com is for sale on Afternic").
+ * Returning that domain lets a caller check WHICH site the text is about — stored
+ * website-derived text goes stale when a company's website changes, and acting on it then
+ * would delete a good website on evidence about a different domain. Proven live 2026-08-05:
+ * of 361 rows whose stored description carried a for-sale phrase, only 11 named the company's
+ * CURRENT website; the other 350 (Villaggio, Gulf Hotels, Air Con Trading…) were stale.
+ */
+export function parkedDomainNamed(text) {
+  const m = String(text || '').replace(/&amp;/g, '&')
+    .match(/\b([a-z0-9-]+(?:\.[a-z]{2,}){1,2})\s+is\s+for\s+sale\b/i);
+  return m ? m[1].toLowerCase().replace(/^www\./, '') : null;
+}
+
+/**
+ * Bare host of a URL, lowercased, no www. — for comparing "which site is this about".
+ * Strips any user-info prefix: Bell has stored malformed values like
+ * "https://info@lazpro.com" (an email pasted into a website field), and without this the
+ * host would read "info@lazpro.com" and fail to match its own evidence.
+ */
+export function hostOfUrl(url) {
+  return String(url || '').trim()
+    .replace(/^https?:\/\//i, '')
+    .replace(/^[^/@?#]*@/, '')        // user:pass@ / info@
+    .replace(/^www\./i, '')
+    .split(/[/?#:]/)[0]
+    .toLowerCase();
+}
+
+export function pickLogo(meta, siteUrl = '') {
   if (!meta) return null;
   const cand = meta.ogImage || meta.icon || null;
   if (!cand) return null;
-  if (isPlaceholderLogo(cand)) return null;   // a shared CMS default is worse than no logo
+  if (isPlaceholderLogo(cand, siteUrl)) return null;   // a template default is worse than no logo
   if (/\.(svg|png|jpe?g|webp|ico|gif)(\?|$)/i.test(cand) || /og:image|image|logo|icon/i.test(cand)) return cand;
   return cand;  // accept anyway — better than nothing
 }
