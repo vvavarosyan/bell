@@ -232,10 +232,35 @@ router.get('/:id(\\d+)', async (req, res, next) => {
 });
 
 // ---- Admin: source registry + manual poll (admin.bell.qa / local engine) ----
-router.get('/sources', requireRole('platform_admin'), async (req, res, next) => {
+// ⚠️ MUST NOT be '/sources'. A public GET '/sources' is registered ~55 lines above, and Express
+// matches the FIRST route that fits — so this admin handler was unreachable dead code and there
+// was NO way to see whether a news source was actually working. That mattered: 9 of Bell's 12
+// sources (every Google News feed) stopped producing on 2026-07-10 and nothing surfaced it —
+// production's newest 100 items are 99 Al Jazeera + 1 Doha News, which is exactly why the UI
+// looks like it only has two sources.
+router.get('/sources/registry', requireRole('platform_admin'), async (req, res, next) => {
   try {
-    const r = await query(`SELECT * FROM news_sources ORDER BY active DESC, name`);
-    res.json({ sources: r.rows, engine: getNewsState() });
+    const r = await query(`
+      SELECT *,
+             (SELECT count(*)::int FROM news_items i WHERE i.source_id = s.id) AS items_total,
+             (SELECT max(i.created_at) FROM news_items i WHERE i.source_id = s.id) AS last_item_at
+        FROM news_sources s
+       ORDER BY active DESC, name`);
+    // Health, stated plainly: a source that has not produced an item in 3 days is failing even
+    // when its last poll returned HTTP 200 with an empty feed — which is exactly how the Google
+    // News outage hid.
+    const sources = r.rows.map((s) => {
+      const ageH = s.last_item_at ? (Date.now() - new Date(s.last_item_at).getTime()) / 3.6e6 : null;
+      return {
+        ...s,
+        hours_since_last_item: ageH == null ? null : Math.round(ageH),
+        health: !s.active ? 'disabled'
+          : ageH == null ? 'never produced'
+          : ageH > 72 ? 'stalled'
+          : 'ok',
+      };
+    });
+    res.json({ sources, engine: getNewsState() });
   } catch (err) { next(err); }
 });
 
