@@ -38,6 +38,13 @@ import * as stage12 from './local/tech_stack.js';
 const FIND_FLOOR_DAYS    = Number(process.env.BELL_FIND_FLOOR_DAYS    || 7);
 const HARVEST_FLOOR_DAYS = Number(process.env.BELL_HARVEST_FLOOR_DAYS || 3);
 const FAILED_FLOOR_DAYS  = Number(process.env.BELL_FAILED_FLOOR_DAYS  || 14);
+// Later engines re-check less often than the harvester: a company's partner list, its
+// decision-maker emails and its tech stack move far more slowly than its website content.
+const MAP_FLOOR_DAYS     = Number(process.env.BELL_MAP_FLOOR_DAYS     || 30);
+const EMAIL_FLOOR_DAYS   = Number(process.env.BELL_EMAIL_FLOOR_DAYS   || 30);
+// 30 not 45: Engine 6 first ran 2026-07-09, so at 45 days it would sit idle for another two
+// weeks before engaging at all. Tech detection is local and $0, so a monthly re-read is cheap.
+const TECH_FLOOR_DAYS    = Number(process.env.BELL_TECH_FLOOR_DAYS    || 30);
 
 const STAGES = {
   1: { module: stage1, label: 'Stage 1 — LinkedIn Discovery',         tool: 'firecrawl_spark_pro' },
@@ -431,6 +438,28 @@ export async function runHarvestSweep({ limit = 100, triggeredBy = null, jobLog 
     jobLog?.(`  Phase 2 — no un-harvested companies with a website. Skipping.`);
   }
 
+
+  // FRESHNESS FOR THE LATER ENGINES (Val, 2026-08-06: "things must be checked and scanned
+  // continuously so that Bell has the fresh and the most reliable data").
+  // Engines 1 and 2 already re-check the stalest record when nothing is new. Engines 3, 4 and 6
+  // never did — they only ever ran on a company they had NOT seen, so once the frontier emptied
+  // they stopped forever. Measured 2026-08-06: 18,705 of 19,687 network maps and 18,088 of
+  // 19,075 tech fingerprints were older than 7 days, and the oldest map dated to 2026-06-09.
+  //
+  // ⚠️ ENGINE 5 (Company Facts, stage 11) IS DELIBERATELY EXCLUDED and must stay excluded.
+  // company_facts.js can fall back to a PAID Firecrawl LLM extract (~5 credits/company) the
+  // moment BELL_FACTS_FIRECRAWL=1. A freshness cycle over ~17,700 website companies would turn
+  // that flag into a five-figure credit bill the day anyone set it. New companies still get
+  // facts; re-checking them is not worth that risk.
+  const staleIds = async (stageCol, floorDays, extraWhere = '') => (await query(
+    `SELECT id FROM companies
+      WHERE COALESCE(archived, false) = false AND is_active IS NOT false
+        AND website IS NOT NULL AND btrim(website) <> ''
+        ${extraWhere}
+        AND ${stageCol} < now() - ($2 || ' days')::interval
+      ORDER BY ${stageCol} ASC, id ASC
+      LIMIT $1`, [cap, floorDays])).rows.map(r => r.id);
+
   // Phase 3 — map the business network (partners/affiliates/competitors) for
   // companies that have a website but were never mapped (includes any harvested
   // in Phase 2). Run AFTER harvest so logos/partner pages are already known.
@@ -441,7 +470,11 @@ export async function runHarvestSweep({ limit = 100, triggeredBy = null, jobLog 
         AND stage9_at IS NULL
       ORDER BY bell_score ASC, id ASC
       LIMIT $1`, [cap]);
-  const mapIds = mapRows.rows.map(r => r.id);
+  let mapIds = mapRows.rows.map(r => r.id);
+  if (!mapIds.length) {
+    mapIds = await staleIds('stage9_at', MAP_FLOOR_DAYS);
+    if (mapIds.length) jobLog?.(`  Phase 3 — freshness cycle: re-mapping the ${mapIds.length} stalest network(s).`);
+  }
   let mapped = { done: 0, no_data: 0, failed: 0 };
   if (mapIds.length) {
     jobLog?.(`  Phase 3 — Engine 3 (Network Mapper) on ${mapIds.length} company(ies) with a website…`);
@@ -461,7 +494,11 @@ export async function runHarvestSweep({ limit = 100, triggeredBy = null, jobLog 
         AND stage10_at IS NULL
       ORDER BY bell_score ASC, id ASC
       LIMIT $1`, [cap]);
-  const emailIds = emailRows.rows.map(r => r.id);
+  let emailIds = emailRows.rows.map(r => r.id);
+  if (!emailIds.length) {
+    emailIds = await staleIds('stage10_at', EMAIL_FLOOR_DAYS, 'AND stage7_at IS NOT NULL');
+    if (emailIds.length) jobLog?.(`  Phase 4 — freshness cycle: re-checking decision-maker emails for the ${emailIds.length} stalest company(ies).`);
+  }
   let email = { done: 0, no_data: 0, failed: 0, emails: 0 };
   if (emailIds.length) {
     jobLog?.(`  Phase 4 — Engine 4 (Email Finder) on ${emailIds.length} company(ies) with a harvested website…`);
@@ -505,7 +542,11 @@ export async function runHarvestSweep({ limit = 100, triggeredBy = null, jobLog 
     jobLog?.(`  Phase 6 — skipped (schema not ready: ${e.message}). Restart the local Portal to apply migration 076.`);
     return { rows: [] };
   });
-  const techIds = techRows.rows.map(r => r.id);
+  let techIds = techRows.rows.map(r => r.id);
+  if (!techIds.length) {
+    techIds = await staleIds('stage12_at', TECH_FLOOR_DAYS);
+    if (techIds.length) jobLog?.(`  Phase 6 — freshness cycle: re-fingerprinting the ${techIds.length} stalest website(s).`);
+  }
   let techScan = { done: 0, no_data: 0, failed: 0, tech: 0 };
   if (techIds.length) {
     jobLog?.(`  Phase 6 — Engine 6 (Tech Stack) on ${techIds.length} company(ies)…`);
