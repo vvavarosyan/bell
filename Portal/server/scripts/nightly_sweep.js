@@ -19,7 +19,7 @@ import { runHarvestSweep } from '../enrichment/orchestrator.js';
 import { autoLinkRegistryChains } from '../enrichment/chain_link.js';
 import { runTenderScan, closeExpiredTenders } from '../tenders/scrape.js';
 import { scanMonaqasatAwards, repairThinAwards } from '../tenders/scan_monaqasat_awards.js';
-import { selfUpdate } from '../ops/self_update.js';
+import { selfUpdate, recycleEngineAfterUpdate } from '../ops/self_update.js';
 import { recordJob } from '../ops/job_log.js';
 import { recomputeBellScores } from '../assembly/bell_score.js';
 import { pool } from '../db.js';
@@ -40,7 +40,10 @@ const log = (m) => console.log(`[${new Date().toISOString()}] ${m}`);
   // The logic now lives in ops/self_update.js, which RECORDS the outcome to job_runs instead
   // of swallowing it — the first version skipped silently on any untracked file and left the
   // ROG 4 commits behind for 12 days without a single visible symptom.
-  await selfUpdate({ log });
+  const updated = await selfUpdate({ log });
+  // If the pull moved, end the always-on sweep so it comes back on the new code. The sweep cannot
+  // do this for itself the first time — the process that would notice is the stale one.
+  await recycleEngineAfterUpdate(updated, { log });
 
   let rounds = 0, totalFound = 0, totalHarvested = 0;
   try {

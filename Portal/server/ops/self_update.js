@@ -138,3 +138,47 @@ export async function lastSelfUpdate() {
     };
   } catch { return null; }
 }
+
+/**
+ * After the clone moves forward, the ALWAYS-ON SWEEP is still executing whatever it imported at
+ * launch. That is not a corner case — it is what actually happened twice: the pull worked, the
+ * engine kept running yesterday's code for 25 hours, and Engines 3/4/6 processed five companies
+ * a day while 14,909 waited.
+ *
+ * The sweep now checks its own HEAD between rounds, but that cannot bootstrap itself: the process
+ * that must notice the change is the OLD one, which has no such check. So the nightly — a fresh
+ * process every night, therefore always on current code — ends the stale sweep itself and lets
+ * the supervisor bring up a replacement.
+ *
+ * Deliberately narrow. It only fires when the pull actually MOVED, only kills the pid the engine
+ * itself published, and only if that heartbeat is recent — a stale row could name a pid the OS
+ * has since reused, and killing a stranger's process would be far worse than a stale engine.
+ * Never kills its own process. Failure is reported, never thrown: the night's work continues.
+ */
+export async function recycleEngineAfterUpdate(update, { log = () => {} } = {}) {
+  if (!update || update.state !== 'updated') return { recycled: false, reason: 'code unchanged' };
+  let row;
+  try {
+    row = (await query(
+      `SELECT pid, updated_at FROM engine_heartbeat WHERE id = 1`)).rows[0];
+  } catch { return { recycled: false, reason: 'no heartbeat table' }; }
+  if (!row || !row.pid) return { recycled: false, reason: 'engine not running' };
+
+  const ageMs = row.updated_at ? Date.now() - new Date(row.updated_at).getTime() : Infinity;
+  if (ageMs > 5 * 60_000) {
+    log(`▸ engine recycle skipped: heartbeat is ${Math.round(ageMs / 60000)} min old, so pid ${row.pid} may no longer be the engine.`);
+    return { recycled: false, reason: 'stale heartbeat' };
+  }
+  if (Number(row.pid) === process.pid) return { recycled: false, reason: 'that pid is me' };
+
+  try {
+    process.kill(Number(row.pid));            // default SIGTERM; the supervisor relaunches
+    log(`▸ engine recycled: ended pid ${row.pid} so it restarts on ${update.after}.`);
+    return { recycled: true, pid: row.pid };
+  } catch (err) {
+    // EPERM here is the cross-session case on Windows. Say so plainly — a silent failure is how
+    // the engine stayed stale in the first place.
+    log(`✗ engine recycle FAILED for pid ${row.pid}: ${err.code || err.message}. It is still running ${update.before} — restart it manually or give the nightly task elevated rights.`);
+    return { recycled: false, reason: err.code || err.message };
+  }
+}
