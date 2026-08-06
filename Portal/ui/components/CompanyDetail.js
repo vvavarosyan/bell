@@ -314,7 +314,11 @@ export function CompanyDetail({ companyId, onMutated, onDeleted, canHardDelete =
           // A custom fetcher (0 Risk portal) means the caller has no access to
           // the feature-gated similar-companies endpoint — skip it cleanly.
           fetchCompany ? Promise.resolve({ rows: [] }) : api.similarBySource(companyId).catch(() => ({ rows: [] })),
-          isLocalEngine ? api.relationships(companyId).catch(() => ({ outgoing: [], incoming: [] })) : Promise.resolve({ outgoing: [], incoming: [] }),
+          // Admins get the engine view (every edge, confidence, discovered_via). Customers get the
+          // evidenced view. A custom fetcher (0 Risk portal) has access to neither — skip cleanly.
+          fetchCompany ? Promise.resolve({ outgoing: [], incoming: [] })
+            : (isLocalEngine ? api.relationships(companyId) : api.companyRelationships(companyId))
+                .catch(() => ({ outgoing: [], incoming: [] })),
         ]);
         if (!cancelled) {
           setData(r);
@@ -859,7 +863,9 @@ function CompanyTab({ company, extra, similar, relationships, contacts, branches
         </section>
       ` : null}
 
-      ${isLocalEngine ? html`<${NetworkSection} relationships=${relationships} />` : null}
+      ${isLocalEngine
+        ? html`<${NetworkSection} relationships=${relationships} />`
+        : html`<${BusinessRelationships} relationships=${relationships} />`}
     </div>
   `;
 }
@@ -881,6 +887,72 @@ const COUNTRY_BADGE = {
   non_qatar: { label: 'International',     color: 'var(--amber)' },
   uncertain: { label: 'pending',          color: 'rgb(91 140 255)' },
 };
+
+// CUSTOMER-FACING relationships. Deliberately NOT the engine's NetworkSection above:
+//   • no engine vocabulary — no "Engine 3", no confidence score, no discovered_via;
+//   • silent when there is nothing to show. The admin view says "Run Engine 3 · Map Network",
+//     which is an instruction to an operator; a customer seeing an empty box on most companies
+//     would read absence of evidence as a claim about the company;
+//   • every row links the page the company states it on, so the customer can check Bell rather
+//     than trust it. No hook is used, so this cannot affect hook order (Rule 2.6).
+// Headings say WHERE the name was published, never what the relationship is. The engine stores
+// every one of these as 'partner' regardless of the page it came from, and two thirds of them
+// were not on a partners page at all — so any label asserting a relationship type would be Bell
+// making a claim the company never made.
+const CUSTOMER_REL_GROUPS = [
+  ['partners',  'Named on their partners page'],
+  ['clients',   'Named on their clients page'],
+  ['portfolio', 'Named in their portfolio'],
+  ['brands',    'Named on their brands page'],
+  ['sponsors',  'Named on their sponsors page'],
+  ['website',   'Named on their website'],
+];
+
+function BusinessRelationships({ relationships }) {
+  const out = relationships?.outgoing || [];
+  const inc = relationships?.incoming || [];
+  if (!out.length && !inc.length) return null;
+  const proof = (url) => url
+    ? html`<a class="muted small" href=${url} target="_blank" rel="noreferrer" title="The page this appears on">source</a>`
+    : null;
+  return html`
+    <section class="group" key="relationships">
+      <h3>Companies named on their website</h3>
+      <div class="muted small" style=${{marginBottom:'6px'}}>
+        Open “source” to see the page each name appears on.
+      </div>
+      ${CUSTOMER_REL_GROUPS.map(([kind, label]) => {
+        const rows = out.filter(r => r.page_kind === kind);
+        if (!rows.length) return null;
+        return html`
+          <div key=${kind} style=${{marginBottom:'8px'}}>
+            <div class="muted small" style=${{marginBottom:'3px', textTransform:'uppercase', letterSpacing:'.04em'}}>${label} (${rows.length})</div>
+            <ul class="similar-list">
+              ${rows.map(r => html`<li key=${r.id}>
+                <div class="similar-row" style=${{display:'flex', gap:'6px', alignItems:'center', flexWrap:'wrap'}}>
+                  <strong>${r.target_company_name}</strong>
+                  ${r.target_domain ? html`<a class="muted small" href=${'https://' + r.target_domain} target="_blank" rel="noreferrer">${r.target_domain}</a>` : null}
+                  ${proof(r.source_url)}
+                </div>
+              </li>`)}
+            </ul>
+          </div>`;
+      })}
+      ${inc.length ? html`
+        <div style=${{marginTop:'6px'}}>
+          <div class="muted small" style=${{marginBottom:'3px', textTransform:'uppercase', letterSpacing:'.04em'}}>Named by (${inc.length})</div>
+          <ul class="similar-list">
+            ${inc.map(r => html`<li key=${'in' + r.id}>
+              <div class="similar-row" style=${{display:'flex', gap:'6px', alignItems:'center', flexWrap:'wrap'}}>
+                <strong>${r.source_company_name}</strong>
+                <span class="muted small">names this company on their website</span>
+                ${proof(r.source_url)}
+              </div>
+            </li>`)}
+          </ul>
+        </div>` : null}
+    </section>`;
+}
 
 function NetworkSection({ relationships }) {
   const out = relationships?.outgoing || [];

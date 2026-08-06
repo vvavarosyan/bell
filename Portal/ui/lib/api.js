@@ -328,6 +328,9 @@ export const api = {
   promoteNewEntity:       (id) => request(`/api/contributions/new-entities/${id}/promote`, { method: 'POST', body: '{}' }),
   rejectNewEntity:        (id) => request(`/api/contributions/new-entities/${id}/reject`, { method: 'POST', body: '{}' }),
   relationships:          (companyId) => request('/api/enrichment/relationships/' + companyId),
+  // Customer-facing relationships: evidenced edges only, each with the page that states it.
+  // The line above is the ADMIN view (every edge incl. derived competitor guesses, engine fields).
+  companyRelationships:   (companyId) => request(`/api/companies/${companyId}/relationships`),
   enrichmentJob:          (id, since = 0) => request(`/api/enrichment/jobs/${id}?since=${since}`),
   harvestHistory:         (limit = 50) => request('/api/enrichment/harvest-history?limit=' + limit),
   // Manual Company Lookup — type a name, local engines find everything, approve/reject.

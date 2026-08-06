@@ -724,6 +724,83 @@ router.get('/:id/map-network', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+// GET /api/companies/:id/relationships — CUSTOMER-FACING business relationships: the partners,
+// clients, affiliates and group companies a company names on its OWN website, plus the companies
+// that name it. Val, 2026-08-06: "yes they should see".
+//
+// THE BAR HERE IS DELIBERATELY STRICTER THAN THE MIRROR'S, and the difference is measured, not
+// stylistic. Production carries 10,591 evidenced edges (website-stated, with a source_url), which
+// is the right bar for STORING them. It is NOT the right bar for SHOWING them:
+//
+//   • 92% of those edges have a single-token target_name and 91% are entirely lower-case — the
+//     signature of a scraped link slug, not a company. Smartdivs Solutions QFZ LLC alone carries
+//     84 "partners" including `32si`, `ac` and `abcmueblesbogota` (a Bogotá furniture site),
+//     harvested off a logo wall. Publishing that to a paying customer is indefensible.
+//   • 16 edges name the company as its OWN partner.
+//   • `matchExisting()` resolves a target either by exact registrable DOMAIN or by
+//     `name_normalized`. The normalized form is LOSSY — it is what once let "Al Jaber Holding
+//     Company" swallow "Al Jaber & Partners" — so a name-matched edge can point at the wrong firm.
+//
+// So a relationship is shown ONLY when the target resolves to a real Bell company whose OWN
+// website host is exactly the domain the source's page linked to. That is the same-website test:
+// no name similarity is trusted anywhere in it. Measured on live data: 1,652 edges qualify, while
+// 67 name-only and 42 whose domain contradicts the matched company are excluded.
+//
+// BELL DOES NOT CALL THESE "PARTNERS", because the stored relation_type does not mean that.
+// discoverFromWebsite() reads /partners, /clients, /customers, /brands, /sponsors, /portfolio,
+// /references, /associates and /alliances, then stamps EVERY outbound link on ANY of them as
+// relation_type='partner'. Measured across the 1,652 rows that pass the test above: 569 really do
+// come from a partners page, but 460 come from a CLIENTS page, 348 from a PORTFOLIO, 82 from
+// BRANDS and 34 from SPONSORS. Publishing all of them as "partner" would misdescribe 1,083 of
+// them — and to a B2B customer "client" and "partner" are opposite commercial facts.
+//
+// So the API returns `page_kind`: WHERE the company published the name, taken from the company's
+// own URL, which is a stated fact. Bell reports the location and links the page; it never asserts
+// what the relationship is. `confidence` and `discovered_via` are withheld as engine internals,
+// and research_candidates is never joined (local-only, so a customer could never resolve the id).
+const PAGE_KIND = `CASE
+    WHEN r.source_url ILIKE '%client%' OR r.source_url ILIKE '%customer%'   THEN 'clients'
+    WHEN r.source_url ILIKE '%partner%' OR r.source_url ILIKE '%alliance%'
+      OR r.source_url ILIKE '%associate%'                                   THEN 'partners'
+    WHEN r.source_url ILIKE '%portfolio%' OR r.source_url ILIKE '%reference%' THEN 'portfolio'
+    WHEN r.source_url ILIKE '%brand%'                                       THEN 'brands'
+    WHEN r.source_url ILIKE '%sponsor%'                                     THEN 'sponsors'
+    ELSE 'website' END`;
+const REL_TYPE_OK = `r.relation_type <> 'competitor' AND r.confidence IN ('high','medium')`;
+// The target company's own website host === the domain the source's page pointed at.
+const SAME_SITE = `r.target_domain IS NOT NULL AND tc.website IS NOT NULL
+  AND split_part(regexp_replace(lower(btrim(tc.website)), '^https?://(www\\.)?', ''), '/', 1)
+    = regexp_replace(lower(btrim(r.target_domain)), '^(www\\.)?', '')`;
+
+router.get('/:id/relationships', async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) return res.status(400).json({ error: 'invalid_id' });
+    const outgoing = await query(
+      `SELECT r.id, ${PAGE_KIND} AS page_kind, r.target_domain, r.source_url, r.target_company_id,
+              tc.name AS target_company_name
+         FROM company_relationships r
+         JOIN companies tc ON tc.id = r.target_company_id AND COALESCE(tc.archived, false) = false
+        WHERE r.source_company_id = $1
+          AND r.target_company_id <> r.source_company_id
+          AND ${REL_TYPE_OK} AND ${SAME_SITE}
+        ORDER BY tc.name`, [id]);
+    // Incoming: another company names THIS one. Same same-site proof (tc IS this company), and the
+    // naming company must not be archived — a merged-away duplicate is not a separate business.
+    const incoming = await query(
+      `SELECT r.id, ${PAGE_KIND} AS page_kind, r.source_url,
+              sc.id AS source_company_id, sc.name AS source_company_name
+         FROM company_relationships r
+         JOIN companies tc ON tc.id = r.target_company_id
+         JOIN companies sc ON sc.id = r.source_company_id AND COALESCE(sc.archived, false) = false
+        WHERE r.target_company_id = $1
+          AND r.target_company_id <> r.source_company_id
+          AND ${REL_TYPE_OK} AND ${SAME_SITE}
+        ORDER BY sc.name`, [id]);
+    res.json({ outgoing: outgoing.rows, incoming: incoming.rows });
+  } catch (err) { next(err); }
+});
+
 // POST /api/companies/:id/reveal — unlock company contact details (1 credit).
 router.post('/:id/reveal', async (req, res, next) => {
   try {
