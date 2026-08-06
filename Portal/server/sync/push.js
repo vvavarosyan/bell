@@ -263,6 +263,13 @@ export async function runPush({ full = false, reset = false } = {}) {
         const why = (summary.errors.find((e) => e.table === name) || {}).error || 'no reason returned';
         summary.tables[name].total_rejection = why;
         console.error(`[sync] ✗ ${name}: ALL ${rows.length.toLocaleString()} row(s) rejected — ${why}`);
+        // AND COUNT IT AS A FAILURE, so the watermark does NOT advance. tableFailures only ever
+        // counted THROWN errors, but a wholesale rejection does not throw — prod answers 200 with
+        // every row in its error list. So the watermark moved past 195,537 registrations that had
+        // landed nowhere, and no later push would ever look at them again: the data was silently
+        // unrecoverable without a manual full re-mirror. Holding the watermark makes the next
+        // push retry them by itself, which is what "the engine heals" has to mean.
+        tableFailures++;
       }
       summary.total_upserted += upserted;
       summary.total_skipped  += skipped;
@@ -283,7 +290,7 @@ export async function runPush({ full = false, reset = false } = {}) {
     await setSetting(SETTINGS_WATERMARK, startedAt);
     summary.watermark_advanced = true;
   } else {
-    summary.watermark_advanced = false;   // failed tables re-send next push
+    summary.watermark_advanced = false;   // failed or wholly-rejected tables re-send next push
   }
   summary.finished_at = new Date().toISOString();
   return summary;
