@@ -41,6 +41,13 @@ export async function generateSignals() {
   return { inserted };
 }
 
+// ⚠️ BOTH JOB SIGNALS WINDOW ON `posted_at` — THE DATE THE EMPLOYER PUBLISHED THE ROLE — never on
+// created_at, which is only the moment Bell inserted the row. Windowing on created_at meant that
+// the first time any backfill landed, EVERY job would look posted that morning and every covered
+// employer would instantly fire "is scaling — N roles opened in two weeks" at paying customers.
+// A company Bell simply hadn't looked at before is not a company that is hiring. A job whose
+// source states no posting date is excluded from both signals by this predicate (NULL > x is
+// never true), which is the correct outcome: Bell cannot date it, so Bell cannot claim it.
 // hiring — companies that posted jobs in the window (one signal per company/day).
 async function genHiring() {
   const r = await query(`
@@ -53,10 +60,10 @@ async function genHiring() {
            'jobs', 'companies', c.id,
            c.industry, c.employee_count,
            LEAST(0.4 + count(j.id) * 0.1, 0.9),
-           max(j.created_at),
+           max(j.posted_at),
            'hiring:' || c.id || ':' || to_char(now(), 'YYYY-MM-DD')
       FROM jobs j JOIN companies c ON c.id = j.company_id
-     WHERE j.created_at > now() - interval '${LOOKBACK_HOURS.hiring} hours' AND j.is_active = true
+     WHERE j.posted_at > now() - interval '${LOOKBACK_HOURS.hiring} hours' AND j.is_active = true
      GROUP BY c.id, c.name, c.industry, c.employee_count
     ON CONFLICT (dedup_key) DO NOTHING`);
   return r.rowCount || 0;
@@ -172,10 +179,10 @@ async function genExpansion() {
            'jobs', 'companies', c.id,
            c.industry, c.employee_count,
            LEAST(0.65 + count(j.id) * 0.04, 0.95),
-           max(j.created_at),
+           max(j.posted_at),
            'expansion:' || c.id || ':' || to_char(now(), 'IYYY-"W"IW')
       FROM jobs j JOIN companies c ON c.id = j.company_id
-     WHERE j.created_at > now() - interval '${LOOKBACK_HOURS.expansion} hours' AND j.is_active = true
+     WHERE j.posted_at > now() - interval '${LOOKBACK_HOURS.expansion} hours' AND j.is_active = true
      GROUP BY c.id, c.name, c.industry, c.employee_count
     HAVING count(j.id) >= 4
     ON CONFLICT (dedup_key) DO NOTHING`);
