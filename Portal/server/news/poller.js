@@ -11,6 +11,24 @@
 import { query } from '../db.js';
 import { parseFeed } from './parse.js';
 
+// Compiled topic filters, cached per source so a feed poll does not rebuild the regex per item.
+// A pattern that will not compile is remembered as "keep everything" and warned about ONCE.
+const _topicRx = new Map();
+function topicMatches(src, text) {
+  const pat = src.topic_filter;
+  if (!pat) return true;
+  let rx = _topicRx.get(pat);
+  if (rx === undefined) {
+    try { rx = new RegExp(pat, 'i'); }
+    catch (e) {
+      console.warn(`[news] source "${src.name}" has an invalid topic_filter — keeping ALL items: ${e.message}`);
+      rx = null;                       // null = keep everything, never silence the source
+    }
+    _topicRx.set(pat, rx);
+  }
+  return rx ? rx.test(String(text || '')) : true;
+}
+
 const POLL_TICK_MS   = 60_000;   // check for due sources every minute
 const SOURCES_PER_TICK = 8;      // cap work per tick
 const FETCH_TIMEOUT_MS = 15_000;
@@ -112,6 +130,14 @@ async function pollOne(src) {
       }
       // Google News "descriptions" are just relinks, not summaries — drop them.
       const summary = isGoogle ? null : it.summary;
+
+      // Per-source topic filter (migration 106). Al Jazeera publishes ONE feed covering the
+      // whole world, so without this Bell was indexing football transfers and moon landings on
+      // its own domain. NULL filter = keep everything, which is every other source.
+      // An INVALID regex keeps the item and warns once — a bad pattern must never silence a
+      // source in the way the Google News outage silently did.
+      if (src.topic_filter && !topicMatches(src, `${it.title || ''} ${summary || ''}`)) continue;
+
       const category = src.category_hint || 'other';
 
       const r = await query(

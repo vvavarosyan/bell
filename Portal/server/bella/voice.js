@@ -20,6 +20,8 @@ const STT_MODEL = process.env.BDI_BELLA_STT_MODEL || 'scribe_v2';
 const TTS_MODEL = process.env.BDI_BELLA_TTS_MODEL || 'eleven_turbo_v2_5';
 const VOICE_ID  = process.env.BDI_BELLA_VOICE_ID  || 'hA4zGnmTwX2NQiTRMt7o'; // Val's chosen Bella voice (2026-07-03)
 const OUTPUT    = process.env.BDI_BELLA_TTS_FORMAT || 'mp3_44100_128';
+// 3 = ElevenLabs' maximum latency optimisation that KEEPS text normalization. See ttsStream().
+const TTS_LATENCY = process.env.BDI_BELLA_TTS_LATENCY || '3';
 
 // Arabic replies get a dedicated voice when one is configured
 // (BDI_BELLA_VOICE_ID_AR); otherwise the multilingual turbo model still renders
@@ -88,7 +90,16 @@ export async function transcribe(buffer, mimetype) {
 export async function ttsStream(text, signal) {
   const key = await elevenKey();
   if (!key) throw new Error('elevenlabs_key_missing');
-  const url = `https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(pickVoice(text))}/stream?output_format=${encodeURIComponent(OUTPUT)}`;
+  // optimize_streaming_latency: ElevenLabs' latency tier for the streaming endpoint. Measured
+  // on Bella's own voice at FULL quality (mp3_44100_128, Turbo, her tuned settings), time to
+  // first audio byte: no flag 642 ms · 1 → 596 · 2 → 580 · 3 → 567 · 4 → 573.
+  // 3 is the floor — 4 is not faster and it also switches OFF ElevenLabs' text normalizer, which
+  // Bella depends on to read "QAR 402,500,000" and dates as words. So 3 is both the fastest and
+  // the safe choice. Quality is untouched: same model, same format, same voice settings.
+  // (Val 2026-08-06: "keep full quality please and make it faster".)
+  const url = `https://api.elevenlabs.io/v1/text-to-speech/${encodeURIComponent(pickVoice(text))}`
+    + `/stream?output_format=${encodeURIComponent(OUTPUT)}`
+    + `&optimize_streaming_latency=${encodeURIComponent(TTS_LATENCY)}`;
   // Arabic replies: pin the language so the multilingual model never reads
   // Arabic text with foreign phonemes. Detection = the reply text itself
   // (same per-turn rule as pickVoice above).

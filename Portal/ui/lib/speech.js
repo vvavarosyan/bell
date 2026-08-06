@@ -9,22 +9,32 @@ const ENDER = /[.!?…]|[؟۔]/;
 
 const MIN_CHARS = 60;    // don't TTS tiny fragments ("1." or "Yes.")
 const MAX_CHARS = 320;   // force a cut on a word boundary if no ender showed up
+// The FIRST segment of a reply is allowed to be shorter. Everything the listener experiences as
+// "Bella is slow" happens before the first sound, and with a flat 60-char floor a perfectly good
+// opening sentence — "Good morning Val." is 18 characters — waited for another 42 characters to
+// be generated before anything was spoken. Later segments keep the full floor so delivery does
+// not turn choppy. 16 was chosen against real openings, not by feel: "Good morning Val." is 17
+// and "I found three tenders." is 22, so both now speak immediately, while one-word
+// acknowledgements ("Yes." 4, "Done." 5, "1." 2) stay held exactly as before.
+// (Val 2026-08-06: make her as fast as possible without giving up quality.)
+const FIRST_MIN_CHARS = 16;
 
 /**
  * Try to cut one speakable segment off the front of `buffer`.
  * Returns { segment, rest } or null when no cut is ready yet.
  * Never cuts into a trailing "[choices: …]" block (UI-only, must not be spoken).
  */
-export function cutSpeechSegment(buffer) {
+export function cutSpeechSegment(buffer, opts = {}) {
+  const min = opts.first ? FIRST_MIN_CHARS : MIN_CHARS;
   let buf = String(buffer || '');
   // Anything from a choices marker onward is UI, not speech — hold it back.
   const choiceAt = buf.search(/\[choices:/i);
   if (choiceAt !== -1) buf = buf.slice(0, choiceAt);
-  if (buf.length < MIN_CHARS) return null;
+  if (buf.length < min) return null;
 
-  // First sentence ender at/after MIN_CHARS whose next char is whitespace/EOB —
+  // First sentence ender at/after `min` whose next char is whitespace/EOB —
   // and not a decimal point ("3.5") or a numbered-list dot ("2.").
-  for (let i = MIN_CHARS - 1; i < buf.length; i++) {
+  for (let i = min - 1; i < buf.length; i++) {
     const ch = buf[i];
     if (!ENDER.test(ch)) continue;
     const next = buf[i + 1];
@@ -40,7 +50,7 @@ export function cutSpeechSegment(buffer) {
   // rambling sentence still starts playing.
   if (buf.length >= MAX_CHARS) {
     const cutAt = buf.lastIndexOf(' ', MAX_CHARS);
-    if (cutAt > MIN_CHARS) {
+    if (cutAt > min) {
       return { segment: buf.slice(0, cutAt).trim(), rest: String(buffer).slice(cutAt + 1) };
     }
   }

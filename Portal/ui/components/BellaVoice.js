@@ -232,7 +232,10 @@ export function BellaVoice({ onClose, onOpenChat }) {
       if (run.stopped) return;
       speechBuf += t;
       for (;;) {
-        const cut = cutSpeechSegment(speechBuf);
+        // `first` until something has actually been spoken: the opening sentence may be short,
+        // so Bella starts talking as soon as she has a complete one instead of waiting for the
+        // full 60-character floor. Everything after keeps the normal floor.
+        const cut = cutSpeechSegment(speechBuf, { first: !spokeAnything });
         if (!cut) break;
         speechBuf = cut.rest;
         spokeAnything = true;
