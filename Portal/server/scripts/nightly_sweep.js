@@ -20,6 +20,7 @@ import { autoLinkRegistryChains } from '../enrichment/chain_link.js';
 import { runTenderScan, closeExpiredTenders } from '../tenders/scrape.js';
 import { scanMonaqasatAwards, repairThinAwards } from '../tenders/scan_monaqasat_awards.js';
 import { selfUpdate } from '../ops/self_update.js';
+import { recordJob } from '../ops/job_log.js';
 import { recomputeBellScores } from '../assembly/bell_score.js';
 import { pool } from '../db.js';
 
@@ -68,7 +69,8 @@ const log = (m) => console.log(`[${new Date().toISOString()}] ${m}`);
     // which would have silently frozen Bell's tenders. Riding the nightly keeps every
     // scheduled duty in ONE place.
     try {
-      const t = await runTenderScan({});
+      const t = await recordJob('tender_scan', () => runTenderScan({}),
+        { yield: (r) => (r?.total?.inserted ?? 0) + (r?.total?.updated ?? 0), log });
       log(`✓ Tender scan: ${t.total.scraped} scraped · ${t.total.inserted} new · ${t.total.updated} updated · ${t.total.linked} linked.`);
       for (const [src, r] of Object.entries(t.sources)) if (r.error) log(`  ✗ ${src}: ${r.error}`);
     } catch (err) { log(`✗ Tender scan failed: ${err.message}`); }
@@ -77,7 +79,9 @@ const log = (m) => console.log(`[${new Date().toISOString()}] ${m}`);
     // the whole ~1,187-page archive is a separate one-off ("Backfill Tender Winners.command").
     // Reports already stored are skipped, so this stays cheap forever.
     try {
-      const a = await scanMonaqasatAwards({ pages: AWARD_PAGES, jobLog: (m) => log('  ' + m) });
+      const a = await recordJob('award_reports',
+        () => scanMonaqasatAwards({ pages: AWARD_PAGES, jobLog: (m) => log('  ' + m) }),
+        { yield: (r) => (r?.updated ?? 0) + (r?.inserted ?? 0), log });
       log(`✓ Award reports: ${a.reports} read · ${a.updated} tender(s) filled · ${a.inserted} added · ${a.linked} winner(s) linked to a company.`);
       const rep = await repairThinAwards({ limit: 500, jobLog: (m) => log('  ' + m) });
       if (rep.fixed) log(`✓ Completed ${rep.fixed} award-feed tender(s) that were missing detail.`);
@@ -85,20 +89,20 @@ const log = (m) => console.log(`[${new Date().toISOString()}] ${m}`);
     // A tender whose stated closing date has passed is not open any more. Only Kahramaa did
     // this at scrape time, leaving 319 expired Monaqasat/Ashghal tenders showing as OPEN.
     try {
-      const c = await closeExpiredTenders();
+      const c = await recordJob('close_expired_tenders', () => closeExpiredTenders(), { log });
       if (c.closed) log(`✓ Closed ${c.closed} tender(s) whose deadline had passed.`);
     } catch (err) { log(`✗ Expired-tender close failed: ${err.message}`); }
     // Registry-stated chain links (Val's standing instruction 2026-07-22: a matching
     // base CR links automatically). New MOCI branch registrations picked up by the
     // sweep join their parent the same night.
     try {
-      const c = await autoLinkRegistryChains((m) => log(m));
+      const c = await recordJob('chain_auto_link', () => autoLinkRegistryChains((m) => log(m)), { log });
       if (c.written) log(`✓ Chain links: ${c.written} branch registration(s) auto-linked across ${c.firms} firm(s).`);
     } catch (err) { log(`✗ Chain auto-link failed: ${err.message}`); }
     // Safety net: heal any Bell Scores that drifted (writers that forgot to
     // rescore, bulk backfills). Scoped — only rows whose score actually changed.
     try {
-      const healed = await recomputeBellScores((m) => log(m));
+      const healed = await recordJob('bell_score_heal', () => recomputeBellScores((m) => log(m)), { log });
       log(`✓ Bell Score heal: ${healed.companies} companies, ${healed.people} people corrected.`);
     } catch (err) { log(`✗ Bell Score heal failed: ${err.message}`); }
     const reason = Date.now() >= deadline ? 'time budget reached' : 'complete';

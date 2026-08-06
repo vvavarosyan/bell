@@ -4,6 +4,7 @@ import { Router } from 'express';
 import { query } from '../db.js';
 import { jobs } from '../ingest/jobs.js';
 import { lastSelfUpdate } from '../ops/self_update.js';
+import { jobHealth } from '../ops/job_log.js';
 import {
   runStageForCompanies,
   runFullEnrichment,
@@ -69,6 +70,10 @@ router.get('/engine-status', async (req, res) => {
     // commits behind for 12 days with a perfectly healthy-looking heartbeat, so 'alive' is
     // not enough — the dashboard has to be able to say 'alive, but on stale code'.
     const code = await lastSelfUpdate();
+    // Every scheduled duty's last outcome. 'ok' is not enough — a leg that runs fine while
+    // producing NOTHING is the exact shape of the three failures that hid this month, so
+    // 'producing nothing' is its own health state here.
+    const jobs = await jobHealth();
     res.json({
       installed: !!h, alive, paused: !!c.paused, state,
       heartbeat: h, beat_age_ms: beatAgeMs,
@@ -76,9 +81,10 @@ router.get('/engine-status', async (req, res) => {
       frontier: fr.rows[0] || {},
       crawl4ai: { up: c4up },
       code,
+      jobs,
     });
   } catch {
-    res.json({ installed: false, alive: false, paused: false, state: 'off', heartbeat: null, frontier: {}, control: {}, crawl4ai: { up: false }, code: null });
+    res.json({ installed: false, alive: false, paused: false, state: 'off', heartbeat: null, frontier: {}, control: {}, crawl4ai: { up: false }, code: null, jobs: [] });
   }
 });
 
