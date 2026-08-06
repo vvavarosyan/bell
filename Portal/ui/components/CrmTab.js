@@ -10,6 +10,7 @@ import { navigateTo } from '../lib/router.js';
 import { ImportPanel } from './ImportPanel.js';
 import { DatapointsPanel } from './DatapointsPanel.js';
 import { ListsTab } from './ListsTab.js';
+import { emailOutcome, OUTCOME_COLOR } from '../lib/email_outcome.js';
 
 // Flat per-export row cap (matches the server's MAX_EXPORT_ROWS). More than this
 // is pulled as successive non-overlapping batches.
@@ -23,6 +24,8 @@ const STATUS_META = {
   lost:      { label: 'Lost',      color: 'rgb(232 142 168)' },
 };
 const STATUSES = ['new', 'contacted', 'engaged', 'won', 'lost'];
+
+
 
 function timeAgo(iso) {
   if (!iso) return '';
@@ -902,16 +905,25 @@ function RecordDrawer({ recordId, members = [], onClose, onChanged }) {
               ${data.emails.map(e => {
                 const inbound = e.direction === 'in';
                 const open = openEmail === e.id;
-                return html`<div key=${e.id} style=${{ border: '1px solid ' + (open ? 'var(--border)' : 'transparent'), borderRadius: '8px', background: open ? 'rgba(255,255,255,0.02)' : 'transparent' }}>
+                const oc = emailOutcome(e);
+                const bad = oc.tone === 'bad';
+                return html`<div key=${e.id} style=${{ border: '1px solid ' + (open ? 'var(--border)' : 'transparent'), borderLeft: bad ? '2px solid ' + oc.color : undefined, borderRadius: '8px', background: bad ? 'rgba(232,142,168,0.06)' : (open ? 'rgba(255,255,255,0.02)' : 'transparent') }}>
                   <div onClick=${() => setOpenEmail(open ? null : e.id)} style=${{ display: 'flex', alignItems: 'center', gap: '8px', padding: '6px 8px', cursor: 'pointer', borderBottom: open ? 'none' : '1px solid rgba(255,255,255,0.05)' }}>
-                    <span title=${inbound ? 'Reply received' : 'Sent'} style=${{ fontSize: '11px', color: inbound ? 'rgb(91 140 255)' : e.status === 'sent' ? 'rgb(111 207 151)' : e.status === 'failed' ? 'rgb(232 142 168)' : 'var(--text-dim)' }}>${inbound ? '↙' : e.status === 'failed' ? '✕' : '↗'}</span>
+                    <span title=${oc.title} style=${{ fontSize: '11px', color: oc.color }}>${oc.glyph}</span>
+                    <span title=${oc.title} style=${{ fontSize: '10px', color: oc.color, fontWeight: bad ? 600 : 400, whiteSpace: 'nowrap' }}>${oc.label}</span>
                     <span style=${{ flex: 1, minWidth: 0, fontSize: '12px', color: 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>${e.subject || '(no subject)'}</span>
                     <span style=${{ fontSize: '10.5px', color: 'var(--text-dim)' }}>${timeAgo(e.created_at)}</span>
                   </div>
                   ${open ? html`<div style=${{ padding: '4px 12px 12px' }}>
                     <div style=${{ fontSize: '10.5px', color: 'var(--text-dim)', marginBottom: '8px' }}>
-                      ${inbound ? 'From ' + (e.from_email || '—') : 'To ' + (e.to_email || '—')} · ${new Date(e.created_at).toLocaleString()}${!inbound ? ' · ' + (e.status || '') : ''}
+                      ${inbound ? 'From ' + (e.from_email || '—') : 'To ' + (e.to_email || '—')}${e.cc_email ? ' · cc ' + e.cc_email : ''} · ${new Date(e.created_at).toLocaleString()}${!inbound ? ' · ' + oc.label : ''}
+                      ${e.opened_at ? html`<span> · opened ${new Date(e.opened_at).toLocaleString()}</span>` : null}
                     </div>
+                    ${/* The provider's OWN words, verbatim — "mailbox does not exist" tells the
+                          user what to fix; a one-word status does not. Never paraphrased. */
+                      !inbound && e.error ? html`<div style=${{ fontSize: '11px', color: OUTCOME_COLOR.bad, background: 'rgba(232,142,168,0.08)', border: '1px solid rgba(232,142,168,0.25)', borderRadius: '6px', padding: '6px 8px', marginBottom: '8px' }}>
+                      <strong>${oc.label}:</strong> ${e.error}
+                    </div>` : null}
                     <div style=${{ fontSize: '12.5px', color: 'var(--text)', lineHeight: 1.6, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>${e.body_text || html`<span class="muted small">(no text content)</span>`}</div>
                   </div>` : null}
                 </div>`;
