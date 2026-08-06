@@ -95,6 +95,27 @@ const log = (m) => console.log(`[${new Date().toISOString()}] ${m}`);
       const c = await recordJob('close_expired_tenders', () => closeExpiredTenders(), { log });
       if (c.closed) log(`✓ Closed ${c.closed} tender(s) whose deadline had passed.`);
     } catch (err) { log(`✗ Expired-tender close failed: ${err.message}`); }
+    // QSE DISCLOSURES — the ~54 listed companies' own announcements (results, dividends, board
+    // changes, AGMs, buybacks). Until now the ONLY way this ran was Val double-clicking
+    // "Run QSE Scan.command", so it had not run in 14 days and the 'disclosure' signal generator
+    // had nothing dated inside its 336h window — a whole signal type quietly off. Plain fetch, no
+    // browser, idempotent on the exchange's own ids, so it is safe beside anything else.
+    try {
+      const q = await recordJob('qse_scan', async () => {
+        const { scrapeQse } = await import('../qse/scrape_qse.js');
+        const { ingestQseDisclosures, linkQseCompanies, qseTableReady } = await import('../qse/ingest_qse.js');
+        if (!(await qseTableReady())) return { skipped: 'table not ready' };
+        const year = new Date().getFullYear();
+        const { rows } = await scrapeQse({ years: [year, year - 1] });
+        // Scraping nothing is a FAILURE, not an empty day: qe.com.qa was unreachable. Saying so
+        // lets recordJob mark it, instead of writing a cheerful zero over a real outage.
+        if (!rows.length) throw new Error('qe.com.qa returned no rows');
+        const ing = await ingestQseDisclosures(rows);
+        const link = await linkQseCompanies();
+        return { scraped: rows.length, inserted: ing.inserted, updated: ing.updated, linked: link.linked };
+      }, { yield: (r) => (r?.inserted ?? 0) + (r?.updated ?? 0), log });
+      if (q?.scraped) log(`✓ QSE disclosures: ${q.scraped} read · ${q.inserted} new · ${q.updated} updated · ${q.linked} linked to a Bell company.`);
+    } catch (err) { log(`✗ QSE disclosure scan failed: ${err.message}`); }
     // Registry-stated chain links (Val's standing instruction 2026-07-22: a matching
     // base CR links automatically). New MOCI branch registrations picked up by the
     // sweep join their parent the same night.

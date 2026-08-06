@@ -120,6 +120,64 @@ async function reconcileContributedDeletions(base, token, summary) {
   }
 }
 
+/**
+ * A row that USED to qualify and no longer does must be removed from prod.
+ *
+ * `syncWhere` is a keep-predicate applied on the way OUT. On its own it is one-directional: it
+ * stops a row being sent, but says nothing about the copy prod already holds. That gap is real,
+ * not theoretical — `upsertEdge()` re-runs write `confidence = EXCLUDED.confidence`, so a
+ * relationship the site no longer corroborates can drop medium → low. Without this step prod
+ * would keep publishing a claim the engine has since withdrawn: the same shape as the legacy
+ * contact column, where deleted evidence left a live assertion behind.
+ *
+ * Cheap by construction: a demotion bumps `updated_at`, so the disqualified row lands in the same
+ * changed-since-watermark window the push is already reading. A full mirror (wm = epoch) widens it
+ * to every disqualified row, which is exactly right for a mirror — chunked so the body stays sane.
+ *
+ * COALESCE(..., false) is what makes the two directions provably complementary: `WHERE (keep)`
+ * drops a NULL result, so NULL must count as disqualified here too, or such a row would be neither
+ * sent nor withdrawn — stranded forever.
+ *
+ * companies/people are skipped deliberately: reconcileContributedDeletions() already covers them
+ * UNCONDITIONALLY (no watermark filter), which is the stronger guarantee its comment promises.
+ */
+async function reconcileDisqualified(base, token, summary, wm, full) {
+  for (const { name, watermark, syncWhere } of MIRROR_TABLES) {
+    if (!syncWhere || name === 'companies' || name === 'people') continue;
+    let ids;
+    try {
+      const r = await query(
+        `SELECT id FROM "${name}"
+          WHERE NOT COALESCE((${syncWhere}), false)
+            ${full ? '' : `AND ("${watermark}" > $1 OR "${watermark}" IS NULL)`}`,
+        full ? [] : [wm]);
+      ids = r.rows.map((x) => Number(x.id));
+    } catch (err) {
+      if (summary.errors.length < 50) summary.errors.push({ table: name, phase: 'disqualify-scan', error: err.message });
+      continue;
+    }
+    if (!ids.length) continue;
+    let deleted = 0;
+    try {
+      for (let i = 0; i < ids.length; i += CHUNK_SIZE) {
+        const res = await postDeletions(base, token, name, ids.slice(i, i + CHUNK_SIZE));
+        deleted += res.deleted || 0;
+      }
+    } catch (err) {
+      if (summary.errors.length < 50) summary.errors.push({ table: name, phase: 'disqualify', error: err.message });
+      continue;
+    }
+    // Only report it when prod actually held something — otherwise every push would log a
+    // reassuring-looking line about rows that were never there.
+    if (deleted) {
+      const prev = summary.deletions[name] || { requested: 0, deleted: 0 };
+      summary.deletions[name] = { requested: prev.requested + ids.length, deleted: prev.deleted + deleted };
+      summary.total_deleted += deleted;
+      console.log(`[sync] withdrew ${deleted.toLocaleString()} ${name} row(s) from prod — they no longer meet the publish rule.`);
+    }
+  }
+}
+
 // GENERATED columns must never be transmitted. Postgres refuses an INSERT that supplies a value
 // for a GENERATED ALWAYS … STORED column ("cannot insert a non-DEFAULT value into column"), so a
 // single generated column silently rejects EVERY row of that table — 195,537 registrations were
@@ -147,7 +205,7 @@ async function generatedColumns(table) {
 // columns; table/watermark/selfRef come from the trusted MIRROR_TABLES constant.
 // When a self-referential FK exists, order canonical/standalone rows (selfRef IS
 // NULL) first so a duplicate never references a not-yet-inserted canonical.
-async function selectRows(table, watermarkCol, wm, selfRef, full = false, syncWhere = null) {
+async function selectRows(table, watermarkCol, wm, selfRef, full = false, syncWhere = null, stripColumns = null) {
   const order = selfRef
     ? `("${selfRef}" IS NOT NULL), "${watermarkCol}"`
     : `"${watermarkCol}"`;
@@ -164,11 +222,19 @@ async function selectRows(table, watermarkCol, wm, selfRef, full = false, syncWh
     ? `SELECT * FROM "${table}"${syncWhere ? ` WHERE (${syncWhere})` : ''} ORDER BY ${order} NULLS FIRST`
     : `SELECT * FROM "${table}" WHERE ("${watermarkCol}" > $1 OR "${watermarkCol}" IS NULL)${keep} ORDER BY ${order} NULLS FIRST`;
   const r = await query(sql, full ? [] : [wm]);
-  const gen = await generatedColumns(table);
-  if (!gen.size) return r.rows;
+  // Columns prod must not receive: GENERATED (it computes them itself) plus any column the table
+  // declares LOCAL-ONLY. The second kind exists because a mirrored row may reference a table that
+  // is deliberately never mirrored — company_relationships.target_candidate_id is an FK to
+  // research_candidates, and research candidates stay local by doctrine (never grow the online DB
+  // with un-curated entities). Sending the id would fail prod's foreign key on 8,673 of 10,591
+  // rows. Omitting it leaves NULL, which is the truthful state on prod: the row keeps target_name,
+  // and prod simply holds no candidate to point at.
+  const drop = new Set(await generatedColumns(table));
+  for (const c of stripColumns || []) drop.add(c);
+  if (!drop.size) return r.rows;
   return r.rows.map((row) => {
     const out = {};
-    for (const k of Object.keys(row)) if (!gen.has(k)) out[k] = row[k];
+    for (const k of Object.keys(row)) if (!drop.has(k)) out[k] = row[k];
     return out;
   });
 }
@@ -234,6 +300,8 @@ export async function runPush({ full = false, reset = false } = {}) {
     // entity remains on prod (covers pre-gate leaks). Runs before the upserts so
     // a freshly-promoted row in this same push is still re-asserted afterwards.
     await reconcileContributedDeletions(base, token, summary);
+    // …and withdraw anything that has since stopped meeting its table's publish rule.
+    await reconcileDisqualified(base, token, summary, wm, full || reset);
   }
 
   // Per-table isolation: one failing table (e.g. a table prod's code doesn't
@@ -241,9 +309,9 @@ export async function runPush({ full = false, reset = false } = {}) {
   // only advances when EVERY table succeeded, so a failed table's rows are
   // simply re-sent by the next push — the idempotent-resend guarantee holds.
   let tableFailures = 0;
-  for (const { name, watermark, selfRef, syncWhere } of MIRROR_TABLES) {
+  for (const { name, watermark, selfRef, syncWhere, stripColumns } of MIRROR_TABLES) {
     try {
-      const rows = await selectRows(name, watermark, wm, selfRef, full || reset, syncWhere);
+      const rows = await selectRows(name, watermark, wm, selfRef, full || reset, syncWhere, stripColumns);
       let upserted = 0, skipped = 0;
       for (let i = 0; i < rows.length; i += CHUNK_SIZE) {
         const chunk = rows.slice(i, i + CHUNK_SIZE);

@@ -117,6 +117,20 @@ export const MIRROR_TABLES = [
   { name: 'osm_places',               watermark: 'updated_at' },
   { name: 'osm_streets',              watermark: 'updated_at' },
 
+  // Company-to-company relationships (Engine 3). NEVER mirrored until 2026-08-06, so prod's table
+  // was empty and the 'partnership' signal generator inserted zero every tick since it was written.
+  //
+  // ONLY THE EVIDENCED SUBSET TRAVELS. Of 150,018 local edges, 115,886 are `competitor` and 23,217
+  // are `partner` at LOW confidence — derived similarity, not anything a source states. Publishing
+  // those as company facts is exactly the guess Rule 2.1 forbids, and it is also what the signal
+  // generator already refused to touch. What remains (10,591) is 100% `discovered_via='website'`
+  // WITH a source_url — the company's own site naming the relationship. Measured, not assumed.
+  //
+  // `target_candidate_id` is stripped: it references research_candidates, which is local-only by
+  // doctrine, so prod's FK would reject 8,673 of these rows.
+  { name: 'company_relationships',    watermark: 'updated_at',
+    syncWhere: `relation_type <> 'competitor' AND confidence IN ('high','medium')`,
+    stripColumns: ['target_candidate_id'] },
   // Address verdicts (migration 104). MANDATORY to mirror: the outreach engine runs on
   // app.bell.qa, so targeting.js executes on PROD. A verdict that stays local changes nothing.
   { name: 'address_verdicts',         watermark: 'updated_at' },
