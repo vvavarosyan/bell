@@ -12,6 +12,7 @@
 // escape hatch) — EL errors are surfaced verbatim in logs.
 
 import { getKey } from '../keychain.js';
+import { spokenForm } from './spoken.js';
 
 const STT_MODEL = process.env.BDI_BELLA_STT_MODEL || 'scribe_v2';
 // Turbo over Flash (Val 2026-07-03): Flash degraded into a slow, robotic
@@ -104,12 +105,17 @@ export async function ttsStream(text, signal) {
   // Arabic text with foreign phonemes. Detection = the reply text itself
   // (same per-turn rule as pickVoice above).
   const arabic = ARABIC_RX.test(String(text));
+  // SPOKEN FORM, not written form. Val 2026-08-06: "she does not say the numbers correctly...
+  // when it comes to QR currency she says QR. It's either Qatari riyal or riyal only."
+  // Applied HERE and nowhere else, so the on-screen reply keeps "QAR 402,500,000" — which is
+  // what a business user wants to read and copy — while the voice says it in words.
+  const spoken = spokenForm(text, { arabic });
   const call = (withExtras) => fetch(url, {
     method: 'POST',
     signal,
     headers: { 'xi-api-key': key, 'Content-Type': 'application/json' },
     body: JSON.stringify({
-      text: String(text).slice(0, 1500),
+      text: String(spoken).slice(0, 1500),
       model_id: TTS_MODEL,
       ...(withExtras ? { voice_settings: VOICE_SETTINGS } : {}),
       ...(withExtras && arabic ? { language_code: 'ar' } : {}),
