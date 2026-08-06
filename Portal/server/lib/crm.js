@@ -17,6 +17,27 @@ function runnerOf(clientOrNull) {
  * tenant+entity). Returns { id, created }. Logs an 'added'/'reveal' activity
  * the first time the record appears.
  */
+/**
+ * A user id supplied by a client may only ever name a member of THAT client's own tenant.
+ *
+ * ⚠️ SECURITY (found 2026-08-06). Three CRM write paths took `assignee_user_id` / `owner_user_id`
+ * straight from the request body with no membership check, while the matching read paths joined
+ * `LEFT JOIN users u ON u.id = t.assignee_user_id` with NO tenant predicate and returned
+ * `u.email`. So a user in tenant A could assign a task to a user id belonging to tenant B, then
+ * read that person's EMAIL ADDRESS back out of their own task list. The record was scoped; the
+ * assignee never was.
+ *
+ * Returns the member row, or null. Callers must reject on null — never silently store the id.
+ */
+export async function tenantMember(tenantId, userId) {
+  const id = Number(userId);
+  if (!Number.isFinite(id) || id <= 0) return null;
+  const r = await poolQuery(
+    `SELECT id, full_name, email FROM users WHERE id = $1 AND tenant_id = $2 AND is_active = true`,
+    [id, tenantId]);
+  return r.rows[0] || null;
+}
+
 export async function ensureCrmRecord(client, tenantId, entityType, entityId, source = 'manual', addedBy = null, ownerUserId = null) {
   const r = runnerOf(client);
   if (!tenantId || !entityType || !entityId) return { id: null, created: false };

@@ -15,7 +15,7 @@
 
 import { Router } from 'express';
 import { query } from '../db.js';
-import { ensureCrmRecord, logActivity, markContacted, buildMergeVars, applyMerge } from '../lib/crm.js';
+import { ensureCrmRecord, logActivity, markContacted, buildMergeVars, applyMerge, tenantMember } from '../lib/crm.js';
 import { sendEmail, getFromAddress, inboundReplyTo } from '../lib/email.js';
 import { getEmailBranding, renderBrandedEmail } from '../lib/email_branding.js';
 import { resolveSendIdentity, formatFrom } from '../lib/email_domains.js';
@@ -50,7 +50,7 @@ const RECORD_SELECT = `
     FROM crm_records r
     LEFT JOIN companies c ON r.entity_type = 'company' AND c.id = r.entity_id
     LEFT JOIN people    p ON r.entity_type = 'person'  AND p.id = r.entity_id
-    LEFT JOIN users     u ON u.id = r.owner_user_id
+    LEFT JOIN users     u ON u.id = r.owner_user_id AND u.tenant_id = r.tenant_id
 `;
 
 // GET /api/crm/records
@@ -127,7 +127,7 @@ router.get('/records/:id', async (req, res, next) => {
       query(`SELECT id, author_email, body, created_at FROM crm_notes WHERE record_id=$1 ORDER BY created_at DESC`, [id]),
       query(`SELECT id, type, actor_email, summary, payload, occurred_at FROM crm_activities WHERE record_id=$1 ORDER BY occurred_at DESC LIMIT 200`, [id]),
       query(`SELECT t.id, t.title, t.description, t.due_at, t.status, t.assignee_user_id, u.email AS assignee_email, t.created_by, t.created_at, t.completed_at
-               FROM crm_tasks t LEFT JOIN users u ON u.id = t.assignee_user_id
+               FROM crm_tasks t LEFT JOIN users u ON u.id = t.assignee_user_id AND u.tenant_id = t.tenant_id
               WHERE t.record_id=$1 ORDER BY t.status, t.due_at NULLS LAST, t.created_at DESC`, [id]),
       query(`SELECT id, direction, from_email, to_email, subject, body_text, status, sent_by, created_at, sent_at FROM crm_emails WHERE record_id=$1 ORDER BY created_at DESC LIMIT 100`, [id]),
       query(`SELECT e.id, e.sequence_id, e.current_step, e.status, e.next_run_at, s.name AS sequence_name,
@@ -384,6 +384,13 @@ router.post('/records/:id/tasks', async (req, res, next) => {
     const owns = await query(`SELECT 1 FROM crm_records WHERE id=$1 AND tenant_id=$2`, [id, tenantId(req)]);
     if (!owns.rows.length) return res.status(404).json({ error: 'not_found' });
     const b = req.body || {};
+    // SECURITY: an assignee id from the client must belong to the CALLER's tenant. Without this
+    // a user could assign to another tenant's user id, and the read join below would then hand
+    // back that stranger's email address.
+    if (b.assignee_user_id != null && b.assignee_user_id !== '' &&
+        !(await tenantMember(tenantId(req), b.assignee_user_id))) {
+      return res.status(400).json({ error: 'invalid_assignee', reason: 'That teammate isn’t on your team.' });
+    }
     const r = await query(
       `INSERT INTO crm_tasks (tenant_id, record_id, title, description, due_at, assignee_user_id, created_by)
        VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING id, title, description, due_at, status, assignee_user_id, created_at`,
@@ -407,7 +414,7 @@ router.get('/tasks', async (req, res, next) => {
       `SELECT t.id, t.record_id, t.title, t.due_at, t.status, t.assignee_user_id, u.email AS assignee_email,
               r.entity_type, c.name AS company_name, p.full_name AS person_name
          FROM crm_tasks t
-         LEFT JOIN users u ON u.id = t.assignee_user_id
+         LEFT JOIN users u ON u.id = t.assignee_user_id AND u.tenant_id = t.tenant_id
          LEFT JOIN crm_records r ON r.id = t.record_id
          LEFT JOIN companies c ON r.entity_type='company' AND c.id=r.entity_id
          LEFT JOIN people p ON r.entity_type='person' AND p.id=r.entity_id
@@ -434,6 +441,13 @@ router.patch('/tasks/:id', async (req, res, next) => {
     }
     if (b.title !== undefined)            { params.push(b.title); sets.push(`title = $${params.length}`); }
     if (b.due_at !== undefined)           { params.push(b.due_at || null); sets.push(`due_at = $${params.length}`); }
+    // SECURITY: an assignee id from the client must belong to the CALLER's tenant. Without this
+    // a user could assign to another tenant's user id, and the read join below would then hand
+    // back that stranger's email address.
+    if (b.assignee_user_id != null && b.assignee_user_id !== '' &&
+        !(await tenantMember(tenantId(req), b.assignee_user_id))) {
+      return res.status(400).json({ error: 'invalid_assignee', reason: 'That teammate isn’t on your team.' });
+    }
     if (b.assignee_user_id !== undefined) { params.push(b.assignee_user_id || null); sets.push(`assignee_user_id = $${params.length}`); }
     if (!sets.length) return res.status(400).json({ error: 'nothing_to_update' });
     params.push(id, tenantId(req));
@@ -730,6 +744,13 @@ router.patch('/deals/:id', async (req, res, next) => {
     if (b.value_num !== undefined)      { params.push(b.value_num === null ? null : Number(b.value_num)); sets.push(`value_num = $${params.length}`); }
     if (b.currency !== undefined)       { params.push(b.currency); sets.push(`currency = $${params.length}`); }
     if (b.expected_close !== undefined) { params.push(b.expected_close || null); sets.push(`expected_close = $${params.length}`); }
+    // SECURITY: an assignee id from the client must belong to the CALLER's tenant. Without this
+    // a user could assign to another tenant's user id, and the read join below would then hand
+    // back that stranger's email address.
+    if (b.owner_user_id != null && b.owner_user_id !== '' &&
+        !(await tenantMember(tenantId(req), b.owner_user_id))) {
+      return res.status(400).json({ error: 'invalid_owner', reason: 'That teammate isn’t on your team.' });
+    }
     if (b.owner_user_id !== undefined)  { params.push(b.owner_user_id || null); sets.push(`owner_user_id = $${params.length}`); }
     if (!sets.length) return res.status(400).json({ error: 'nothing_to_update' });
     sets.push(`updated_at = now()`);
