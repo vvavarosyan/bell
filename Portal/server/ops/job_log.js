@@ -76,9 +76,20 @@ function summarize(r) {
   return out;
 }
 
+// The duties that are actually SCHEDULED, and are therefore expected to run. job_runs also
+// collects ad-hoc kinds written by Portal buttons ('ingest', 'assembly', 'enrichment',
+// 'scrape'); those were last used 2026-07-02 and would otherwise show as permanently "overdue",
+// which is a false alarm that trains you to ignore the report. An alarm nobody trusts is worse
+// than no alarm.
+const SCHEDULED_KINDS = new Set([
+  'self_update', 'tender_scan', 'award_reports', 'close_expired_tenders',
+  'chain_auto_link', 'bell_score_heal', 'weekly_data_check',
+]);
+
 /**
  * What every scheduled duty last did — the screen that would have caught all three failures.
- * A duty that has not run in over 36h, or whose last run produced nothing, is flagged.
+ * A SCHEDULED duty that has not run in over 36h, or whose last run produced nothing, is flagged.
+ * Anything else is reported as 'ad-hoc' and never raises an alarm.
  */
 export async function jobHealth() {
   try {
@@ -95,7 +106,9 @@ export async function jobHealth() {
         hours_ago: ageH == null ? null : Math.round(ageH),
         produced: j.result?.produced ?? null,
         error: j.error || null,
-        health: j.status === 'error' ? 'failing'
+        scheduled: SCHEDULED_KINDS.has(j.kind),
+        health: !SCHEDULED_KINDS.has(j.kind) ? 'ad-hoc'
+          : j.status === 'error' ? 'failing'
           : ageH == null ? 'never run'
           : ageH > 36 ? 'overdue'
           : j.status === 'zero' ? 'producing nothing'

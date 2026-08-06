@@ -99,6 +99,16 @@ const log = (m) => console.log(`[${new Date().toISOString()}] ${m}`);
       const c = await recordJob('chain_auto_link', () => autoLinkRegistryChains((m) => log(m)), { log });
       if (c.written) log(`✓ Chain links: ${c.written} branch registration(s) auto-linked across ${c.firms} firm(s).`);
     } catch (err) { log(`✗ Chain auto-link failed: ${err.message}`); }
+    // WEEKLY DATA CHECK — moved here from the production outreach tick (2026-08-06). Its
+    // headline metric reads website_candidates, which is LOCAL-ONLY, so on production every
+    // "data lost" figure silently returned 0 and the mail said nothing was being discarded.
+    // It has to run where the canonical data is. ignoreHour: the nightly starts at 00:30.
+    try {
+      const gr = await recordJob('weekly_data_check',
+        async () => (await import('../ops/gap_report.js')).maybeSendWeeklyGapReport({ ignoreHour: true }),
+        { log });
+      if (gr?.sent) log(`✓ Weekly data check emailed to ${gr.to}.`);
+    } catch (err) { log(`✗ Weekly data check failed: ${err.message}`); }
     // Safety net: heal any Bell Scores that drifted (writers that forgot to
     // rescore, bulk backfills). Scoped — only rows whose score actually changed.
     try {

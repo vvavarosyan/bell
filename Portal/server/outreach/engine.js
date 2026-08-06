@@ -390,13 +390,11 @@ async function _safeTick() {
     const { maybeSendWeeklyDigest } = await import('./digest.js');
     const d = await maybeSendWeeklyDigest();
     if (d?.sent) console.log('[outreach] weekly digest:', JSON.stringify(d));
-    // Weekly INTERNAL data-gap report to Val (ops mail to one address — not
-    // marketing, so it is independent of consent and the cold-send gate).
-    try {
-      const { maybeSendWeeklyGapReport } = await import('../ops/gap_report.js');
-      const g = await maybeSendWeeklyGapReport();
-      if (g?.sent) console.log('[ops] weekly gap report:', JSON.stringify({ to: g.to }));
-    } catch (e) { console.error('[ops] gap report failed:', e.message); }
+    // The weekly data-gap report USED to be sent from here. It is not any more (2026-08-06):
+    // this tick runs on production, where website_candidates — the table its "data seen but not
+    // kept" figures depend on — does not exist, so it mailed a confident zero every week.
+    // It now runs from scripts/nightly_sweep.js on the engine box, against canonical data.
+    // Do NOT re-add it here; two senders would also race the 5-day cooldown.
   } catch (e) {
     console.error('[outreach] tick failed:', e.message);
   } finally { _running = false; }
