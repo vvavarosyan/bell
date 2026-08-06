@@ -477,6 +477,16 @@ export async function mergeCompanies(canonicalId, duplicateId, jobLog = null) {
           latitude                = COALESCE(c.latitude,  d.latitude),
           longitude               = COALESCE(c.longitude, d.longitude),
           industry                = COALESCE(c.industry, d.industry),
+          -- UNION, not COALESCE. industries[] was the one multi-valued field the merge simply
+          -- dropped: the survivor kept its own array and the duplicate's tags vanished. That is
+          -- the exact opposite of "show all the applicable tags" (Val, 2026-08-06) — iHorizons'
+          -- Tasmu rows carry Telecommunications / Media & Entertainment that its MOCI row does
+          -- not. NULLIF keeps an empty result NULL rather than storing '{}'.
+          industries              = NULLIF(ARRAY(
+                                      SELECT DISTINCT x FROM unnest(
+                                        COALESCE(c.industries, '{}') || COALESCE(d.industries, '{}')
+                                      ) AS x WHERE x IS NOT NULL AND btrim(x) <> ''
+                                    ), '{}'),
           sector                  = COALESCE(c.sector,   d.sector),
           sub_sector              = COALESCE(c.sub_sector, d.sub_sector),
           employee_count          = COALESCE(c.employee_count, d.employee_count),
@@ -549,6 +559,42 @@ export async function mergeCompanies(canonicalId, duplicateId, jobLog = null) {
     // jobs — straight re-parent. linkedin_job_url is globally unique already.
     await timed('UPDATE jobs re-parent', () => client.query(`UPDATE jobs SET company_id = $1 WHERE company_id = $2`,
       [canonicalId, duplicateId]));
+
+    // ── The tables the merge used to FORGET ──────────────────────────────────────────────
+    // Until 2026-08-06 this function re-parented only company_sources, company_contacts,
+    // person_companies and jobs. Everything else stayed pointing at the archived duplicate, so a
+    // merge silently deleted the company's map pins, financials, owners, partners and licences
+    // from view. Measured before the fix: 6,460 registrations, 65 financials, 4 shareholders,
+    // 4 partnerships and 1 location already stranded on merged-away rows.
+    //
+    // EACH TABLE IS HANDLED BY ITS OWN CONSTRAINTS — the shapes genuinely differ, and copying
+    // one pattern across all of them is how you get either a crash or silent data loss:
+    //   locations / financials / shareholders / partnerships — PRIMARY KEY only, no unique key,
+    //     so a plain UPDATE cannot collide. Duplicated facts are acceptable here and are the
+    //     honest outcome: two sources really did each state them.
+    //   tech (UNIQUE company_id, tech) and registrations (UNIQUE company_id, body, type, number)
+    //     CAN collide, so move only what the survivor does not already have, then drop the rest.
+    for (const t of ['company_locations', 'company_financials', 'company_shareholders', 'company_partnerships']) {
+      await timed(`UPDATE ${t} re-parent`, () => client.query(
+        `UPDATE ${t} SET company_id = $1 WHERE company_id = $2`, [canonicalId, duplicateId]));
+    }
+    await timed('UPDATE company_tech re-parent', () => client.query(`
+      UPDATE company_tech SET company_id = $1
+       WHERE company_id = $2
+         AND tech NOT IN (SELECT tech FROM company_tech WHERE company_id = $1)`,
+      [canonicalId, duplicateId]));
+    await timed('DELETE leftover company_tech', () => client.query(
+      `DELETE FROM company_tech WHERE company_id = $1`, [duplicateId]));
+    await timed('UPDATE company_registrations re-parent', () => client.query(`
+      UPDATE company_registrations r SET company_id = $1
+       WHERE r.company_id = $2
+         AND NOT EXISTS (
+           SELECT 1 FROM company_registrations k
+            WHERE k.company_id = $1 AND k.body = r.body
+              AND k.registration_type = r.registration_type AND k.number = r.number)`,
+      [canonicalId, duplicateId]));
+    await timed('DELETE leftover company_registrations', () => client.query(
+      `DELETE FROM company_registrations WHERE company_id = $1`, [duplicateId]));
 
     // 3. Mark the duplicate as merged
     await timed('UPDATE dup merge_status', () => client.query(`

@@ -1,0 +1,92 @@
+// Rows left behind by merges that ran BEFORE the merge learned to carry them.
+// ----------------------------------------------------------------------------
+// mergeCompanies() re-parented only sources, contacts, person links and jobs until 2026-08-06.
+// Everything else kept pointing at the archived duplicate, so those facts vanished from the
+// surviving company: its map pins, financials, owners, partners and licences.
+//
+// This moves them onto the survivor using canonical_id — the merge already recorded where each
+// duplicate went, so nothing is guessed. Same per-table rules as the merge itself: the four
+// tables with no unique key move wholesale; tech and registrations move only what the survivor
+// does not already hold.
+//
+// Preview by default; writes only with --apply. Idempotent — a second run finds nothing.
+
+import { query } from '../db.js';
+
+const apply = process.argv.includes('--apply');
+
+// Follow a chain to its final survivor. The merge flattens canonical_id, but a row written
+// between two merges can still point one hop short.
+const SURVIVOR = `
+  WITH RECURSIVE hop(from_id, to_id, depth) AS (
+    SELECT id, canonical_id, 1 FROM companies WHERE canonical_id IS NOT NULL
+    UNION ALL
+    SELECT h.from_id, c.canonical_id, h.depth + 1
+      FROM hop h JOIN companies c ON c.id = h.to_id
+     WHERE c.canonical_id IS NOT NULL AND h.depth < 10)
+  SELECT from_id, to_id FROM (
+    SELECT from_id, to_id, row_number() OVER (PARTITION BY from_id ORDER BY depth DESC) rn FROM hop) x
+   WHERE rn = 1`;
+
+const PLAIN = ['company_locations', 'company_financials', 'company_shareholders', 'company_partnerships'];
+
+async function count(table) {
+  const r = await query(`
+    SELECT count(*)::int c FROM ${table} t
+      JOIN companies co ON co.id = t.company_id
+     WHERE co.canonical_id IS NOT NULL AND co.canonical_id <> t.company_id`);
+  return r.rows[0].c;
+}
+
+async function main() {
+  console.log('');
+  console.log('BELL — RECONNECT DATA LEFT BEHIND BY OLD MERGES'
+    + (apply ? '   (APPLYING)' : '   (PREVIEW — nothing written)'));
+  console.log('==========================================================\n');
+
+  const tables = [...PLAIN, 'company_tech', 'company_registrations'];
+  const before = {};
+  for (const t of tables) { before[t] = await count(t); console.log('  ' + t.padEnd(26) + String(before[t]).padStart(7) + ' row(s) stranded'); }
+  const total = Object.values(before).reduce((a, b) => a + b, 0);
+  console.log('  ' + 'TOTAL'.padEnd(26) + String(total).padStart(7));
+
+  if (!total) { console.log('\nNothing to reconnect.\n'); return; }
+  if (!apply) {
+    console.log('\nThese belong to companies that were merged away; the surviving record cannot');
+    console.log('see them today. PREVIEW ONLY — double-click "Apply Stranded Data Repair.command".\n');
+    return;
+  }
+
+  let moved = 0;
+  for (const t of PLAIN) {
+    const r = await query(`
+      WITH s AS (${SURVIVOR})
+      UPDATE ${t} t SET company_id = s.to_id
+        FROM s WHERE t.company_id = s.from_id AND s.to_id <> t.company_id`);
+    console.log('  moved ' + String(r.rowCount).padStart(6) + '  ' + t);
+    moved += r.rowCount;
+  }
+  // tech — UNIQUE (company_id, tech)
+  const tech = await query(`
+    WITH s AS (${SURVIVOR})
+    UPDATE company_tech t SET company_id = s.to_id
+      FROM s WHERE t.company_id = s.from_id AND s.to_id <> t.company_id
+        AND NOT EXISTS (SELECT 1 FROM company_tech k WHERE k.company_id = s.to_id AND k.tech = t.tech)`);
+  console.log('  moved ' + String(tech.rowCount).padStart(6) + '  company_tech');
+  moved += tech.rowCount;
+  // registrations — UNIQUE (company_id, body, registration_type, number)
+  const reg = await query(`
+    WITH s AS (${SURVIVOR})
+    UPDATE company_registrations r SET company_id = s.to_id
+      FROM s WHERE r.company_id = s.from_id AND s.to_id <> r.company_id
+        AND NOT EXISTS (SELECT 1 FROM company_registrations k
+                         WHERE k.company_id = s.to_id AND k.body = r.body
+                           AND k.registration_type = r.registration_type AND k.number = r.number)`);
+  console.log('  moved ' + String(reg.rowCount).padStart(6) + '  company_registrations');
+  moved += reg.rowCount;
+
+  console.log(`\nReconnected ${moved.toLocaleString()} row(s) to the company that survived the merge.`);
+  console.log('Rows still left are exact duplicates the survivor already holds — nothing lost.');
+  console.log('Publishes to the live site on the next data push.\n');
+}
+main().then(() => process.exit(0)).catch((e) => { console.error('Stopped:', e.stack || e.message); process.exit(1); });
