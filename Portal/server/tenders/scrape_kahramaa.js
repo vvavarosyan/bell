@@ -145,11 +145,44 @@ export function kmAwardToRow(r, category) {
 
 // ── fetching ────────────────────────────────────────────────────────────────
 
+// SESSION HANDSHAKE (added 2026-08-06).
+// Kahramaa put an authentication wall in front of this ASMX service. A cold POST — which is what
+// Bell did for a year — now returns HTTP 401 {"Message":"There was an error processing the
+// request."} in ~75 ms. The host is perfectly healthy; it simply refuses a caller with no
+// session. That is why Kahramaa produced ZERO new tenders for 14 consecutive nights (newest row
+// 2026-07-23) while the nightly scan reported success every time.
+//
+// The browser works because loading the tenders page sets SharePoint session cookies first.
+// Proven live 2026-08-06: cold POST → 401; GET the page, keep its 4 cookies, repeat the SAME
+// POST → HTTP 200 with the real cursor list. So we do exactly what a browser does.
+//
+// The session is fetched lazily, reused for the whole run, and re-fetched ONCE on a 401 (they
+// expire). If it still 401s we return null rather than looping — a source that is genuinely
+// locked out must fail visibly, not spin.
+let sessionCookie = null;
+
+async function ensureSession(force = false) {
+  if (sessionCookie && !force) return sessionCookie;
+  try {
+    const res = await fetch(REFERER, { headers: { 'User-Agent': UA }, redirect: 'follow' });
+    // getSetCookie() keeps EVERY Set-Cookie header separate; res.headers.get('set-cookie')
+    // folds them into one comma-joined string that cannot be parsed back reliably.
+    const jar = (typeof res.headers.getSetCookie === 'function' ? res.headers.getSetCookie() : [])
+      .map((c) => String(c).split(';')[0].trim())
+      .filter(Boolean);
+    sessionCookie = jar.length ? jar.join('; ') : null;
+  } catch {
+    sessionCookie = null;
+  }
+  return sessionCookie;
+}
+
 async function callService(method, request, timeoutMs = 25_000) {
   for (let attempt = 0; attempt < 2; attempt++) {
     const ctl = new AbortController();
     const to = setTimeout(() => ctl.abort(), timeoutMs);
     try {
+      const cookie = await ensureSession(attempt > 0);   // 2nd try = refresh an expired session
       const res = await fetch(`${BASE}/${method}`, {
         method: 'POST',
         signal: ctl.signal,
@@ -158,10 +191,17 @@ async function callService(method, request, timeoutMs = 25_000) {
           'X-Requested-With': 'XMLHttpRequest',
           'User-Agent': UA,
           'Referer': REFERER,
+          ...(cookie ? { Cookie: cookie } : {}),
         },
         body: JSON.stringify({ request }),
       });
-      if (!res.ok) { if (attempt) return null; continue; }
+      if (!res.ok) {
+        // Say WHICH refusal it was. "401" is the entire diagnosis, and logging it is what turns
+        // the next lockout into a five-minute fix instead of a fortnight of silent zeroes.
+        if (attempt) { console.warn(`[kahramaa] ${method} refused: HTTP ${res.status}`); return null; }
+        if (res.status === 401) sessionCookie = null;    // force a fresh handshake on retry
+        continue;
+      }
       const j = await res.json().catch(() => null);
       return j?.d ?? null;
     } catch {
