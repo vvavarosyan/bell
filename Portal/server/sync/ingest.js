@@ -247,6 +247,22 @@ export async function applyBatch(table, rows) {
               `DELETE FROM company_tech WHERE company_id = $1 AND tech = $2 AND id <> $3`,
               [r.company_id, r.tech, r.id]);
           }
+          // company_registrations, same disease, discovered 2026-08-07 the expensive way. An
+          // ON CONFLICT (id) upsert can resolve a clash with the SAME id; it can do nothing about
+          // a DIFFERENT prod id squatting the UNIQUE (company_id, body, registration_type, number)
+          // slot the incoming row claims. That is exactly what a re-parenting repair produces: the
+          // row moves to the surviving company locally, and prod still holds the old copy under
+          // another id. The result was 188,999 of 195,537 rows rejected on a full re-push, and the
+          // table had to be wiped and rebuilt to recover. The incoming row is the mirror's truth,
+          // so the squatter yields.
+          if (table === 'company_registrations' && r.company_id != null
+              && r.body != null && r.registration_type != null && r.number != null) {
+            await client.query(
+              `DELETE FROM company_registrations
+                WHERE company_id = $1 AND body = $2 AND registration_type = $3 AND number = $4
+                  AND id <> $5`,
+              [r.company_id, r.body, r.registration_type, r.number, r.id]);
+          }
           if (parentCol && r[parentCol] != null) {
             // free the (parent, type, value) slot held by a different id
             await client.query(
