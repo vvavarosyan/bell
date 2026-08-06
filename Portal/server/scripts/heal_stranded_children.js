@@ -15,6 +15,12 @@ import { query } from '../db.js';
 
 const apply = process.argv.includes('--apply');
 
+// ⚠️ EVERY UPDATE HERE MUST SET updated_at = now(), and that is not cosmetic. NONE of these six
+// tables has a touch trigger, and `updated_at` IS the sync watermark. The first run moved 6,517
+// rows and left their timestamps untouched, so the incremental push selected ZERO of them and
+// production kept pointing every one at the company that had been merged away — a repair that
+// reported success locally and changed nothing customers can see. Verified after the fact: newest
+// company_registrations.updated_at was 12:13 against a 16:00 watermark.
 // Follow a chain to its final survivor. The merge flattens canonical_id, but a row written
 // between two merges can still point one hop short.
 const SURVIVOR = `
@@ -61,7 +67,7 @@ async function main() {
   for (const t of PLAIN) {
     const r = await query(`
       WITH s AS (${SURVIVOR})
-      UPDATE ${t} t SET company_id = s.to_id
+      UPDATE ${t} t SET company_id = s.to_id, updated_at = now()
         FROM s WHERE t.company_id = s.from_id AND s.to_id <> t.company_id`);
     console.log('  moved ' + String(r.rowCount).padStart(6) + '  ' + t);
     moved += r.rowCount;
@@ -69,7 +75,7 @@ async function main() {
   // tech — UNIQUE (company_id, tech)
   const tech = await query(`
     WITH s AS (${SURVIVOR})
-    UPDATE company_tech t SET company_id = s.to_id
+    UPDATE company_tech t SET company_id = s.to_id, updated_at = now()
       FROM s WHERE t.company_id = s.from_id AND s.to_id <> t.company_id
         AND NOT EXISTS (SELECT 1 FROM company_tech k WHERE k.company_id = s.to_id AND k.tech = t.tech)`);
   console.log('  moved ' + String(tech.rowCount).padStart(6) + '  company_tech');
@@ -77,7 +83,7 @@ async function main() {
   // registrations — UNIQUE (company_id, body, registration_type, number)
   const reg = await query(`
     WITH s AS (${SURVIVOR})
-    UPDATE company_registrations r SET company_id = s.to_id
+    UPDATE company_registrations r SET company_id = s.to_id, updated_at = now()
       FROM s WHERE r.company_id = s.from_id AND s.to_id <> r.company_id
         AND NOT EXISTS (SELECT 1 FROM company_registrations k
                          WHERE k.company_id = s.to_id AND k.body = r.body
