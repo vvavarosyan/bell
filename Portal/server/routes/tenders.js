@@ -173,14 +173,32 @@ router.get('/buyers', async (req, res, next) => {
 
 // GET /api/tenders/awards — "Who won what": recent contract awards with the winning
 // company, value, ICV score and (Ashghal) the full bidder table — competitive award
-// intelligence rivals charge for and don't link to a company graph. Only sources that
-// publish a real winner (Monaqasat hides the winner and its "value" is a bid bond).
+// intelligence rivals charge for and don't link to a company graph.
+//
+// MONAQASAT WAS EXCLUDED HERE ON A PREMISE THAT IS FALSE. The old comment read "Monaqasat hides
+// the winner and its value is a bid bond". It does not hide the winner: the awarded list links a
+// per-tender report stating the winning company, its CR number, the awarded amount and every
+// rival bid. That belief cost Bell a year of award data, and this page was showing 1,479 awards
+// while the database held 24,537.
+//
+// The bid-bond half of the warning WAS true and is handled, not ignored. On the list page
+// `value_amount` carries the tender bond; the award backfill overwrote it with the report's
+// stated Awarded Amount, keeping the bond separately in raw.tender_bond. Measured on all 23,058
+// Monaqasat awards, exactly 9 still hold a figure equal to the recorded bond — for those the
+// value is published as NULL rather than presented as a contract value. Bell shows no number
+// rather than the wrong number (Rule 2.1).
+//
+// Amounts proven against the two awards documented in CLAUDE.md, both exact: 4905/2022 →
+// ALMOHANNADI, QAR 105,763,640.26; 1799/2023 → AL ALI ENGINEERING, QAR 402,500,000.00.
+//
+// Twin suppression matches the tender list: a Kahramaa row that is the same award as a Monaqasat
+// row would otherwise now appear twice, since both sources are included.
 router.get('/awards', async (req, res, next) => {
   try {
     const limit = Math.min(Math.max(Number(req.query.limit) || 30, 1), 100);
     const offset = Math.max(Number(req.query.offset) || 0, 0);
     const params = [];
-    const conds = [`status = 'awarded'`, `source IN ('ashghal','qatarenergy','kahramaa')`,
+    const conds = [`status = 'awarded'`, `source IN ('monaqasat','ashghal','qatarenergy','kahramaa')`,
       `award_company_name IS NOT NULL`, `btrim(award_company_name) <> ''`];
     if (req.query.icp === '1') {
       const icp = await icpIndustries(req);
@@ -188,12 +206,19 @@ router.get('/awards', async (req, res, next) => {
       params.push(icp); conds.push(`industries && $${params.length}::text[]`);
     }
     if (req.query.source) { params.push(String(req.query.source).toLowerCase()); conds.push(`source = $${params.length}`); }
+    // Same rule the tender list uses: asking FOR Kahramaa shows Kahramaa's own rows in full.
+    if (String(req.query.source || '').toLowerCase() !== 'kahramaa') conds.push(TWIN_SUPPRESS);
     const where = 'WHERE ' + conds.join(' AND ');
     const totalR = await query(`SELECT count(*)::int n FROM tenders ${where}`, params);
     params.push(limit); const lim = params.length;
     params.push(offset); const off = params.length;
     const rowsR = await query(
-      `SELECT id, source, title, buyer, award_company_name, award_company_id, value_amount, awarded_at,
+      `SELECT id, source, title, buyer, award_company_name, award_company_id, awarded_at,
+              -- Never present a bid bond as a contract value. If the only figure held for this
+              -- award is identical to the tender bond the source published, Bell shows nothing.
+              CASE WHEN source = 'monaqasat' AND value_amount IS NOT NULL
+                    AND value_amount = NULLIF(regexp_replace(COALESCE(raw->>'tender_bond',''), '[^0-9.]', '', 'g'), '')::numeric
+                   THEN NULL ELSE value_amount END AS value_amount,
               industries, primary_industry,
               nullif(raw->>'bidder_count', '')::int AS bidder_count,
               (raw->'bidders'->0->>'icv')          AS winner_icv
