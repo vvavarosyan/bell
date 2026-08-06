@@ -574,27 +574,42 @@ export async function mergeCompanies(canonicalId, duplicateId, jobLog = null) {
     //     honest outcome: two sources really did each state them.
     //   tech (UNIQUE company_id, tech) and registrations (UNIQUE company_id, body, type, number)
     //     CAN collide, so move only what the survivor does not already have, then drop the rest.
+    // ⚠️ TWO THINGS EVERY LINE BELOW MUST DO, both learned the hard way on 2026-08-06:
+    //
+    //   1. SET updated_at = now(). None of these six tables has a touch trigger, and updated_at IS
+    //      the sync watermark. An UPDATE that changes only company_id is INVISIBLE to the
+    //      incremental push — the standalone repair moved 6,517 rows this way and production kept
+    //      every one of them pointing at the company that had been merged away, while the run
+    //      reported success.
+    //   2. TOMBSTONE BEFORE DELETING. Production is a mirror with no delete trigger; a row removed
+    //      here without a sync_deletions row survives there forever (the same trap already
+    //      documented for company_locations). Prod is currently carrying 260 company_tech rows
+    //      local no longer has, which is what this omission looks like once it has run a while.
     for (const t of ['company_locations', 'company_financials', 'company_shareholders', 'company_partnerships']) {
       await timed(`UPDATE ${t} re-parent`, () => client.query(
-        `UPDATE ${t} SET company_id = $1 WHERE company_id = $2`, [canonicalId, duplicateId]));
+        `UPDATE ${t} SET company_id = $1, updated_at = now() WHERE company_id = $2`, [canonicalId, duplicateId]));
     }
     await timed('UPDATE company_tech re-parent', () => client.query(`
-      UPDATE company_tech SET company_id = $1
+      UPDATE company_tech SET company_id = $1, updated_at = now()
        WHERE company_id = $2
          AND tech NOT IN (SELECT tech FROM company_tech WHERE company_id = $1)`,
       [canonicalId, duplicateId]));
-    await timed('DELETE leftover company_tech', () => client.query(
-      `DELETE FROM company_tech WHERE company_id = $1`, [duplicateId]));
+    await timed('TOMBSTONE + DELETE leftover company_tech', () => client.query(`
+      WITH gone AS (DELETE FROM company_tech WHERE company_id = $1 RETURNING id)
+      INSERT INTO sync_deletions (table_name, row_id) SELECT 'company_tech', id FROM gone`,
+      [duplicateId]));
     await timed('UPDATE company_registrations re-parent', () => client.query(`
-      UPDATE company_registrations r SET company_id = $1
+      UPDATE company_registrations r SET company_id = $1, updated_at = now()
        WHERE r.company_id = $2
          AND NOT EXISTS (
            SELECT 1 FROM company_registrations k
             WHERE k.company_id = $1 AND k.body = r.body
               AND k.registration_type = r.registration_type AND k.number = r.number)`,
       [canonicalId, duplicateId]));
-    await timed('DELETE leftover company_registrations', () => client.query(
-      `DELETE FROM company_registrations WHERE company_id = $1`, [duplicateId]));
+    await timed('TOMBSTONE + DELETE leftover company_registrations', () => client.query(`
+      WITH gone AS (DELETE FROM company_registrations WHERE company_id = $1 RETURNING id)
+      INSERT INTO sync_deletions (table_name, row_id) SELECT 'company_registrations', id FROM gone`,
+      [duplicateId]));
 
     // 3. Mark the duplicate as merged
     await timed('UPDATE dup merge_status', () => client.query(`
