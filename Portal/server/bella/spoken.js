@@ -1,92 +1,71 @@
 // Spoken form — what Bella SAYS, as opposed to what she writes.
 // ----------------------------------------------------------------------------
-// Val, 2026-08-06: "She does not say the numbers correctly. If it's eleven thousand two hundred
-// fifty seven she might not be able to pronounce the number correctly. And when it comes to QR
-// currency she says 'QR'. It's either 'Qatari riyal' or 'riyal' only. That will be much better,
-// and the user can understand it much better."
+// Val, 2026-08-06: "It's either 'Qatari riyal' or 'riyal' only… This is a Qatar based system. We
+// need to make sure that the basic terms are pronounced correctly."
 //
-// This runs ONLY on the text handed to text-to-speech. The on-screen reply keeps its numerals
-// and its "QAR 402,500,000", which is what a business user wants to read and copy — it is only
-// the spoken rendering that changes.
+// ⚠️ READ THIS BEFORE ADDING ANYTHING HERE. The first version of this file converted the DIGITS
+// to words as well, and it was materially worse than doing nothing:
+//     "QR 75.8 million"  →  "seventy-five Qatari riyals million"   (decimal dropped, scale orphaned)
+//     "QR 1.2 billion"   →  "one Qatari riyals billion"            (a 20% understatement)
+//     "QAR 75.8m"        →  "seventy-five Qatari riyalsm"
+// It dropped the fractional part on purpose ("noise on a 105-million contract") and had never
+// heard of a scale word. In a product that reports company financials, a spoken number that is
+// not the written number is a lie, not a rough edge.
 //
-// TWO DELIBERATE LIMITS, both to avoid making things worse:
-//   1. Only numbers written WITH thousands separators are spelled out. "11,257" is unambiguous
-//      prose; a bare "2026" is a year, "4905/2022" is a tender reference and "1.08" is a factor,
-//      and reading those as words would be wrong. A comma is the author's own signal that the
-//      value is a quantity.
-//   2. ElevenLabs' own text normalizer stays ON (we send optimize_streaming_latency=3 rather
-//      than 4 precisely to keep it). This layer handles what it gets wrong — currency codes and
-//      long grouped amounts — and leaves everything else to it.
+// THE RULE THIS FILE NOW FOLLOWS: **never rewrite a number.** ElevenLabs' own text normalizer
+// reads "75.8" and "402,500,000" correctly — it is on deliberately (we send
+// optimize_streaming_latency=3 rather than 4 precisely to keep it). The only legitimate job here
+// is the CURRENCY: say the term in words, put it in the right place, and expand an abbreviated
+// scale suffix that would otherwise be read as a letter. Digits pass through untouched.
+//
+// Applied ONLY on the text-to-speech path, so the on-screen reply keeps "QAR 402,500,000" —
+// which is what a business user wants to read and copy.
 
-const UNDER_20 = ['zero', 'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight', 'nine',
-  'ten', 'eleven', 'twelve', 'thirteen', 'fourteen', 'fifteen', 'sixteen', 'seventeen',
-  'eighteen', 'nineteen'];
-const TENS = ['', '', 'twenty', 'thirty', 'forty', 'fifty', 'sixty', 'seventy', 'eighty', 'ninety'];
-const SCALES = [[1e9, 'billion'], [1e6, 'million'], [1e3, 'thousand']];
+const SCALES = {
+  k: 'thousand', m: 'million', mn: 'million', b: 'billion', bn: 'billion', tr: 'trillion',
+  thousand: 'thousand', million: 'million', billion: 'billion', trillion: 'trillion',
+};
 
-/** 402500000 → "four hundred two million five hundred thousand". Integers only. */
-export function numberToWords(n) {
-  n = Math.trunc(Math.abs(Number(n)));
-  if (!Number.isFinite(n)) return null;
-  if (n === 0) return 'zero';
-  if (n >= 1e12) return null;                 // beyond conversational range — leave the digits
-  const parts = [];
-  for (const [value, name] of SCALES) {
-    if (n >= value) {
-      parts.push(`${numberToWords(Math.floor(n / value))} ${name}`);
-      n %= value;
-    }
-  }
-  if (n >= 100) { parts.push(`${UNDER_20[Math.floor(n / 100)]} hundred`); n %= 100; }
-  if (n >= 20) { parts.push(TENS[Math.floor(n / 10)] + (n % 10 ? '-' + UNDER_20[n % 10] : '')); n = 0; }
-  else if (n > 0) { parts.push(UNDER_20[n]); }
-  return parts.join(' ');
+// An Arabic reply must not carry an English scale word: "75.8 million ريال قطري" makes the voice
+// switch language mid-phrase, which is the same defect the Arabic filler line had.
+const AR_SCALES = { thousand: 'ألف', million: 'مليون', billion: 'مليار', trillion: 'تريليون' };
+
+const EN_PLURAL = 'Qatari riyals';
+const EN_SINGLE = 'Qatari riyal';
+const AR_UNIT   = 'ريال قطري';
+
+// A number, optionally grouped and/or decimal, optionally followed by a scale word. The trailing
+// \b on the scale group is what stops "QAR 75 barrels" from reading the "b" of barrels as
+// "billion" — verified in the test suite.
+const NUM = String.raw`(\d[\d,]*(?:\.\d+)?)(?:\s*(million|billion|thousand|trillion|mn|bn|tr|[kmb])\b)?`;
+const CODE = String.raw`(?:QAR|QR)`;
+
+const BEFORE = new RegExp(String.raw`\b${CODE}\s*${NUM}`, 'gi');
+const AFTER  = new RegExp(String.raw`\b${NUM}\s*${CODE}\b`, 'gi');
+const BARE   = new RegExp(String.raw`\b${CODE}\b|ر\.?\s?ق`, 'gi');
+
+/** "75.8" + "m" → "75.8 million Qatari riyals". The digits are never touched. */
+function amount(num, scaleRaw, arabic) {
+  const scale = scaleRaw ? SCALES[String(scaleRaw).toLowerCase()] : null;
+  const unit = arabic ? AR_UNIT
+    : (!scale && num.replace(/,/g, '') === '1') ? EN_SINGLE
+    : EN_PLURAL;
+  if (!scale) return `${num} ${unit}`;
+  return `${num} ${arabic ? (AR_SCALES[scale] || scale) : scale} ${unit}`;
 }
 
-// "QAR", "QR", "ر.ق" — Qatar's currency, however it was written. \b does not work on the Arabic
-// form, so that alternative is matched on its own.
-const CURRENCY_RX = /(?:\bQAR\b|\bQR\b|ر\.?\s?ق)/gi;
-
 /**
- * Rewrite a reply for speech.
+ * Rewrite a reply for speech. Numbers are preserved EXACTLY as written.
  * @param {string} text
  * @param {object} [opts]
- * @param {boolean} [opts.arabic]  Arabic reply — leave numerals to the multilingual voice and
- *                                 only fix the currency, since English number words would be wrong.
+ * @param {boolean} [opts.arabic] Arabic reply — use the Arabic currency term.
  */
 export function spokenForm(text, opts = {}) {
   let s = String(text || '');
   if (!s) return s;
-
-  // 1) Amounts: "QAR 402,500,000" / "402,500,000 QAR" → spoken words + "Qatari riyals".
-  //    Done first so the currency code is consumed here and not by the generic pass below.
-  s = s.replace(/(?:\bQAR\b|\bQR\b)\s*([\d][\d,]*)(?:\.(\d{1,2}))?/gi, (m, int, dec) =>
-    amountPhrase(int, dec, opts.arabic));
-  s = s.replace(/([\d][\d,]*)(?:\.(\d{1,2}))?\s*(?:\bQAR\b|\bQR\b)/gi, (m, int, dec) =>
-    amountPhrase(int, dec, opts.arabic));
-
-  // 2) Any remaining currency mention with no number attached.
-  s = s.replace(CURRENCY_RX, opts.arabic ? 'ريال قطري' : 'Qatari riyals');
-
-  // 3) Bare grouped quantities — "11,257 companies" → "eleven thousand two hundred fifty-seven".
-  //    Arabic replies are skipped: English number words in an Arabic sentence read as gibberish
-  //    and would also flip the TTS language mid-utterance.
-  if (!opts.arabic) {
-    s = s.replace(/\b(\d{1,3}(?:,\d{3})+)\b/g, (m) => {
-      const w = numberToWords(m.replace(/,/g, ''));
-      return w || m;
-    });
-  }
+  const ar = !!opts.arabic;
+  s = s.replace(BEFORE, (m, num, scale) => amount(num, scale, ar));
+  s = s.replace(AFTER,  (m, num, scale) => amount(num, scale, ar));
+  s = s.replace(BARE, ar ? AR_UNIT : EN_PLURAL);   // a currency mention with no amount
   return s;
-}
-
-function amountPhrase(intPart, decPart, arabic) {
-  const whole = intPart.replace(/,/g, '');
-  if (arabic) return `${intPart}${decPart ? '.' + decPart : ''} ريال قطري`;
-  const words = numberToWords(whole);
-  const unit = whole === '1' && !decPart ? 'Qatari riyal' : 'Qatari riyals';
-  if (!words) return `${intPart}${decPart ? '.' + decPart : ''} ${unit}`;
-  // Fractions of a riyal are dirhams, but Bell's amounts are contract values where the decimals
-  // are noise — ".26" on a 105-million contract is not worth speaking. Whole riyals only.
-  return `${words} ${unit}`;
 }
