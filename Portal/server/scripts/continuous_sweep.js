@@ -22,6 +22,31 @@
 import { runHarvestSweep } from '../enrichment/orchestrator.js';
 import { pool, query } from '../db.js';
 
+// ── Code freshness ───────────────────────────────────────────────────────────
+// A long-running process never reloads its own modules. That is a second, quieter version of the
+// stale-code failure that cost 12 days: even after the nightly's git pull was fixed, the sweep
+// kept executing whatever it had imported at boot. Measured 2026-08-06 — the process that had
+// been up since 2026-08-05 12:15 was still running the pre-freshness-cycle orchestrator and the
+// pre-session-handshake Kahramaa scraper, so Engines 3/4/6 did 5 companies in a day and Kahramaa
+// produced nothing, while every fix sat on disk unused.
+//
+// Between rounds we compare the repo's HEAD with the one we started on. If it moved, exit 70 and
+// let the supervisor bring up a fresh process — the exact mechanism the round watchdog already
+// relies on. The frontier lives in the database, so a restart loses nothing.
+import { execFile } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import { promisify } from 'node:util';
+const execFileP = promisify(execFile);
+const REPO_DIR = fileURLToPath(new URL('../../..', import.meta.url));
+async function headSha() {
+  try {
+    const { stdout } = await execFileP('git', ['-C', REPO_DIR, 'rev-parse', 'HEAD'], { timeout: 10_000 });
+    return stdout.trim() || null;
+  } catch { return null; }          // no git, no worries — freshness checking is best-effort
+}
+let bootSha = null;
+
+
 const NIGHT_CHUNK = Number(process.env.BELL_ENGINE_NIGHT_CHUNK || 120);
 const DAY_CHUNK   = Number(process.env.BELL_ENGINE_DAY_CHUNK   || 30);
 const ROUND_SLEEP = Number(process.env.BELL_ENGINE_ROUND_SLEEP_MS || 4000);
@@ -101,6 +126,8 @@ async function beat(state, s = {}) {
 (async () => {
   log('▸▸▸ Continuous Enrichment Engine started — always-on, resumable.');
   if (await anotherEngineIsRunning()) { try { await pool.end(); } catch { /* ignore */ } process.exit(0); }
+  bootSha = await headSha();
+  if (bootSha) log(`▸ running code ${bootSha.slice(0, 7)} — will restart itself when that changes.`);
   let totals = { round_no: 0, found_total: 0, harvested_total: 0, mapped_total: 0, email_total: 0, facts_total: 0, tech_total: 0 };
   await beat('starting', totals);
 
@@ -179,6 +206,21 @@ async function beat(state, s = {}) {
     log(`✓ Round ${totals.round_no}: +${r.found || 0} found, +${r.harvested || 0} harvested, +${r.mapped || 0} mapped, +${r.emails || 0} emailed, +${r.facts || 0} facts, +${r.tech || 0} tech · left find:${r.find_left} harvest:${r.harvest_left} map:${r.map_left} email:${r.email_left} facts:${r.facts_left} tech:${r.tech_left}`);
 
     if (stopping) break;
+
+    // CODE FRESHNESS — if the repo moved under us, hand over to a fresh process. Checked BEFORE
+    // the idle wait, because idling is exactly when a deploy is most likely to land and exactly
+    // when this process is doing nothing worth protecting. exit 70 = the supervisor relaunches;
+    // the frontier is in the database, so nothing is lost.
+    if (bootSha) {
+      const now = await headSha();
+      if (now && now !== bootSha) {
+        log(`▸ new code detected (${bootSha.slice(0, 7)} → ${now.slice(0, 7)}) — restarting so the engines run it.`);
+        try { await beat('restarting', totals); } catch { /* ignore */ }
+        try { await pool.end(); } catch { /* ignore */ }
+        process.exit(70);
+      }
+    }
+
     if (idle) {
       // Caught up: wait before re-checking for new companies, but keep beating
       // every minute so the dashboard shows the engine as alive-and-idle (not stopped).

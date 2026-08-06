@@ -77,6 +77,12 @@ export const MIRROR_TABLES = [
   // Company branches/locations (Track B). company_id is a soft ref (no FK), so
   // ordering doesn't matter. Writes must bump updated_at explicitly (no trigger).
   { name: 'company_locations',    watermark: 'updated_at' },
+  // Every registration a company holds, with the body that issued it (migration 107). This is
+  // what fills the Legal section on a company — "registered under multiple ministries should show
+  // all the applicable tags" (Val, 2026-08-06) — so it MUST reach customers; the engine box is
+  // the only place it is derived. company_id is a hard FK to companies, which the mirror sends
+  // first, so ordering is already satisfied.
+  { name: 'company_registrations', watermark: 'updated_at' },
   // Qatar public tenders (scraped locally via "Run Tender Scan.command"). Mirror
   // them to prod so Bella + the in-market score can use them; prod regenerates
   // the 'tender' signals from these rows. award_company_id is a soft ref (no FK),
