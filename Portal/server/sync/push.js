@@ -120,6 +120,29 @@ async function reconcileContributedDeletions(base, token, summary) {
   }
 }
 
+// GENERATED columns must never be transmitted. Postgres refuses an INSERT that supplies a value
+// for a GENERATED ALWAYS … STORED column ("cannot insert a non-DEFAULT value into column"), so a
+// single generated column silently rejects EVERY row of that table — 195,537 registrations were
+// skipped this way on 2026-08-06, the whole table, with the failure buried in a per-row error
+// list. The value is not lost by omitting it: prod runs the same migration, so it regenerates the
+// column itself from the columns we DO send. That is the correct semantics for a derived value.
+// Cached per table — the schema does not change between rows.
+const _generatedCols = new Map();
+async function generatedColumns(table) {
+  if (_generatedCols.has(table)) return _generatedCols.get(table);
+  let set = new Set();
+  try {
+    const r = await query(
+      `SELECT column_name FROM information_schema.columns
+        WHERE table_schema = 'public' AND table_name = $1
+          AND (is_generated = 'ALWAYS' OR is_identity = 'YES' AND identity_generation = 'ALWAYS')`,
+      [table]);
+    set = new Set(r.rows.map((x) => x.column_name));
+  } catch { /* if we cannot ask, send everything — the previous behaviour */ }
+  _generatedCols.set(table, set);
+  return set;
+}
+
 // Pull every row whose watermark column is newer than `wm`. SELECT * mirrors all
 // columns; table/watermark/selfRef come from the trusted MIRROR_TABLES constant.
 // When a self-referential FK exists, order canonical/standalone rows (selfRef IS
@@ -141,7 +164,13 @@ async function selectRows(table, watermarkCol, wm, selfRef, full = false, syncWh
     ? `SELECT * FROM "${table}"${syncWhere ? ` WHERE (${syncWhere})` : ''} ORDER BY ${order} NULLS FIRST`
     : `SELECT * FROM "${table}" WHERE ("${watermarkCol}" > $1 OR "${watermarkCol}" IS NULL)${keep} ORDER BY ${order} NULLS FIRST`;
   const r = await query(sql, full ? [] : [wm]);
-  return r.rows;
+  const gen = await generatedColumns(table);
+  if (!gen.size) return r.rows;
+  return r.rows.map((row) => {
+    const out = {};
+    for (const k of Object.keys(row)) if (!gen.has(k)) out[k] = row[k];
+    return out;
+  });
 }
 
 async function postChunk(ingestUrl, token, table, rows, mode) {
@@ -226,6 +255,15 @@ export async function runPush({ full = false, reset = false } = {}) {
         }
       }
       summary.tables[name] = { selected: rows.length, upserted, skipped };
+      // A table that offered rows and landed NONE is a total rejection, not a quiet no-op. That is
+      // how 195,537 company_registrations were lost on 2026-08-06 — every row refused for the same
+      // reason, reported only as a number in a "skipped" field nobody reads. Say it out loud and
+      // carry the provider's first reason with it.
+      if (rows.length && upserted === 0) {
+        const why = (summary.errors.find((e) => e.table === name) || {}).error || 'no reason returned';
+        summary.tables[name].total_rejection = why;
+        console.error(`[sync] ✗ ${name}: ALL ${rows.length.toLocaleString()} row(s) rejected — ${why}`);
+      }
       summary.total_upserted += upserted;
       summary.total_skipped  += skipped;
     } catch (err) {
