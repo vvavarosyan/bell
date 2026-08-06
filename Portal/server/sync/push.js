@@ -259,7 +259,17 @@ async function postChunk(ingestUrl, token, table, rows, mode) {
  * @param {object} opts
  * @param {boolean} [opts.full=false]  full mirror (ignore watermark)
  */
-export async function runPush({ full = false, reset = false } = {}) {
+/**
+ * @param {object} opts
+ * @param {boolean} [opts.full=false]   full mirror (ignore watermark)
+ * @param {boolean} [opts.reset=false]  wipe prod first, then re-send everything
+ * @param {string[]} [opts.only]        mirror ONLY these tables, as a full mirror of each.
+ *   For newly-added mirror tables: their rows are older than the watermark, so an incremental
+ *   push would skip them, and a whole-database full mirror to catch one table re-sends over a
+ *   million rows. NEVER advances the watermark — the tables left out were not even examined, so
+ *   claiming everything is current up to now would silently strand their pending changes.
+ */
+export async function runPush({ full = false, reset = false, only = null } = {}) {
   const token = await getKey('sync-token');
   if (!token) {
     throw new Error('No sync token configured. Add it in the Sync tab and set BDI_SYNC_TOKEN on Bell.qa to the same value.');
@@ -309,9 +319,11 @@ export async function runPush({ full = false, reset = false } = {}) {
   // only advances when EVERY table succeeded, so a failed table's rows are
   // simply re-sent by the next push — the idempotent-resend guarantee holds.
   let tableFailures = 0;
+  const wanted = only && only.length ? new Set(only) : null;
   for (const { name, watermark, selfRef, syncWhere, stripColumns } of MIRROR_TABLES) {
+    if (wanted && !wanted.has(name)) continue;
     try {
-      const rows = await selectRows(name, watermark, wm, selfRef, full || reset, syncWhere, stripColumns);
+      const rows = await selectRows(name, watermark, wm, selfRef, full || reset || !!wanted, syncWhere, stripColumns);
       let upserted = 0, skipped = 0;
       for (let i = 0; i < rows.length; i += CHUNK_SIZE) {
         const chunk = rows.slice(i, i + CHUNK_SIZE);
@@ -354,7 +366,12 @@ export async function runPush({ full = false, reset = false } = {}) {
     await query(`DELETE FROM sync_deletions`).catch(() => {});
   }
 
-  if (tableFailures === 0) {
+  if (wanted) {
+    // Tables outside `only` were never examined. Advancing would assert prod is current up to
+    // now for all of them and silently strand whatever changed in the meantime.
+    summary.watermark_advanced = false;
+    summary.partial = [...wanted];
+  } else if (tableFailures === 0) {
     await setSetting(SETTINGS_WATERMARK, startedAt);
     summary.watermark_advanced = true;
   } else {
