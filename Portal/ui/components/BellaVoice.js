@@ -20,6 +20,7 @@ import { emitBellaAction, stashPending, fireToolEffects, setBellaBusy,
   BELLA_CONV_EVENT, getActiveConversation, setActiveConversation } from '../lib/bellaBus.js';
 import { fireApprovalsChanged } from './BellaApprovals.js';
 import { cutSpeechSegment, segmentAll } from '../lib/speech.js';
+import { createNoiseGate } from '../lib/noise_gate.js';
 
 const SILENCE_MS = 900;      // pause that ends an utterance
 const MIN_SPEECH_MS = 350;   // shorter blips are ignored (coughs, clicks)
@@ -371,9 +372,15 @@ export function BellaVoice({ onClose, onOpenChat }) {
       let speechStart = 0;
       let lastSpeech = 0;
       let bargeTentative = false;   // capturing during 'speaking', not yet committed
-      let noiseFloor = 0.004;
+      // The mic gate lives in ui/lib/noise_gate.js so it can be unit-tested without a microphone.
+      // It replaces a floor that was the MAXIMUM RMS of the first 700ms and never revisited — one
+      // door, one cough, or Val simply talking as he opened voice pinned the threshold ABOVE
+      // speech for the whole session, and the orb sat there saying "listening" while deaf.
+      // Measured with the old arithmetic: speaking during calibration produced a threshold of
+      // 0.3696 against speech of ~0.12; a door produced 1.2320. The new gate returns 0.05 and
+      // 0.0120, and keeps adapting so a bad read heals instead of lasting forever.
+      const gate = createNoiseGate();
       let lastActivity = performance.now();   // for the idle auto-off
-      const t0 = performance.now();
 
       const startRec = () => {
         chunks = [];
@@ -405,12 +412,11 @@ export function BellaVoice({ onClose, onOpenChat }) {
         const rms = Math.sqrt(sum / buf.length);
         const now = performance.now();
 
-        // First 700ms: calibrate the room's noise floor.
-        if (now - t0 < 700) { noiseFloor = Math.max(noiseFloor, rms * 1.4); raf = requestAnimationFrame(tick); return; }
-        const listenTh = Math.max(0.012, noiseFloor * 2.2);
-        // Stricter while she speaks: echo cancellation removes most of her own
-        // voice from the mic, and this margin absorbs what's left.
-        const bargeTh = Math.max(0.02, noiseFloor * 3.5);
+        // Listen to the room for the first 700ms, then keep tracking it. bargeTh stays stricter
+        // than listenTh — echo cancellation removes most of her own voice from the mic and that
+        // margin absorbs the rest — but it is capped too, or she becomes impossible to interrupt.
+        const { listenTh, bargeTh, calibrating } = gate.push(rms, now);
+        if (calibrating) { raf = requestAnimationFrame(tick); return; }
 
         const st = stateRef.current;
 
