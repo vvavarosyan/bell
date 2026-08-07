@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html xmlns:ng="http://angularjs.org"
+lang="en"
+hreflang="en-US"
+dir="ltr"
+id="ng-app"
+class="no-js rms-node"
+ ng-app="jibeapply" 
+data-placeholder-focus='false'
+ class="" >
+  <head>
+    
+
+    
+      
+<script  type="text/javascript">
+window.NREUM||(NREUM={}),__nr_require=function(t,e,n){function r(n){if(!e[n]){var o=e[n]={exports:{}};t[n][0].call(o.exports,function(e){var o=t[n][1][e];return r(o||e)},o,o.exports)}return e[n].exports}if("function"==typeof __nr_require)return __nr_require;for(var o=0;o<n.length;o++)r(n[o]);return r}({1:[function(t,e,n){function r(t){try{s.console&&console.log(t)}catch(e){}}var o,i=t("ee"),a=t(24),s={};try{o=localStorage.getItem("__nr_flags").split(","),console&&"function"==typeof console.log&&(s.console=!0,o.indexOf("dev")!==-1&&(s.dev=!0),o.indexOf("nr_dev")!==-1&&(s.nrDev=!0))}catch(c){}s.nrDev&&i.on("internal-error",function(t){r(t.stack)}),s.dev&&i.on("fn-err",function(t,e,n){r(n.stack)}),s.dev&&(r("NR AGENT IN DEVELOPMENT MODE"),r("flags: "+a(s,function(t,e){return t}).join(", ")))},{}],2:[function(t,e,n){function r(t,e,n,r,s){try{l?l-=1:o(s||new UncaughtException(t,e,n),!0)}catch(f){try{i("ierr",[f,c.now(),!0])}catch(d){}}return"function"==typeof u&&u.apply(this,a(arguments))}function UncaughtException(t,e,n){this.message=t||"Uncaught error with no additional information",this.sourceURL=e,this.line=n}function o(t,e){var n=e?null:c.now();i("err",[t,n])}var i=t("handle"),a=t(25),s=t("ee"),c=t("loader"),f=t("gos"),u=window.onerror,d=!1,p="nr@seenError",l=0;c.features.err=!0,t(1),window.onerror=r;try{throw new Error}catch(h){"stack"in h&&(t(13),t(12),"addEventListener"in window&&t(6),c.xhrWrappable&&t(14),d=!0)}s.on("fn-start",function(t,e,n){d&&(l+=1)}),s.on("fn-err",function(t,e,n){d&&!n[p]&&(f(n,p,function(){return!0}),this.thrown=!0,o(n))}),s.on("fn-end",function(){d&&!this.thrown&&l>0&&(l-=1)}),s.on("internal-error",function(t){i("ierr",[t,c.now(),!0])})},{}],3:[function(t,e,n){t("loader").features.ins=!0},{}],4:[function(t,e,n){function r(){L++,C=g.hash,this[u]=y.now()}function o(){L--,g.hash!==C&&i(0,!0);var t=y.now();this[h]=~~this[h]+t-this[u],this[d]=t}function i(t,e){E.emit("newURL",[""+g,e])}function a(t,e){t.on(e,function(){this[e]=y.now()})}var s="-start",c="-end",f="-body",u="fn"+s,d="fn"+c,p="cb"+s,l="cb"+c,h="jsTime",m="fetch",v="addEventListener",w=window,g=w.location,y=t("loader");if(w[v]&&y.xhrWrappable){var x=t(10),b=t(11),E=t(8),R=t(6),O=t(13),N=t(7),P=t(14),M=t(9),T=t("ee"),S=T.get("tracer");t(16),y.features.spa=!0;var C,L=0;T.on(u,r),T.on(p,r),T.on(d,o),T.on(l,o),T.buffer([u,d,"xhr-done","xhr-resolved"]),R.buffer([u]),O.buffer(["setTimeout"+c,"clearTimeout"+s,u]),P.buffer([u,"new-xhr","send-xhr"+s]),N.buffer([m+s,m+"-done",m+f+s,m+f+c]),E.buffer(["newURL"]),x.buffer([u]),b.buffer(["propagate",p,l,"executor-err","resolve"+s]),S.buffer([u,"no-"+u]),M.buffer(["new-jsonp","cb-start","jsonp-error","jsonp-end"]),a(P,"send-xhr"+s),a(T,"xhr-resolved"),a(T,"xhr-done"),a(N,m+s),a(N,m+"-done"),a(M,"new-jsonp"),a(M,"jsonp-end"),a(M,"cb-start"),E.on("pushState-end",i),E.on("replaceState-end",i),w[v]("hashchange",i,!0),w[v]("load",i,!0),w[v]("popstate",function(){i(0,L>1)},!0)}},{}],5:[function(t,e,n){function r(t){}if(window.performance&&window.performance.timing&&window.performance.getEntriesByType){var o=t("ee"),i=t("handle"),a=t(13),s=t(12),c="learResourceTimings",f="addEventListener",u="resourcetimingbufferfull",d="bstResource",p="resource",l="-start",h="-end",m="fn"+l,v="fn"+h,w="bstTimer",g="pushState",y=t("loader");y.features.stn=!0,t(8),"addEventListener"in window&&t(6);var x=NREUM.o.EV;o.on(m,function(t,e){var n=t[0];n instanceof x&&(this.bstStart=y.now())}),o.on(v,function(t,e){var n=t[0];n instanceof x&&i("bst",[n,e,this.bstStart,y.now()])}),a.on(m,function(t,e,n){this.bstStart=y.now(),this.bstType=n}),a.on(v,function(t,e){i(w,[e,this.bstStart,y.now(),this.bstType])}),s.on(m,function(){this.bstStart=y.now()}),s.on(v,function(t,e){i(w,[e,this.bstStart,y.now
+<!-- FIXTURE TRIM: bytes 4000..60985 removed (vendor JavaScript). -->
+s by clicking this <a href=\"${page.url}?id=${user.id}&ptoken=${user.token}\">link</a>.</p>\n<p>Alternatively, you can verify your account by pasting this URL into your browser: <a href=\"${page.url}?id=${user.id}&ptoken=${user.token}\">${page.url}?id=${user.id}&ptoken=${user.token}</a></p>\n<p>Please note that your job application will not be submitted to ${client.display.name} until you have successfully verified ownership of your email address.</p>\n<p>Sincerely,</p>\n<p>The ${client.display.name} Recruiting Team</p>"}},"ERROR":{"NO_JOBS_404":"We’re sorry, but it looks like this job may be no longer available or does not exist. Please click <a href=\"/jobs\">here</a> to perform a new job search.","NO_APPLICATIONS_404":"We’re sorry, but it looks like we cannot find your job application. Please click <a href=\"/jobs\">here</a> to perform a new job search.","PAGE_NOT_EXISTS":"The page you are looking for no longer exists."},"candidate_connect":{"cc_signup":{"error_blank_input":"Please fill out all fields."},"email_signup":{"error_blank_input":"Please fill out all fields.","error_network":"There was an error processing your request. Please try again later.","error_title":"Error","success_title":"Success!","error_invalid":"Please enter a valid email address.","success_button":"Continue","success_paragraph":"Thanks for subscribing. Check your email shortly for a confirmation.","error_existing_email":"This candidate profile already exists.","userExists_paragraph":"A message has been sent to your email address . Please follow the instructions to verify it.","userExists_title":"Success!"}},"HCAPTCHA":{"PRIVACY":"Privacy","TERMS":"Terms","PROTECTED":"Protected by hCaptcha."},"JOB_DESCRIPTION":{"LOCATION":"Locations:","LOCATION_ARIA_LABEL":"Job Location","REQ_ID":"Req ID:","EMP
+<!-- FIXTURE TRIM: bytes 62785..408407 removed (vendor JavaScript). -->
+in continually improving the candidate experience and all the interaction data we store of our visitors is anonymous. Learn more about your rights on our <a href="https://www.qatarenergy.qa/en/Documents/Privacy%20Notice%20English.pdf">Privacy Policy</a> page.
+                    </p>
+                </div>
+
+                <div class="third-party-button-container column-container">
+                    <a aria-label="Okay" role="button" tabindex="0" class="btn-primary accept-button" id="cookie-consent-accept-button">
+                      Okay
+                    </a>
+                </div>
+            </div>
+            <button tabindex="0" class="close-button" id="cookie-consent-x" aria-label="Close">
+                x
+            </button>
+        </div>
+    
+</div>
+
+<script >
+function showCookieConsent() {
+  const dialog = document.getElementById('pixel-consent-container');
+  
+  if (!dialog) return;
+  setTimeout(() => {
+    const firstButton = dialog.querySelector('.deny-button, .accept-button, .close-button');
+    
+    if (firstButton) {
+      firstButton.focus();
+    }
+  }, 100);
+}
+
+window.addEventListener('load', () => {
+  setTimeout(showCookieConsent, 1000);
+});
+</script>
+
+        <script >
+            window.gdprConfiguration = {"enabled":true,"pixel_consent":{"enabled":true,"cookie_notice":true,"third_party":false,"versionId":"search-consent-1","show_consent":true},"apply_consent":{"enabled":false,"job_specific":true,"versionId":"apply-consent-1"},"ttl":2592000000};
+        </script>
+        <script  type='text/javascript'> function defer(method) { if (window.jQuery) { method(); } else { setTimeout(function() { defer(method) }, 50); } } defer(function() { window.$ = jQuery; var head = window.document.querySelectorAll('head')[0], scrp = document.createElement('script'); scrp.setAttribute('type', 'text/javascript'); scrp.src = '/dist/js/gdpr/gdpr.js?v=5.4.35'; jQuery(function() { window.document.body.appendChild(scrp); }); }); </script>
+    
+  </body>
+</html>
