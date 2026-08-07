@@ -17,6 +17,7 @@
 
 import { runHarvestSweep } from '../enrichment/orchestrator.js';
 import { autoLinkRegistryChains } from '../enrichment/chain_link.js';
+import { autoMergeExactRegistrations } from '../assembly/auto_merge.js';
 import { runTenderScan, closeExpiredTenders } from '../tenders/scrape.js';
 import { scanMonaqasatAwards, repairThinAwards } from '../tenders/scan_monaqasat_awards.js';
 import { selfUpdate, recycleEngineAfterUpdate } from '../ops/self_update.js';
@@ -116,6 +117,19 @@ const log = (m) => console.log(`[${new Date().toISOString()}] ${m}`);
       }, { yield: (r) => (r?.inserted ?? 0) + (r?.updated ?? 0), log });
       if (q?.scraped) log(`✓ QSE disclosures: ${q.scraped} read · ${q.inserted} new · ${q.updated} updated · ${q.linked} linked to a Bell company.`);
     } catch (err) { log(`✗ QSE disclosure scan failed: ${err.message}`); }
+    // REGISTRY MERGE (Val, 2026-07-22: "if CR number is matching let it link automatically").
+    // Runs BEFORE chain linking on purpose: merging collapses exact duplicates, so the chain
+    // linker then works on one record per firm instead of accidentally parenting a branch to a
+    // duplicate that is about to disappear. The rule is same-body + same-number + names agree —
+    // never number alone, which across different registers would merge a kindergarten into a
+    // petroleum services company (both real, both live).
+    try {
+      const m = await recordJob('registry_merge',
+        () => autoMergeExactRegistrations({ apply: true, log: (x) => log(x) }),
+        { yield: (r) => r?.merged ?? 0, log });
+      if (m?.merged) log(`✓ Registry merge: ${m.merged} duplicate record(s) merged into ${m.eligible} company(ies).`);
+      if (m?.held) log(`  ${m.held} registration group(s) held back — the names disagree, so a human decides.`);
+    } catch (err) { log(`✗ Registry merge failed: ${err.message}`); }
     // Registry-stated chain links (Val's standing instruction 2026-07-22: a matching
     // base CR links automatically). New MOCI branch registrations picked up by the
     // sweep join their parent the same night.
