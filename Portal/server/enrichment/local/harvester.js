@@ -64,6 +64,84 @@ const PAGE_HINTS = {
 };
 const ALL_HINTS = Object.values(PAGE_HINTS).flat();
 
+// ── CAREERS DISCOVERY (jobs, 2026-08-07) ───────────────────────────────────────────────────────
+// Val: gather job postings across the ENTIRE active company database, not only large employers.
+//
+// Careers pages are DISCOVERED AND RECORDED, never crawled here. That distinction is the whole
+// design and it is not laziness:
+//   · Recording costs ZERO extra fetches. The homepage links are already in hand, so this adds
+//     nothing to a crawl that must run across ~17,930 sites on one machine, and it cannot push a
+//     contact or locations page out of the small per-company page budget.
+//   · A vacancy list is a MOVING TARGET. Harvesting it on the company's ~3-day freshness cycle
+//     would produce stale vacancies; the jobs sweep needs its own cadence and its own closure
+//     logic, so it must own the fetch.
+//   · Almost every real careers portal lives on ANOTHER HOST — jobs.vodafone.qa, careers.qnb.com,
+//     careerportal.qatarenergy.qa — or on a third-party ATS entirely (Oracle, SuccessFactors,
+//     iCIMS). pickPages() drops all of them, correctly, because their CONTENT is not this
+//     company's content. Recording a URL makes no such claim.
+//
+// A third-party ATS link is kept and flagged rather than dropped: it is the single most valuable
+// find, because those platforms publish structured, dated vacancies. But it is flagged `external`
+// so the identity gate downstream knows the host does not belong to the company — that is exactly
+// the shape that attached Honeywell International's 1,282 Chennai vacancies to a Qatar trading
+// firm called "Honey Well Trading".
+const CAREERS_HINTS = ['/career', '/careers', '/jobs', '/job-', '/vacanc', '/join-us', '/joinus',
+  '/work-with-us', '/workwithus', '/employment', '/recruit', '/hiring', '/opportunit',
+  '/وظائف', '/التوظيف'];
+// Host fragments of applicant-tracking platforms that publish machine-readable vacancies.
+const ATS_HOST_RX = /(^|\.)(oraclecloud\.com|myworkdayjobs\.com|wd\d+\.myworkdaysite\.com|icims\.com|successfactors\.(com|eu)|taleo\.net|greenhouse\.io|lever\.co|smartrecruiters\.com|bamboohr\.com|zohorecruit\.com|recruitee\.com|teamtailor\.com|personio\.de|workable\.com)$/i;
+
+/** Registrable domain — crude eTLD handling for the two-label ccTLDs Qatar actually uses. */
+export function registrableHost(host) {
+  if (!host) return '';
+  const parts = String(host).toLowerCase().replace(/^www\./, '').split('.');
+  if (parts.length <= 2) return parts.join('.');
+  const last2 = parts.slice(-2).join('.');
+  if (/^(com|co|net|org|gov|edu)\.[a-z]{2}$/.test(last2)) return parts.slice(-3).join('.');
+  return last2;
+}
+
+/**
+ * Careers endpoints linked from a company's own pages. PURE — no network, no database.
+ * Returns [{ url, host, kind }] where kind is:
+ *   'own'      same registrable domain (careers.qnb.com for qnb.com) — safe to attribute
+ *   'ats'      a known applicant-tracking platform — high value, but NOT the company's host
+ *   'external' some other host — recorded, attribute nothing without separate evidence
+ * Ordered own → ats → external, deduped by URL, capped so one bloated nav cannot flood the row.
+ */
+export function pickCareersLinks(homeUrl, links, limit = 4) {
+  const homeHost = hostOf(homeUrl);
+  const homeReg = registrableHost(homeHost);
+  const out = [];
+  const seen = new Set();
+  for (const l of links || []) {
+    let u;
+    try { u = new URL(l); } catch { continue; }
+    if (!/^https?:$/.test(u.protocol)) continue;
+    u.hash = '';
+    const path = decodedPath(u.toString());
+    // The hint must match the PATH, or the host itself must be a careers/jobs subdomain —
+    // "careers.qnb.com/" has no path to match, and it is the single most common real shape.
+    const host = u.hostname.toLowerCase();
+    const hostSaysCareers = /^(careers?|jobs?|recruit|hiring|careerportal|jobsearch)\./.test(host);
+    // A hosted applicant-tracking platform qualifies on its HOST alone. Its URLs routinely carry
+    // no careers-ish path at all — Oracle's is /hcmUI/CandidateExperience, Workday's is
+    // /wday/cxs/... — so demanding a path hint would discard precisely the machine-readable
+    // sources that make this feature possible. Caught by its own unit test before shipping.
+    const isAts = ATS_HOST_RX.test(host);
+    if (!isAts && !hostSaysCareers && !CAREERS_HINTS.some((h) => path.includes(h))) continue;
+    const clean = u.toString().replace(/\/$/, '');
+    if (seen.has(clean)) continue;
+    seen.add(clean);
+    const reg = registrableHost(host);
+    const kind = reg && reg === homeReg ? 'own' : (isAts ? 'ats' : 'external');
+    out.push({ url: clean, host, kind });
+  }
+  const rank = { own: 0, ats: 1, external: 2 };
+  out.sort((a, b) => rank[a.kind] - rank[b.kind]);
+  return out.slice(0, limit);
+}
+
 function decodedPath(url) {
   let path = '/';
   try { path = new URL(url).pathname.toLowerCase(); } catch {}
