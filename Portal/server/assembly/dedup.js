@@ -585,7 +585,27 @@ export async function mergeCompanies(canonicalId, duplicateId, jobLog = null) {
     //      here without a sync_deletions row survives there forever (the same trap already
     //      documented for company_locations). Prod is currently carrying 260 company_tech rows
     //      local no longer has, which is what this omission looks like once it has run a while.
-    for (const t of ['company_locations', 'company_financials', 'company_shareholders', 'company_partnerships']) {
+    // ⚠️ company_locations HAS a unique key — `company_locations_dedupe_idx` on
+    // (company_id, lower(address)). I previously asserted it had none, because I checked
+    // pg_constraint, which lists CONSTRAINTS; this is a FUNCTIONAL INDEX and does not appear
+    // there. pg_indexes is the honest place to look. The consequence was not theoretical: two of
+    // Val's 41 registry merges aborted on it, and they were exactly the ones you would expect —
+    // the same company recorded twice, therefore holding the SAME ADDRESS twice.
+    // So it is handled like tech and registrations: move what the survivor lacks, withdraw the
+    // rest, tombstone included.
+    await timed('UPDATE company_locations re-parent', () => client.query(`
+      UPDATE company_locations l SET company_id = $1, updated_at = now()
+       WHERE l.company_id = $2
+         AND NOT EXISTS (SELECT 1 FROM company_locations k
+                          WHERE k.company_id = $1 AND lower(k.address) = lower(l.address))`,
+      [canonicalId, duplicateId]));
+    await timed('TOMBSTONE + DELETE leftover company_locations', () => client.query(`
+      WITH gone AS (DELETE FROM company_locations WHERE company_id = $1 RETURNING id)
+      INSERT INTO sync_deletions (table_name, row_id) SELECT 'company_locations', id FROM gone`,
+      [duplicateId]));
+    // These three genuinely carry no unique key beyond the primary key — verified in pg_indexes,
+    // not inferred — so a plain UPDATE cannot collide and duplicated facts are the honest outcome.
+    for (const t of ['company_financials', 'company_shareholders', 'company_partnerships']) {
       await timed(`UPDATE ${t} re-parent`, () => client.query(
         `UPDATE ${t} SET company_id = $1, updated_at = now() WHERE company_id = $2`, [canonicalId, duplicateId]));
     }
