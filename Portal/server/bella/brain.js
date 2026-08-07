@@ -380,7 +380,25 @@ export async function runBellaTurn({ ctx, conversationId, userText, clientContex
       const a = pending[0];
       let args = a.args;
       if (typeof args === 'string') { try { args = JSON.parse(args); } catch { args = {}; } }
-      if (a.tool === 'propose_plan') {
+
+      // 🔴 SPEECH NEVER AUTHORISES AN EXTERNAL SEND OR A DELETION.
+      // Val, 2026-08-07: while he was speaking INSTRUCTIONS to Bella she emailed a real customer,
+      // MyWeb Systems QFZ LLC — "very unprofessional… might cause critical issues for companies."
+      // This is the mechanism. AFFIRM_RX matches "go ahead", "do it", "send it", "confirmed" —
+      // precisely the words you use while directing someone to do something ELSE. Voice makes it
+      // far likelier still: an utterance is cut at a pause, so a trailing "go ahead" arrives as a
+      // COMPLETE message with nothing around it to disambiguate.
+      //
+      // The 'always' category is already defined as the actions that gate in EVERY mode — external
+      // sends and deletions. Accepting a conversational phrase as that approval contradicts the
+      // category's own meaning. So those now require the button, which cannot be said by accident.
+      // 'act' and 'spend' still honour spoken approval (Val 2026-07-15: "user can just say
+      // approved, not necessary for user to click approve") — those are reversible and internal.
+      const pendingTool = getTool(a.tool);
+      if (pendingTool?.approval === 'always') {
+        effectiveText = `[System note: the user said "${String(userText).trim().slice(0, 60)}", which sounds like approval, but the pending action #${a.id} (${a.tool}) sends or deletes something outside Bell and was NOT run. Tell them plainly that this one needs the Approve button on the card, because a spoken phrase can be picked up by accident. Do not re-propose it; the card is already there.]`;
+        send('approval', { action_id: a.id, tool: a.tool, decided: 'needs_click' });
+      } else if (a.tool === 'propose_plan') {
         grant = buildPlanGrant(args, (name) => !!getTool(name));
         grantSteps = planSteps(args).length;
         await store.setActionStatus(a.id, 'done', 'approved by voice/chat').catch(() => {});

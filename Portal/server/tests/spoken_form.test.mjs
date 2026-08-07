@@ -26,11 +26,20 @@ test('THE REGRESSION: a scaled amount keeps its full value', () => {
     'Revenue was 1.2 billion Qatari riyals this year.');
 });
 
-test('digits are never altered', () => {
-  for (const n of ['75.8', '1.2', '402,500,000', '850,000', '11,257', '0.5', '1']) {
+test('a number is never RESCALED or rounded — the original ban still holds', () => {
+  // POLICY CHANGED 2026-08-07, deliberately and narrowly. Val: "she was not able to say
+  // (5,916,565) she lags when it comes to a bit complicated numbers." A comma-grouped integer of
+  // 10,000+ is now spoken as WORDS, which is why this test no longer demands the digits survive
+  // verbatim. What has NOT changed is the thing the original ban existed for: the spoken value
+  // must equal the written value. tests/spoken_numbers.test.mjs proves that by parsing every
+  // produced phrase back to a number. Decimals and small numbers are still untouched here.
+  for (const n of ['75.8', '1.2', '0.5', '1']) {
     const out = spokenForm(`It was QAR ${n}.`);
     assert.ok(out.includes(n), `${n} must survive verbatim, got: ${out}`);
   }
+  // Grouped integers become words — but never a DIFFERENT quantity.
+  assert.match(spokenForm('It was QAR 850,000.'), /eight hundred fifty thousand Qatari riyals/);
+  assert.match(spokenForm('It was QAR 11,257.'), /eleven thousand two hundred fifty-seven/);
 });
 
 test('an abbreviated scale is expanded, not read as a letter', () => {
@@ -40,9 +49,10 @@ test('an abbreviated scale is expanded, not read as a letter', () => {
 
 test('the currency lands after the amount, whichever side it was written on', () => {
   assert.equal(spokenForm('The award was QAR 402,500,000.'),
-    'The award was 402,500,000 Qatari riyals.');
+    'The award was four hundred two million five hundred thousand Qatari riyals.');
   assert.equal(spokenForm('402,500,000 QAR was the bid.'),
-    '402,500,000 Qatari riyals was the bid.');
+    'four hundred two million five hundred thousand Qatari riyals was the bid.');
+  // A decimal with a scale word is still left exactly as written.
   assert.equal(spokenForm('75.8 million QAR was the profit.'),
     '75.8 million Qatari riyals was the profit.');
 });
@@ -69,7 +79,10 @@ test('quarters, years, references and dates are left alone', () => {
   assert.equal(spokenForm('Q1 2026 was strong.'), 'Q1 2026 was strong.');
   assert.equal(spokenForm('Tender 4905/2022 closes 20/06/2023.'),
     'Tender 4905/2022 closes 20/06/2023.');
-  assert.equal(spokenForm('I found 11,257 companies.'), 'I found 11,257 companies.');
+  // A plain COUNT is a quantity, and as of 2026-08-07 a grouped one is spoken as words — that is
+  // the point of the change, and it is why Val heard her stumble on 5,916,565.
+  assert.equal(spokenForm('I found 11,257 companies.'),
+    'I found eleven thousand two hundred fifty-seven companies.');
   assert.equal(spokenForm('Revenue grew 1.08 times.'), 'Revenue grew 1.08 times.');
 });
 
