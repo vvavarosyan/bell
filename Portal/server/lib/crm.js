@@ -115,6 +115,158 @@ export function applyMerge(text, vars) {
   });
 }
 
+// ── CRM search ──────────────────────────────────────────────────────────────
+//
+// What a salesperson types into the CRM search box, and where Bell actually
+// holds the answer:
+//
+//   "al baraka"          → companies.name / companies.legal_name / people.full_name
+//   "albaraka.com"       → companies.website
+//   "ir@albaraka.com"    → company_contacts (type='email') / people.email
+//   "4455 5333"          → company_contacts (type='phone'|'whatsapp') / people.phone
+//   "30734" / "BIN-0002" → company_registrations.number(_normalized) / companies.bin
+//   "sent the quote"     → crm_notes.body   (this tenant's own notes only)
+//   "Q3 renewal"         → crm_deals.title  (this tenant's own deals only)
+//
+// Three rules this code exists to enforce:
+//
+//  1. TENANT SCOPING. The whole search is anchored on crm_records rows that
+//     already passed `r.tenant_id = $1`, and the two tenant-owned sources
+//     (crm_notes, crm_deals) carry their OWN `tenant_id = $1` predicate as well
+//     — a stray row with a colliding record_id can never surface in another
+//     tenant's list. crm_deals.record_id has no compound tenant key in
+//     migration 022, so that second predicate is load-bearing, not decoration.
+//
+//  2. ENTITY-TYPE GUARD. `crm_records.entity_id` is polymorphic: it is a
+//     companies.id on a company row and a people.id on a person row. Joining
+//     company_contacts.company_id = r.entity_id WITHOUT checking entity_type
+//     would match a completely unrelated company for every person record. Every
+//     company-side subquery below is wrapped in `r.entity_type = 'company'`.
+//
+//  3. NO FREE REVEALS (Rule 2.1 adjacent). Contact VALUES are the product Bell
+//     charges credits for. Matching on an email/phone the tenant has not
+//     revealed would turn the search box into a free confirmation oracle
+//     ("is this address this company's?"). Contact matching is therefore gated
+//     by tenant_reveals, exactly as routes/export.js masks its contact columns.
+//     Name / website / registration / notes / deals are never gated.
+
+/** LIKE metacharacters are literal text when a salesperson types them. */
+export function likeEscape(s) { return String(s).replace(/[\\%_]/g, '\\$&'); }
+
+/** The field keys `match_fields` can report, in the order they are evaluated. */
+export const CRM_SEARCH_FIELDS = ['name', 'website', 'registration', 'email', 'phone', 'note', 'deal'];
+
+/**
+ * Normalize what the user typed. Returns null when there is nothing to search,
+ * so an empty (or one-character) box can never fall through to "match
+ * everything" — the caller must treat null as "apply no search condition at
+ * all", never as "match all rows".
+ */
+export function parseCrmQuery(raw) {
+  const text = String(raw ?? '').trim();
+  if (text.length < 2) return null;
+  const digits = text.replace(/[^0-9]/g, '');
+  const dense = text.replace(/\s+/g, '').length || 1;
+  // A phone / registration lookup only when the typed string is mostly digits —
+  // otherwise "Al Baraka 2" would go hunting through every phone number.
+  const numeric = digits.length >= 4 && digits.length / dense >= 0.5 ? digits : null;
+  // A registration number is an IDENTIFIER, so it is matched exactly, never as
+  // a substring ("3073" must not find CR 30734 — that is a different company).
+  // `company_registrations.number_normalized` is the canonical stored form, and
+  // it was verified against all 195,496 live rows: 195,479 equal either the
+  // digits of `number` or those digits with leading zeros stripped, and the
+  // remaining 10 are the verbatim strings TR00001…TR00010. Those three forms
+  // therefore cover the table completely.
+  const bare = digits.replace(/^0+/, '');
+  const regCandidates = [...new Set([
+    digits.length >= 3 ? digits : null,
+    bare.length >= 3 ? bare : null,
+    /^[A-Za-z0-9/_.-]{3,24}$/.test(text) ? text.toUpperCase() : null,
+  ].filter(Boolean))];
+  return { text, like: '%' + likeEscape(text.toLowerCase()) + '%', digits, numeric, regCandidates };
+}
+
+/**
+ * Build the SQL for a CRM record search.
+ *
+ * `params` is the live parameter array for the query being assembled — this
+ * pushes onto it and returns `$n` references, so it must be called while the
+ * array is in the state the caller expects.
+ *
+ * Returns `{ where, matchSelect }`:
+ *   where       — one parenthesised boolean, AND it into the record WHERE list
+ *   matchSelect — `, ARRAY[…] AS match_fields`, append to the SELECT column list
+ *
+ * Aliases assumed present: r (crm_records), c (companies), p (people).
+ */
+export function buildCrmSearch(parsed, params, { tenantParam, revealBypass = false } = {}) {
+  if (!parsed) return null;
+  const push = (v) => { params.push(v); return '$' + params.length; };
+  const like = push(parsed.like);
+  const num = parsed.numeric ? push('%' + parsed.numeric + '%') : null;
+
+  // Backslash is Postgres' default LIKE escape character, so likeEscape() above
+  // is sufficient — no ESCAPE clause needed (same convention as routes/companies.js).
+  const L = (expr) => `lower(coalesce(${expr},'')) LIKE ${like}`;
+  const DIGITS = (expr) => `regexp_replace(coalesce(${expr},''),'[^0-9]','','g')`;
+
+  const revealed = revealBypass
+    ? 'true'
+    : `EXISTS (SELECT 1 FROM tenant_reveals tr
+                WHERE tr.tenant_id = ${tenantParam}
+                  AND tr.entity_type = r.entity_type
+                  AND tr.entity_id   = r.entity_id)`;
+
+  const f = {};
+  f.name = `(${L('c.name')} OR ${L('c.legal_name')} OR ${L('p.full_name')} OR ${L('p.headline')})`;
+  f.website = L('c.website::text');
+  // companies.bin (Bell's own reference, e.g. "BIN-00023779") is free to search
+  // — `c` is already joined — so it is matched as a substring like any other
+  // display field.
+  //
+  // company_registrations is NOT free: 195,496 rows, and a substring LIKE on it
+  // made the planner take one full pass over the table on EVERY search with a
+  // digit in it — measured at ~440 ms even for a tenant with 1,000 records.
+  // It is now an indexed equality against the pre-computed candidate forms (see
+  // parseCrmQuery), which is both faster and more correct: a registration
+  // number identifies one company, so "3073" must not surface CR 30734.
+  const regs = parsed.regCandidates.length ? push(parsed.regCandidates) : null;
+  f.registration = `(${L('c.bin')}
+      ${num ? `OR (r.entity_type = 'company' AND ${DIGITS('c.bin')} LIKE ${num})` : ''}
+      ${regs ? `OR (r.entity_type = 'company' AND EXISTS (
+            SELECT 1 FROM company_registrations cr
+             WHERE cr.company_id = r.entity_id
+               AND cr.number_normalized = ANY(${regs}::text[])))` : ''})`;
+  f.email = `(${revealed} AND (
+      (r.entity_type = 'company' AND EXISTS (
+          SELECT 1 FROM company_contacts cc
+           WHERE cc.company_id = r.entity_id AND cc.type = 'email' AND ${L('cc.value')}))
+      OR (r.entity_type = 'person' AND ${L('p.email::text')})))`;
+  f.phone = num
+    ? `(${revealed} AND (
+      (r.entity_type = 'company' AND EXISTS (
+          SELECT 1 FROM company_contacts cc
+           WHERE cc.company_id = r.entity_id AND cc.type IN ('phone','whatsapp')
+             AND ${DIGITS('cc.value')} LIKE ${num}))
+      OR (r.entity_type = 'person' AND ${DIGITS('p.phone')} LIKE ${num})))`
+    : 'false';
+  // Tenant-owned text. Both predicates are required: record_id alone is not
+  // tenant-safe (see rule 1 above).
+  f.note = `EXISTS (SELECT 1 FROM crm_notes n
+                     WHERE n.record_id = r.id AND n.tenant_id = ${tenantParam} AND ${L('n.body')})`;
+  f.deal = `EXISTS (SELECT 1 FROM crm_deals d
+                     WHERE d.record_id = r.id AND d.tenant_id = ${tenantParam} AND ${L('d.title')})`;
+
+  const active = CRM_SEARCH_FIELDS.filter((k) => f[k] !== 'false');
+  const where = '(' + active.map((k) => f[k]).join(' OR ') + ')';
+  // Evaluated only for rows that already passed the WHERE, so the duplicated
+  // predicates cost nothing on the rows that did not match.
+  const matchSelect = ', array_remove(ARRAY['
+    + active.map((k) => `CASE WHEN ${f[k]} THEN '${k}' END`).join(', ')
+    + '], NULL) AS match_fields';
+  return { where, matchSelect };
+}
+
 /** Append a timeline activity + bump the record's last_activity_at. */
 export async function logActivity(client, tenantId, recordId, type, { actorUserId = null, actorEmail = null, summary = null, payload = {} } = {}) {
   const r = runnerOf(client);

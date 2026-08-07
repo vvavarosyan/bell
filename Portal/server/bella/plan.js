@@ -36,11 +36,22 @@ export function planSteps(args) {
  * `isKnownTool` keeps hallucinated tool names out of the grant (they'd never
  * execute anyway, but a grant must never contain what the card didn't show).
  */
-export function buildPlanGrant(args, isKnownTool = () => true) {
+export function buildPlanGrant(args, isKnownTool = () => true, isAlwaysApprove = () => false) {
   const grant = {};
   for (const s of planSteps(args)) {
     if (!isKnownTool(s.tool)) continue;
     if (s.tool === 'propose_plan') continue;   // a plan may never pre-approve another plan
+    // 🔴 NOR MAY IT PRE-APPROVE AN EXTERNAL SEND OR A DELETION.
+    // A grant records the tool NAME and a COUNT — nothing else. It does not bind the recipient,
+    // the subject or the record, and nothing at send time compares what is actually being sent
+    // against what the card said. So one approved plan authorised an email to an address the user
+    // was never shown; the card for a single email does not even print the recipient.
+    // Val, 2026-08-07, after Bella emailed MyWeb Systems QFZ LLC by accident: "This is very
+    // unprofessional and should not happen because it might cause critical issues for companies."
+    // The rule above already exists for exactly this reason — a plan cannot pre-approve another
+    // plan, because a blanket permission must not create more blanket permission. An email to a
+    // third party deserves the same treatment: it raises its own card, naming its own recipient.
+    if (isAlwaysApprove(s.tool)) continue;
     grant[s.tool] = (grant[s.tool] || 0) + 1;
   }
   return grant;

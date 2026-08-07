@@ -15,7 +15,8 @@
 
 import { Router } from 'express';
 import { query } from '../db.js';
-import { ensureCrmRecord, logActivity, markContacted, buildMergeVars, applyMerge, tenantMember } from '../lib/crm.js';
+import { ensureCrmRecord, logActivity, markContacted, buildMergeVars, applyMerge, tenantMember,
+         parseCrmQuery, buildCrmSearch } from '../lib/crm.js';
 import { sendEmail, getFromAddress, inboundReplyTo } from '../lib/email.js';
 import { getEmailBranding, renderBrandedEmail } from '../lib/email_branding.js';
 import { resolveSendIdentity, formatFrom } from '../lib/email_domains.js';
@@ -23,7 +24,7 @@ import { checkDailyLimit } from '../lib/sendlimits.js';
 
 // Sender signature + header/footer branding now live in lib/email_branding.js
 // (getEmailBranding / renderBrandedEmail), applied on every send path below.
-import { getRevealedSet } from '../lib/credits.js';
+import { getRevealedSet, bypassesCredits } from '../lib/credits.js';
 import { addDatapoint, listDatapoints, deleteDatapoint, addNewEntity, DATAPOINT_FIELDS } from '../lib/contributions.js';
 
 const router = Router();
@@ -39,19 +40,21 @@ const actorUserId = (req) => (req.user?.id && req.user.id !== 0 ? req.user.id : 
 
 // Join a record to its canonical company/person for display (identity only —
 // contact fields are gated by the reveal system elsewhere).
-const RECORD_SELECT = `
-  SELECT r.*,
-         c.name        AS company_name,  c.bin AS company_bin, c.industry AS company_industry,
-         c.city        AS company_city,  c.website AS company_website, c.linkedin_url AS company_linkedin,
-         c.archived    AS company_archived,
-         p.full_name   AS person_name,   p.pin AS person_pin, p.headline AS person_headline,
-         p.linkedin_url AS person_linkedin,
-         u.email       AS owner_email, u.full_name AS owner_name
+const RECORD_COLS = `
+  r.*,
+  c.name        AS company_name,  c.bin AS company_bin, c.industry AS company_industry,
+  c.city        AS company_city,  c.website AS company_website, c.linkedin_url AS company_linkedin,
+  c.archived    AS company_archived,
+  p.full_name   AS person_name,   p.pin AS person_pin, p.headline AS person_headline,
+  p.linkedin_url AS person_linkedin,
+  u.email       AS owner_email, u.full_name AS owner_name`;
+const RECORD_FROM = `
     FROM crm_records r
     LEFT JOIN companies c ON r.entity_type = 'company' AND c.id = r.entity_id
     LEFT JOIN people    p ON r.entity_type = 'person'  AND p.id = r.entity_id
     LEFT JOIN users     u ON u.id = r.owner_user_id AND u.tenant_id = r.tenant_id
 `;
+const RECORD_SELECT = `SELECT ${RECORD_COLS} ${RECORD_FROM}`;
 
 // GET /api/crm/records
 router.get('/records', async (req, res, next) => {
@@ -65,10 +68,16 @@ router.get('/records', async (req, res, next) => {
       params.push(req.query.archived === 'true');
       where.push(`r.archived = $${params.length}`);
     }
-    if (req.query.q && req.query.q.trim()) {
-      params.push('%' + req.query.q.trim().toLowerCase() + '%');
-      where.push(`(lower(coalesce(c.name,'')) LIKE $${params.length} OR lower(coalesce(p.full_name,'')) LIKE $${params.length})`);
-    }
+    // Search. Anchored on this tenant's own records; covers name, website,
+    // registration number, revealed contact details, notes and deal titles.
+    // A blank (or 1-character) box adds NO condition — it must never behave as
+    // "match every row" and it must never behave as "match nothing" either.
+    const parsedQ = parseCrmQuery(req.query.q);
+    const search = buildCrmSearch(parsedQ, params, {
+      tenantParam: '$1',
+      revealBypass: bypassesCredits(req.user, req.tenant),
+    });
+    if (search) where.push(search.where);
     // Owner filter (Phase 5): 'me' = my leads, 'unassigned' = no owner, or a
     // teammate's user id. 'me' with no resolvable user just returns everything.
     if (req.query.owner) {
@@ -82,7 +91,8 @@ router.get('/records', async (req, res, next) => {
     params.push(limit, offset);
 
     const rows = await query(
-      `${RECORD_SELECT} WHERE ${where.join(' AND ')}
+      `SELECT ${RECORD_COLS}${search ? search.matchSelect : ''} ${RECORD_FROM}
+        WHERE ${where.join(' AND ')}
        ORDER BY r.last_activity_at DESC
        LIMIT $${params.length - 1} OFFSET $${params.length}`,
       params
@@ -94,7 +104,13 @@ router.get('/records', async (req, res, next) => {
         WHERE ${where.join(' AND ')}`,
       params.slice(0, params.length - 2)
     );
-    res.json({ total: count.rows[0].total, rows: rows.rows, limit, offset });
+    res.json({
+      total: count.rows[0].total, rows: rows.rows, limit, offset,
+      // Echo what was actually searched — a 1-character box searches nothing,
+      // and the UI must be able to say so rather than silently showing everything.
+      q: parsedQ ? parsedQ.text : null,
+      searched: !!search,
+    });
   } catch (err) { next(err); }
 });
 

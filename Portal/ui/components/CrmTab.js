@@ -25,6 +25,18 @@ const STATUS_META = {
 };
 const STATUSES = ['new', 'contacted', 'engaged', 'won', 'lost'];
 
+// Why a row is in the search results. The server returns these keys in
+// `match_fields`; a row always carries at least one when a search ran.
+const MATCH_LABEL = {
+  name:         'name',
+  website:      'website',
+  registration: 'registration no.',
+  email:        'email',
+  phone:        'phone',
+  note:         'your note',
+  deal:         'deal',
+};
+
 
 
 function timeAgo(iso) {
@@ -54,7 +66,13 @@ export function CrmTab() {
   const [entityType, setEntityType] = useState('company');
   const [revealedOnly, setRevealedOnly] = useState(false);
   const [status, setStatus] = useState('');
+  // Two search states on purpose: `qInput` is what the box shows (updates on
+  // every keystroke), `q` is what has actually been sent to the server. Only `q`
+  // is in the load() dependency list, so typing "al baraka" fires ONE request
+  // after the pause instead of nine.
+  const [qInput, setQInput] = useState('');
   const [q, setQ] = useState('');
+  const [searchedQ, setSearchedQ] = useState(null);   // what the server confirms it searched
   const [rows, setRows] = useState([]);
   const [stats, setStats] = useState(null);
   const [total, setTotal] = useState(0);          // full count for the current filter
@@ -90,9 +108,21 @@ export function CrmTab() {
       setRows(r.rows || []);
       setStats(s);
       setTotal(r.total || 0);
+      // The server tells us whether it actually ran a search (a 1-character box
+      // searches nothing) — never assume the box and the result set agree.
+      setSearchedQ(r.searched ? (r.q || null) : null);
     } catch (err) { if (!silent) toast('Load failed: ' + err.message, 'error'); }
     finally { if (!silent) setLoading(false); }
   }, [entityType, status, revealedOnly, q, owner]);
+
+  // Debounce: commit the box to the real query 300ms after the last keystroke.
+  // Clearing the box is applied immediately so the full list comes straight back.
+  useEffect(() => {
+    if (qInput === q) return;
+    if (!qInput.trim()) { setQ(''); return; }
+    const t = setTimeout(() => setQ(qInput), 300);
+    return () => clearTimeout(t);
+  }, [qInput, q]);
 
   useEffect(() => { load(); }, [load]);
   // Live refresh when Bella (or any other surface) changes CRM data — reveal,
@@ -151,7 +181,7 @@ export function CrmTab() {
       toast('Added to your CRM.');
       setNewEntity(null);
       // Switch to the matching tab + clear filters so the new record is visible.
-      setStatus(''); setRevealedOnly(false); setQ('');
+      setStatus(''); setRevealedOnly(false); setQInput(''); setQ('');
       if (entityType !== kindAdded) setEntityType(kindAdded); else load();
     } catch (err) { toast('Could not save: ' + err.message, 'error'); }
     finally { setSavingEntity(false); }
@@ -203,7 +233,8 @@ export function CrmTab() {
     setEntityType(f.entity_type || 'company');
     setStatus(f.status || '');
     setRevealedOnly(f.source === 'reveal');
-    setQ(f.q || '');
+    // Both, or the box shows one thing while the list shows another.
+    setQInput(f.q || ''); setQ(f.q || '');
   };
   const saveSegment = async () => {
     const name = window.prompt('Name this view:');
@@ -251,9 +282,15 @@ export function CrmTab() {
         </div>
         <button class=${'toolbar-toggle' + (crmFilterCount > 0 || showFilters ? ' accent' : '')} onClick=${() => setShowFilters(v => !v)}
           title="Filters — status, owner, revealed-only" style=${{ whiteSpace: 'nowrap' }}>☰ Filters${crmFilterCount > 0 ? ` · ${crmFilterCount}` : ''}</button>
-        <input type="text" placeholder="Search…" value=${q}
-          onChange=${e => setQ(e.target.value)}
-          style=${{ background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border)', color: 'var(--text)', padding: '6px 10px', borderRadius: '6px', fontSize: '12px', minWidth: '180px' }} />
+        <div style=${{ position: 'relative', display: 'inline-flex', alignItems: 'center' }}>
+          <input type="text" placeholder="Search name, email, phone, CR no., notes…" value=${qInput}
+            onInput=${e => setQInput(e.target.value)}
+            onKeyDown=${e => { if (e.key === 'Escape') { setQInput(''); setQ(''); } }}
+            title="Searches company and contact name, website, registration number, revealed email and phone, your notes and your deal titles"
+            style=${{ background: 'rgba(255,255,255,0.03)', border: '1px solid var(--border)', color: 'var(--text)', padding: '6px 26px 6px 10px', borderRadius: '6px', fontSize: '12px', minWidth: '260px' }} />
+          ${qInput ? html`<button onClick=${() => { setQInput(''); setQ(''); }} title="Clear search (Esc)"
+            style=${{ position: 'absolute', right: '4px', background: 'transparent', border: 'none', color: 'var(--text-dim)', cursor: 'pointer', fontSize: '13px', lineHeight: 1, padding: '2px 5px' }}>✕</button>` : null}
+        </div>
         <span style=${{ flex: 1 }}></span>
         <button class="toolbar-toggle" onClick=${() => setNewEntity({ kind: 'company', name: '' })} title="Add a company or person Bell doesn't have yet">+ New</button>
         <button class="toolbar-toggle" onClick=${() => setShowImport(true)} title="Import your own contacts or companies from a CSV">Import</button>
@@ -374,6 +411,16 @@ export function CrmTab() {
           </div>
         </div>` : null}
 
+      <!-- Search result summary. Says exactly what was searched, how many
+           matched, and how many of those are on screen — the list is capped at
+           100 rows, so total and rows.length can legitimately disagree. -->
+      ${searchedQ ? html`<div style=${{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '11.5px', color: 'var(--text-muted)', marginBottom: '9px', flexWrap: 'wrap' }}>
+        <span><strong style=${{ color: 'var(--text)' }}>${total.toLocaleString()}</strong> ${total === 1 ? 'record matches' : 'records match'} “${searchedQ}”${total > rows.length ? ` · showing the first ${rows.length}` : ''}</span>
+        <button onClick=${() => { setQInput(''); setQ(''); }} class="toolbar-toggle" style=${{ padding: '2px 9px', fontSize: '11px' }}>Clear search</button>
+      </div>`
+        : qInput.trim().length === 1 ? html`<div style=${{ fontSize: '11.5px', color: 'var(--text-dim)', marginBottom: '9px' }}>Type at least 2 characters to search.</div>`
+        : null}
+
       ${rows.length > 0 ? html`<label style=${{ display: 'inline-flex', alignItems: 'center', gap: '6px', fontSize: '11px', color: 'var(--text-dim)', marginBottom: '8px', cursor: 'pointer' }}>
         <input type="checkbox" checked=${allSelected} onChange=${toggleAll} /> Select all (${rows.length})
       </label>` : null}
@@ -381,8 +428,11 @@ export function CrmTab() {
       <!-- List -->
       ${loading ? html`<div style=${{ color: 'var(--text-dim)', textAlign: 'center', padding: '50px 0', fontSize: '12px' }}>Loading…</div>`
         : rows.length === 0 ? html`<div style=${{ color: 'var(--text-dim)', textAlign: 'center', padding: '50px 0', fontSize: '12.5px', lineHeight: 1.6 }}>
-            No ${entityType === 'company' ? 'companies' : 'people'} in your CRM yet.<br/>
-            <span class="muted small">Reveal a ${entityType} in the ${entityType === 'company' ? 'Companies' : 'People'} tab and it lands here automatically.</span>
+            ${searchedQ ? html`<div>No ${entityType === 'company' ? 'companies' : 'people'} in your CRM match “${searchedQ}”.<br/>
+              <span class="muted small">Searched name, website, registration number, revealed email and phone, your notes and your deal titles.</span><br/>
+              <button onClick=${() => { setQInput(''); setQ(''); }} class="toolbar-toggle" style=${{ marginTop: '10px', padding: '3px 10px', fontSize: '11px' }}>Clear search</button></div>`
+            : html`<div>No ${entityType === 'company' ? 'companies' : 'people'} in your CRM yet.<br/>
+              <span class="muted small">Reveal a ${entityType} in the ${entityType === 'company' ? 'Companies' : 'People'} tab and it lands here automatically.</span></div>`}
           </div>`
         : html`<div style=${{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
             ${rows.map(r => html`<div key=${r.id}
@@ -401,6 +451,11 @@ export function CrmTab() {
               <div style=${{ minWidth: 0, flex: 1 }}>
                 <div style=${{ fontSize: '13.5px', fontWeight: 600, color: 'var(--text)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>${recName(r)}</div>
                 <div style=${{ fontSize: '11px', color: 'var(--text-muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>${recSub(r) || '—'}</div>
+                ${searchedQ && Array.isArray(r.match_fields) && r.match_fields.length ? html`
+                  <div style=${{ display: 'flex', gap: '4px', marginTop: '3px', flexWrap: 'wrap' }}>
+                    ${r.match_fields.map(f => html`<span key=${f} title=${'“' + searchedQ + '” was found in this record’s ' + (MATCH_LABEL[f] || f)}
+                      style=${{ fontSize: '9.5px', fontWeight: 600, letterSpacing: '.02em', color: 'rgb(165 195 255)', background: 'rgba(91,140,255,.12)', border: '1px solid rgba(91,140,255,.3)', borderRadius: '999px', padding: '1px 7px' }}>matched ${MATCH_LABEL[f] || f}</span>`)}
+                  </div>` : null}
               </div>
               ${r.source === 'reveal' ? html`<span style=${{ fontSize: '9.5px', color: 'var(--text-dim)', border: '1px solid var(--border)', borderRadius: '4px', padding: '1px 5px' }}>revealed</span>` : null}
               ${members.length > 1 && r.owner_name ? html`<span title=${'Owner: ' + r.owner_name} style=${{ fontSize: '10px', fontWeight: 600, color: 'var(--accent-bright, #a5c3ff)', background: 'rgba(91,140,255,.12)', border: '1px solid rgba(91,140,255,.35)', borderRadius: '999px', padding: '2px 8px', whiteSpace: 'nowrap', maxWidth: '92px', overflow: 'hidden', textOverflow: 'ellipsis' }}>${String(r.owner_name).split(' ')[0]}</span>` : null}

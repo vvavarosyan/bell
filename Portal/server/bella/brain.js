@@ -352,7 +352,7 @@ export async function runBellaTurn({ ctx, conversationId, userText, clientContex
         } else {
           let args = action.args;
           if (typeof args === 'string') { try { args = JSON.parse(args); } catch { args = {}; } }
-          grant = buildPlanGrant(args, (name) => !!getTool(name));
+          grant = buildPlanGrant(args, (name) => !!getTool(name), (name) => getTool(name)?.approval === 'always');
           grantSteps = planSteps(args).length;
           effectiveText = planApprovedNote(action.id, args);
         }
@@ -399,7 +399,7 @@ export async function runBellaTurn({ ctx, conversationId, userText, clientContex
         effectiveText = `[System note: the user said "${String(userText).trim().slice(0, 60)}", which sounds like approval, but the pending action #${a.id} (${a.tool}) sends or deletes something outside Bell and was NOT run. Tell them plainly that this one needs the Approve button on the card, because a spoken phrase can be picked up by accident. Do not re-propose it; the card is already there.]`;
         send('approval', { action_id: a.id, tool: a.tool, decided: 'needs_click' });
       } else if (a.tool === 'propose_plan') {
-        grant = buildPlanGrant(args, (name) => !!getTool(name));
+        grant = buildPlanGrant(args, (name) => !!getTool(name), (name) => getTool(name)?.approval === 'always');
         grantSteps = planSteps(args).length;
         await store.setActionStatus(a.id, 'done', 'approved by voice/chat').catch(() => {});
         effectiveText = planApprovedNote(a.id, args);

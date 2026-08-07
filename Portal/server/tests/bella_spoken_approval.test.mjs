@@ -15,6 +15,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { getTool } from '../bella/tools.js';
+import { buildPlanGrant } from '../bella/plan.js';
 
 // The matcher from server/bella/brain.js. Kept in step with it by this test.
 const AFFIRM_RX = /^\s*(ok(ay)?\s+)?(approved?|approve\s+it|yes[,\s]*approve(\s+it)?|go\s+ahead|do\s+it|send\s+it|confirm(ed)?|yes[,\s]*(please\s+)?(do\s+it|go\s+ahead|send\s+it))\s*[.!]*\s*$/i;
@@ -61,10 +62,14 @@ test('reversible internal actions keep spoken approval, which Val asked for', ()
   // The fix must not take away "just say approved" for everything — only for what cannot be undone.
   const reveal = getTool('reveal_companies');
   assert.equal(reveal.approval, 'spend', 'revealing is reversible and internal — spoken approval stays');
-  const acts = ['add_to_outreach', 'update_icp'].map(getTool).filter(Boolean);
+  // NOTE: add_to_outreach used to be listed here as "internal". It is not — it queues COLD EMAIL
+  // to real companies, and it was moved to 'always' on 2026-08-07. Genuinely internal writes are
+  // things that only touch this tenant's own records.
+  const acts = ['add_crm_note', 'add_crm_task', 'set_crm_status', 'update_icp'].map(getTool).filter(Boolean);
+  assert.ok(acts.length >= 3, 'expected several internal write tools to exist');
   for (const t of acts) {
     assert.notEqual(t.approval, 'always',
-      `${t.definition.name} should not be swept into the click-only category by accident`);
+      `${t.definition.name} only touches this tenant's own records — it should not need a click`);
   }
 });
 
@@ -76,3 +81,48 @@ test('the spoken-approval branch is gated on the tool category, not on a name li
   assert.match(src, /needs_click/, 'the client must be told the card still needs a click');
 });
 
+
+// ── APPROVING A PLAN IS NOT A BLANK CHEQUE (audit finding, 2026-08-07) ──────────────────────────
+// A grant records the tool NAME and a COUNT — not the recipient, subject or record — and nothing
+// at send time compares what is being sent against what the card said. So one approved plan
+// authorised an email to an address the user was never shown. The code already refused to let a
+// plan pre-approve another plan, for exactly this reason; an external send gets the same rule.
+
+const isAlways = (n) => getTool(n)?.approval === 'always';
+const PLAN = { title: 'Reach out', steps: [
+  { tool: 'search_companies', what: 'find construction firms' },
+  { tool: 'reveal_companies', what: 'unlock their contacts' },
+  { tool: 'send_email',       what: 'email each one' },
+  { tool: 'add_to_outreach',  what: 'queue the rest' },
+  { tool: 'schedule_task',    what: 'follow up Monday' },
+  { tool: 'update_icp',       what: 'save the profile' },
+] };
+
+test('an approved plan never pre-approves an external send', () => {
+  const grant = buildPlanGrant(PLAN, (n) => !!getTool(n), isAlways);
+  for (const t of ['send_email', 'add_to_outreach', 'schedule_task']) {
+    assert.equal(grant[t], undefined, `${t} must raise its own card, naming its own recipient`);
+  }
+});
+
+test('a plan still covers the reversible work, or the feature is pointless', () => {
+  const grant = buildPlanGrant(PLAN, (n) => !!getTool(n), isAlways);
+  assert.equal(grant.search_companies, 1);
+  assert.equal(grant.reveal_companies, 1);
+  assert.equal(grant.update_icp, 1);
+});
+
+test('queuing cold email and scheduling unattended work both need the button', () => {
+  // add_to_outreach queues COLD EMAIL to up to 25 real Qatar companies per call; a scheduled run
+  // executes later with approval checks skipped, while nobody is watching. Both were 'act', which
+  // shows NO card at all when approval mode is 'auto'.
+  for (const n of ['add_to_outreach', 'schedule_task']) {
+    assert.equal(getTool(n)?.approval, 'always', `${n} acts outward or unattended`);
+  }
+});
+
+test('the email card names the recipient', () => {
+  // It read "Send email to record #12" — the address appeared nowhere on the thing being approved.
+  const card = getTool('send_email').describe({ record_id: 12, to: 'ceo@myweb.qa', subject: 'Hello', body: 'Hi' });
+  assert.match(card, /ceo@myweb\.qa/, 'the user must see WHO it goes to before approving');
+});

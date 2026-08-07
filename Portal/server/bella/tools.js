@@ -1411,7 +1411,16 @@ export const TOOLS = [
         required: ['record_id', 'subject', 'body'],
       },
     },
-    describe: (args) => `Send email to record #${args.record_id} — "${String(args.subject || '').slice(0, 60)}"${Array.isArray(args.cc) && args.cc.length ? ` · cc ${args.cc.join(', ')}` : ''} · ${String(args.body || '').slice(0, 120)}…`,
+    // ⚠️ THE CARD MUST NAME THE RECIPIENT. It used to read "Send email to record #12" — the
+    // address appeared NOWHERE on the thing the user approves, so approving it was an act of
+    // faith. The WhatsApp card already showed its number; email was the odd one out. The address
+    // is resolved from the CRM record at propose time so the card states who it actually goes to.
+    describe: (args) => {
+      const to = String(args.to || args.to_email || '').trim();
+      const who = to ? to : `record #${args.record_id}`;
+      const cc = Array.isArray(args.cc) && args.cc.length ? ` · cc ${args.cc.join(', ')}` : '';
+      return `Send email to ${who} — "${String(args.subject || '').slice(0, 60)}"${cc} · ${String(args.body || '').slice(0, 120)}…`;
+    },
     async execute(args, ctx) {
       // The route already accepts + forwards cc (filters on '@', caps at 25) and the mail
       // transport emits it — only this schema was missing it, so Bella could never cc.
@@ -1430,7 +1439,8 @@ export const TOOLS = [
   },
 
   {
-    approval: 'act',
+    // OUTWARD-FACING: queues COLD EMAIL to real Qatar companies (up to 25 a call). It was 'act', so
+    approval: 'always',
     definition: {
       name: 'add_to_outreach',
       description: "PLATFORM ADMIN ONLY — Bell's own self-marketing. Adds companies to the outreach MACHINE's queue (admin → Marketing), which sends cold email under ALL its protections: the isolated go.bell.qa domain, a working unsubscribe in every email, suppression/consent checks, warmup ramp, daily caps, Qatar working hours, holidays, the circuit breaker, and reply-stop. Sends are NOT immediate — the machine sends on its own schedule once armed, or the admin can use 'Send now (test)' in the Marketing tab. NEVER use send_email for cold outreach to companies that have not engaged: that would bypass every protection and burn the main bell.qa domain. After adding, tell the admin honestly which companies were queued, which had no usable email, and that sending follows the machine's schedule.",
@@ -1768,7 +1778,8 @@ export const TOOLS = [
   },
 
   {
-    approval: 'act',
+    // UNATTENDED: a scheduled run executes with approval checks skipped, hours later, while nobody
+    approval: 'always',
     definition: {
       name: 'schedule_task',
       description: 'Schedule Bella to do work later ("have this ready by tomorrow morning"). The run executes FULLY AUTONOMOUSLY at the set time — no approvals are asked then, because the user\'s approval of the schedule counts as approval for everything in it. So your proposal MUST disclose any emails/WhatsApp it will send and any credits it will spend. Results land in this conversation + a notification; the user can cancel queued tasks in Settings → Bella.',
