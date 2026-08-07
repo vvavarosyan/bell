@@ -296,8 +296,34 @@ export function BellaChat({ onClose }) {
 
   // Approve/Deny click → server executes/denies → hidden continuation turn
   // lets Bella narrate the outcome (no user bubble for it).
+  //
+  // ⚠️ A CLICK IS NEVER DROPPED, AND ITS NARRATION IS NEVER LOST. Val: approving mid-sentence
+  // stalls. Two separate defects produced that, both from treating an approval like a chat message:
+  //
+  //   1. `if (busy) return` at the top. An approval card routinely appears WHILE Bella is still
+  //      streaming — that is the normal case, not an edge case — and every click in that window
+  //      was silently discarded. No request, no error, no change to the card. The user clicks
+  //      again, and nothing happens again.
+  //   2. Even past that guard, the continuation went out through `send()`, which ALSO returns
+  //      early when busy. So the action was genuinely approved on the server and executed, the
+  //      card flipped to "approved", and Bella then said nothing at all about it — the worst of
+  //      the two, because it looks like she ignored something she actually did.
+  //
+  // The decision itself is a direct user action on a card and has nothing to do with whether a
+  // turn is streaming, so it always goes through. Only the NARRATION has to wait its turn, and it
+  // is queued rather than dropped. Queued decisions drain in click order once the turn ends.
+  const pendingContinuations = useRef([]);
+
+  const drainContinuations = () => {
+    if (busyRef.current) return;
+    const next = pendingContinuations.current.shift();
+    if (next) send(next, { hidden: true });
+  };
+
   const decide = async (actionId, verdict) => {
-    if (busy) return;
+    // Ignore a second click on the SAME card only — never a click during someone else's turn.
+    const already = msgs.flatMap((m) => m.approvals || []).find((a) => a.action_id === actionId);
+    if (already && (already.status === 'busy' || already.status === 'approved' || already.status === 'denied')) return;
     patchApproval(actionId, (a) => ({ ...a, status: 'busy' }));
     try {
       const r = verdict === 'approved' ? await api.bellaApprove(actionId) : await api.bellaDeny(actionId);
@@ -308,7 +334,9 @@ export function BellaChat({ onClose }) {
       }
       patchApproval(actionId, (a) => ({ ...a, status: verdict, note: r?.summary || null }));
       fireApprovalsChanged();
-      send(`[[action:${actionId}:${verdict}]]`, { hidden: true });
+      const continuation = `[[action:${actionId}:${verdict}]]`;
+      if (busyRef.current) pendingContinuations.current.push(continuation);
+      else send(continuation, { hidden: true });
     } catch (err) {
       patchApproval(actionId, (a) => ({ ...a, status: 'error', note: err?.message || 'failed' }));
     }
@@ -400,6 +428,9 @@ export function BellaChat({ onClose }) {
       busyRef.current = false;
       streamRef.current = null;
       refreshConvs();
+      // Any approval clicked while this turn was streaming now gets its narration, in click order.
+      // Deferred a tick so this turn's state has settled before the next one starts.
+      if (pendingContinuations.current.length) setTimeout(drainContinuations, 0);
       // Voice bridge: when Bella Voice is active, she SPEAKS chat replies too
       // (incl. the narration after an Approve click).
       if (typeof window !== 'undefined' && window.__bellaVoiceActive && spokenText.trim()) {
