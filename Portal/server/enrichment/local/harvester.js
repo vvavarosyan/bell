@@ -25,6 +25,7 @@ import { upsertContact } from '../../lib/contacts.js';
 import { recomputeBellScoreForCompany } from '../../assembly/bell_score.js';
 import { inferSeniority } from '../seniority.js';
 import { fetchPage, toRootUrl, sameHost, hostOf, pool } from './http.js';
+import { recordCareersBoards } from '../../jobs/boards.js';
 import { renderPage, rendererAvailable, closeRenderer } from './render.js';
 import { recordReject } from './rejects.js';
 import { recordSearch } from './ledger.js';
@@ -573,6 +574,21 @@ export async function enrichCompany(company) {
     } else {
       note = renderMode ? 'rendered, no contacts found' : 'no contacts found on crawled pages';
     }
+  }
+
+  // WHERE THIS COMPANY ADVERTISES JOBS. Recorded, never crawled here: the links are already in
+  // hand so it costs no extra fetch across ~17,930 sites, and a vacancy list is a moving target
+  // that needs its own cadence and its own closure logic. Links from EVERY page crawled, not just
+  // the homepage — plenty of sites put careers only in a footer reached from /about.
+  try {
+    const careers = pickCareersLinks(home.finalUrl, pages.flatMap((p) => p.page?.links || []));
+    if (careers.length) {
+      const { recorded } = await recordCareersBoards(company.id, careers);
+      if (recorded) summary.stage7_job_boards = recorded;
+    }
+  } catch (err) {
+    // Never let job-board bookkeeping fail a harvest that otherwise succeeded.
+    console.warn('[harvest] job boards:', err.message);
   }
 
   return {
