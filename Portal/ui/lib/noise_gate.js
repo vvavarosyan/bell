@@ -1,43 +1,48 @@
 // The microphone gate that decides when Bella is being spoken to.
 //
-// WHY THIS IS ITS OWN MODULE: the old logic lived inline in the animation loop, so the only way to
-// test it was to speak into a laptop. It is pure now — you push RMS samples in and read thresholds
-// out — which is how the four scenarios below became unit tests instead of guesses.
+// Pure on purpose: inline in the animation loop, the only way to check this was to speak into a
+// laptop and hope. Push RMS frames in, read thresholds out, and the scenarios below become tests.
 //
-// ── THE BUG THIS REPLACES (Val: "listening gets stuck") ──────────────────────────────────────
-// The old gate spent its first 700ms taking the MAXIMUM RMS it saw and used that as the room's
-// noise floor, for the rest of the session, never revisited:
+// ── TWO FAILURES, IN OPPOSITE DIRECTIONS ────────────────────────────────────────────────────────
+// FIRST (Val: "listening gets stuck"): the original gate spent 700ms taking the MAXIMUM RMS it saw
+// as the room's noise floor, then used that for the whole session and never revisited it. A
+// maximum is the least robust statistic there is — one door, one cough, or simply starting to talk
+// as you open voice pinned the floor at SPEECH level, leaving the bar 2.2x above ordinary speech.
+// She sat there saying "listening" while structurally deaf, and talking louder made it worse.
 //
-//     if (now - t0 < 700) { noiseFloor = Math.max(noiseFloor, rms * 1.4); return; }
-//     const listenTh = Math.max(0.012, noiseFloor * 2.2);
+// SECOND (Val: "noisy environment distracted her"): the first repair added a hard ABSOLUTE ceiling
+// on the threshold. That cured deafness and caused the mirror-image fault — in a genuinely loud
+// room EVERY frame cleared a capped bar, so she heard the room as continuous speech: utterances
+// that never ended, transcriptions of nothing.
 //
-// A maximum is the least robust statistic there is. One loud thing in that 700ms window — a door,
-// a chair, a cough, a notification, or the completely normal case of Val starting to talk the
-// instant he opens voice — latched the floor at SPEECH level. The threshold then sat 2.2× ABOVE
-// ordinary speech and nothing could ever cross it again. The orb sat there saying "listening"
-// while being structurally deaf, and no amount of talking louder fixed it, because talking louder
-// is what caused it.
+// The ceiling was the wrong instrument. Deafness was never caused by loud rooms; it was caused by
+// the floor being WRONG and never re-examined. So the floor is what is fixed:
 //
-// THREE CHANGES, each aimed at that:
-//   1. Calibrate on a LOW PERCENTILE, not the max. The quietest quarter of the window is the room;
-//      anything above it is an event. One bang no longer defines the room.
-//   2. KEEP ADAPTING, asymmetrically — fall fast toward quiet, rise slowly. A gate that mis-reads
-//      the room recovers within a second or two instead of staying wrong forever. Rising slowly
-//      means a cough still cannot latch it.
-//   3. A HARD CEILING. The threshold may never exceed a level ordinary speech clears. If the room
-//      is genuinely louder than that, a false trigger costs one short transcription; being deaf
-//      costs Val the entire feature. That trade is deliberate and it is not symmetric.
+//   1. CALIBRATE ON A LOW PERCENTILE, not the peak. Even during continuous speech the RMS dips
+//      between syllables, so the 10th percentile finds the room rather than the talker.
+//   2. KEEP ADAPTING, ASYMMETRICALLY — fall fast toward quiet, rise slowly. A mis-read heals in
+//      about a second instead of lasting the session; rising slowly stops one cough latching it.
+//   3. CLAMP THE FLOOR TO THE ROOM'S OWN QUIET LEVEL, not to a fixed number. The floor may never
+//      sit more than FLOOR_OVER_QUIET x above the quietest level recently observed. In a loud room
+//      that quiet level is itself high, so the bar scales up with the room — which is correct. In
+//      a quiet room where something banged, it cannot stay high. This does the job the absolute
+//      ceiling was trying to do, without being blind to how loud the room actually is.
+//   4. HYSTERESIS. Starting an utterance takes a clear rise above the bar for several consecutive
+//      frames; SUSTAINING it only takes CONTINUE_RATIO of that. Without the split, a noisy room
+//      either triggers on every spike or chops a sentence into fragments at each pause.
 
-// Ordinary speech into a laptop mic sits around 0.05–0.3 RMS; a quiet room is 0.001–0.01.
-const FLOOR_MIN = 0.002;
-const LISTEN_MIN = 0.012;   // never trigger on near-silence
-const LISTEN_MAX = 0.05;    // never demand more than ordinary speech — the anti-deafness ceiling
+const FLOOR_MIN = 0.002;         // a zero floor would make every frame speech
+const LISTEN_MIN = 0.012;        // never trigger on near-silence
 const CALIBRATE_MS = 700;
 const LISTEN_MULT = 2.2;
-const BARGE_MULT = 3.5;     // stricter while she talks: absorbs what echo cancellation leaves
+const BARGE_MULT = 3.5;          // stricter while she talks — absorbs what echo cancellation leaves
 const BARGE_MIN = 0.02;
+const FLOOR_OVER_QUIET = 6;      // how far above the room's quiet level the floor may sit
+const CONTINUE_RATIO = 0.55;     // sustaining an utterance is easier than starting one
+const START_FRAMES = 3;          // consecutive frames above the bar before speech is believed
+const QUIET_RISE = 1.0004;       // per frame: lets the quiet reference follow a room getting louder
 
-/** Value below which `p` of the samples fall (p in 0..1). Sorts a copy; sample counts are tiny. */
+/** Value below which `p` of the samples fall (p in 0..1). */
 export function percentile(samples, p) {
   const a = [...samples].sort((x, y) => x - y);
   if (!a.length) return 0;
@@ -45,57 +50,73 @@ export function percentile(samples, p) {
   return a[i];
 }
 
-/**
- * @param {object} [opts]
- * @param {number} [opts.calibrateMs]  length of the initial listen-to-the-room window
- * @param {number} [opts.listenMax]    ceiling on the speech threshold
- */
 export function createNoiseGate(opts = {}) {
   const calibrateMs = opts.calibrateMs ?? CALIBRATE_MS;
-  const listenMax = opts.listenMax ?? LISTEN_MAX;
+  const startFrames = opts.startFrames ?? START_FRAMES;
   let t0 = null;
   let calibrating = true;
   const samples = [];
   let floor = 0.004;
+  let quiet = null;      // the room's quietest recent level — the reference the floor is clamped to
+  let above = 0;         // consecutive frames over the start bar
 
+  const clampFloor = (f) => {
+    const lo = FLOOR_MIN;
+    const hi = quiet == null ? Infinity : Math.max(FLOOR_MIN, quiet * FLOOR_OVER_QUIET);
+    return Math.min(hi, Math.max(lo, f));
+  };
   const thresholds = () => {
-    const listen = Math.min(listenMax, Math.max(LISTEN_MIN, floor * LISTEN_MULT));
-    // The barge threshold gets the same ceiling treatment, scaled — otherwise she could become
-    // impossible to interrupt, which is the same deafness bug wearing a different hat.
-    const barge = Math.min(listenMax * (BARGE_MULT / LISTEN_MULT),
-      Math.max(BARGE_MIN, floor * BARGE_MULT));
-    return { listenTh: listen, bargeTh: barge };
+    const listenTh = Math.max(LISTEN_MIN, floor * LISTEN_MULT);
+    return {
+      listenTh,
+      continueTh: listenTh * CONTINUE_RATIO,
+      bargeTh: Math.max(BARGE_MIN, floor * BARGE_MULT),
+    };
   };
 
   return {
     /**
-     * Feed one frame. Returns { listenTh, bargeTh, calibrating, floor }.
-     * @param {number} rms  frame RMS
-     * @param {number} now  monotonic ms (performance.now())
+     * Feed one frame.
+     * @returns {{listenTh:number, continueTh:number, bargeTh:number, calibrating:boolean,
+     *            floor:number, startSpeech:boolean}}
+     *   startSpeech — true on the frame where a NEW utterance should begin.
      */
     push(rms, now) {
       if (t0 === null) t0 = now;
+
+      // The room's quiet reference. Tracked always, including during calibration, and allowed to
+      // drift up slowly so a room that genuinely gets louder is followed rather than fought.
+      quiet = quiet == null ? rms : Math.min(quiet * QUIET_RISE, rms);
+      quiet = Math.max(FLOOR_MIN / 2, quiet);
+
       if (calibrating) {
         samples.push(rms);
-        if (now - t0 < calibrateMs) return { ...thresholds(), calibrating: true, floor };
-        // The quietest quarter of the window IS the room. Speech or a bang occupies the top of
-        // the distribution and is excluded by construction, not by a threshold we had to guess.
-        floor = Math.max(FLOOR_MIN, percentile(samples, 0.25) * 1.4);
+        if (now - t0 < calibrateMs) return { ...thresholds(), calibrating: true, floor, startSpeech: false };
+        // Speech and bangs live at the TOP of the distribution; the room lives at the bottom.
+        // A low percentile finds the room even when the whole window contains talking, because
+        // RMS dips between syllables.
+        // NO extra multiplier here. The floor IS the room's level; the margin above it belongs to
+        // LISTEN_MULT alone. Stacking 1.4 on top of 2.2 demanded speech 3.08x louder than the
+        // room, which in a noisy office is more headroom than a nearby talker actually has —
+        // the very complaint this is fixing.
+        floor = clampFloor(percentile(samples, 0.10));
         calibrating = false;
-        return { ...thresholds(), calibrating: false, floor };
+        return { ...thresholds(), calibrating: false, floor, startSpeech: false };
       }
 
-      const { listenTh } = thresholds();
-      // Only frames that are NOT speech inform the floor, or she would chase her own users upward.
-      if (rms < listenTh) {
-        // Asymmetric: fall fast, rise slow. Falling fast is what makes a bad calibration heal;
-        // rising slowly is what stops one cough from latching it.
-        const a = rms < floor ? 0.05 : 0.002;
-        floor = Math.max(FLOOR_MIN, floor * (1 - a) + rms * a);
+      const th = thresholds();
+      // Only non-speech frames inform the floor, or it would chase the talker upward.
+      if (rms < th.listenTh) {
+        const a = rms < floor ? 0.05 : 0.002;   // fall fast, rise slow
+        floor = clampFloor(floor * (1 - a) + rms * a);
+      } else {
+        floor = clampFloor(floor);
       }
-      return { ...thresholds(), calibrating: false, floor };
+
+      above = rms > th.listenTh ? above + 1 : 0;
+      const startSpeech = above === startFrames;
+      return { ...thresholds(), calibrating: false, floor, startSpeech };
     },
-    /** Current thresholds without feeding a frame. */
     read() { return { ...thresholds(), calibrating, floor }; },
   };
 }

@@ -13,6 +13,7 @@
 // flag on each definition is the hook the brain already honors.
 
 import { query } from '../db.js';
+import { bypassesCredits } from '../lib/credits.js';
 import { resolveCenter, companiesNear, buildingsNear, landAt, placesNear } from '../gis/nearby.js';
 import { planSteps, planSummary } from './plan.js';
 import openstatsRouter from '../routes/openstats.js';
@@ -1159,8 +1160,12 @@ export const TOOLS = [
     async execute(args, ctx) {
       const ids = (args.ids || []).map(Number).filter(Number.isFinite).slice(0, 200);
       if (!ids.length) return { error: 'ids[] required' };
-      const budget = await store.checkCreditsBudget(ctx.tenant.id, ctx.user?.id ?? 0, ids.length);
-      if (!budget.ok) return { error: `daily Bella credit cap would be exceeded (${budget.spent}/${budget.cap} spent today)` };
+      // The daily cap guards a credit balance. An account that bypasses credits has none to guard,
+      // and blocking here made an unlimited reveal fail for a reason that cannot apply to it.
+      if (!bypassesCredits(ctx.user, ctx.tenant)) {
+        const budget = await store.checkCreditsBudget(ctx.tenant.id, ctx.user?.id ?? 0, ids.length);
+        if (!budget.ok) return { error: `daily Bella credit cap would be exceeded (${budget.spent}/${budget.cap} spent today)` };
+      }
       const { status, payload } = await internalCall(peopleRouter, 'POST', '/reveal-bulk', ctx, { body: { ids } });
       const r = asResult(status, payload, ['requested', 'already', 'revealed', 'insufficient', 'charged', 'balance', 'unlimited']);
       if (!r.error) await store.addCreditsSpent(ctx.tenant.id, ctx.user?.id ?? 0, Number(payload?.charged) || 0);
@@ -1184,8 +1189,12 @@ export const TOOLS = [
     async execute(args, ctx) {
       const ids = (args.ids || []).map(Number).filter(Number.isFinite).slice(0, 200);
       if (!ids.length) return { error: 'ids[] required' };
-      const budget = await store.checkCreditsBudget(ctx.tenant.id, ctx.user?.id ?? 0, ids.length);
-      if (!budget.ok) return { error: `daily Bella credit cap would be exceeded (${budget.spent}/${budget.cap} spent today) — use a smaller batch or continue tomorrow` };
+      // The daily cap guards a credit balance. An account that bypasses credits has none to guard,
+      // and blocking here made an unlimited reveal fail for a reason that cannot apply to it.
+      if (!bypassesCredits(ctx.user, ctx.tenant)) {
+        const budget = await store.checkCreditsBudget(ctx.tenant.id, ctx.user?.id ?? 0, ids.length);
+        if (!budget.ok) return { error: `daily Bella credit cap would be exceeded (${budget.spent}/${budget.cap} spent today) — use a smaller batch or continue tomorrow` };
+      }
       const { status, payload } = await internalCall(companiesRouter, 'POST', '/reveal-bulk', ctx, { body: { ids } });
       const r = asResult(status, payload, ['requested', 'already', 'revealed', 'insufficient', 'charged', 'balance', 'unlimited']);
       if (!r.error) await store.addCreditsSpent(ctx.tenant.id, ctx.user?.id ?? 0, Number(payload?.charged) || 0);
@@ -2110,10 +2119,15 @@ export function getTool(name) {
  *   'always'        → gated in EVERY mode (external sends / auto-email triggers)
  *   (reads carry no approval field and never gate)
  */
-export function requiresApproval(tool, approvalMode) {
+export function requiresApproval(tool, approvalMode, ctx = null) {
   const a = tool?.approval;
   if (!a) return false;
   if (a === 'always') return true;
+  // A 'spend' gate exists to protect a credit balance. Signed in as platform admin there is no
+  // balance to protect — reveal-bulk returns {unlimited:true} and charges nothing — so asking for
+  // approval to spend zero is a confirmation step with no question in it. 'act' still gates: those
+  // change data, which is worth confirming regardless of who is paying.
+  if (a === 'spend' && ctx && bypassesCredits(ctx.user, ctx.tenant)) return false;
   return approvalMode !== 'auto';
 }
 
@@ -2124,8 +2138,20 @@ export async function executeTool(name, args, ctx) {
   if (!tool) return { result: { error: 'unknown tool: ' + name }, summary: 'unknown tool', isError: true };
   try {
     const result = await tool.execute(args || {}, ctx);
-    const summary = (() => { try { return tool.summarize(args || {}, result); } catch { return name; } })();
-    return { result, summary, isError: false };
+    let summary = (() => { try { return tool.summarize(args || {}, result); } catch { return name; } })();
+    // Val, 2026-08-07: "she failed to reveal and no explanation on why it failed."
+    // 27 tools summarize a failure as the bare word "failed", discarding the reason — and that
+    // summary is both what the user sees AND what Bella narrates from, so the reason reached
+    // nobody even though the tool had it in hand. Repaired centrally, so a tool added tomorrow
+    // cannot reintroduce it.
+    const failed = !!(result && result.error);
+    if (failed) {
+      const why = String(result.error).slice(0, 200);
+      if (!summary || !String(summary).includes(why.slice(0, 40))) summary = `failed — ${why}`;
+    }
+    // A tool returning {error} HAS failed. Reporting isError:false let the turn treat a refusal as
+    // a success — which is how "no explanation" became "no acknowledgement either".
+    return { result, summary, isError: failed };
   } catch (err) {
     return { result: { error: String(err.message || err).slice(0, 300) }, summary: 'failed: ' + String(err.message || '').slice(0, 80), isError: true };
   }

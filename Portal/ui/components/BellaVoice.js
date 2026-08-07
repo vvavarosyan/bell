@@ -415,7 +415,7 @@ export function BellaVoice({ onClose, onOpenChat }) {
         // Listen to the room for the first 700ms, then keep tracking it. bargeTh stays stricter
         // than listenTh — echo cancellation removes most of her own voice from the mic and that
         // margin absorbs the rest — but it is capped too, or she becomes impossible to interrupt.
-        const { listenTh, bargeTh, calibrating } = gate.push(rms, now);
+        const { listenTh, continueTh, bargeTh, calibrating, startSpeech } = gate.push(rms, now);
         if (calibrating) { raf = requestAnimationFrame(tick); return; }
 
         const st = stateRef.current;
@@ -427,10 +427,12 @@ export function BellaVoice({ onClose, onOpenChat }) {
         if (st === 'listening' && !speechStart && now - lastActivity > VOICE_IDLE_MS) { onClose?.(); return; }
 
         if (st === 'listening') {
-          if (rms > listenTh) {
-            lastSpeech = now;
-            if (!speechStart) { speechStart = now; startRec(); }
-          }
+          // STARTING an utterance needs a sustained rise over the bar (startSpeech is only true
+          // after several consecutive frames), so a door or a keyboard cannot open the recorder.
+          // SUSTAINING it needs only continueTh — without that split, the dips between words fall
+          // under the start bar and a noisy room chops one sentence into fragments.
+          if (startSpeech && !speechStart) { speechStart = now; lastSpeech = now; startRec(); }
+          else if (rms > (speechStart ? continueTh : listenTh)) lastSpeech = now;
           if (speechStart) {
             const tooLong = now - speechStart > MAX_UTTER_MS;
             const silentEnough = now - lastSpeech > SILENCE_MS;

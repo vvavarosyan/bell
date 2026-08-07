@@ -488,7 +488,7 @@ export async function runBellaTurn({ ctx, conversationId, userText, clientContex
         // named). Raising a fresh card here breaks the one-card promise (Val
         // 2026-07-20). Hand back a narratable result instead — the tool did NOT
         // run, and Bella tells the user honestly + can re-propose if they want it.
-        if (grant && !autonomous && requiresApproval(tool, approvalMode) && !takeGrant(grant, tu.name)) {
+        if (grant && !autonomous && requiresApproval(tool, approvalMode, ctx) && !takeGrant(grant, tu.name)) {
           slots[i] = { type: 'tool_result', tool_use_id: tu.id, content: JSON.stringify({ status: 'not_in_approved_plan', note: 'This action was NOT part of the plan the user approved, so it was NOT run (no email/spend happened). Tell the user plainly which step is beyond the approved plan; do not claim it ran. If they want it, offer to propose it separately.' }) };
           metaSlots[i] = { name: tu.name, summary: 'skipped — not in the approved plan' };
           continue;
@@ -497,7 +497,7 @@ export async function runBellaTurn({ ctx, conversationId, userText, clientContex
         // Approval gate (Val's D2): 'always' tools gate in every mode;
         // 'act'/'spend' gate unless the user chose no-approval in Settings.
         // Autonomous (scheduled) runs skip gates — pre-approved at scheduling.
-        if (!autonomous && requiresApproval(tool, approvalMode) && !takeGrant(grant, tu.name)) {
+        if (!autonomous && requiresApproval(tool, approvalMode, ctx) && !takeGrant(grant, tu.name)) {
           let summary;
           try { summary = tool.describe ? tool.describe(tu.input || {}) : 'Run ' + tu.name; } catch { summary = 'Run ' + tu.name; }
           const actionId = await store.proposeAction(tenantId, userId, convId, tu.name, tu.input || {}, summary);
