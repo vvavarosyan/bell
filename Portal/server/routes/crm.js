@@ -569,12 +569,19 @@ router.post('/records/:id/email', async (req, res, next) => {
       const sent = await sendEmail({ from, to, cc: cc.length ? cc : undefined, replyTo: effReplyTo, subject, html: bodyHtml || undefined, text: bodyOut, system: 'crm', tenantId: req.tenant?.id });
       await query(`UPDATE crm_emails SET status='sent', provider_message_id=$2, from_email=$3, reply_to=$4, sent_at=now() WHERE id=$1`,
         [emailId, sent.id, from, effReplyTo]);
-      await logActivity(null, tenantId(req), id, 'email_out', {
+      // ANSWER AS SOON AS THE SEND IS RECORDED. The activity entry and the contacted stamp are
+      // internal bookkeeping — nobody outside Bell sees them — but they used to sit between the
+      // send and the reply, adding round-trips to the engine box inside Bella's 12-second window.
+      // A caller that gives up there believes a delivered email failed, and retries it. They still
+      // run, just after the caller has its answer; a failure to write them is logged, never
+      // silently swallowed, because a missing activity row makes a record look uncontacted.
+      res.json({ id: emailId, status: 'sent', message_id: sent.id });
+      logActivity(null, tenantId(req), id, 'email_out', {
         actorUserId: actorUserId(req), actorEmail: replyTo,
         summary: 'Email sent: ' + (subject || '(no subject)'), payload: { to, email_id: emailId },
-      });
-      await markContacted(null, tenantId(req), id, replyTo);
-      res.json({ id: emailId, status: 'sent', message_id: sent.id });
+      }).catch((e) => console.error('[crm] activity log after send failed:', e.message));
+      markContacted(null, tenantId(req), id, replyTo)
+        .catch((e) => console.error('[crm] markContacted after send failed:', e.message));
     } catch (err) {
       const safe = /key_missing/i.test(err.message) ? 'Email is not configured yet (set the Resend key).' : 'Could not send the email.';
       await query(`UPDATE crm_emails SET status='failed', error=$2 WHERE id=$1`, [emailId, String(err.message).slice(0, 500)]);

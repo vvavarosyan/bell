@@ -84,7 +84,14 @@ function internalCall(router, method, path, ctx, { query = {}, body = {} } = {})
     let settled = false;
     let status = 200;
     const timer = setTimeout(() => {
-      if (!settled) { settled = true; reject(new Error('tool timeout after ' + TOOL_TIMEOUT_MS + 'ms')); }
+      if (!settled) {
+        settled = true;
+        // Flagged, not just worded: a timeout is NOT a failure. The work may well have completed —
+        // the timer only says we stopped waiting. executeTool keys on this flag.
+        const e = new Error('tool timeout after ' + TOOL_TIMEOUT_MS + 'ms');
+        e.timedOut = true;
+        reject(e);
+      }
     }, TOOL_TIMEOUT_MS);
     const finish = (fn, arg) => { if (!settled) { settled = true; clearTimeout(timer); fn(arg); } };
 
@@ -2164,6 +2171,17 @@ export async function executeTool(name, args, ctx) {
     // a success — which is how "no explanation" became "no acknowledgement either".
     return { result, summary, isError: failed };
   } catch (err) {
+    // ⚠️ A TIMEOUT IS NOT A FAILURE, and saying so is how a customer gets two emails.
+    // Val, 2026-08-08. The send route inserts the mail row, calls Resend, updates the row to
+    // 'sent', writes an activity entry and marks the record contacted. Nothing aborts when the
+    // 12-second timer fires — the route runs on and the email GOES OUT — but Bella was told
+    // "failed". The natural next words are "try again", and the recipient gets a second copy.
+    // Claiming a failure we did not observe is the same class of error as claiming a success
+    // (Rule 2.1): state what is actually known, which is that we stopped waiting.
+    if (err?.timedOut) {
+      const msg = `still running after ${TOOL_TIMEOUT_MS / 1000}s — the outcome is UNKNOWN. It may well have completed. Do NOT retry; check the record or the mail log first.`;
+      return { result: { unknown: true, error: msg }, summary: `outcome unknown (timed out) — ${name} may have completed; do not retry blindly`, isError: true };
+    }
     return { result: { error: String(err.message || err).slice(0, 300) }, summary: 'failed: ' + String(err.message || '').slice(0, 80), isError: true };
   }
 }

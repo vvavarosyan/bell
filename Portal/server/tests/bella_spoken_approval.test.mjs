@@ -126,3 +126,35 @@ test('the email card names the recipient', () => {
   const card = getTool('send_email').describe({ record_id: 12, to: 'ceo@myweb.qa', subject: 'Hello', body: 'Hi' });
   assert.match(card, /ceo@myweb\.qa/, 'the user must see WHO it goes to before approving');
 });
+
+// ── A TIMEOUT IS NOT A FAILURE (Val, 2026-08-08) ────────────────────────────────────────────────
+// Bella's tools stop waiting after 12 seconds. The send route inserts the mail row, calls Resend,
+// updates the row to 'sent', writes an activity entry and marks the record contacted — and NOTHING
+// aborts when that timer fires. The route runs on, the email GOES OUT, and Bella was told "failed".
+// The natural next words are "try again", and the recipient gets a second copy.
+
+test('a timed-out tool reports the outcome as UNKNOWN, never as failed', async () => {
+  const { executeTool } = await import('../bella/tools.js');
+  // A tool whose execute hangs past the timeout. Registering a fake tool is not possible, so this
+  // asserts the CONTRACT the timeout path must satisfy, against the shipped source.
+  const src = readFileSync(new URL('../bella/tools.js', import.meta.url), 'utf8');
+  assert.match(src, /e\.timedOut = true/, 'the timeout must be FLAGGED, not just worded');
+  assert.match(src, /err\?\.timedOut/, 'executeTool must branch on it');
+  assert.match(src, /outcome is UNKNOWN/i, 'the model must be told the outcome is unknown');
+  assert.doesNotMatch(
+    src.slice(src.indexOf('if (err?.timedOut)'), src.indexOf('if (err?.timedOut)') + 600),
+    /summary: `failed/, 'a timeout must never be summarised as a failure');
+  assert.ok(typeof executeTool === 'function');
+});
+
+test('the timeout message tells the user not to retry blindly', () => {
+  const src = readFileSync(new URL('../bella/tools.js', import.meta.url), 'utf8');
+  assert.match(src, /Do NOT retry/i, 'retrying is exactly what sends the second copy');
+  assert.match(src, /check the record or the mail log/i, 'and it must say how to find out');
+});
+
+test('a real failure is still reported as a failure', () => {
+  const src = readFileSync(new URL('../bella/tools.js', import.meta.url), 'utf8');
+  assert.match(src, /summary: 'failed: ' \+ String\(err\.message/,
+    'only the timeout path changed — a genuine error must still say failed');
+});
