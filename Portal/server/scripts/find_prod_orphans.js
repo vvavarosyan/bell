@@ -56,10 +56,17 @@ async function prodIds(base, token, table) {
   console.log('');
 
   let totalOrphans = 0;
-  for (const { name } of tables) {
+  for (const { name, syncWhere } of tables) {
     let local, prod;
     try {
-      local = new Set((await query(`SELECT id FROM ${name}`)).rows.map((r) => Number(r.id)));
+      // ⚠️ A FILTERED TABLE IS NOT A BEHIND TABLE. company_relationships mirrors only high/medium
+      // confidence non-competitor rows (syncWhere in sync/tables.js), so 216,538 local rows are
+      // deliberately absent from production. Comparing raw counts called that "awaiting the next
+      // push", which is exactly the kind of false alarm that trains you to ignore a report.
+      // The filter is applied to the local side so both sides mean the same thing.
+      local = new Set((await query(
+        `SELECT id FROM ${name}` + (syncWhere ? ` WHERE ${syncWhere}` : '')
+      )).rows.map((r) => Number(r.id)));
       prod = await prodIds(base, token, name);
     } catch (err) {
       console.log(`  ${name.padEnd(26)} skipped — ${err.message}`);
@@ -67,16 +74,21 @@ async function prodIds(base, token, table) {
     }
 
     // Rows production holds that the engine box does not: deletions that never propagated.
+    // ⚠️ For a filtered table this ALSO catches rows that stopped qualifying — a relationship
+    // downgraded to 'low' confidence is withdrawn from production the same way a deletion is.
     const orphans = [...prod].filter((id) => !local.has(id));
     // The other direction is NOT a defect — those are simply rows the next push will carry.
     const pending = [...local].filter((id) => !prod.has(id)).length;
 
     if (!orphans.length) {
-      console.log(`  ${name.padEnd(26)} ✓ ${n(local.size)} rows` + (pending ? `  (${n(pending)} awaiting the next push)` : ''));
+      console.log(`  ${name.padEnd(26)} ✓ ${n(local.size)} rows` +
+        (syncWhere ? ' (filtered mirror)' : '') +
+        (pending ? `  (${n(pending)} awaiting the next push)` : ''));
       continue;
     }
     totalOrphans += orphans.length;
-    console.log(`  ${name.padEnd(26)} ⚠ ${n(orphans.length)} row(s) on production that Bell has deleted`);
+    console.log(`  ${name.padEnd(26)} ⚠ ${n(orphans.length)} row(s) on production that Bell has deleted` +
+      (syncWhere ? ' or withdrawn' : ''));
     console.log(`      ids: ${orphans.slice(0, 12).join(', ')}${orphans.length > 12 ? ` … +${orphans.length - 12} more` : ''}`);
 
     if (APPLY) {
