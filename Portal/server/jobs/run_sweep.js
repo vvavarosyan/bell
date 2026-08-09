@@ -206,12 +206,16 @@ export async function runJobSweep({ limit = 40, staleHours = 12, ownSiteStaleHou
       continue;
     }
 
+    // ⚠️ ORDER MATTERS AND IT IS NOT THE OBVIOUS ONE. The sweep row goes in BEFORE the jobs are
+    // written, because upsertJobs stamps last_seen_at = now() and closeVanished counts good sweeps
+    // LATER than that. Recording afterwards made every job's count start at 1, so the FIRST missed
+    // read closed it — the one-blip-deletes-a-live-vacancy bug the whole module exists to avoid.
+    // The read has already succeeded by this point, so 'ok' is honest here.
+    await recordSweep(board.board_key, { ok: true, jobsSeen: jobs.length });
     const { inserted, updated, attributed } = await upsertJobs(board, jobs, { log });
     out.jobs += inserted + updated;
     out.unattributed += (inserted + updated) - attributed;
     track(board.platform, { inserted, updated });
-    // Record the successful read BEFORE closing, so the closure query can see it.
-    await recordSweep(board.board_key, { ok: true, jobsSeen: jobs.length });
     const c = await closeVanished(board.board_key, jobs.map((j) => j.external_id), { log });
     out.closed += c.expired + c.withdrawn;
     track(board.platform, { closed: c.expired + c.withdrawn });

@@ -39,7 +39,19 @@ const asArray = (v) => {
   return arr.length ? arr : null;
 };
 
-/** Record that a board was read — or that reading it failed. Closure depends on this being honest. */
+/**
+ * Record that a board was read — or that reading it failed. Closure depends on this being honest.
+ *
+ * ⚠️ CALL THIS **BEFORE** upsertJobs, NOT AFTER. closeVanished counts good sweeps whose swept_at is
+ * later than a job's last_seen_at. upsertJobs sets last_seen_at = now(); if the sweep row is written
+ * afterwards its swept_at is LATER still, so the very sweep that just SAW a job counts as a sweep
+ * "since it was seen". Every job then starts at 1, the first absence makes 2, MISSES_BEFORE_CLOSED
+ * fires, and a live vacancy is withdrawn after ONE missed read instead of two.
+ *
+ * That is precisely the failure this module exists to prevent, and the ordering hid it: the unit
+ * test built its own rows and never modelled the sweep that had seen the job, so it passed while
+ * production closed on the first miss. Proven against real Postgres before and after the fix.
+ */
 export async function recordSweep(boardKey, { ok, jobsSeen = 0, error = null }) {
   await query(
     `INSERT INTO job_board_sweeps (board_key, ok, jobs_seen, error) VALUES ($1,$2,$3,$4)`,
@@ -87,7 +99,7 @@ export async function upsertJobs(board, jobs, { log = () => {} } = {}) {
                         employer_stated, posted_at, expires_at,
                         is_active, last_seen_at, extra_fields, raw_payload, created_at, updated_at)
       VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::text[],$14::text[],$15,$16,$17,$18,$19,$20,
-              $21::timestamptz,$22::timestamptz,true,now(),$23::jsonb,$24::jsonb,now(),now())
+              $21::timestamptz,$22::timestamptz,true,now(),COALESCE($23::jsonb,'{}'::jsonb),$24::jsonb,now(),now())
       ON CONFLICT (board_key, external_id) WHERE board_key IS NOT NULL AND external_id IS NOT NULL
       DO UPDATE SET
         title           = EXCLUDED.title,
@@ -112,7 +124,11 @@ export async function upsertJobs(board, jobs, { log = () => {} } = {}) {
         posted_at       = COALESCE(EXCLUDED.posted_at, jobs.posted_at),
         expires_at      = COALESCE(EXCLUDED.expires_at, jobs.expires_at),
         company_id      = COALESCE(EXCLUDED.company_id, jobs.company_id),
-        extra_fields    = COALESCE(EXCLUDED.extra_fields, jobs.extra_fields),
+        -- ⚠️ jobs.extra_fields is NOT NULL DEFAULT '{}'. The insert coerces, so EXCLUDED is never
+        -- null here and COALESCE would be a no-op that WIPES a stored payload with '{}'. An empty
+        -- object means "this reader stated nothing extra", not "forget what you knew".
+        extra_fields    = CASE WHEN EXCLUDED.extra_fields = '{}'::jsonb
+                               THEN jobs.extra_fields ELSE EXCLUDED.extra_fields END,
         last_seen_at    = now(),
         -- Re-appearing on the board un-closes it. Without this a job that briefly vanished would
         -- stay closed forever while the employer is still advertising it.
