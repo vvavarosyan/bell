@@ -527,7 +527,7 @@ export function CompanyDetail({ companyId, onMutated, onDeleted, canHardDelete =
       </div>
 
       <div class="detail-body" ref=${bodyRef}>
-        ${tab === 'company' ? html`<${CompanyTab} company=${c} extra=${extra} similar=${similar} relationships=${rels} contacts=${data.contacts || []} branches=${data.branches || []} parentCompany=${data.parent_company || null} onReload=${reload} needsReveal=${needsReveal} onReveal=${revealContacts} isUser=${isUser} isLocalEngine=${isLocalEngine} />` : null}
+        ${tab === 'company' ? html`<${CompanyTab} company=${c} extra=${extra} similar=${similar} relationships=${rels} contacts=${data.contacts || []} branches=${data.branches || []} registrations=${data.registrations || []} parentCompany=${data.parent_company || null} onReload=${reload} needsReveal=${needsReveal} onReveal=${revealContacts} isUser=${isUser} isLocalEngine=${isLocalEngine} />` : null}
         ${tab === 'people'  ? (data.people_locked
           ? html`<${PeopleLockedBanner} count=${data.people_count ?? 0} compact=${true} />`
           : html`<${PeopleView}  people=${data.people} isUser=${isUser} onReveal=${revealPerson} />`) : null}
@@ -606,7 +606,15 @@ function CompanyNotes({ companyId }) {
     </section>`;
 }
 
-function CompanyTab({ company, extra, similar, relationships, contacts, branches = [], parentCompany = null, onReload, needsReveal = false, onReveal, isUser = false, isLocalEngine = false }) {
+// The registering bodies, in words. `company_record` is Bell's own name for the number a
+// directory listing carried without saying which register issued it — say that, don't pretend.
+const REG_BODY_LABELS = {
+  MOCI: 'Ministry of Commerce', QCCI: 'Qatar Chamber', QFC: 'Qatar Financial Centre',
+  QFCRA: 'QFC Regulatory Authority', MoPH: 'Ministry of Public Health',
+  CRA: 'Communications Regulatory Authority', company_record: 'Stated on the company record',
+};
+
+function CompanyTab({ company, extra, similar, relationships, contacts, branches = [], registrations = [], parentCompany = null, onReload, needsReveal = false, onReveal, isUser = false, isLocalEngine = false }) {
   const saveField = async (field, value) => {
     try {
       await api.updateCompany(company.id, { [field]: value });
@@ -789,6 +797,28 @@ function CompanyTab({ company, extra, similar, relationships, contacts, branches
           <${SearchProofBlock} companyId=${company.id} />
         </section>
       ` : null}
+
+      ${registrations.length > 1 ? html`
+        <section class="group" key="registrations">
+          <h3>Registered with ${new Set(registrations.map((r) => r.body)).size} bodies</h3>
+          <p style=${{ margin: '2px 0 8px', color: 'var(--text-muted)', fontSize: '12.5px' }}>
+            In Qatar the licensing body is half the answer to who a company is — a QFC entity and a
+            MOCI entity follow different rules. Every registration the state publishes, verbatim.
+          </p>
+          <table class="kv" style=${{ width: '100%' }}>
+            ${registrations.map((r) => html`<tr key=${r.id}>
+              <td style=${{ whiteSpace: 'nowrap', paddingRight: '14px' }}>
+                <b>${REG_BODY_LABELS[r.body] || r.body}</b>
+                ${r.registration_type && r.registration_type !== 'commercial_registration'
+                  ? html`<span class="muted" style=${{ fontSize: '11.5px' }}> · ${String(r.registration_type).replace(/_/g, ' ')}</span>` : null}
+              </td>
+              <td style=${{ fontFamily: 'ui-monospace, monospace' }}>${r.number}</td>
+              <td class="muted" style=${{ fontSize: '11.5px', textAlign: 'right' }}>
+                ${r.status || ''}${r.expires_on ? ' · expires ' + String(r.expires_on).slice(0, 10) : ''}
+              </td>
+            </tr>`)}
+          </table>
+        </section>` : null}
 
       <${LocationsBlock} companyId=${company.id} branches=${branches} />
 

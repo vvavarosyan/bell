@@ -191,6 +191,14 @@ function companyDetailOut(payload) {
   if (Array.isArray(payload?.locations) && payload.locations.length) {
     out.locations = payload.locations.slice(0, 20).map((l) => pick(l, ['label', 'address', 'latitude', 'longitude', 'is_primary']));
   }
+  // WHO LICENSES THIS COMPANY. In Qatar the registering body is half the answer to what a company
+  // IS — a QFC entity and a MOCI entity follow different rules, and a MoPH facility licence says
+  // the firm operates a clinic. Bella had the single primary_registration_no and nothing else, so
+  // she could not tell a QFC firm from a Chamber one. 10,490 companies hold more than one.
+  if (Array.isArray(payload?.registrations) && payload.registrations.length) {
+    out.registrations = payload.registrations.slice(0, 20)
+      .map((r) => pick(r, ['body', 'registration_type', 'number', 'status', 'expires_on']));
+  }
   // Branch model (migration 101): the operator's group structure. If this company
   // is itself a branch, part_of names the parent; branches lists its facilities.
   if (payload?.parent_company) out.part_of = pick(payload.parent_company, ['id', 'name']);
@@ -272,7 +280,7 @@ export const TOOLS = [
   {
     definition: {
       name: 'get_company',
-      description: 'Full profile of one company by id — everything you need to PERSONALIZE outreach: identity, industry tags, description, website, Google review rating + volume, partnerships, technographics, financials, contacts (masked unless revealed; includes WhatsApp numbers where captured), physical LOCATIONS (head office + branches with addresses — reference "your Lusail branch" when relevant), people count (people details restricted for customer accounts), enrichment score. Call this before drafting an email so the message references THIS company specifically.',
+      description: 'Full profile of one company by id — everything you need to PERSONALIZE outreach: identity, industry tags, description, website, Google review rating + volume, partnerships, technographics, financials, contacts (masked unless revealed; includes WhatsApp numbers where captured), physical LOCATIONS (head office + branches with addresses — reference "your Lusail branch" when relevant), EVERY REGISTRATION the Qatari state publishes for it (MOCI commercial registration, Qatar Chamber, QFC/QFCRA licence, MoPH facility licence — the body tells you what kind of company it is and which rules it lives under), people count (people details restricted for customer accounts), enrichment score. Call this before drafting an email so the message references THIS company specifically.',
       input_schema: {
         type: 'object',
         properties: { id: { type: 'integer', description: 'Company id from search_companies.' } },

@@ -623,6 +623,33 @@ router.get('/:id', async (req, res, next) => {
       query(`SELECT id, tech, category, confidence, evidence, detected_at, updated_at
                FROM company_tech WHERE company_id = $1 ORDER BY category, tech`, [id]).catch(() => ({ rows: [] })),
     ]);
+    // EVERY REGISTRATION THE STATE HOLDS, not just one number.
+    //
+    // `companies.primary_registration_no` carries a single value, and it was the ONLY registration
+    // this endpoint returned — so a firm licensed by more than one body showed one of them and
+    // silently hid the rest. Measured 2026-08-09: Bell holds 195,496 numbers across 175,883
+    // companies, and **10,490 of those companies are registered with more than one body**.
+    // "j awan and partners QFC LLC" holds a QFC licence AND a QFCRA regulatory registration;
+    // "HM HOLDING LLC" is in the Chamber's register AND the QFC's. In Qatar the licensing body is
+    // half the answer to "who is this company" — a QFC entity and a MOCI entity are different
+    // creatures with different rules — so showing one number and dropping the others is not a
+    // cosmetic gap.
+    //
+    // Ordered so the commercial registers a customer recognises come first. Fail-soft: the table
+    // is migration 107 and an older deployment simply gets an empty list.
+    const registrations = await query(
+      `SELECT id, body, registration_type, number, status, issued_on, expires_on
+         FROM company_registrations WHERE company_id = $1
+        ORDER BY CASE body WHEN 'MOCI' THEN 1 WHEN 'QCCI' THEN 2 WHEN 'QFC' THEN 3
+                           WHEN 'QFCRA' THEN 4 WHEN 'MoPH' THEN 5 WHEN 'CRA' THEN 6 ELSE 7 END,
+                 body, number`, [id])
+      .then((r) => r.rows)
+      // ⚠️ FAIL-SOFT, BUT SAY SO. This catch exists for a deployment that predates migration 107,
+      // NOT for a query I got wrong — and the two are indistinguishable from the outside. The first
+      // version of this selected issued_at/expires_at (the columns are issued_on/expires_on) and
+      // the silent catch turned a typo into "this company has no registrations" on every record.
+      .catch((err) => { console.warn(`[companies] registrations unavailable: ${err.message}`); return []; });
+
     // Track B: physical locations (head office + branches) — also feeds Bella's get_company so
     // she can personalize with "your Lusail branch". Fail-soft pre-098.
     const locations = await query(
@@ -696,6 +723,10 @@ router.get('/:id', async (req, res, next) => {
       rejects:      showSources ? rejects : [],
       tech:         stripSrc(tech.rows),
       locations,
+      // The registering body is a FACT the state publishes, not Bell's own sourcing, so it is not
+      // subject to the admin-only provenance rule above — a customer is entitled to know a company
+      // is QFC-licensed rather than MOCI-registered.
+      registrations,
       parent_company: parentCompany,
       branches,
     });
