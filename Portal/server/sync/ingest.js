@@ -60,6 +60,7 @@ export async function applyDeletions(table, ids) {
 export async function collectResearchPull(since) {
   const watermark = new Date().toISOString();
 
+  // See the note on `people` below: the high band is a second, ledger-independent signal.
   const companies = await query(
     `SELECT c.* FROM companies c
       WHERE c.id IN (
@@ -68,10 +69,23 @@ export async function collectResearchPull(since) {
            AND action IN ('created','enriched')
            AND entity_id <> 0
            AND derived_at > $1
-      )`,
+      )
+      OR (c.id >= 2000000000 AND c.updated_at > $1)`,
     [since]
   );
 
+  // ⚠️ THE SECOND CLAUSE IS A SAFETY NET, AND IT IS NOT OPTIONAL.
+  // The ledger is how a prod-created person is found, so a person whose ledger row was never
+  // written is unreachable — no `since` value can fetch it, because there is nothing to fetch it
+  // BY. That happened: on 2026-08-09, 7 people sat on production with high-band ids and no ledger
+  // entry, invisible even to a pull from the epoch. The cause is fixed in research/ingest.js, but
+  // a cause fixed forward does not recover what is already stranded, and the same shape could
+  // arise from any future writer that forgets the ledger.
+  //
+  // So the high band ITSELF is the second signal. Those ids only ever come from
+  // research_entity_id_seq (migration 017), so every one of them is a prod-originated entity that
+  // belongs on the engine box. Bounded by `since` on updated_at so a normal incremental pull stays
+  // small; a rewound watermark sweeps up everything that was ever missed.
   const people = await query(
     `SELECT p.* FROM people p
       WHERE p.id IN (
@@ -80,7 +94,8 @@ export async function collectResearchPull(since) {
            AND action IN ('created','enriched')
            AND entity_id <> 0
            AND derived_at > $1
-      )`,
+      )
+      OR (p.id >= 2000000000 AND p.updated_at > $1)`,
     [since]
   );
 

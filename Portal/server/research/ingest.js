@@ -240,7 +240,12 @@ async function processPerson(client, jobId, p, targetCompanyId = null) {
     };
     await client.query(`UPDATE people SET extra_fields = extra_fields || $2::jsonb WHERE id = $1`,
       [row.id, JSON.stringify(newExtras)]);
-    await linkPersonToCompany(client, row.id, p, jobId, targetCompanyId);
+    // Same hazard on the enrich path — a failed link must not cost the ledger row.
+    try {
+      await linkPersonToCompany(client, row.id, p, jobId, targetCompanyId);
+    } catch (linkErr) {
+      console.warn(`[research] person ${row.id} enriched but not linked: ${linkErr.message}`);
+    }
     return audit(client, jobId, 'person', row.id, 'enriched',
       { research_derived: newExtras.research_derived[`from_job_${jobId}`] },
       'merged into extra_fields.research_derived');
@@ -264,10 +269,29 @@ async function processPerson(client, jobId, p, targetCompanyId = null) {
       }),
     ]);
     const personId = Number(r.rows[0].id);
-    await linkPersonToCompany(client, personId, p, jobId, targetCompanyId);
-    return audit(client, jobId, 'person', personId, 'created',
+    // ⚠️ RECORD THE CREATION BEFORE ANYTHING ELSE CAN FAIL, AND NEVER LET A LATER STEP UNDO IT.
+    //
+    // The ledger row is what makes this person reachable: collectResearchPull selects people whose
+    // id appears in research_derived_entities with action 'created' or 'enriched'. The reverse pull
+    // is the ONLY way a prod-created person ever reaches the engine box.
+    //
+    // The original order was insert → link → audit, all inside one try whose catch returns
+    // audit(…'skipped', entity_id NULL). The enclosing savepoint therefore saw NO error, released,
+    // and committed a real person with no ledger row — invisible to the pull, permanently. Seven
+    // such people were found on production on 2026-08-09, with consecutive ids, i.e. one job whose
+    // linking step failed seven times in a row. A full pull from the epoch could not fetch them
+    // because there was nothing to fetch them BY.
+    const created = await audit(client, jobId, 'person', personId, 'created',
       { full_name: fullName, title: clean(p.title), linkedin_url: linkedinUrl, company_name: clean(p.company_name) },
       null);
+    // Linking is a separate concern with its own failure mode. A person without an employment link
+    // is incomplete; a person without a ledger row is LOST.
+    try {
+      await linkPersonToCompany(client, personId, p, jobId, targetCompanyId);
+    } catch (linkErr) {
+      console.warn(`[research] person ${personId} created but not linked: ${linkErr.message}`);
+    }
+    return created;
   } catch (err) {
     if (err && err.code === '23505') {
       return audit(client, jobId, 'person', null, 'skipped', null, 'unique violation: ' + err.constraint);
