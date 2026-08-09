@@ -27,12 +27,25 @@ import { fetchPage } from '../../enrichment/local/http.js';
 
 export const JSONLD_SOURCE = 'own_site';
 
-/** Every <script type="application/ld+json"> payload on the page, parsed, junk skipped. */
+/**
+ * Every <script type="application/ld+json"> payload on the page, parsed, junk skipped.
+ *
+ * ⚠️ HTML COMMENTS ARE STRIPPED FIRST, AND BELL HAS BEEN BITTEN BY THIS BEFORE — the working
+ * agreement records that a commented-out <td> once shifted Ashghal's winner columns. A careers page
+ * that ships its theme's demo markup commented out
+ *     <!-- <script type="application/ld+json">{"@type":"JobPosting","title":"Senior Accountant",
+ *          "hiringOrganization":{"name":"Milaha"}}</script> -->
+ * would otherwise become a real, dated, attributed vacancy on a real Qatar company. Verified: the
+ * first version of this INVENTED exactly that posting.
+ */
 export function extractLdBlocks(html) {
   const out = [];
+  // Comments cannot nest in HTML, so a non-greedy sweep is exact. Done before the script scan so a
+  // commented block is simply not there to be found.
+  const live = String(html || '').replace(/<!--[\s\S]*?-->/g, ' ');
   const re = /<script[^>]+type=["']application\/ld\+json["'][^>]*>([\s\S]*?)<\/script>/gi;
   let m;
-  while ((m = re.exec(String(html || '')))) {
+  while ((m = re.exec(live))) {
     let text = m[1].trim();
     if (!text) continue;
     // Some CMSs wrap the payload in a CDATA guard or an HTML comment.
@@ -111,12 +124,24 @@ export function ldExpiry(job) {
   return { expires_at: through, note: 'stated by the page' };
 }
 
-/** A stable id for this posting. Prefer what the page states; fall back to its own URL. */
-export function ldExternalId(job, pageUrl) {
+/**
+ * The id the page STATES for this posting, or null.
+ *
+ * ⚠️ NO FALLBACK TO THE PAGE URL. The first version keyed an unidentified posting as
+ * `${pageUrl}#${title}` using the POST-REDIRECT url, so the vacancy's identity depended on two
+ * things the employer changes casually. Adding a locale redirect (/careers → /careers?lang=en),
+ * moving www→apex, or appending a tracking parameter re-keys EVERY posting on the board: the new
+ * ids insert as new rows and the old ids, absent from the sweep, are withdrawn. One redirect, and
+ * the whole board's history is deleted and re-created.
+ *
+ * A posting whose page states neither an identifier nor a url has not told Bell which vacancy it
+ * is, so Bell cannot track whether it closes. Absent, not invented — rule 2.1.
+ */
+export function ldExternalId(job) {
   const ident = job.identifier;
   const fromIdent = str(ident?.value) || (typeof ident === 'string' ? ident.trim() : null);
   const url = str(job.url) || str(job['@id']) || null;
-  const raw = fromIdent || url || (str(job.title) ? `${pageUrl}#${str(job.title)}` : null);
+  const raw = fromIdent || url;
   return raw ? String(raw).slice(0, 300) : null;
 }
 
@@ -131,7 +156,7 @@ export function parseJobPostings(html, pageUrl) {
   const seen = new Set();
   for (const p of postings) {
     const title = str(p.title) || str(p.name);
-    const external_id = ldExternalId(p, pageUrl);
+    const external_id = ldExternalId(p);
     // No title or no identity means Bell cannot show it or track its closure. Skipped, not guessed.
     if (!title || !external_id || seen.has(external_id)) continue;
     seen.add(external_id);
@@ -159,7 +184,11 @@ export function parseJobPostings(html, pageUrl) {
       raw: p,
     });
   }
-  return { jobs, blocks: blocks.length, postings: postings.length };
+  // A posting the page published but Bell could not turn into a trackable row makes this read
+  // INCOMPLETE — the board looks smaller than it is, and a board that looks smaller withdraws the
+  // difference. Same rule as the other three readers: only a read that can vouch for itself may
+  // close anything.
+  return { jobs, blocks: blocks.length, postings: postings.length, complete: jobs.length === postings.length };
 }
 
 /**
@@ -179,6 +208,10 @@ export async function fetchOwnSiteJobs(url, { get = fetchPage } = {}) {
   if (!res?.ok || !res.html) {
     throw new Error(`careers page unreadable (${res?.error || 'HTTP ' + (res?.status ?? 0)})`);
   }
-  const { jobs, postings } = parseJobPostings(res.html, res.finalUrl || url);
-  return { jobs, postings };
+  const { jobs, postings, complete } = parseJobPostings(res.html, res.finalUrl || url);
+  if (!complete) {
+    throw new Error(`careers page states ${postings} vacancies but only ${jobs.length} carry an id ` +
+      'the page published — refusing a partial read (the missing ones would look withdrawn)');
+  }
+  return { jobs, postings, complete };
 }

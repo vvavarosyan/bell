@@ -83,11 +83,51 @@ test('a malformed block does not lose the good one beside it', () => {
 test('a posting with no title or no identity is skipped, never invented', () => {
   const noTitle = { ...POSTING, title: undefined, name: undefined };
   assert.equal(parseJobPostings(page(noTitle), 'https://x.qa/c').jobs.length, 0);
-  // No identifier and no url: the page url + title is the last resort, and it IS stable.
+  // ⚠️ NO FALLBACK TO THE PAGE URL. Keying an unidentified posting as `${pageUrl}#${title}` made
+  // its identity depend on the POST-REDIRECT url. One locale redirect, one www→apex move, one
+  // tracking parameter, and every posting on the board re-keys: the new ids insert as new rows and
+  // the old ones, now absent, are withdrawn. A page that states no id has not said which vacancy
+  // this is, and Bell cannot track a closure it cannot identify.
   const noId = { ...POSTING, identifier: undefined, url: undefined };
   const r = parseJobPostings(page(noId), 'https://x.qa/c');
+  assert.equal(r.jobs.length, 0, 'no stated id → absent, not derived');
+  assert.equal(r.complete, false, 'and the read is incomplete, so it may not close anything');
+});
+
+test('the same posting keeps its id when the page URL changes', () => {
+  // The redirect case, stated positively.
+  const a = parseJobPostings(page(POSTING), 'https://acme.qa/careers').jobs[0];
+  const b = parseJobPostings(page(POSTING), 'https://www.acme.qa/careers?lang=en').jobs[0];
+  assert.equal(a.external_id, b.external_id);
+  assert.equal(a.external_id, 'REQ-1001');
+});
+
+test('a page that publishes JobPosting markup inside an HTML COMMENT states no vacancy', () => {
+  // Bell has been bitten by commented-out markup before: a commented <td> once shifted Ashghal's
+  // winner columns. A careers page shipping its theme's demo markup commented out would otherwise
+  // become a real, dated vacancy attributed to a real Qatar company.
+  const html = `<html><body><!-- ${page({ ...POSTING, title: 'Senior Accountant' })} --></body></html>`;
+  const r = parseJobPostings(html, 'https://x.qa/c');
+  assert.equal(r.jobs.length, 0);
+  assert.equal(r.blocks, 0, 'the commented block is not even parsed');
+});
+
+test('live markup beside a commented block still reads', () => {
+  const html = `<html><head><!-- <script type="application/ld+json">{"@type":"JobPosting","title":"Demo"}</script> -->`
+    + `<script type="application/ld+json">${JSON.stringify(POSTING)}</script></head></html>`;
+  const r = parseJobPostings(html, 'https://x.qa/c');
   assert.equal(r.jobs.length, 1);
-  assert.equal(r.jobs[0].external_id, 'https://x.qa/c#Site Engineer');
+  assert.equal(r.jobs[0].title, 'Site Engineer');
+});
+
+test('a page whose postings cannot all be identified is INCOMPLETE', () => {
+  // 2 published, 1 identifiable → the board looks half its size, and a board that looks smaller
+  // withdraws the difference. Same rule as the other three readers.
+  const html = page(POSTING, { ...POSTING, title: 'Accountant', identifier: undefined, url: undefined });
+  const r = parseJobPostings(html, 'https://x.qa/c');
+  assert.equal(r.postings, 2);
+  assert.equal(r.jobs.length, 1);
+  assert.equal(r.complete, false);
 });
 
 test('the same posting twice on one page is stored once', () => {
@@ -133,9 +173,9 @@ test('location reads the address the page states, in its own words', () => {
 });
 
 test('the identifier the page publishes is preferred over its URL', () => {
-  assert.equal(ldExternalId({ identifier: { value: 'REQ-9' }, url: 'https://x.qa/j/1' }, 'https://x.qa/c'), 'REQ-9');
-  assert.equal(ldExternalId({ url: 'https://x.qa/j/1' }, 'https://x.qa/c'), 'https://x.qa/j/1');
-  assert.equal(ldExternalId({}, 'https://x.qa/c'), null);
+  assert.equal(ldExternalId({ identifier: { value: 'REQ-9' }, url: 'https://x.qa/j/1' }), 'REQ-9');
+  assert.equal(ldExternalId({ url: 'https://x.qa/j/1' }), 'https://x.qa/j/1');
+  assert.equal(ldExternalId({}), null, 'nothing stated → nothing claimed');
 });
 
 test('a JobPosting typed with a full schema.org URL still counts', () => {
