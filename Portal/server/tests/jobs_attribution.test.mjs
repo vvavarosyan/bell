@@ -141,12 +141,26 @@ test('a name Bell does not hold simply gets no company', { skip: skip() }, async
 });
 
 // ── the whole decision ───────────────────────────────────────────────────────────────────────
-test('a verified board answers for its own jobs', { skip: skip() }, async () => {
+test('a verified board answers when the posting names nobody', { skip: skip() }, async () => {
   await clear();
   const id = await company('Some Employer Ltd');
   const r = await attributeJob({ attribution: 'verified', company_id: id }, { employer_stated: null }, { q });
   assert.equal(r.company_id, id);
   assert.match(r.how, /own domain/);
+});
+
+test('a recruitment agency does not become the employer of its clients vacancies', { skip: skip() }, async () => {
+  await clear();
+  // The case that breaks a board-only rule, and it is common in Qatar: the agency's OWN careers
+  // page — a verified board by every test — advertises its clients' roles. The posting names the
+  // real employer, and the posting is the more specific statement.
+  const agency = await company('Al Fares Manpower Supply');
+  const client = await company('Baab Al Rayyan Group');
+  const r = await attributeJob(
+    { attribution: 'verified', company_id: agency, board_key: 'site:alfares.qa/careers' },
+    { employer_stated: state('Baab Al Rayyan Group'), title: 'Storekeeper' }, { q });
+  assert.equal(r.company_id, client);
+  assert.match(r.how, /posting wins/);
 });
 
 test('an UNVERIFIED board attributes nothing on its own', { skip: skip() }, async () => {

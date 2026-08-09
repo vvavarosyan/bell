@@ -172,7 +172,10 @@ export async function fetchOwnSiteJobs(url, { get = fetchPage } = {}) {
   // fetchPage honours robots.txt, caps the body size and follows redirects — the same reader the
   // harvester uses on these very domains, so a site that has already asked Bell not to crawl a path
   // is not crawled twice under a different name.
-  const res = await get(url, { timeoutMs: 20_000, retries: 1 });
+  // Tight, because this runs across HUNDREDS of pages in one sweep. A retry only fires on a
+  // transient error, but the ceiling is what matters: 80 boards × (15 s + one retry) is the worst
+  // night this leg can cost, and it has to leave room for the rest of the nightly.
+  const res = await get(url, { timeoutMs: 15_000, retries: 1 });
   if (!res?.ok || !res.html) {
     throw new Error(`careers page unreadable (${res?.error || 'HTTP ' + (res?.status ?? 0)})`);
   }

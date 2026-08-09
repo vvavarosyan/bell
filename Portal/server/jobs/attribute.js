@@ -146,18 +146,32 @@ export async function matchStatedEmployer(stated, { q = query } = {}) {
 /**
  * Decide company_id for one incoming job.
  *
- * Order matters. A VERIFIED board is a company vouching for its own careers page from its own
- * domain, which is stronger than a name match — a name can collide, a domain the company publishes
- * on itself cannot be someone else's by accident. The stated employer is the fallback, and it is
- * what makes aggregator sources usable at all.
+ * THE POSTING OUTRANKS THE BOARD. A verified board — a careers page on the company's own domain —
+ * is good evidence, but it is evidence about the PAGE, not about each vacancy on it. Recruitment
+ * agencies are the case that breaks a board-only rule and they are common in Qatar: an agency's own
+ * careers page advertises its CLIENTS' vacancies, and every one of them would otherwise be recorded
+ * as the agency hiring. The same shape appears wherever a site embeds a shared job widget.
+ *
+ * So when the posting names an employer AND that name resolves to exactly one active company, that
+ * company wins — it is the more specific statement, and it is the source's own. The board answers
+ * only when the posting says nothing, which is the common case (Oracle states no employer on 86 of
+ * 86 requisitions sampled).
  *
  * @returns {Promise<{company_id: number|null, how: string}>}
  */
 export async function attributeJob(board, job, { q = query } = {}) {
-  if (board?.attribution === 'verified' && board.company_id) {
-    return { company_id: Number(board.company_id), how: 'verified board on the company\'s own domain' };
-  }
   const m = await matchStatedEmployer(job?.employer_stated, { q });
-  if (m) return { company_id: m.company_id, how: m.why };
+  if (m) {
+    const boardId = board?.attribution === 'verified' && board.company_id ? Number(board.company_id) : null;
+    return {
+      company_id: m.company_id,
+      how: boardId && boardId !== m.company_id
+        ? `${m.why} — which is NOT the company whose page carries this board, so the posting wins`
+        : m.why,
+    };
+  }
+  if (board?.attribution === 'verified' && board.company_id) {
+    return { company_id: Number(board.company_id), how: 'verified board on the company\'s own domain; the posting names no employer' };
+  }
   return { company_id: null, how: 'no company named by the source, or the name matched more than one' };
 }

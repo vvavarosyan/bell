@@ -30,6 +30,11 @@ import { JSONLD_SOURCE, fetchOwnSiteJobs } from './sources/jsonld.js';
 // sitemap before shipping (rule 2.2), not by reasoning about it.
 const QE_MAX_JOBS_PER_RUN = Number(process.env.BELL_JOBS_QE_MAX || 400);
 
+// Company careers pages are re-read WEEKLY, not nightly. Measured yield across 95 of them is zero
+// (see the own_site reader's note) — nightly fetching of 255 pages for nothing would crowd out the
+// boards that actually publish vacancies.
+const OWN_SITE_STALE_HOURS = Number(process.env.BELL_JOBS_OWN_SITE_STALE_H || 168);
+
 // One entry per platform Bell can read. A board on a platform with no reader is skipped and left
 // for later — never guessed at, and never recorded as an empty board, which would start closing
 // its jobs.
@@ -84,6 +89,17 @@ const READERS = {
   // different hand-built layout. This reads ONLY schema.org JobPosting — structured data the site
   // publishes itself for search engines — and returns an honest zero when a page carries none.
   // Scraping the visible page instead would turn "Life at X" testimonials into vacancies.
+  //
+  // ⚠️ MEASURED 2026-08-09, AND THE ANSWER IS ZERO. Across 95 of Bell's own careers pages (25 by
+  // id, then 70 sampled at random): NOT ONE publishes JobPosting. 32 of the 70 publish some
+  // structured data — WebPage, WebSite, BreadcrumbList, Organization, DiscussionForumPosting — so
+  // the tooling is there; Qatar employers simply do not mark up their vacancies for Google Jobs.
+  //
+  // The reader is kept because it is correct and free, and any site that adds the markup is picked
+  // up the same week. But it runs on a WEEKLY cadence, not nightly (see OWN_SITE_STALE_HOURS):
+  // 255 fetches a night for a measured yield of zero is not diligence, it is noise. Covering every
+  // company's own site properly needs a paid actor — the route Val already expected to take — or
+  // guessing at page layout, which this file exists to refuse.
   [JSONLD_SOURCE]: async (board) => fetchOwnSiteJobs(board.url),
 
   [QL_SOURCE]: async () => {
@@ -133,7 +149,7 @@ export async function ensureNationalBoards({ log = () => {} } = {}) {
  * @param {number} [opts.staleHours]   how old a successful read must be before re-reading
  * @param {boolean} [opts.dryRun]      read and report, write nothing
  */
-export async function runJobSweep({ limit = 40, staleHours = 12, dryRun = false, log = () => {} } = {}) {
+export async function runJobSweep({ limit = 40, staleHours = 12, ownSiteStaleHours = null, dryRun = false, log = () => {} } = {}) {
   if (!dryRun) await ensureNationalBoards({ log });
   // ⚠️ TWO QUEUES, NOT ONE. boardsDue orders by "least recently read", and 255 never-read company
   // careers pages all sort ahead of every ATS board. That exact shape already broke this once: the
@@ -142,8 +158,12 @@ export async function runJobSweep({ limit = 40, staleHours = 12, dryRun = false,
   // long tail of own-site pages only fills what is left.
   const PRIORITY = Object.keys(READERS).filter((p) => p !== JSONLD_SOURCE);
   const head = await boardsDue({ limit, staleHours, platforms: PRIORITY });
+  // Weekly, not nightly — see the reader's note. An explicit ownSiteStaleHours always wins;
+  // otherwise "read everything now" (staleHours 0, what the Read Job Boards Now command passes)
+  // still means everything, and any other cadence is stretched to a week.
+  const ownStale = ownSiteStaleHours ?? (staleHours === 0 ? 0 : Math.max(staleHours, OWN_SITE_STALE_HOURS));
   const tail = head.length < limit
-    ? await boardsDue({ limit: limit - head.length, staleHours, platforms: [JSONLD_SOURCE] })
+    ? await boardsDue({ limit: limit - head.length, staleHours: ownStale, platforms: [JSONLD_SOURCE] })
     : [];
   const boards = [...head, ...tail];
   const out = { boards: boards.length, read: 0, skipped: 0, failed: 0, jobs: 0, closed: 0, unattributed: 0 };
