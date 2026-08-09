@@ -471,9 +471,43 @@ export const TOOLS = [
   },
 
   {
+    // THE QUESTION BELL ALONE CAN ANSWER, and until 2026-08-08 nothing in the product could:
+    // "how much government work does this firm actually win?" Bell holds 24,537 awarded tenders
+    // with a named winner, 18,601 matched to a company across 1,691 firms — Mannai Trading Co. WLL
+    // alone has 894 contracts worth QAR 8.79bn across 54 buyers.
+    definition: {
+      name: 'get_company_wins',
+      description: "What ONE company has WON from Qatar government buyers — how many contracts, their total stated value, which buyers, and the most recent awards. This is the strongest possible evidence of a firm's real standing, and Bell is the only place it can be answered. Use it whenever the user asks about a company's track record, size, credibility, or 'are they any good' — and before drafting outreach to a contractor or supplier, so the message can reference work they actually won. Only awards matched to the company by a STATED registration number are counted, never by name similarity, so the figures are evidence rather than estimates. A contract count and a total value answer different questions: not every award states an amount, so both are reported.",
+      input_schema: {
+        type: 'object',
+        properties: {
+          company_id: { type: 'integer', description: 'Company id from search_companies or get_company.' },
+          limit: { type: 'integer', description: 'How many recent awards to list (default 20, max 100).' },
+        },
+        required: ['company_id'],
+      },
+    },
+    async execute(args, ctx) {
+      const id = Number(args.company_id);
+      if (!Number.isFinite(id)) return { error: 'company_id required' };
+      const { status, payload } = await internalCall(tendersRouter, 'GET', `/won-by/${id}`, ctx,
+        { query: { limit: args.limit } });
+      return asResult(status, payload, ['totals', 'by_buyer', 'recent']);
+    },
+    summarize: (_a, r) => {
+      if (r?.error) return 'failed';
+      const t = r?.totals || {};
+      if (!t.contracts) return 'no government contracts on record';
+      const v = Number(t.total_value) || 0;
+      return `${t.contracts} contract${t.contracts === 1 ? '' : 's'} from ${t.buyers} buyer${t.buyers === 1 ? '' : 's'}`
+        + (v ? ` · QAR ${Math.round(v).toLocaleString('en-US')} stated across ${t.with_value}` : '');
+    },
+  },
+
+  {
     definition: {
       name: 'get_awards',
-      description: "WHO WON — recent Qatar contract awards (Ashghal, QatarEnergy, Kahramaa) with the WINNING company, contract value, ICV score and bidder count. A recent winner is an active vendor with fresh budget (buyer intent for their own supply chain). Use for 'who won [x]', 'recent awards', 'who's winning contracts in my industry', competitive/win-loss questions. icp=true = only awards in the user's ICP industries. (Monaqasat hides winners so it's excluded.)",
+      description: "WHO WON — Qatar contract awards from ALL FOUR sources (Monaqasat, Ashghal, QatarEnergy, Kahramaa) with the WINNING company, contract value, ICV score and bidder count. Bell holds 24,537 awarded tenders with a named winner; 18,601 are matched to a company record across 1,691 firms. A recent winner is an active vendor with fresh budget (buyer intent for their own supply chain). Use for 'who won [x]', 'recent awards', 'who is winning contracts in my industry', competitive and win-loss questions. icp=true limits it to the user's ICP industries.",
       input_schema: {
         type: 'object',
         properties: {

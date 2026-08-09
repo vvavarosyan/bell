@@ -230,6 +230,53 @@ router.get('/awards', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+// GET /api/tenders/won-by/:companyId — what ONE company has won from the Qatar government.
+//
+// The highest-value question a Qatar B2B customer can ask about a local firm, and until now Bell
+// could not answer it anywhere — not in the API, not on the company profile, not through Bella —
+// despite holding 24,537 awarded tenders with a named winner, 18,601 of them matched to a company.
+//
+// Only tenders whose winner was matched by a STATED registration number are counted (that is how
+// award_company_id is set — never by name similarity), so a total here is evidence, not an
+// estimate. Values are summed ONLY where the source states an amount; a count and a total are
+// therefore answers to different questions and are reported separately rather than blended.
+router.get('/won-by/:companyId', async (req, res, next) => {
+  try {
+    const id = Number(req.params.companyId);
+    if (!Number.isFinite(id)) return res.status(400).json({ error: 'invalid_id' });
+    const limit = Math.min(Math.max(Number(req.query.limit) || 20, 1), 100);
+
+    const totals = await query(`
+      SELECT count(*)::int                                          AS contracts,
+             count(*) FILTER (WHERE value_amount IS NOT NULL)::int   AS with_value,
+             COALESCE(sum(value_amount::numeric) FILTER (WHERE value_amount IS NOT NULL), 0) AS total_value,
+             min(awarded_at)::date                                   AS first_award,
+             max(awarded_at)::date                                   AS latest_award,
+             count(DISTINCT buyer)::int                              AS buyers
+        FROM tenders
+       WHERE award_company_id = $1 AND status = 'awarded' AND ${TWIN_SUPPRESS}`, [id]);
+
+    const byBuyer = await query(`
+      SELECT buyer, count(*)::int AS contracts,
+             COALESCE(sum(value_amount::numeric) FILTER (WHERE value_amount IS NOT NULL), 0) AS value
+        FROM tenders
+       WHERE award_company_id = $1 AND status = 'awarded' AND ${TWIN_SUPPRESS}
+         AND buyer IS NOT NULL
+       GROUP BY buyer ORDER BY contracts DESC LIMIT 10`, [id]);
+
+    const recent = await query(`
+      SELECT id, source, source_ref, title, buyer, awarded_at::date, currency,
+             CASE WHEN source = 'monaqasat' AND value_amount IS NOT NULL
+                   AND value_amount = NULLIF(regexp_replace(COALESCE(raw->>'tender_bond',''), '[^0-9.]', '', 'g'), '')::numeric
+                  THEN NULL ELSE value_amount END AS value_amount
+        FROM tenders
+       WHERE award_company_id = $1 AND status = 'awarded' AND ${TWIN_SUPPRESS}
+       ORDER BY awarded_at DESC NULLS LAST, id DESC LIMIT $2`, [id, limit]);
+
+    res.json({ totals: totals.rows[0], by_buyer: byBuyer.rows, recent: recent.rows });
+  } catch (err) { next(err); }
+});
+
 router.get('/stats', async (_req, res, next) => {
   try {
     // Counts match the deduped LIST (cross-source twins collapse to one), or the

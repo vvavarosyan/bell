@@ -218,6 +218,12 @@ export function parseAwardDate(s) {
   const m = String(s || '').match(/(\d{1,2})\/(\d{1,2})\/(\d{4})/);
   if (!m) return null;
   const [, d, mo, y] = m;
+  // 30/12/1899 is the SPREADSHEET ZERO DATE, not a date. Monaqasat publishes it on rows where the
+  // award date is blank, and the parser faithfully recorded it — three tenders carried it, which
+  // made the earliest award in a company's record read "1899" on a customer-facing figure.
+  // Recording what a source states does not extend to recording its sentinel for "nothing":
+  // absent is the honest value, and a missing date stays missing (Rule 2.1).
+  if (Number(y) < 1990) return null;
   const iso = `${y}-${String(mo).padStart(2, '0')}-${String(d).padStart(2, '0')}`;
   return Number.isNaN(Date.parse(iso)) ? null : iso;
 }
