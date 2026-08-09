@@ -117,6 +117,43 @@ router.get('/count', requireSyncToken, async (req, res, next) => {
   }
 });
 
+/**
+ * GET /api/sync/ids?table=people&after=0&limit=50000 — the ids production holds, ascending.
+ *
+ * ⚠️ WHY THIS EXISTS. Production is a strict id-mirror, but a hard delete only propagates through a
+ * sync_deletions tombstone, and production has ZERO delete triggers. So every bulk DELETE that
+ * forgets its tombstone leaves a row alive on production forever — a company, a person, a contact
+ * that Bell itself has decided is wrong, still being served to customers.
+ *
+ * /count could say the two sides disagreed but never WHICH rows, so a known 260-row orphan set in
+ * company_tech sat unresolved for want of a list, and a 7-row gap in people turned up the same way
+ * the moment anyone compared. This returns the ids, so the diff is a one-liner and the fix is a
+ * normal tombstoned deletion.
+ *
+ * Ids only — no names, no contact details, nothing personal. This endpoint is machine-to-machine
+ * under the sync token and must stay that way, because `people` is PDPPL-sensitive and an
+ * id list is the least it can possibly disclose.
+ */
+router.get('/ids', requireSyncToken, async (req, res, next) => {
+  try {
+    const table = String(req.query.table || '');
+    if (!MIRROR_TABLE_NAMES.has(table)) {
+      return res.status(400).json({ error: 'bad_request', reason: 'unknown_table' });
+    }
+    const after = Number(req.query.after || 0);
+    if (!Number.isFinite(after)) return res.status(400).json({ error: 'bad_request', reason: 'bad_after' });
+    // Capped, and the caller pages with `after` — an unbounded list of 200k ids in one response
+    // is how a diagnostic endpoint becomes an outage.
+    const limit = Math.min(Math.max(Number(req.query.limit) || 50000, 1), 100000);
+    const r = await query(
+      `SELECT id FROM ${table} WHERE id > $1 ORDER BY id LIMIT $2`, [after, limit]);
+    const ids = r.rows.map((x) => Number(x.id));
+    res.json({ table, after, limit, count: ids.length, next_after: ids.length ? ids[ids.length - 1] : null, ids });
+  } catch (err) {
+    next(err);
+  }
+});
+
 // ---------------------------------------------------------------------------
 // LOCAL engine — trigger a push. Guarded to local-admin mode + platform_admin.
 // ---------------------------------------------------------------------------
