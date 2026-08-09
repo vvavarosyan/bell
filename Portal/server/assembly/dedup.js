@@ -523,12 +523,14 @@ export async function mergeCompanies(canonicalId, duplicateId, jobLog = null) {
     //    constraint was somehow violated previously (e.g. an aborted prior
     //    migration). Net effect: every one of dup's source rows ends up on
     //    canonical, nothing duplicated.
-    await timed('DELETE conflicting company_sources', () => client.query(
-      `DELETE FROM company_sources
-       WHERE company_id = $2
-         AND (source, source_record_id) IN (
-           SELECT source, source_record_id FROM company_sources WHERE company_id = $1
-         )`,
+    await timed('TOMBSTONE + DELETE conflicting company_sources', () => client.query(
+      `WITH gone AS (
+         DELETE FROM company_sources
+          WHERE company_id = $2
+            AND (source, source_record_id) IN (
+              SELECT source, source_record_id FROM company_sources WHERE company_id = $1)
+         RETURNING id)
+       INSERT INTO sync_deletions (table_name, row_id) SELECT 'company_sources', id FROM gone`,
       [canonicalId, duplicateId],
     ));
     await timed('UPDATE re-parent company_sources', () => client.query(
@@ -545,7 +547,10 @@ export async function mergeCompanies(canonicalId, duplicateId, jobLog = null) {
        ON CONFLICT (company_id, type, value) DO NOTHING`,
       [canonicalId, duplicateId],
     ));
-    await timed('DELETE old company_contacts', () => client.query(`DELETE FROM company_contacts WHERE company_id = $1`, [duplicateId]));
+    await timed('TOMBSTONE + DELETE old company_contacts', () => client.query(`
+      WITH gone AS (DELETE FROM company_contacts WHERE company_id = $1 RETURNING id)
+      INSERT INTO sync_deletions (table_name, row_id) SELECT 'company_contacts', id FROM gone`,
+      [duplicateId]));
 
     // person_companies — same person can already be linked to canonical, so
     // a straight UPDATE may violate any uniqueness. We INSERT-or-skip then drop.
@@ -554,7 +559,34 @@ export async function mergeCompanies(canonicalId, duplicateId, jobLog = null) {
       WHERE company_id = $2
         AND person_id NOT IN (SELECT person_id FROM person_companies WHERE company_id = $1)
     `, [canonicalId, duplicateId]));
-    await timed('DELETE old person_companies', () => client.query(`DELETE FROM person_companies WHERE company_id = $1`, [duplicateId]));
+    await timed('TOMBSTONE + DELETE old person_companies', () => client.query(`
+      WITH gone AS (DELETE FROM person_companies WHERE company_id = $1 RETURNING id)
+      INSERT INTO sync_deletions (table_name, row_id) SELECT 'person_companies', id FROM gone`,
+      [duplicateId]));
+
+    // ⚠️ AWARDED TENDERS. mergeCompanies re-parented ten child tables and `tenders` was not one of
+    // them — `grep award_company_id assembly/` returned ZERO. Every award on the archived record
+    // became invisible, because the reader is a bare `WHERE award_company_id = $1`. Measured before
+    // this fix: 5,162 awarded tenders across 342 companies already stranded by the 8,309 merges
+    // done so far. That is Bell's single most valuable dataset — who wins Qatar government work —
+    // being deleted from view in order to tidy up a duplicate row. There is no unique key on
+    // award_company_id, so a plain UPDATE is correct and cannot collide.
+    await timed('UPDATE tenders award winner re-parent', () => client.query(
+      `UPDATE tenders SET award_company_id = $1, updated_at = now() WHERE award_company_id = $2`,
+      [canonicalId, duplicateId]));
+
+    // ⚠️ BRANCHES. parent_company_id appeared ZERO times in assembly/, so archiving a company that
+    // is a PARENT orphaned its branches onto a dead row — silently undoing Val's "one organized
+    // view, sixteen true records". A branch of the duplicate becomes a branch of the survivor;
+    // and if the duplicate was itself a branch, that link moves too.
+    await timed('UPDATE branch parents re-parent', () => client.query(
+      `UPDATE companies SET parent_company_id = $1, updated_at = now()
+        WHERE parent_company_id = $2 AND id <> $1`, [canonicalId, duplicateId]));
+
+    // The job boards discovered on the duplicate's website belong to the survivor too.
+    await timed('UPDATE job_boards re-parent', () => client.query(
+      `UPDATE job_boards SET company_id = $1, updated_at = now() WHERE company_id = $2`,
+      [canonicalId, duplicateId]).catch(() => ({ rowCount: 0 })));
 
     // jobs — straight re-parent. linkedin_job_url is globally unique already.
     await timed('UPDATE jobs re-parent', () => client.query(`UPDATE jobs SET company_id = $1 WHERE company_id = $2`,

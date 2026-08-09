@@ -53,7 +53,20 @@ async function main() {
   const tables = [...PLAIN, 'company_tech', 'company_registrations'];
   const before = {};
   for (const t of tables) { before[t] = await count(t); console.log('  ' + t.padEnd(26) + String(before[t]).padStart(7) + ' row(s) stranded'); }
-  const total = Object.values(before).reduce((a, b) => a + b, 0);
+  // Awarded tenders and branch links are counted here too — the preview must show everything the
+  // Apply will touch, or the click is uninformed. These two are NOT child tables of the same shape:
+  // tenders reference the winner via award_company_id, and a branch references its parent via
+  // companies.parent_company_id. Both were missed by mergeCompanies entirely.
+  const strandedTenders = Number((await query(`
+    SELECT count(*)::int n FROM tenders t JOIN companies c ON c.id = t.award_company_id
+     WHERE c.canonical_id IS NOT NULL`)).rows[0].n);
+  console.log('  ' + 'awarded tenders'.padEnd(26) + String(strandedTenders).padStart(7) + ' row(s) stranded');
+  const strandedParents = Number((await query(`
+    SELECT count(*)::int n FROM companies b JOIN companies c ON c.id = b.parent_company_id
+     WHERE c.canonical_id IS NOT NULL`)).rows[0].n);
+  console.log('  ' + 'branch links'.padEnd(26) + String(strandedParents).padStart(7) + ' row(s) stranded');
+
+  const total = Object.values(before).reduce((a, b) => a + b, 0) + strandedTenders + strandedParents;
   console.log('  ' + 'TOTAL'.padEnd(26) + String(total).padStart(7));
 
   if (!total) { console.log('\nNothing to reconnect.\n'); return; }
@@ -90,6 +103,25 @@ async function main() {
                            AND k.registration_type = r.registration_type AND k.number = r.number)`);
   console.log('  moved ' + String(reg.rowCount).padStart(6) + '  company_registrations');
   moved += reg.rowCount;
+
+  // AWARDED TENDERS — the table mergeCompanies never re-parented at all, so every award on a
+  // merged-away record was invisible. Measured 2026-08-09: 5,162 tenders across 342 companies.
+  // No unique key on award_company_id, so a plain UPDATE cannot collide; updated_at is stamped
+  // because `tenders` is mirrored and the watermark is what publishes the correction.
+  const tw = await query(`
+    WITH s AS (${SURVIVOR})
+    UPDATE tenders t SET award_company_id = s.to_id, updated_at = now()
+      FROM s WHERE t.award_company_id = s.from_id`);
+  if (tw.rowCount) console.log('  moved ' + String(tw.rowCount).padStart(6) + '  awarded tenders (award winner)');
+  moved += tw.rowCount;
+
+  // BRANCH LINKS pointing at a merged-away parent — the "one organized view" quietly broken.
+  const bp = await query(`
+    WITH s AS (${SURVIVOR})
+    UPDATE companies c SET parent_company_id = s.to_id, updated_at = now()
+      FROM s WHERE c.parent_company_id = s.from_id AND c.id <> s.to_id`);
+  if (bp.rowCount) console.log('  moved ' + String(bp.rowCount).padStart(6) + '  branch links (parent company)');
+  moved += bp.rowCount;
 
   console.log(`\nReconnected ${moved.toLocaleString()} row(s) to the company that survived the merge.`);
   console.log('Rows still left are exact duplicates the survivor already holds — nothing lost.');
