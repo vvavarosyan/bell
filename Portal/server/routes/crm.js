@@ -61,7 +61,16 @@ router.get('/records', async (req, res, next) => {
   try {
     const where = ['r.tenant_id = $1'];
     const params = [tenantId(req)];
-    if (req.query.entity_type) { params.push(req.query.entity_type); where.push(`r.entity_type = $${params.length}`); }
+    // ⚠️ A SEARCH IS GLOBAL; A TAB IS A FILTER. The UI always sends the tab it is on, so typing a
+    // contact's name while looking at Companies used to return "no companies match" while that
+    // person sat in the CRM one tab away — a dead end in the one feature whose entire purpose is
+    // "find the thing I remember". Browsing still respects the tab; searching does not, because
+    // the user is looking for a THING, not a category. Every result carries its own entity_type
+    // and the list already renders both shapes.
+    const searching = !!parseCrmQuery(req.query.q);
+    if (req.query.entity_type && !searching) {
+      params.push(req.query.entity_type); where.push(`r.entity_type = $${params.length}`);
+    }
     if (req.query.status)      { params.push(req.query.status);      where.push(`r.status = $${params.length}`); }
     if (req.query.source)      { params.push(req.query.source);      where.push(`r.source = $${params.length}`); }
     if (req.query.archived !== 'all') {
@@ -72,7 +81,7 @@ router.get('/records', async (req, res, next) => {
     // registration number, revealed contact details, notes and deal titles.
     // A blank (or 1-character) box adds NO condition — it must never behave as
     // "match every row" and it must never behave as "match nothing" either.
-    const parsedQ = parseCrmQuery(req.query.q);
+    const parsedQ = parseCrmQuery(req.query.q);   // same parse the entity_type guard above used
     const search = buildCrmSearch(parsedQ, params, {
       tenantParam: '$1',
       revealBypass: bypassesCredits(req.user, req.tenant),
@@ -110,6 +119,12 @@ router.get('/records', async (req, res, next) => {
       // and the UI must be able to say so rather than silently showing everything.
       q: parsedQ ? parsedQ.text : null,
       searched: !!search,
+      // While searching, the tab is ignored — so tell the UI, and tell it how the matches split.
+      // Without this the Companies tab would silently list people with no explanation.
+      global_search: searching,
+      by_type: searching
+        ? rows.rows.reduce((a, r) => { a[r.entity_type] = (a[r.entity_type] || 0) + 1; return a; }, {})
+        : null,
     });
   } catch (err) { next(err); }
 });

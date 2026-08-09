@@ -73,6 +73,7 @@ export function CrmTab() {
   const [qInput, setQInput] = useState('');
   const [q, setQ] = useState('');
   const [searchedQ, setSearchedQ] = useState(null);   // what the server confirms it searched
+  const [searchSpread, setSearchSpread] = useState(null);  // {company: n, person: n} while searching
   const [rows, setRows] = useState([]);
   const [stats, setStats] = useState(null);
   const [total, setTotal] = useState(0);          // full count for the current filter
@@ -111,6 +112,9 @@ export function CrmTab() {
       // The server tells us whether it actually ran a search (a 1-character box
       // searches nothing) — never assume the box and the result set agree.
       setSearchedQ(r.searched ? (r.q || null) : null);
+      // A search ignores the tab on purpose (see routes/crm.js). Remember how the matches split
+      // so the list can SAY so — otherwise the Companies tab silently lists people.
+      setSearchSpread(r.global_search ? (r.by_type || null) : null);
     } catch (err) { if (!silent) toast('Load failed: ' + err.message, 'error'); }
     finally { if (!silent) setLoading(false); }
   }, [entityType, status, revealedOnly, q, owner]);
@@ -416,6 +420,9 @@ export function CrmTab() {
            100 rows, so total and rows.length can legitimately disagree. -->
       ${searchedQ ? html`<div style=${{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '11.5px', color: 'var(--text-muted)', marginBottom: '9px', flexWrap: 'wrap' }}>
         <span><strong style=${{ color: 'var(--text)' }}>${total.toLocaleString()}</strong> ${total === 1 ? 'record matches' : 'records match'} “${searchedQ}”${total > rows.length ? ` · showing the first ${rows.length}` : ''}</span>
+        ${searchSpread && (searchSpread.company || 0) > 0 && (searchSpread.person || 0) > 0
+          ? html`<span style=${{ opacity: .85 }}>· ${searchSpread.company} compan${searchSpread.company === 1 ? 'y' : 'ies'} and ${searchSpread.person} ${searchSpread.person === 1 ? 'person' : 'people'} — search looks across both</span>`
+          : null}
         <button onClick=${() => { setQInput(''); setQ(''); }} class="toolbar-toggle" style=${{ padding: '2px 9px', fontSize: '11px' }}>Clear search</button>
       </div>`
         : qInput.trim().length === 1 ? html`<div style=${{ fontSize: '11.5px', color: 'var(--text-dim)', marginBottom: '9px' }}>Type at least 2 characters to search.</div>`
@@ -428,7 +435,7 @@ export function CrmTab() {
       <!-- List -->
       ${loading ? html`<div style=${{ color: 'var(--text-dim)', textAlign: 'center', padding: '50px 0', fontSize: '12px' }}>Loading…</div>`
         : rows.length === 0 ? html`<div style=${{ color: 'var(--text-dim)', textAlign: 'center', padding: '50px 0', fontSize: '12.5px', lineHeight: 1.6 }}>
-            ${searchedQ ? html`<div>No ${entityType === 'company' ? 'companies' : 'people'} in your CRM match “${searchedQ}”.<br/>
+            ${searchedQ ? html`<div>Nothing in your CRM matches “${searchedQ}” — companies or people.<br/>
               <span class="muted small">Searched name, website, registration number, revealed email and phone, your notes and your deal titles.</span><br/>
               <button onClick=${() => { setQInput(''); setQ(''); }} class="toolbar-toggle" style=${{ marginTop: '10px', padding: '3px 10px', fontSize: '11px' }}>Clear search</button></div>`
             : html`<div>No ${entityType === 'company' ? 'companies' : 'people'} in your CRM yet.<br/>
