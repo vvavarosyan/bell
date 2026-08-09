@@ -404,9 +404,20 @@ export async function runBellaTurn({ ctx, conversationId, userText, clientContex
         await store.setActionStatus(a.id, 'done', 'approved by voice/chat').catch(() => {});
         effectiveText = planApprovedNote(a.id, args);
       } else {
+        // The same claim the Approve button takes. Without it, saying "approved" while a click is
+        // already in flight runs the action TWICE — and this path is reached from voice, where a
+        // repeated phrase is entirely ordinary.
+        const claimed = await store.claimAction(tenantId, userId, a.id).catch(() => null);
+        if (!claimed) {
+          // Another click or another utterance already has it. Say so and carry on with the turn —
+          // this is inside runBellaTurn, so returning here would abandon the whole reply.
+          effectiveText = `[System note: the user said "${String(userText).trim().slice(0, 40)}", but action #${a.id} (${a.tool}) is already being handled — it was NOT run a second time. Say briefly that it is already in progress.]`;
+          send('approval', { action_id: a.id, tool: a.tool, decided: 'already_running' });
+        } else {
         const { result, summary, isError } = await executeTool(a.tool, args, { ...ctx, conversationId: convId });
         await store.setActionStatus(a.id, isError ? 'error' : 'done', summary, Number(result?.charged) || 0).catch(() => {});
         effectiveText = `[System note: the user said "${String(userText).trim().slice(0, 40)}" — that is their approval for the pending ${a.tool} (action #${a.id}), which has now been ${isError ? 'ATTEMPTED and FAILED' : 'executed'}. Result: ${summary}. Tell them the outcome plainly; do not claim success if it failed.]`;
+        }
       }
       send('approval', { action_id: a.id, tool: a.tool, decided: 'approved' });   // client resyncs the inbox
     } else if (pending.length > 1) {

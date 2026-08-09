@@ -314,6 +314,43 @@ export async function supersedePendingActions(tenantId, userId) {
   return r.rows;
 }
 
+/**
+ * Take exclusive ownership of a proposed action BEFORE running it. Returns the action, or null if
+ * somebody already has it.
+ *
+ * This is the whole double-send fix. The old flow read the row, checked its status, ran the tool,
+ * and wrote the result — with nothing holding the row in between, so two clicks both saw
+ * 'proposed', both passed the check, and both sent. One UPDATE … WHERE status = 'proposed' makes
+ * the check and the claim the SAME operation, which is the only way it can be safe: Postgres will
+ * let exactly one of them match.
+ *
+ * STALE CLAIMS ARE RECLAIMABLE. If the process dies between claiming and finishing, the row would
+ * otherwise sit in 'running' forever and the user could never retry — a dead card instead of a
+ * double send, which is not an improvement. A claim older than STALE_CLAIM_MS may be taken again.
+ * The window is deliberately longer than the tool timeout, so a slow-but-alive send is never
+ * stolen from under itself.
+ */
+const STALE_CLAIM_MS = 5 * 60 * 1000;
+
+export async function claimAction(tenantId, userId, id) {
+  const r = await query(
+    `UPDATE bella_actions
+        SET status = 'running', claimed_at = now()
+      WHERE id = $3 AND tenant_id = $1 AND user_id = $2
+        AND (status = 'proposed'
+             OR (status = 'running' AND claimed_at < now() - ($4::bigint || ' milliseconds')::interval))
+      RETURNING *`,
+    [tenantId, userId, id, STALE_CLAIM_MS]);
+  return r.rows[0] || null;
+}
+
+/** Hand a claim back when the action was NOT run, so the card stays usable. */
+export async function releaseAction(id) {
+  await query(
+    `UPDATE bella_actions SET status = 'proposed', claimed_at = NULL
+      WHERE id = $1 AND status = 'running'`, [id]);
+}
+
 export async function setActionStatus(id, status, resultSummary = null, creditsCost = null) {
   await query(
     `UPDATE bella_actions

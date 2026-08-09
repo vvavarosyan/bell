@@ -119,14 +119,35 @@ router.get('/actions', async (req, res, next) => {
 // own auth context, exactly like a chat-turn tool call would.
 router.post('/actions/:id/approve', async (req, res, next) => {
   try {
-    const action = await store.getOwnedAction(req.tenant.id, req.user?.id ?? 0, Number(req.params.id));
-    if (!action) return res.status(404).json({ error: 'not_found' });
-    if (action.status !== 'proposed') return res.status(409).json({ error: 'not_pending', status: action.status });
+    // CLAIM FIRST, THEN RUN. Reading the row, checking it, and running the tool used to be three
+    // separate steps with nothing holding the row in between — so two clicks on the same card
+    // (the chat shows one, the approvals inbox shows another) both saw 'proposed' and both sent.
+    // claimAction folds the check and the claim into ONE update, which Postgres can only grant to
+    // one of them. A second click now finds nothing to claim and is told so.
+    const action = await store.claimAction(req.tenant.id, req.user?.id ?? 0, Number(req.params.id));
+    if (!action) {
+      const existing = await store.getOwnedAction(req.tenant.id, req.user?.id ?? 0, Number(req.params.id));
+      if (!existing) return res.status(404).json({ error: 'not_found' });
+      // 'running' here means another click has it IN FLIGHT — say that, rather than letting the
+      // user think nothing happened and click a third time.
+      return res.status(409).json({
+        error: existing.status === 'running' ? 'already_running' : 'not_pending',
+        status: existing.status,
+      });
+    }
 
     let args = action.args;
     if (typeof args === 'string') { try { args = JSON.parse(args); } catch { args = {}; } }
     const ctx = { user: req.user, tenant: req.tenant, conversationId: action.conversation_id, authHeader: req.headers.authorization || null };
-    const { result, summary, isError } = await executeTool(action.tool, args, ctx);
+    let result, summary, isError;
+    try {
+      ({ result, summary, isError } = await executeTool(action.tool, args, ctx));
+    } catch (err) {
+      // The tool threw outright — nothing ran, so hand the claim back and let the card be used
+      // again. Leaving it claimed would turn a transient failure into a permanently dead button.
+      await store.releaseAction(action.id).catch(() => {});
+      throw err;
+    }
     const credits = Number(result?.charged) || 0;
     await store.setActionStatus(action.id, isError ? 'error' : 'done', summary, credits);
     res.json({ ok: !isError, status: isError ? 'error' : 'done', summary, result });
@@ -136,9 +157,17 @@ router.post('/actions/:id/approve', async (req, res, next) => {
 // POST /api/bella/actions/:id/deny
 router.post('/actions/:id/deny', async (req, res, next) => {
   try {
-    const action = await store.getOwnedAction(req.tenant.id, req.user?.id ?? 0, Number(req.params.id));
-    if (!action) return res.status(404).json({ error: 'not_found' });
-    if (action.status !== 'proposed') return res.status(409).json({ error: 'not_pending', status: action.status });
+    // Deny claims too. Otherwise a click on Approve and a click on Deny can both pass their checks
+    // and the action is executed AND recorded as refused.
+    const action = await store.claimAction(req.tenant.id, req.user?.id ?? 0, Number(req.params.id));
+    if (!action) {
+      const existing = await store.getOwnedAction(req.tenant.id, req.user?.id ?? 0, Number(req.params.id));
+      if (!existing) return res.status(404).json({ error: 'not_found' });
+      return res.status(409).json({
+        error: existing.status === 'running' ? 'already_running' : 'not_pending',
+        status: existing.status,
+      });
+    }
     await store.setActionStatus(action.id, 'denied');
     res.json({ ok: true, status: 'denied' });
   } catch (err) { next(err); }
