@@ -158,3 +158,22 @@ test('a real failure is still reported as a failure', () => {
   assert.match(src, /summary: 'failed: ' \+ String\(err\.message/,
     'only the timeout path changed — a genuine error must still say failed');
 });
+
+// ── A SCHEDULED RUN MAY NEVER SEND OR DELETE (audit finding, 2026-08-07) ────────────────────────
+// Autonomous runs skip approval gates on the reasoning that scheduling WAS the approval. True for
+// reversible internal work; false for an email — a schedule created on Monday is not consent for a
+// message sent Thursday to a recipient chosen at run time, with nobody watching.
+
+test('a scheduled run refuses every outward-facing tool', () => {
+  const src = readFileSync(new URL('../bella/brain.js', import.meta.url), 'utf8');
+  assert.match(src, /autonomous && tool\?\.approval === 'always'/,
+    'the refusal must key on the approval category, so a new sending tool is covered automatically');
+  assert.match(src, /refused: true/, 'the model must be told it was refused, not that it succeeded');
+  // The refusal must come BEFORE the gate that autonomous skips, or it never runs.
+  assert.ok(src.indexOf("autonomous && tool?.approval === 'always'") < src.indexOf('if (!autonomous && requiresApproval'),
+    'the refusal must be evaluated before the skipped gate');
+});
+
+test('scheduling itself needs a click, so an unattended run cannot be created silently', () => {
+  assert.equal(getTool('schedule_task')?.approval, 'always');
+});

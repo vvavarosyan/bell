@@ -523,9 +523,29 @@ export async function runBellaTurn({ ctx, conversationId, userText, clientContex
           continue;
         }
 
+        // 🔴 A SCHEDULED RUN MAY NEVER SEND OR DELETE.
+        // Autonomous runs skip approval gates, on the reasoning that scheduling WAS the approval.
+        // That holds for reversible internal work. It does not hold for an email: a schedule
+        // created on Monday is not informed consent for a message sent on Thursday to a recipient
+        // chosen at run time, with nobody at the screen to see the card — and the 'always'
+        // category is DEFINED as the actions that gate in every mode. Val, 2026-08-07, after
+        // Bella emailed a customer by accident: "it might cause critical issues for companies."
+        // Refused outright rather than proposed: raising a card nobody will see would leave the
+        // action pending indefinitely and the task reporting success. She narrates the refusal
+        // into the task summary, so the user learns the schedule cannot do this.
+        if (autonomous && tool?.approval === 'always') {
+          slots[i] = { type: 'tool_result', tool_use_id: tu.id, content: JSON.stringify({
+            refused: true,
+            note: `A scheduled run cannot ${tu.name.startsWith('delete') ? 'delete things' : 'send messages'}. Nothing was sent, enrolled or deleted. Say so plainly in the summary and, if it still matters, tell the user to do it from the chat where they can approve it.`,
+          }) };
+          metaSlots[i] = { name: tu.name, summary: 'refused — a scheduled run cannot send or delete' };
+          continue;
+        }
+
         // Approval gate (Val's D2): 'always' tools gate in every mode;
         // 'act'/'spend' gate unless the user chose no-approval in Settings.
-        // Autonomous (scheduled) runs skip gates — pre-approved at scheduling.
+        // Autonomous (scheduled) runs skip the gate for the REVERSIBLE tools only — the block
+        // above has already refused anything that reaches outside Bell.
         if (!autonomous && requiresApproval(tool, approvalMode, ctx) && !takeGrant(grant, tu.name)) {
           let summary;
           try { summary = tool.describe ? tool.describe(tu.input || {}) : 'Run ' + tu.name; } catch { summary = 'Run ' + tu.name; }
