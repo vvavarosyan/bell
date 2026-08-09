@@ -11,6 +11,24 @@
 import { query } from '../db.js';
 import { boardsDue, recordSweep, upsertJobs, closeVanished } from './sweep.js';
 import { fetchOracleJobs } from './sources/oracle_cloud.js';
+import {
+  QE_SOURCE, QE_HOST, QE_BASE_URL, QE_CRAWL_DELAY_MS,
+  fetchQatarEnergySitemap, fetchQatarEnergyJob,
+} from './sources/qatarenergy.js';
+import { QL_SOURCE, QL_BASE, QL_LIST_PATH, fetchQatarLivingJobs } from './sources/qatarliving.js';
+import { JSONLD_SOURCE, fetchOwnSiteJobs } from './sources/jsonld.js';
+
+// Reading every QatarEnergy vacancy costs one request per posting at the crawl-delay THE SITE'S OWN
+// robots.txt states (5 s). MEASURED 2026-08-09: the sitemap lists 249 job URLs, so a full read is
+// about 21 minutes. That is fine for a nightly $0 source — but the cap has to sit ABOVE the real
+// list, and a run that hits it must FAIL rather than truncate.
+//
+// ⚠️ WHY TRUNCATION WOULD BE WORSE THAN FAILING. The first version of this capped at 120. A capped
+// read returns 120 of 249 postings, and everything it did not reach looks ABSENT from the board —
+// so after two such sweeps closeVanished would withdraw 129 live vacancies as "no longer
+// advertised". A partial read is not a small read; it is a wrong one. Caught by counting the
+// sitemap before shipping (rule 2.2), not by reasoning about it.
+const QE_MAX_JOBS_PER_RUN = Number(process.env.BELL_JOBS_QE_MAX || 400);
 
 // One entry per platform Bell can read. A board on a platform with no reader is skipped and left
 // for later — never guessed at, and never recorded as an empty board, which would start closing
@@ -21,7 +39,93 @@ const READERS = {
     if (!host) throw new Error('oracle board_key carries no tenant host');
     return fetchOracleJobs(host, { limit: 200 });
   },
+
+  // ── One employer, one portal ────────────────────────────────────────────────────────────────
+  // The sitemap lists every live posting; each posting is then fetched for its detail. A 404 is
+  // this source's clearest closure evidence, but it needs no special handling here: a posting that
+  // has gone simply stops appearing, and closeVanished waits for two proven-good sweeps.
+  //
+  // ⚠️ The expiry these pages carry is FABRICATED when the underlying ATS states none — it is
+  // create_date plus exactly 365 days, and trusting it would have closed 9 of 43 live vacancies.
+  // The reader refuses those, so anything that reaches expires_at here was genuinely stated.
+  [QE_SOURCE]: async () => {
+    const entries = await fetchQatarEnergySitemap({});
+    if (!entries.length) throw new Error('qatarenergy sitemap listed no jobs');
+    // See the cap's comment: reading part of a board and reporting it as the whole board is how
+    // real vacancies get closed. Refuse instead, loudly, and let a human raise the ceiling.
+    if (entries.length > QE_MAX_JOBS_PER_RUN) {
+      throw new Error(`qatarenergy lists ${entries.length} jobs, over the ${QE_MAX_JOBS_PER_RUN} ceiling — refusing a partial read (raise BELL_JOBS_QE_MAX)`);
+    }
+    const jobs = [];
+    let unreadable = 0;
+    for (const e of entries) {
+      const r = await fetchQatarEnergyJob(e.id, { url: e.url });
+      // A page Bell could not read is NOT a vacancy that closed. Counted, then judged below.
+      if (!r.ok) { if (!r.closed) unreadable++; continue; }
+      jobs.push({ ...r.record, employer_stated: r.record?.extra_fields?.employer_name || null });
+    }
+    // Half the portal unreadable means the portal changed, not that half its jobs closed. Throwing
+    // records the sweep as FAILED, and a failed sweep closes nothing (rule 3).
+    if (unreadable > entries.length / 2) {
+      throw new Error(`qatarenergy: ${unreadable} of ${entries.length} job pages unreadable — refusing to treat this as a complete read`);
+    }
+    return { jobs };
+  },
+
+  // ── Many employers, one board ───────────────────────────────────────────────────────────────
+  // A classifieds board is not one company's careers page: each listing names its own employer, so
+  // company_id comes from that stated name (jobs/attribute.js) and never from the board.
+  //
+  // ⚠️ CLOSURE NEEDS A COMPLETE CRAWL. The reader reports `complete` only when every page the site
+  // itself advertises was fetched AND its own vacancy tally agrees. An incomplete crawl is thrown,
+  // which records the sweep as failed — so a half-read list can never withdraw real vacancies.
+  // ── A company's own careers page ────────────────────────────────────────────────────────────
+  // 255 of these were recorded by the harvester and read by nobody, because every one is a
+  // different hand-built layout. This reads ONLY schema.org JobPosting — structured data the site
+  // publishes itself for search engines — and returns an honest zero when a page carries none.
+  // Scraping the visible page instead would turn "Life at X" testimonials into vacancies.
+  [JSONLD_SOURCE]: async (board) => fetchOwnSiteJobs(board.url),
+
+  [QL_SOURCE]: async () => {
+    const crawl = await fetchQatarLivingJobs({});
+    if (!crawl.complete) {
+      throw new Error(`incomplete crawl (${crawl.pagesFetched} of ${crawl.totalPages ?? '?'} pages` +
+        `${crawl.errors?.length ? '; ' + String(crawl.errors[0].error).slice(0, 80) : ''}) — refusing to close anything from a partial list`);
+    }
+    return {
+      jobs: crawl.jobs.map((j) => ({
+        ...j,
+        employer_stated: j.extra_fields?.employer_name || null,
+      })),
+    };
+  },
 };
+
+/**
+ * The two national boards Bell reads directly. They are not discovered from a company's website —
+ * they exist independently of any one company — so they are registered here rather than by the
+ * harvester, and neither is ever 'verified': one of them carries many employers, and the other
+ * names its employer on every page, which is better evidence than a board-level guess.
+ */
+export async function ensureNationalBoards({ log = () => {} } = {}) {
+  const boards = [
+    { board_key: `${QE_SOURCE}:${QE_HOST}`, platform: QE_SOURCE, url: `${QE_BASE_URL}/`, kind: 'ats',
+      why: 'the career portal names its own employer on every posting' },
+    { board_key: `${QL_SOURCE}:list`, platform: QL_SOURCE, url: `${QL_BASE}${QL_LIST_PATH}`, kind: 'external',
+      why: 'many employers on one board — each listing names its own, so attribution is per job' },
+  ];
+  let added = 0;
+  for (const b of boards) {
+    const r = await query(`
+      INSERT INTO job_boards (company_id, board_key, platform, url, kind, attribution, attribution_why)
+      VALUES (NULL,$1,$2,$3,$4,'unverified',$5)
+      ON CONFLICT (board_key) DO UPDATE SET url = EXCLUDED.url, updated_at = now()
+      RETURNING (xmax = 0) AS was_insert`,
+      [b.board_key, b.platform, b.url, b.kind, b.why]);
+    if (r.rows[0]?.was_insert) { added++; log(`  registered board ${b.board_key}`); }
+  }
+  return { added };
+}
 
 /**
  * @param {object} opts
@@ -30,9 +134,27 @@ const READERS = {
  * @param {boolean} [opts.dryRun]      read and report, write nothing
  */
 export async function runJobSweep({ limit = 40, staleHours = 12, dryRun = false, log = () => {} } = {}) {
-  // Ask only for platforms there is a reader for — see boardsDue for why this matters.
-  const boards = await boardsDue({ limit, staleHours, platforms: Object.keys(READERS) });
+  if (!dryRun) await ensureNationalBoards({ log });
+  // ⚠️ TWO QUEUES, NOT ONE. boardsDue orders by "least recently read", and 255 never-read company
+  // careers pages all sort ahead of every ATS board. That exact shape already broke this once: the
+  // first live sweep read ZERO boards while reporting "40 no reader yet". So the handful of
+  // high-yield boards — the ATS tenants and the two national ones — are asked for FIRST, and the
+  // long tail of own-site pages only fills what is left.
+  const PRIORITY = Object.keys(READERS).filter((p) => p !== JSONLD_SOURCE);
+  const head = await boardsDue({ limit, staleHours, platforms: PRIORITY });
+  const tail = head.length < limit
+    ? await boardsDue({ limit: limit - head.length, staleHours, platforms: [JSONLD_SOURCE] })
+    : [];
+  const boards = [...head, ...tail];
   const out = { boards: boards.length, read: 0, skipped: 0, failed: 0, jobs: 0, closed: 0, unattributed: 0 };
+  // Per PLATFORM, so one dead reader is visible on its own instead of averaging into the total —
+  // the same lesson as the tender scan, where three healthy portals hid Kahramaa for 14 nights.
+  const bySource = {};
+  const track = (platform, patch) => {
+    const b = bySource[platform] || (bySource[platform] = { boards: 0, read: 0, failed: 0, inserted: 0, updated: 0, closed: 0 });
+    for (const [k, v] of Object.entries(patch)) b[k] = (b[k] || 0) + v;
+  };
+  for (const b of boards) track(b.platform, { boards: 1 });
   if (!boards.length) { log('  no boards due.'); return out; }
 
   for (const board of boards) {
@@ -48,8 +170,11 @@ export async function runJobSweep({ limit = 40, staleHours = 12, dryRun = false,
       // throws on that shape rather than reporting zero, which is what keeps a silent API change
       // from closing an employer's entire vacancy list.
       out.read++;
+      track(board.platform, { read: 1 });
     } catch (err) {
       out.failed++;
+      track(board.platform, { failed: 1 });
+      bySource[board.platform].error = err.message.slice(0, 200);
       if (!dryRun) await recordSweep(board.board_key, { ok: false, error: err.message });
       log(`  ✗ ${board.board_key}: ${err.message.slice(0, 80)}`);
       continue;   // rule 3: a board that cannot be read closes NOTHING
@@ -61,17 +186,24 @@ export async function runJobSweep({ limit = 40, staleHours = 12, dryRun = false,
       continue;
     }
 
-    const { inserted, updated } = await upsertJobs(board, jobs, { log });
+    const { inserted, updated, attributed } = await upsertJobs(board, jobs, { log });
     out.jobs += inserted + updated;
-    if (board.attribution !== 'verified') out.unattributed += inserted + updated;
+    out.unattributed += (inserted + updated) - attributed;
+    track(board.platform, { inserted, updated });
     // Record the successful read BEFORE closing, so the closure query can see it.
     await recordSweep(board.board_key, { ok: true, jobsSeen: jobs.length });
     const c = await closeVanished(board.board_key, jobs.map((j) => j.external_id), { log });
     out.closed += c.expired + c.withdrawn;
+    track(board.platform, { closed: c.expired + c.withdrawn });
   }
 
   log(`  boards ${out.read} read · ${out.failed} unreadable · ${out.skipped} no reader yet`);
-  log(`  jobs ${out.jobs} open · ${out.closed} closed` + (out.unattributed ? ` · ${out.unattributed} held with no company (board unverified)` : ''));
+  out.sources = bySource;
+  for (const [platform, b] of Object.entries(bySource)) {
+    log(`  · ${platform}: ${b.read}/${b.boards} read` + (b.failed ? `, ${b.failed} FAILED` : '') +
+        `, ${b.inserted} new, ${b.updated} still open` + (b.closed ? `, ${b.closed} closed` : ''));
+  }
+  log(`  jobs ${out.jobs} open · ${out.closed} closed` + (out.unattributed ? ` · ${out.unattributed} with no company named by the source` : ''));
   return out;
 }
 

@@ -28,8 +28,16 @@
 
 import { query } from '../db.js';
 import { packRaw } from '../tenders/raw.js';
+import { attributeJob } from './attribute.js';
 
 const MISSES_BEFORE_CLOSED = 2;
+
+/** null | string | string[] → a non-empty text[] or null. */
+const asArray = (v) => {
+  if (v == null) return null;
+  const arr = (Array.isArray(v) ? v : [v]).map((x) => (x == null ? '' : String(x).trim())).filter(Boolean);
+  return arr.length ? arr : null;
+};
 
 /** Record that a board was read — or that reading it failed. Closure depends on this being honest. */
 export async function recordSweep(boardKey, { ok, jobsSeen = 0, error = null }) {
@@ -51,27 +59,51 @@ export async function recordSweep(boardKey, { ok, jobsSeen = 0, error = null }) 
 /**
  * Store the jobs a board is currently advertising.
  *
- * ⚠️ ATTRIBUTION GATE. company_id is written ONLY when the board is 'verified'. An unverified board
- * — one on a host that is not the company's own — yields jobs with NO company attached. That is
- * the guard against Bell's stored website being wrong: "Honey Well Trading & Contracting", a Qatar
- * trading firm, has honeywell.com on record, and that board carries 1,282 vacancies in Chennai.
- * Filtering to Qatar does not save you: Honeywell has a genuine Doha vacancy that would attach to
- * the wrong company with a real, fresh date and light a buyer-intent signal Bell then sells.
+ * ⚠️ ATTRIBUTION IS DECIDED PER JOB, NOT PER BOARD (changed 2026-08-09 when the aggregator sources
+ * were wired in). A verified board — a careers page on the company's own domain — still answers for
+ * all of its jobs. Everything else has to be named by the POSTING ITSELF: an aggregator carries
+ * dozens of employers on one board, so "which board it came from" answers nothing at all there.
+ *
+ * The original guard still holds and is why an unverified board attributes nothing on its own:
+ * "Honey Well Trading & Contracting", a Qatar trading firm, has honeywell.com on record, and that
+ * board carries 1,282 vacancies in Chennai. Filtering to Qatar does not save you — Honeywell has a
+ * genuine Doha vacancy that would attach to the wrong company with a real, fresh date and light a
+ * buyer-intent signal Bell then sells. See jobs/attribute.js.
  */
 export async function upsertJobs(board, jobs, { log = () => {} } = {}) {
-  const companyId = board.attribution === 'verified' ? board.company_id : null;
-  let inserted = 0, updated = 0;
+  let inserted = 0, updated = 0, attributed = 0;
   for (const j of jobs) {
     if (!j?.external_id || !j?.title) continue;
+    // WHOSE vacancy is it? A verified board answers directly; otherwise the POSTING must name its
+    // own employer and that name must land on exactly one active company. See jobs/attribute.js —
+    // an aggregator carries dozens of employers, so "which board it came from" answers nothing.
+    const { company_id } = await attributeJob(board, j);
+    if (company_id) attributed++;
     const r = await query(`
       INSERT INTO jobs (company_id, source, board_key, external_id, source_url, title,
-                        location_text, employer_stated, posted_at, expires_at,
-                        is_active, last_seen_at, raw_payload, created_at, updated_at)
-      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9::timestamptz,$10::timestamptz,true,now(),$11::jsonb,now(),now())
+                        description, location_text, is_remote, workplace_type, employment_type,
+                        seniority_level, job_function, industries,
+                        salary_min, salary_max, salary_currency, salary_period, applicant_count,
+                        employer_stated, posted_at, expires_at,
+                        is_active, last_seen_at, extra_fields, raw_payload, created_at, updated_at)
+      VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13::text[],$14::text[],$15,$16,$17,$18,$19,$20,
+              $21::timestamptz,$22::timestamptz,true,now(),$23::jsonb,$24::jsonb,now(),now())
       ON CONFLICT (board_key, external_id) WHERE board_key IS NOT NULL AND external_id IS NOT NULL
       DO UPDATE SET
         title           = EXCLUDED.title,
+        description     = COALESCE(EXCLUDED.description, jobs.description),
         location_text   = EXCLUDED.location_text,
+        is_remote       = COALESCE(EXCLUDED.is_remote, jobs.is_remote),
+        workplace_type  = COALESCE(EXCLUDED.workplace_type, jobs.workplace_type),
+        employment_type = COALESCE(EXCLUDED.employment_type, jobs.employment_type),
+        seniority_level = COALESCE(EXCLUDED.seniority_level, jobs.seniority_level),
+        job_function    = COALESCE(EXCLUDED.job_function, jobs.job_function),
+        industries      = COALESCE(EXCLUDED.industries, jobs.industries),
+        salary_min      = COALESCE(EXCLUDED.salary_min, jobs.salary_min),
+        salary_max      = COALESCE(EXCLUDED.salary_max, jobs.salary_max),
+        salary_currency = COALESCE(EXCLUDED.salary_currency, jobs.salary_currency),
+        salary_period   = COALESCE(EXCLUDED.salary_period, jobs.salary_period),
+        applicant_count = COALESCE(EXCLUDED.applicant_count, jobs.applicant_count),
         employer_stated = EXCLUDED.employer_stated,
         source_url      = EXCLUDED.source_url,
         -- posted_at is the EMPLOYER's date. Never overwrite a real one with a null, and never
@@ -80,6 +112,7 @@ export async function upsertJobs(board, jobs, { log = () => {} } = {}) {
         posted_at       = COALESCE(EXCLUDED.posted_at, jobs.posted_at),
         expires_at      = COALESCE(EXCLUDED.expires_at, jobs.expires_at),
         company_id      = COALESCE(EXCLUDED.company_id, jobs.company_id),
+        extra_fields    = COALESCE(EXCLUDED.extra_fields, jobs.extra_fields),
         last_seen_at    = now(),
         -- Re-appearing on the board un-closes it. Without this a job that briefly vanished would
         -- stay closed forever while the employer is still advertising it.
@@ -89,13 +122,26 @@ export async function upsertJobs(board, jobs, { log = () => {} } = {}) {
         raw_payload     = EXCLUDED.raw_payload,
         updated_at      = now()
       RETURNING (xmax = 0) AS was_insert`,
-      [companyId, board.platform, board.board_key, String(j.external_id), j.url || board.url,
-       String(j.title).slice(0, 500), j.location_text || null, j.employer_stated || null,
-       j.posted_at || null, j.expires_at || null, packRaw(j.raw || j)]);
+      [company_id, j.source || board.platform, board.board_key, String(j.external_id),
+       j.source_url || j.url || board.url, String(j.title).slice(0, 500),
+       j.description || null, j.location_text || null,
+       typeof j.is_remote === 'boolean' ? j.is_remote : null,
+       j.workplace_type || null, j.employment_type || null, j.seniority_level || null,
+       // jobs.job_function and jobs.industries are text[] columns, but the readers state a single
+       // value (Qatar Living publishes one function name per listing) — so a bare string is wrapped
+       // rather than passed through, which Postgres would reject outright.
+       asArray(j.job_function), asArray(j.industries),
+       j.salary_min ?? null, j.salary_max ?? null, j.salary_currency || null, j.salary_period || null,
+       j.applicant_count ?? null,
+       // The employer as the SOURCE names it, kept verbatim and separate from company_id so the
+       // claim and the link never get confused for each other.
+       j.employer_stated || j.extra_fields?.employer_name || null,
+       j.posted_at || null, j.expires_at || null,
+       j.extra_fields ? packRaw(j.extra_fields) : null, packRaw(j.raw_payload || j.raw || j)]);
     if (r.rows[0]?.was_insert) inserted++; else updated++;
   }
-  if (inserted || updated) log(`    ${board.board_key}: ${inserted} new, ${updated} still open`);
-  return { inserted, updated };
+  if (inserted || updated) log(`    ${board.board_key}: ${inserted} new, ${updated} still open, ${attributed} tied to a company`);
+  return { inserted, updated, attributed };
 }
 
 /**

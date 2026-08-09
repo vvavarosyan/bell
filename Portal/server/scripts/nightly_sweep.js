@@ -158,9 +158,13 @@ function withCeiling(p, ms, label) {
     // needs consecutive PROVEN-GOOD reads before it will remove anything.
     try {
       const js = await recordJob('job_sweep',
-        async () => (await import('../jobs/run_sweep.js')).runJobSweep({ limit: 60, staleHours: 10, log: (m) => log(m) }),
+        async () => (await import('../jobs/run_sweep.js')).runJobSweep({ limit: 80, staleHours: 10, log: (m) => log(m) }),
         { yield: (r) => r?.jobs ?? 0, log });
       if (js?.read) log(`✓ Job boards: ${js.read} read · ${js.jobs} vacancies open · ${js.closed} closed · ${js.failed} unreadable.`);
+      // One row per PLATFORM. The QatarEnergy portal alone is a 21-minute read at the crawl delay
+      // its own robots.txt states, so a night where it silently stops must not hide behind the
+      // hundreds of vacancies the other readers bring in.
+      await recordSourceOutcomes('job_sweep', js?.sources, (v) => (v?.inserted ?? 0) + (v?.updated ?? 0));
     } catch (err) { log(`✗ Job board sweep failed: ${err.message}`); }
     // REGISTRY MERGE (Val, 2026-07-22: "if CR number is matching let it link automatically").
     // Runs BEFORE chain linking on purpose: merging collapses exact duplicates, so the chain

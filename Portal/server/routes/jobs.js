@@ -4,7 +4,28 @@ import { Router } from 'express';
 import { query } from '../db.js';
 import { denyUnlessLocalEngine } from '../lib/auth.js';
 
+const MODE = process.env.BDI_MODE || 'local-admin';
+
 const router = Router();
+
+// ⚠️ WHERE A VACANCY WAS READ IS BELL'S BUSINESS, NOT THE CUSTOMER'S.
+// Val, 2026-08-07, on the classifieds source: "let's just make sure we do not mention the source."
+// The detail route selects j.*, which carries source, source_url, board_key and external_id — a
+// qatarliving.com URL sitting in the payload announces the source just as loudly as a label would.
+// These are stripped for everyone except the platform admin and the local engine, exactly as
+// company detail sources already are.
+const SOURCE_FIELDS = ['source', 'source_url', 'board_key', 'external_id', 'raw_payload'];
+const showsSources = (req) => MODE === 'local-admin' || req.user?.role === 'platform_admin';
+function withoutSource(job, req) {
+  if (showsSources(req)) return job;
+  const out = { ...job };
+  for (const f of SOURCE_FIELDS) delete out[f];
+  // extra_fields is per-source bookkeeping (ql_slug, ats_code, apply_url on the source's own
+  // host). Dropped wholesale rather than filtered — a new reader must not be able to leak a
+  // source name by adding a key nobody remembered to list here.
+  delete out.extra_fields;
+  return out;
+}
 
 // Jobs are canonical data — mutated ONLY on the local engine: allow GET, block
 // writes off-local (no reveal on jobs).
@@ -57,6 +78,7 @@ router.get('/', async (req, res, next) => {
       // shouldn't need to know which field a keyword lives in.
       params.push('%' + q.toLowerCase() + '%');
       where.push(`(lower(j.title) LIKE $${params.length}
+                   OR coalesce(j.employer_stated,'') ILIKE $${params.length}
                    OR coalesce(c.name,'') ILIKE $${params.length}
                    OR coalesce(j.location_text,'') ILIKE $${params.length}
                    OR coalesce(j.description,'') ILIKE $${params.length})`);
@@ -92,6 +114,9 @@ router.get('/', async (req, res, next) => {
 
     const sql = `
       SELECT j.id, j.jin, j.company_id, c.name AS company_name, c.bin AS company_bin,
+             -- The employer as the SOURCE wrote it. Shown when Bell holds no matching company, so
+             -- the row says who is hiring rather than nothing. It is a quoted claim, never a link.
+             j.employer_stated,
              j.title, j.location_text, j.workplace_type, j.employment_type, j.seniority_level,
              j.salary_min, j.salary_max, j.salary_currency, j.salary_period,
              j.posted_at, j.expires_at, j.is_active, ${EFFECTIVE_ACTIVE} AS effective_active,
@@ -129,7 +154,7 @@ router.get('/:id', async (req, res, next) => {
       WHERE j.id = $1
     `, [id]);
     if (!result.rows.length) return res.status(404).json({ error: 'not_found' });
-    res.json({ job: result.rows[0] });
+    res.json({ job: withoutSource(result.rows[0], req) });
   } catch (err) { next(err); }
 });
 
@@ -151,7 +176,7 @@ router.patch('/:id', async (req, res, next) => {
     const sql = `UPDATE jobs SET ${setParts.join(', ')} WHERE id = $${params.length} RETURNING *`;
     const result = await query(sql, params);
     if (!result.rows.length) return res.status(404).json({ error: 'not_found' });
-    res.json({ job: result.rows[0] });
+    res.json({ job: withoutSource(result.rows[0], req) });
   } catch (err) { next(err); }
 });
 

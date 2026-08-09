@@ -155,7 +155,11 @@ export function JobsTab({ mode = 'local-admin' } = {}) {
                     <a onClick=${(e) => { e.preventDefault(); e.stopPropagation(); navigateTo('companies', r.company_id); }}
                        href="#" title="Open the company profile"
                        style=${{ color: 'var(--accent-bright, #a5c3ff)', textDecoration: 'none', cursor: 'pointer' }}>${r.company_name || '—'}</a>`
-                    : (r.company_name || '—')}
+                    : (r.company_name
+                        ? r.company_name
+                        : (r.employer_stated
+                            ? html`<span title="The employer as the advert states it — Bell holds no matching company record">${r.employer_stated}<span class="muted small"> · as advertised</span></span>`
+                            : '—'))}
                 </td>
                 <${EditableCell} value=${r.location_text} readOnly=${isUser} onSave=${(v) => update(r.id, 'location_text', v)} />
                 <td>${nice(r.employment_type)}${r.workplace_type ? html`<span class="muted small"> · ${nice(r.workplace_type)}</span>` : null}</td>
@@ -222,7 +226,7 @@ function JobDetail({ jobId, isUser = false }) {
               <a onClick=${(e) => { e.preventDefault(); navigateTo('companies', j.company_id); }} href="#"
                  style=${{ fontSize: '12.5px', color: 'var(--accent-bright, #a5c3ff)', textDecoration: 'none', cursor: 'pointer' }}>
                 ${j.company_name || 'View company'}${j.company_city ? html`<span class="muted"> · ${j.company_city}</span>` : null}
-              </a>` : html`<span class="muted small">${j.company_name || ''}</span>`}
+              </a>` : html`<span class="muted small">${j.company_name || j.employer_stated || ''}${!j.company_name && j.employer_stated ? ' · as advertised' : ''}</span>`}
           </div>
           <span class=${'pill ' + (j.effective_active ? 'active' : 'inactive')}>${j.effective_active ? 'active' : 'expired'}</span>
         </div>

@@ -199,7 +199,10 @@ function companyDetailOut(payload) {
   }
   return out;
 }
-const JOB_KEYS = ['id', 'title', 'company_name', 'company_id', 'location_text', 'employment_type', 'workplace_type', 'seniority_level', 'posted_at', 'effective_active'];
+// employer_stated so Bella can answer "who is hiring welders?" for a vacancy Bell holds no company
+// record for. It is an allow-list on purpose: source / source_url / board_key are never in it, so
+// no answer of hers can name where a vacancy was read.
+const JOB_KEYS = ['id', 'title', 'company_name', 'company_id', 'employer_stated', 'location_text', 'employment_type', 'workplace_type', 'seniority_level', 'posted_at', 'effective_active'];
 const CRM_ROW_KEYS = ['id', 'entity_type', 'entity_id', 'status', 'company_name', 'company_city', 'company_industry', 'person_name', 'owner_email', 'last_activity_at'];
 
 /** Route responses resolve even on 4xx — turn those into model-readable errors. */
