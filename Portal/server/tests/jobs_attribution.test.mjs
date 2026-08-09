@@ -11,8 +11,8 @@
 import { test, after } from 'node:test';
 import assert from 'node:assert/strict';
 import pg from 'pg';
-import { employerKey, employerCore, isSpecificEmployer, matchStatedEmployer, attributeJob }
-  from '../jobs/attribute.js';
+import { employerKey, employerCore, isSpecificEmployer, matchStatedEmployer, attributeJob,
+  LEGAL_TRAIL_TOKENS, SQL_KEY, SQL_CORE, SQL_TIGHT } from '../jobs/attribute.js';
 
 const DISPOSABLE = process.env.BDI_TEST_DB || 'postgres://localhost:5432/bell_intel';
 let client = null;
@@ -58,6 +58,15 @@ test('only a TRAILING legal form is optional', { skip: false }, () => {
   assert.equal(employerCore('Arctic Cooling Company'), 'arctic cooling');
   // "Company" in the middle is part of the name, not a suffix.
   assert.equal(employerCore('Company Of Bakers'), 'company of bakers');
+});
+
+test('a SPACED legal form is stripped too — the punctuation is already gone by then', { skip: false }, () => {
+  // employerKey turns "W.L.L." into three separate letters, so a token list of only 'wll' misses
+  // it. 2,188 live companies normalize to a name ending this way; before the spaced forms were
+  // added, "Encon Corporation" could never find "Encon Corporation W.L.L.".
+  assert.equal(employerCore('Encon Corporation W.L.L'), 'encon corporation');
+  assert.equal(employerCore('Power Flow Trading W.L.L.'), 'power flow trading');
+  assert.equal(employerCore('Qatar Aluminium Co. W . L . L'), 'qatar aluminium');
 });
 
 test('a category is not an employer', { skip: false }, () => {
@@ -191,4 +200,55 @@ test('an aggregator job whose employer Bell cannot place stays unattached', { sk
     { employer_stated: 'Confidential' }, { q });
   assert.equal(r.company_id, null);
   assert.match(r.how, /no company named by the source/);
+});
+
+// ── the two sides must not drift ─────────────────────────────────────────────────────────────
+// The JS regex and the SQL expression are built from ONE token list, but the INDEX is a separate
+// artefact written in a migration file. The planner matches an expression index by exact
+// expression, so if the query changes and the index does not, everything still returns correct
+// answers — just 2.4 s slower per lookup, with nothing to see. That silence is the whole risk.
+
+test('the shipped index matches the expression the matcher sends', { skip: skip() }, async () => {
+  const idx = await client.query(
+    `SELECT indexname, indexdef FROM pg_indexes
+      WHERE tablename = 'companies' AND indexname LIKE 'companies_employer_%'`);
+  const byName = Object.fromEntries(idx.rows.map((r) => [r.indexname, r.indexdef]));
+  assert.ok(byName.companies_employer_key_idx, 'the key index exists (migration 112)');
+  assert.ok(byName.companies_employer_core_idx, 'the core index exists (migrations 112 + 113)');
+  assert.ok(byName.companies_employer_tight_idx, 'the tight index exists (migration 112)');
+
+  // Postgres re-prints an index expression with its own spacing and ::text casts, so compare on
+  // the parts that carry meaning rather than character-for-character.
+  for (const tok of LEGAL_TRAIL_TOKENS) {
+    assert.ok(byName.companies_employer_core_idx.includes(`|${tok}|`) ||
+              byName.companies_employer_core_idx.includes(`(${tok}|`) ||
+              byName.companies_employer_core_idx.includes(`|${tok})`),
+      `LEGAL_TRAIL_TOKENS has "${tok}" but the shipped index does not — add a migration that ` +
+      'rebuilds companies_employer_core_idx, or every lookup silently drops to a full scan');
+  }
+  // And the reverse: an index token nobody uses any more means the JS side was trimmed alone.
+  const inIdx = (byName.companies_employer_core_idx.match(/\\m\(([^)]*)\)/) || [])[1];
+  if (inIdx) {
+    for (const tok of inIdx.split('|')) {
+      assert.ok(LEGAL_TRAIL_TOKENS.includes(tok),
+        `the shipped index strips "${tok}" but LEGAL_TRAIL_TOKENS does not — the two sides drifted`);
+    }
+  }
+});
+
+test('the planner actually USES those indexes', { skip: skip() }, async () => {
+  // The assertion above proves the tokens agree. This proves the whole expression does, which is
+  // the only thing the planner cares about.
+  const LIVE = 'COALESCE(archived, false) = false AND canonical_id IS NULL AND is_active IS NOT false';
+  for (const [label, expr, idxName] of [
+    ['key', SQL_KEY, 'companies_employer_key_idx'],
+    ['core', SQL_CORE, 'companies_employer_core_idx'],
+    ['tight', SQL_TIGHT, 'companies_employer_tight_idx'],
+  ]) {
+    const e = await client.query(
+      `EXPLAIN SELECT id FROM companies WHERE ${LIVE} AND ${expr} = $1 LIMIT 3`, ['zzattr nothing here']);
+    const plan = e.rows.map((r) => r['QUERY PLAN']).join('\n');
+    assert.ok(plan.includes(idxName),
+      `the ${label} lookup no longer uses ${idxName} — the expression drifted from the migration.\n${plan}`);
+  }
 });

@@ -56,8 +56,31 @@ export function employerKey(name) {
 // A trailing legal form may differ between how a job board writes an employer and how the
 // registry does ("Milaha" ↔ "Milaha W.L.L."), so it is allowed to differ — but only at the END,
 // and only these tokens. Nothing that distinguishes two firms is ever dropped.
-const LEGAL_TRAIL_RE = /(?:\b(?:co|company|llc|ltd|limited|inc|plc|est|establishment|spc|qpsc|qsc|qssc|sae|sao|wll|w l l|psc|qfz|qfc)\b[\s.]*)+$/;
+/**
+ * ⚠️ ONE LIST, TWO CONSUMERS. These tokens build BOTH the JS regex below and the SQL expression
+ * sent to Postgres (and indexed by migrations 112 + 113). They were once written out twice by hand
+ * and drifted: the JS list had the SPACED form `w l l` and the SQL list did not, so 2,188 live
+ * companies registered as "… W.L.L." could never be matched — "Encon Corporation" simply failed to
+ * find "Encon Corporation W.L.L.". Derived from one array now, and tests/jobs_attribution.test.mjs
+ * asserts the shipped index definition still contains every token.
+ *
+ * A SPACED entry is not decoration: employerKey turns "W.L.L." into "w l l" and
+ * "Qatar Aluminium Co. W . L . L" into "… co w l l", so the spaced spellings are what actually
+ * arrive. Only trailing forms are optional; nothing that distinguishes two firms is ever dropped.
+ */
+export const LEGAL_TRAIL_TOKENS = [
+  'co', 'company', 'llc', 'ltd', 'limited', 'inc', 'plc', 'est', 'establishment',
+  'spc', 'qpsc', 'qsc', 'qssc', 'sae', 'sao', 'wll', 'psc', 'qfz', 'qfc',
+  // the same forms as the punctuation-stripper leaves them
+  'w l l', 's p c', 'q p s c', 'q s c', 'q s s c', 's a e', 's a o', 'l l c', 'p l c',
+];
+const LEGAL_TRAIL_RE = new RegExp(`(?:\\b(?:${LEGAL_TRAIL_TOKENS.join('|')})\\b[\\s.]*)+$`);
 export const employerCore = (name) => employerKey(name).replace(LEGAL_TRAIL_RE, '').trim();
+
+/** The SQL forms of the three keys. Exported so a test can compare them with the live indexes. */
+export const SQL_KEY = `btrim(regexp_replace(regexp_replace(lower(replace(name, '&', ' and ')), '[^a-z0-9؀-ۿ]+', ' ', 'g'), '\\s+', ' ', 'g'))`;
+export const SQL_CORE = `btrim(regexp_replace(${SQL_KEY}, '( ?\\m(${LEGAL_TRAIL_TOKENS.join('|')})\\M)+$', '', 'g'))`;
+export const SQL_TIGHT = `replace(${SQL_KEY}, ' ', '')`;
 
 // Words that name an industry or a place rather than a firm. A "stated employer" made only of
 // these is a category, not a company — job boards are full of them ("Trading Company", "Hotel
@@ -100,32 +123,35 @@ export async function matchStatedEmployer(stated, { q = query } = {}) {
   if (!isSpecificEmployer(stated)) return null;
   const core = employerCore(stated);
 
-  // ⚠️ THESE THREE EXPRESSIONS ARE INDEXED BY MIGRATION 112 AND MUST STAY BYTE-IDENTICAL TO IT.
-  // ⚠️ AND THE BACKSLASHES MUST BE DOUBLED. A template literal eats a single one: `'\s+'` reaches
-  // Postgres as 's+', which replaces every letter S with a space — "Qatar Airways" became
-  // "qatar airway " and matched nothing, silently, while also missing the index (3 s per lookup
-  // instead of 0.07 ms). Both symptoms had the same one-character cause. Caught on live data.
+  // ⚠️ THESE EXPRESSIONS ARE INDEXED (migrations 112 + 113) AND MUST MATCH THE INDEX EXACTLY.
   // Without the index this is a full rewrite-and-scan of 190k names per lookup — measured at 2.4 s
-  // for a hit and 4.4 s for a miss, which is a quarter-hour of database burn on one nightly pass.
-  // Edit either side and you must edit both; the migration carries the same warning.
-  const KEY = `btrim(regexp_replace(regexp_replace(lower(replace(name, '&', ' and ')), '[^a-z0-9؀-ۿ]+', ' ', 'g'), '\\s+', ' ', 'g'))`;
-  const CORE = `btrim(regexp_replace(${KEY}, '( ?\\m(co|company|llc|ltd|limited|inc|plc|est|establishment|spc|qpsc|qsc|qssc|sae|sao|wll|psc|qfz|qfc)\\M)+$', '', 'g'))`;
-  const TIGHT = `replace(${KEY}, ' ', '')`;
+  // for a hit and 4.4 s for a miss. They are built from LEGAL_TRAIL_TOKENS above so the JS and SQL
+  // sides cannot drift; a test asserts the live index definition still agrees.
+  const KEY = SQL_KEY, CORE = SQL_CORE, TIGHT = SQL_TIGHT;
   const LIVE = `COALESCE(archived, false) = false AND canonical_id IS NULL AND is_active IS NOT false`;
 
-  // The company's own name, and its name minus a trailing legal form, are both allowed to answer.
+  // ── PASS 1: THE NAME EXACTLY AS REGISTERED ───────────────────────────────────────────────────
   // LIKE, ILIKE and trigram similarity are absent on purpose: "Qatar Steel" and "Qatar Steel
   // Industrial" are two different companies, and a fuzzy match here would merge them.
   const r = await q(
-    `SELECT id, name FROM companies WHERE ${LIVE} AND (${KEY} = $1 OR ${CORE} = $1) LIMIT 3`, [core]);
-
+    `SELECT id, name FROM companies WHERE ${LIVE} AND ${KEY} = $1 LIMIT 3`, [core]);
+  if (r.rows.length === 1) return hit(r.rows[0], stated, 'name');
   // Ambiguity is not a tie to break — it is a reason to stop. Two live companies whose names
   // reduce to the same words means the source has not told Bell which one is hiring.
-  if (r.rows.length === 1) return hit(r.rows[0], stated, 'name');
   if (r.rows.length > 1) return null;
 
-  // ── SECOND PASS: WORD BREAKS ONLY ────────────────────────────────────────────────────────────
-  // Only when the first pass found NOTHING. A brand that writes itself as one word is registered
+  // ── PASS 2: ALLOWING A TRAILING LEGAL FORM TO DIFFER ─────────────────────────────────────────
+  // Only when pass 1 found NOTHING, because an exact registered name is the better answer whenever
+  // one exists. Bell holds both "ooredoo" and "Ooredoo Q.P.S.C."; running the two comparisons in a
+  // single OR made "Ooredoo" ambiguous and lost a match that had been correct — precision first,
+  // then reach.
+  const rc = await q(
+    `SELECT id, name FROM companies WHERE ${LIVE} AND ${CORE} = $1 LIMIT 3`, [core]);
+  if (rc.rows.length === 1) return hit(rc.rows[0], stated, 'name, allowing a trailing legal form to differ');
+  if (rc.rows.length > 1) return null;
+
+  // ── PASS 3: WORD BREAKS ONLY ─────────────────────────────────────────────────────────────────
+  // Only when both passes above found NOTHING. A brand that writes itself as one word is registered
   // as two, or the reverse: the career portal says "QatarEnergy", the register says "Qatar Energy".
   // Comparing with the spaces removed preserves letter order, so two names can only collide if
   // they spell the same thing.
