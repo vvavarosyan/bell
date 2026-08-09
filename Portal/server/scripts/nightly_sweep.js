@@ -117,6 +117,15 @@ const log = (m) => console.log(`[${new Date().toISOString()}] ${m}`);
       }, { yield: (r) => (r?.inserted ?? 0) + (r?.updated ?? 0), log });
       if (q?.scraped) log(`✓ QSE disclosures: ${q.scraped} read · ${q.inserted} new · ${q.updated} updated · ${q.linked} linked to a Bell company.`);
     } catch (err) { log(`✗ QSE disclosure scan failed: ${err.message}`); }
+    // JOB BOARDS — read every readable vacancy board, store what is open, close what has gone.
+    // Twice-daily cadence via staleHours: vacancies move faster than company records, and closure
+    // needs consecutive PROVEN-GOOD reads before it will remove anything.
+    try {
+      const js = await recordJob('job_sweep',
+        async () => (await import('../jobs/run_sweep.js')).runJobSweep({ limit: 60, staleHours: 10, log: (m) => log(m) }),
+        { yield: (r) => r?.jobs ?? 0, log });
+      if (js?.read) log(`✓ Job boards: ${js.read} read · ${js.jobs} vacancies open · ${js.closed} closed · ${js.failed} unreadable.`);
+    } catch (err) { log(`✗ Job board sweep failed: ${err.message}`); }
     // REGISTRY MERGE (Val, 2026-07-22: "if CR number is matching let it link automatically").
     // Runs BEFORE chain linking on purpose: merging collapses exact duplicates, so the chain
     // linker then works on one record per firm instead of accidentally parenting a branch to a

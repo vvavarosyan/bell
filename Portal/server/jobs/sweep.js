@@ -135,17 +135,27 @@ export async function closeVanished(boardKey, seenExternalIds, { log = () => {} 
   return { expired: expired.rowCount, withdrawn: toClose.length, pending: misses.rows.length - toClose.length };
 }
 
-/** Boards due a read, least-recently-swept first. Rejected boards are never swept. */
-export async function boardsDue({ limit = 50, staleHours = 12 } = {}) {
+/**
+ * Boards due a read, least-recently-swept first. Rejected boards are never swept.
+ *
+ * ⚠️ ONLY BOARDS BELL CAN ACTUALLY READ. The harvester records every careers page it finds, so the
+ * table fills with company pages long before there is a parser for them — 66 of them on the first
+ * run. Ordering purely by "least recently swept" put all of those (last_ok_at NULL) ahead of the
+ * Oracle tenants, and a limit of 40 meant the readable boards were never reached at all: the first
+ * live sweep read ZERO boards while reporting "40 no reader yet". Filtering to platforms with a
+ * reader keeps the queue from being clogged by boards nobody can parse yet.
+ */
+export async function boardsDue({ limit = 50, staleHours = 12, platforms = null } = {}) {
   const r = await query(`
     SELECT id, company_id, board_key, platform, url, kind, attribution, consecutive_failures
       FROM job_boards
      WHERE active AND attribution <> 'rejected'
+       AND ($3::text[] IS NULL OR platform = ANY($3::text[]))
        AND (last_ok_at IS NULL OR last_ok_at < now() - ($2 || ' hours')::interval)
        -- A board that has failed many times in a row is backed off rather than hammered; it is
        -- still listed for a human, and its jobs are NOT closed (rule 3).
        AND consecutive_failures < 10
      ORDER BY last_ok_at NULLS FIRST
-     LIMIT $1`, [limit, String(staleHours)]);
+     LIMIT $1`, [limit, String(staleHours), platforms]);
   return r.rows;
 }
