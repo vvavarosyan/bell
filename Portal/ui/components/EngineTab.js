@@ -37,6 +37,14 @@ const ENGINES = [
 ];
 const CARD = { border: '1px solid var(--border)', borderRadius: '12px', padding: '16px', background: 'var(--bg-elev, rgba(255,255,255,0.02))', marginBottom: '16px' };
 
+const JOB_LABELS = {
+  tender_scan: 'Tender scan (all portals)', award_reports: 'Award reports (who won)',
+  close_expired_tenders: 'Close expired tenders', qse_scan: 'Stock-exchange disclosures',
+  job_sweep: 'Job boards', registry_merge: 'Registry merge (duplicates)',
+  chain_auto_link: 'Chain links (branches)', bell_score_heal: 'Bell Score heal',
+  weekly_data_check: 'Weekly data check email', self_update: 'Engine code self-update',
+};
+
 export function EngineTab() {
   const [s, setS] = useState(null);
   const [runs, setRuns] = useState([]);
@@ -127,6 +135,35 @@ export function EngineTab() {
             <div><div class="muted" style=${{ fontSize: '11px' }}>JS scraper (Crawl4AI)</div>${s.crawl4ai && s.crawl4ai.up ? html`<span style=${{ color: '#22c55e', fontWeight: 700 }}>● live</span>` : html`<span class="muted">○ offline</span>`}</div>
           </div>
         </div>
+
+        ${(s.jobs || []).filter((j) => j.scheduled).length ? html`<div style=${CARD}>
+          <div style=${{ fontWeight: 700, fontSize: '14px', marginBottom: '4px' }}>Scheduled duties — what each one last did</div>
+          <div class="muted" style=${{ fontSize: '12px', marginBottom: '12px' }}>
+            "It ran" is not "it worked". A duty that finishes cleanly while producing nothing is flagged here,
+            and a scan that reads several portals is broken out per portal — one dead source can hide inside a healthy total.
+          </div>
+          ${(s.jobs || []).filter((j) => j.scheduled).map((j) => {
+            const bad = j.health !== 'ok';
+            const col = j.health === 'ok' ? 'var(--green, #22c55e)'
+              : (j.health === 'failing' || j.health === 'a source is failing') ? 'var(--red, #ff5d5d)' : 'var(--amber, #f59e0b)';
+            return html`<div key=${j.kind} style=${{ padding: '7px 0', borderBottom: '1px solid var(--border)' }}>
+              <div style=${{ display: 'flex', alignItems: 'baseline', gap: '10px', fontSize: '12.5px' }}>
+                <span style=${{ color: col }}>●</span>
+                <b style=${{ flex: 1 }}>${JOB_LABELS[j.kind] || j.kind}</b>
+                <span style=${{ color: col, fontWeight: bad ? 700 : 400 }}>${j.health}</span>
+                <span class="muted" style=${{ fontSize: '11px', minWidth: '70px', textAlign: 'right' }}>
+                  ${j.hours_ago == null ? 'never' : j.hours_ago + 'h ago'}
+                </span>
+              </div>
+              ${j.error ? html`<div style=${{ fontSize: '11px', color: 'var(--red, #ff5d5d)', marginLeft: '22px', marginTop: '2px' }}>${txt(j.error).slice(0, 160)}</div>` : null}
+              ${(j.sources || []).length ? html`<div style=${{ marginLeft: '22px', marginTop: '5px', display: 'flex', gap: '14px', flexWrap: 'wrap' }}>
+                ${j.sources.map((x) => html`<span key=${x.source} style=${{ fontSize: '11px', color: x.health === 'ok' ? 'var(--text-dim)' : (x.health === 'failing' ? 'var(--red, #ff5d5d)' : 'var(--amber, #f59e0b)') }}>
+                  ${x.health === 'ok' ? '✓' : '✗'} ${x.source}${x.produced != null ? ` · ${nf(x.produced)}` : ''}${x.health !== 'ok' ? ` · ${x.health}` : ''}
+                </span>`)}
+              </div>` : null}
+            </div>`;
+          })}
+        </div>` : null}
 
         <div style=${{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '12px', marginBottom: '16px' }}>
           ${ENGINES.map((e) => html`

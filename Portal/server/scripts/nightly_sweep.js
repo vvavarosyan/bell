@@ -21,7 +21,7 @@ import { autoMergeExactRegistrations } from '../assembly/auto_merge.js';
 import { runTenderScan, closeExpiredTenders } from '../tenders/scrape.js';
 import { scanMonaqasatAwards, repairThinAwards } from '../tenders/scan_monaqasat_awards.js';
 import { selfUpdate, recycleEngineAfterUpdate } from '../ops/self_update.js';
-import { recordJob } from '../ops/job_log.js';
+import { recordJob, recordSourceOutcomes, openJob } from '../ops/job_log.js';
 import { recomputeBellScores } from '../assembly/bell_score.js';
 import { pool } from '../db.js';
 
@@ -30,12 +30,34 @@ const CHUNK  = Number(process.env.BELL_NIGHTLY_CHUNK  || 300);
 // Award-list pages to re-read nightly. New awards appear at the front, so a handful covers a
 // day's worth; raise it if a backlog ever builds. The archive backfill is a separate command.
 const AWARD_PAGES = Number(process.env.BELL_NIGHTLY_AWARD_PAGES || 6);
+// ⚠️ A HARVEST ROUND MUST NOT BE ABLE TO EAT THE NIGHT.
+// 2026-08-09: the nightly started at 00:30 Qatar, self-updated, and wrote nothing for the next
+// sixteen hours. The deadline is only consulted BETWEEN rounds, so a single round that never
+// returns means the loop never comes round again and the `finally` block below — which is where
+// the tender scan, award reports, QSE, job boards, registry merge, chain links, weekly data check
+// and Bell Score heal all live — is never reached. Eight scheduled duties, silently skipped, by
+// one stuck network read. A round is now raced against a ceiling; losing the race abandons that
+// round and moves on, because a lost round costs one chunk and a lost night costs everything.
+const ROUND_MAX_MS = Number(process.env.BELL_NIGHTLY_ROUND_MAX_MS || 90 * 60 * 1000);
 
 const log = (m) => console.log(`[${new Date().toISOString()}] ${m}`);
+
+/** Resolve to a sentinel if `p` has not settled in `ms`. Does NOT cancel `p` — nothing here can —
+ *  but the night continues, and process.exit at the end takes the straggler with it. */
+function withCeiling(p, ms, label) {
+  let t;
+  const ceiling = new Promise((resolve) => { t = setTimeout(() => resolve({ __timedOut: true, label }), ms); });
+  return Promise.race([p, ceiling]).finally(() => clearTimeout(t));
+}
 
 (async () => {
   const deadline = Date.now() + MAX_MS;
   log(`▸▸▸ Nightly Harvest Sweep starting — budget ${(MAX_MS / 3600000).toFixed(1)}h, chunk ${CHUNK}.`);
+  // Open the row NOW. recordJob only writes when work RETURNS, so a hang left no trace at all —
+  // and silence is indistinguishable from "never scheduled". This row says "started", and the
+  // Portal flags it as "started but never finished" if it is still open hours later.
+  const closeNight = await openJob('nightly_sweep', { budget_h: MAX_MS / 3600000, chunk: CHUNK });
+  let nightErr = null;
 
   // SELF-UPDATE (two-machine model): the engine box runs whatever code sits in its clone.
   // The logic now lives in ops/self_update.js, which RECORDS the outcome to job_runs instead
@@ -52,9 +74,17 @@ const log = (m) => console.log(`[${new Date().toISOString()}] ${m}`);
       rounds++;
       let r;
       try {
-        r = await runHarvestSweep({ limit: CHUNK, triggeredBy: 'nightly', jobLog: (m) => log('  ' + m) });
+        r = await withCeiling(
+          runHarvestSweep({ limit: CHUNK, triggeredBy: 'nightly', jobLog: (m) => log('  ' + m) }),
+          Math.min(ROUND_MAX_MS, Math.max(60_000, deadline - Date.now())), `round ${rounds}`);
+        if (r?.__timedOut) {
+          log(`✗ Round ${rounds} exceeded ${(ROUND_MAX_MS / 60000).toFixed(0)} min and was abandoned — moving on to the scheduled duties.`);
+          nightErr = `harvest round ${rounds} timed out`;
+          break;
+        }
       } catch (err) {
         log(`✗ Round ${rounds} failed: ${err.message}`);
+        nightErr = err.message;
         break;
       }
       totalFound     += r.found || 0;
@@ -76,7 +106,13 @@ const log = (m) => console.log(`[${new Date().toISOString()}] ${m}`);
       const t = await recordJob('tender_scan', () => runTenderScan({}),
         { yield: (r) => (r?.total?.inserted ?? 0) + (r?.total?.updated ?? 0), log });
       log(`✓ Tender scan: ${t.total.scraped} scraped · ${t.total.inserted} new · ${t.total.updated} updated · ${t.total.linked} linked.`);
-      for (const [src, r] of Object.entries(t.sources)) if (r.error) log(`  ✗ ${src}: ${r.error}`);
+      // ONE RECORD PER SOURCE. The aggregate above is exactly what hid Kahramaa's HTTP 401 for
+      // fourteen nights: three healthy portals made the total look fine while a fourth was dead.
+      await recordSourceOutcomes('tender_scan', t.sources);
+      for (const [src, r] of Object.entries(t.sources)) {
+        if (r.error) log(`  ✗ ${src}: ${r.error}`);
+        else log(`  · ${src}: ${r.scraped} scraped, ${r.inserted || 0} new, ${r.updated || 0} updated`);
+      }
     } catch (err) { log(`✗ Tender scan failed: ${err.message}`); }
     // Fresh AWARD REPORTS — who won, for how much, and who they beat. New awards land at the
     // FRONT of Monaqasat's awarded list, so a small page walk each night keeps Bell current;
@@ -164,6 +200,8 @@ const log = (m) => console.log(`[${new Date().toISOString()}] ${m}`);
     } catch (err) { log(`✗ Bell Score heal failed: ${err.message}`); }
     const reason = Date.now() >= deadline ? 'time budget reached' : 'complete';
     log(`▸▸▸ Nightly Harvest Sweep finished (${reason}) — ${rounds} round(s), ${totalFound} found, ${totalHarvested} harvested total.`);
+    await closeNight(nightErr ? 'error' : 'ok',
+      { rounds, found: totalFound, harvested: totalHarvested, reason }, nightErr);
     try { await pool.end(); } catch {}
     process.exit(0);
   }

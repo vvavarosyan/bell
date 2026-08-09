@@ -22,7 +22,7 @@ import { qatarParts } from '../lib/qatar_time.js';
 import { getState, setState } from '../outreach/machine.js';
 import { collectGaps } from '../scripts/data_gap_audit.js';
 import { query } from '../db.js';
-import { jobHealth } from './job_log.js';
+import { jobHealth, silentSources } from './job_log.js';
 
 // A source that has stopped producing is invisible until someone counts the days. MOCI and QCCI
 // together are 88% of Bell's provenance and had gone 55 and 46 days without a write before
@@ -46,7 +46,7 @@ async function quietSources() {
 const TO = process.env.BDI_OPS_EMAIL || 'hello@bell.qa';
 const n = (v) => Number(v || 0).toLocaleString();
 
-function buildReport(g, prev, quiet = [], jobs = []) {
+function buildReport(g, prev, quiet = [], jobs = [], deadSources = []) {
   const delta = (key, now) => {
     if (!prev || prev[key] == null) return '';
     const d = now - prev[key];
@@ -98,6 +98,18 @@ function buildReport(g, prev, quiet = [], jobs = []) {
         <td style="padding:6px 0;border-bottom:1px solid #eee;text-align:right;color:#b45309;font-weight:600">${q.days_quiet} days</td></tr>`).join('')}
     </table>` : ''}
 
+    ${deadSources.length ? `
+    <h3 style="margin:0 0 6px;font-size:15px;color:#dc2626">Individual scan sources producing nothing</h3>
+    <p style="color:#555;margin:0 0 8px;font-size:13px">
+      The tender scan reads four portals and used to report ONE total. Three healthy portals hid
+      Kahramaa's dead one for fourteen nights. Each source is now recorded separately — these have
+      not produced a single successful run recently.</p>
+    <table style="border-collapse:collapse;width:100%;margin-bottom:18px">
+      ${deadSources.map((d) => `<tr>
+        <td style="padding:6px 0;border-bottom:1px solid #eee">${d.kind.replace(':source', '')} → <strong>${d.source}</strong></td>
+        <td style="padding:6px 0;border-bottom:1px solid #eee;text-align:right;color:#dc2626;font-weight:600">${d.errors ? d.errors + ' failed' : d.runs + ' empty'} of ${d.runs} runs</td></tr>`).join('')}
+    </table>` : ''}
+
     ${jobs.filter((j) => j.health !== 'ok' && j.health !== 'ad-hoc').length ? `
     <h3 style="margin:0 0 6px;font-size:15px;color:#b45309">Scheduled jobs needing a look</h3>
     <table style="border-collapse:collapse;width:100%;margin-bottom:18px">
@@ -124,10 +136,12 @@ function buildReport(g, prev, quiet = [], jobs = []) {
     `Map coverage: ${g.coverage_pct}% (${n(g.held.pinned)}/${n(g.held.locations)})`,
     ...(quiet.length ? ['', `Sources gone quiet (${QUIET_DAYS}+ days):`,
       ...quiet.map((q) => `  ${q.source}: ${q.days_quiet} days`)] : []),
+    ...(deadSources.length ? ['', 'Scan sources producing nothing:',
+      ...deadSources.map((d) => `  ${d.kind.replace(':source', '')} -> ${d.source}: ${d.ok_runs} good of ${d.runs} runs`)] : []),
     ...(jobs.filter((j) => j.health !== 'ok' && j.health !== 'ad-hoc').length ? ['', 'Scheduled jobs needing a look:',
       ...jobs.filter((j) => j.health !== 'ok' && j.health !== 'ad-hoc').map((j) => `  ${j.kind}: ${j.health}`)] : []),
   ].join('\n');
-  const alarms = quiet.length + jobs.filter((j) => j.health !== 'ok' && j.health !== 'ad-hoc').length;
+  const alarms = quiet.length + deadSources.length + jobs.filter((j) => j.health !== 'ok' && j.health !== 'ad-hoc').length;
   const subject = alarms
     ? `Bell data check — ${alarms} thing(s) need a look`
     : `Bell data check — ${g.coverage_pct}% mapped, ${n(lost)} items not kept`;
@@ -139,8 +153,10 @@ export async function sendGapReportNow() {
   const gaps = await collectGaps();
   const quiet = await quietSources();
   const jobs = await jobHealth();
+  // Per-SOURCE deadness — the aggregate job above cannot see it, which is the whole point.
+  const deadSources = await silentSources({ minRuns: 3, days: 10 }).catch(() => []);
   const prev = (await getState('gap_report_last'))?.snapshot || null;
-  const { subject, html, text } = buildReport(gaps, prev, quiet, jobs);
+  const { subject, html, text } = buildReport(gaps, prev, quiet, jobs, deadSources);
   await sendEmail({ to: TO, subject, html, text, system: 'gap-report' });
   await setState('gap_report_last', {
     at: new Date().toISOString(),

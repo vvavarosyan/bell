@@ -21,6 +21,7 @@
 
 import { runHarvestSweep } from '../enrichment/orchestrator.js';
 import { pool, query } from '../db.js';
+import { alarmOnBrokenDuties } from '../ops/job_log.js';
 
 // ── Code freshness ───────────────────────────────────────────────────────────
 // A long-running process never reloads its own modules. That is a second, quieter version of the
@@ -138,6 +139,9 @@ async function beat(state, s = {}) {
   // round loop.
   let hbState = 'starting';
   let hbStats = { ...totals };
+  // Start the clock an hour back so the first round checks immediately — a restart is precisely
+  // when something may have just broken.
+  let lastDutyCheck = Date.now() - 60 * 60_000;
   const hbTimer = setInterval(() => { beat(hbState, hbStats); }, 45000);
   if (hbTimer.unref) hbTimer.unref();
 
@@ -152,6 +156,15 @@ async function beat(state, s = {}) {
       continue;
     }
     totals.round_no++;
+    // ⚠️ BELL WATCHES ITS OWN DUTIES. This process is the only one guaranteed to be running when
+    // the nightly is NOT — which is exactly the situation nobody could see. On 2026-08-09 the
+    // nightly started at 00:30 Qatar and never reached the eight duties in its finally block; the
+    // only trace was an absence. The check is cheap (one indexed read), throttled to hourly here
+    // and to one mail per duty per 20h inside, and never throws.
+    if (Date.now() - lastDutyCheck > 60 * 60_000) {
+      lastDutyCheck = Date.now();
+      await alarmOnBrokenDuties({ log });
+    }
     const nightC = Number(control.night_chunk) || NIGHT_CHUNK;
     const dayC   = Number(control.day_chunk)   || DAY_CHUNK;
     const chunk = isNight() ? nightC : dayC;
