@@ -89,8 +89,17 @@ export async function upsertJobs(board, jobs, { log = () => {} } = {}) {
     // WHOSE vacancy is it? A verified board answers directly; otherwise the POSTING must name its
     // own employer and that name must land on exactly one active company. See jobs/attribute.js —
     // an aggregator carries dozens of employers, so "which board it came from" answers nothing.
-    const { company_id } = await attributeJob(board, j);
+    const { company_id, how } = await attributeJob(board, j);
     if (company_id) attributed++;
+    // ⚠️ RECORD HOW, NOT JUST WHO. company_id below is written with COALESCE, which is right — a
+    // board that states its employer only some days must not lose a correct link to a blank field.
+    // But it also means a link written under a rule Bell later TIGHTENS survives that correction
+    // forever, exactly as the fabricated descriptions did until they were deleted by hand. Storing
+    // the reason turns an unrepairable state into a one-query repair: find every job attributed by
+    // a rule that has since changed, and re-decide only those.
+    const extra = company_id
+      ? { ...(j.extra_fields || {}), bell_attribution: String(how).slice(0, 300) }
+      : (j.extra_fields || null);
     const r = await query(`
       INSERT INTO jobs (company_id, source, board_key, external_id, source_url, title,
                         description, location_text, is_remote, workplace_type, employment_type,
@@ -153,7 +162,7 @@ export async function upsertJobs(board, jobs, { log = () => {} } = {}) {
        // claim and the link never get confused for each other.
        j.employer_stated || j.extra_fields?.employer_name || null,
        j.posted_at || null, j.expires_at || null,
-       j.extra_fields ? packRaw(j.extra_fields) : null, packRaw(j.raw_payload || j.raw || j)]);
+       extra ? packRaw(extra) : null, packRaw(j.raw_payload || j.raw || j)]);
     if (r.rows[0]?.was_insert) inserted++; else updated++;
   }
   if (inserted || updated) log(`    ${board.board_key}: ${inserted} new, ${updated} still open, ${attributed} tied to a company`);
