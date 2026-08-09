@@ -143,9 +143,13 @@ export function decodeEntities(s) {
 /** Qatar Living stores descriptions as <p>…</p> HTML. Paragraphs → blank-line
  *  separated plain text. Nothing is invented and nothing is dropped. */
 export function qlHtmlToText(html) {
-  if (typeof html !== 'string' || !html) return null;
+  // A flight pointer reaches here as the whole "HTML" body — see unflight/trap 6. Stripping tags
+  // from "$2d" leaves "$2d", which is exactly how it ended up in 158 stored descriptions.
+  const src = unflight(html);
+  if (typeof src !== 'string' || !src) return null;
+  const html_ = src;
   const text = decodeEntities(
-    html
+    html_
       .replace(/<\s*(br|BR)\s*\/?>/g, '\n')
       .replace(/<\/\s*(p|div|li|h[1-6]|tr)\s*>/gi, '\n\n')
       .replace(/<\s*li[^>]*>/gi, '• ')
@@ -159,11 +163,42 @@ export function qlHtmlToText(html) {
   return text || null;
 }
 
-/** A stated string, or null. Blank-after-trim and the "not answered" tokens
- *  above are absent, not values (trap 4). */
-export function statedString(v) {
+/**
+ * ⚠️ TRAP 6 — A REACT FLIGHT REFERENCE IS NOT TEXT.
+ *
+ * The list page is a React Server Components payload. In that format a string beginning with `$`
+ * is a POINTER to another chunk ("$2d" means "see chunk 2d"), and a string that genuinely begins
+ * with a dollar sign is escaped by doubling it ("$$500"). The long-text fields arrive as pointers:
+ * job_description, job_description_ar, company_about, company_about_ar.
+ *
+ * MEASURED LIVE 2026-08-09 across 60 listings on 5 pages: those four fields carry pointers, and
+ * NOT ONE of the referenced chunks is present in the delivered HTML — the site streams them
+ * later. Zero of five were resolvable on page 1.
+ *
+ * The first version of this reader passed the pointer straight through, so Bell stored 158 of 233
+ * job descriptions as the literal strings "$2d", "$31", "$34" and showed them to customers as the
+ * job description. That is a fabricated value, which rule 2.1 forbids outright: an unresolvable
+ * pointer means the text was NOT delivered, so the field is ABSENT, and absent stays null.
+ *
+ * Resolving them would need the streamed chunk, which is not in the HTML. The detail page carries
+ * the real description and mergeQatarLivingJob already folds it in when a detail fetch happens.
+ *
+ * @returns {string|null} the real text, with an escaped leading '$' restored, or null for a pointer
+ */
+export function unflight(v) {
   if (typeof v !== 'string') return null;
-  const t = decodeEntities(v).replace(/\s+/g, ' ').trim();
+  if (v[0] !== '$') return v;
+  // '$$foo' is the escape for a real string 'foo' that starts with '$'.
+  if (v[1] === '$') return v.slice(1);
+  return null;                    // '$2d', '$L4', '$undefined', '$@1' … all pointers/sentinels
+}
+
+/** A stated string, or null. Blank-after-trim and the "not answered" tokens
+ *  above are absent, not values (trap 4). A flight pointer is absent too (trap 6). */
+export function statedString(v) {
+  const u = unflight(v);
+  if (typeof u !== 'string') return null;
+  const t = decodeEntities(u).replace(/\s+/g, ' ').trim();
   if (!t) return null;
   return QL_NULLISH_TOKENS.has(t.toLowerCase()) ? null : t;
 }

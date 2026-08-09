@@ -22,6 +22,8 @@ import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
 
 import {
+  unflight,
+  qlListRecordToJob,
   parseQatarLivingList,
   parseQatarLivingListPagination,
   parseQatarLivingJob,
@@ -419,4 +421,56 @@ test('raw_payload is valid JSON, never a truncated string (Rule 2.4)', () => {
     const back = JSON.parse(j.raw_payload); // throws if truncated
     assert.equal(back.id, j.external_id);
   }
+});
+
+// ── TRAP 6: a React Flight pointer is not text ───────────────────────────────────────────────
+// The list page is an RSC payload. A string starting with `$` is a POINTER to another chunk, and a
+// real string starting with a dollar sign is escaped by doubling it. The four long-text fields
+// (job_description, job_description_ar, company_about, company_about_ar) arrive as pointers whose
+// chunks the site streams LATER — measured live across 60 listings on 5 pages, not one was present
+// in the delivered HTML.
+//
+// The first version passed them through, so Bell stored 158 of 233 descriptions as the literal
+// strings "$2d", "$31", "$34" and showed them to customers as the job description.
+
+test('a flight pointer is absent, not a description', () => {
+  for (const ptr of ['$2d', '$31', '$3b', '$L4', '$undefined', '$@1', '$K2', '$']) {
+    assert.equal(unflight(ptr), null, `${ptr} is a pointer`);
+    assert.equal(qlHtmlToText(ptr), null, `${ptr} must not become description text`);
+    assert.equal(statedString(ptr), null, `${ptr} must not become a stated value`);
+  }
+});
+
+test('a real string that starts with a dollar sign survives, unescaped', () => {
+  // RSC escapes a genuine leading '$' by doubling it, so this is how "$500 signing bonus" arrives.
+  assert.equal(unflight('$$500 signing bonus'), '$500 signing bonus');
+  assert.equal(statedString('$$500 signing bonus'), '$500 signing bonus');
+  // The escape applies to the WHOLE value, not to dollar signs inside it: a description whose
+  // HTML merely contains '$$' never needed escaping, so those characters are literal text and
+  // must survive verbatim. Only a leading '$$' is an escape.
+  assert.equal(qlHtmlToText('$$<p>500 bonus</p>'), '$500 bonus');
+  assert.equal(qlHtmlToText('<p>Pays $$500</p>'), 'Pays $$500');
+});
+
+test('ordinary text is untouched by the guard', () => {
+  assert.equal(unflight('Mechanical Draftsman'), 'Mechanical Draftsman');
+  assert.equal(qlHtmlToText('<p>Immediate Joining</p><p>6+ years</p>'), 'Immediate Joining\n\n6+ years');
+  assert.equal(unflight(null), null);
+  assert.equal(unflight(42), null);
+});
+
+test('a listing whose description is a pointer yields a job with NO description', () => {
+  // The rest of the row is still perfectly good — only the unresolvable field goes missing.
+  const rec = {
+    id: '11111111-2222-3333-4444-555555555555', job_type: 'corporate',
+    title: 'AutoCAD designer', slug: 'autocad-designer',
+    job_description: '$2d', city: 'Doha', country: 'Qatar',
+    created_at: '2026-08-09T06:00:00.000Z',
+    posting_as: { name: 'Zzql Test Employer' },
+  };
+  const job = qlListRecordToJob(rec);
+  assert.ok(job, 'the listing is still a job');
+  assert.equal(job.title, 'AutoCAD designer');
+  assert.equal(job.description, null, 'the description is absent, not "$2d"');
+  assert.equal(job.extra_fields.description_html, undefined, 'and it is not smuggled into extra_fields');
 });
