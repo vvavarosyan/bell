@@ -20,9 +20,29 @@ import { query, pool } from '../db.js';
 import { getKey } from '../keychain.js';
 import { MIRROR_TABLES } from '../sync/tables.js';
 
+// ⚠️ PRODUCTION ORIGINATES SOME ROWS, AND THIS TOOL NEARLY DELETED THEM.
+// The premise "a row on prod that is not on the engine box is a deletion that failed to
+// propagate" is FALSE for one id band. sync/pull.js: research jobs started on bell.qa execute on
+// Railway and write NEW companies and people straight into the prod database, with ids from a
+// reserved HIGH band (migration 0017). A reverse pull, which runs just before each push, brings
+// them down. Between creation and that pull they exist ONLY on production — which is exactly the
+// shape this tool was built to hunt.
+//
+// The first run flagged 7 such people (ids 2000040084-2000040090) as strays. Tombstoning them
+// would have destroyed real research output that had never reached the engine box, permanently,
+// and the reverse pull would have had nothing left to fetch.
+//
+// So the high band is never an orphan. It is reported separately, because a high-band row sitting
+// on prod for a long time means the reverse PULL is failing — a real problem, with the opposite
+// fix.
+const HIGH_BASE = 2000000000;
+
 const args = process.argv.slice(2);
 const APPLY = args.includes('--apply');
 const ONE = (() => { const i = args.indexOf('--table'); return i >= 0 ? args[i + 1] : null; })();
+// Tables to leave alone this run. Used by the Apply command to hold back the one bucket that
+// needs judgement rather than a rule — see HELD below.
+const EXCEPT = new Set(args.reduce((acc, a, i) => (a === '--except' ? [...acc, args[i + 1]] : acc), []));
 const PAGE = 50000;
 
 const n = (v) => Number(v || 0).toLocaleString();
@@ -47,7 +67,9 @@ async function prodIds(base, token, table) {
   if (!token) { console.error('No sync token configured.'); process.exit(1); }
   const base = process.env.BDI_PROD_URL || 'https://app.bell.qa';
 
-  const tables = (ONE ? MIRROR_TABLES.filter((t) => t.name === ONE) : MIRROR_TABLES);
+  const tables = (ONE ? MIRROR_TABLES.filter((t) => t.name === ONE) : MIRROR_TABLES)
+    .filter((t) => !EXCEPT.has(t.name));
+  for (const skipped of EXCEPT) console.log(`  (holding back ${skipped} — not touched this run)`);
   if (!tables.length) { console.error(`Not a mirrored table: ${ONE}`); process.exit(1); }
 
   console.log('');
@@ -73,10 +95,18 @@ async function prodIds(base, token, table) {
       continue;
     }
 
-    // Rows production holds that the engine box does not: deletions that never propagated.
+    // Rows production holds that the engine box does not.
     // ⚠️ For a filtered table this ALSO catches rows that stopped qualifying — a relationship
     // downgraded to 'low' confidence is withdrawn from production the same way a deletion is.
-    const orphans = [...prod].filter((id) => !local.has(id));
+    const missing = [...prod].filter((id) => !local.has(id));
+    // Split off the band production creates for itself — see the note at the top of this file.
+    const orphans = missing.filter((id) => id < HIGH_BASE);
+    const research = missing.filter((id) => id >= HIGH_BASE);
+    if (research.length) {
+      console.log(`  ${name.padEnd(26)} ↩ ${n(research.length)} row(s) CREATED ON PRODUCTION by research, not yet pulled down`);
+      console.log(`      ids: ${research.slice(0, 8).join(', ')}${research.length > 8 ? ` … +${research.length - 8} more` : ''}`);
+      console.log('      These are NOT strays and are never removed. If they persist, the reverse pull is failing.');
+    }
     // The other direction is NOT a defect — those are simply rows the next push will carry.
     const pending = [...local].filter((id) => !prod.has(id)).length;
 

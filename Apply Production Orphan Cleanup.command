@@ -5,13 +5,21 @@
 # read what it lists. This step queues those exact rows for removal, and the next
 # data push takes them off app.bell.qa.
 #
-# What it removes: rows Bell itself already deleted — contacts found to belong to
-# a different company, employment links Bell withdrew, people Bell removed. The
-# deletion was supposed to travel up with the data and did not, so the live site
-# has kept showing them.
+# What it removes: rows Bell itself already deleted — 41 contacts found to belong
+# to a DIFFERENT company, 240 technology records, 5 person contacts and 6 knowledge
+# sources. The deletion was supposed to travel up with the data and did not, so the
+# live site has kept showing them.
 #
 # It removes NOTHING that Bell still holds. Every id is checked against Bell's own
 # database first: if Bell still has the row, it is left alone.
+#
+# TWO THINGS ARE DELIBERATELY LEFT ALONE, and both are explained on screen:
+#   • 10,026 employment links. Almost all are genuinely dead, but a few could
+#     belong to people that exist only on the live site, and there is no way to
+#     tell them apart from here yet. They are not urgent and they are not visible
+#     as wrong data — they will be handled properly rather than quickly.
+#   • 7 people that exist only on the live site and cannot be identified from
+#     Bell's side at all. Nothing that cannot be accounted for gets deleted.
 #
 # A couple of minutes, then a push.
 
@@ -27,14 +35,17 @@ if [ -z "$NODE_BIN" ]; then
 fi
 
 echo
-echo "This will remove rows from the LIVE site (app.bell.qa)."
-echo "Only rows Bell has already deleted. Nothing Bell still holds is touched."
+echo "This removes about 292 rows from the LIVE site (app.bell.qa) —"
+echo "including 41 contacts that belong to a DIFFERENT company."
+echo
+echo "Only rows Bell has already deleted. Nothing Bell still holds is touched,"
+echo "and the 10,026 employment links are deliberately left for later."
 echo
 read -r -p "Type  yes  to continue: " ANSWER
 if [ "$ANSWER" != "yes" ]; then echo "Cancelled — nothing changed."; read -r -p "Press Enter to close..." _; exit 0; fi
 
 cd "$SERVER_DIR"
-"$NODE_BIN" "$SERVER_DIR/scripts/find_prod_orphans.js" --apply
+"$NODE_BIN" "$SERVER_DIR/scripts/find_prod_orphans.js" --apply --except person_companies
 
 echo
 echo "Now publishing the removals to the live site…"
