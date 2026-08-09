@@ -42,7 +42,15 @@ const READERS = {
   oracle_cloud: async (board) => {
     const host = board.board_key.split(':')[1];
     if (!host) throw new Error('oracle board_key carries no tenant host');
-    return fetchOracleJobs(host, { limit: 200 });
+    const res = await fetchOracleJobs(host, { limit: 200 });
+    // ⚠️ THE READER COMPUTES `complete` AND THIS USED TO IGNORE IT. A tenant reporting 250 jobs
+    // whose page at offset 200 comes back empty yields 200 with complete=false — and the other 50,
+    // still advertised, look absent and get withdrawn. Same rule as the classifieds crawl: an
+    // incomplete read closes NOTHING. Throwing records the sweep as failed, which is what protects.
+    if (res?.complete === false) {
+      throw new Error(`oracle ${host}: read ${res.jobs?.length ?? 0} of ${res.total ?? '?'} requisitions — refusing a partial read`);
+    }
+    return res;
   },
 
   // ── One employer, one portal ────────────────────────────────────────────────────────────────
@@ -62,11 +70,19 @@ const READERS = {
       throw new Error(`qatarenergy lists ${entries.length} jobs, over the ${QE_MAX_JOBS_PER_RUN} ceiling — refusing a partial read (raise BELL_JOBS_QE_MAX)`);
     }
     const jobs = [];
+    const stillListed = [];
     let unreadable = 0;
     for (const e of entries) {
       const r = await fetchQatarEnergyJob(e.id, { url: e.url });
-      // A page Bell could not read is NOT a vacancy that closed. Counted, then judged below.
-      if (!r.ok) { if (!r.closed) unreadable++; continue; }
+      if (!r.ok) {
+        // ⚠️ A PAGE BELL COULD NOT READ IS NOT A VACANCY THAT CLOSED — and the first version of
+        // this said so in a comment while doing the opposite. Skipping it dropped its id from the
+        // seen list, so closeVanished withdrew a posting QatarEnergy's OWN SITEMAP still lists,
+        // on the strength of one HTTP 500 in a 21-minute run. A 404 IS closure evidence (proven
+        // live on 5 delisted ids); anything else is an outage, so the sitemap's word stands.
+        if (!r.closed) { unreadable++; stillListed.push(String(e.id)); }
+        continue;
+      }
       jobs.push({ ...r.record, employer_stated: r.record?.extra_fields?.employer_name || null });
     }
     // Half the portal unreadable means the portal changed, not that half its jobs closed. Throwing
@@ -74,7 +90,9 @@ const READERS = {
     if (unreadable > entries.length / 2) {
       throw new Error(`qatarenergy: ${unreadable} of ${entries.length} job pages unreadable — refusing to treat this as a complete read`);
     }
-    return { jobs };
+    // keepOpen: ids the sitemap still lists but Bell could not fetch this run. Not stored as jobs
+    // (there is nothing to store), but counted as SEEN so nothing withdraws them.
+    return { jobs, keepOpen: stillListed };
   },
 
   // ── Many employers, one board ───────────────────────────────────────────────────────────────
@@ -181,10 +199,11 @@ export async function runJobSweep({ limit = 40, staleHours = 12, ownSiteStaleHou
     const reader = READERS[board.platform];
     if (!reader) { out.skipped++; continue; }
 
-    let jobs;
+    let jobs, keepOpen = [];
     try {
       const res = await reader(board);
       jobs = res?.jobs || [];
+      keepOpen = res?.keepOpen || [];
       // ⚠️ A READ THAT RETURNS NOTHING IS NOT AUTOMATICALLY AN EMPTY BOARD. Oracle answers HTTP 200
       // with a correct total and NO job list when one query parameter is dropped — the reader
       // throws on that shape rather than reporting zero, which is what keeps a silent API change
@@ -216,7 +235,10 @@ export async function runJobSweep({ limit = 40, staleHours = 12, ownSiteStaleHou
     out.jobs += inserted + updated;
     out.unattributed += (inserted + updated) - attributed;
     track(board.platform, { inserted, updated });
-    const c = await closeVanished(board.board_key, jobs.map((j) => j.external_id), { log });
+    // A reader may report ids it knows are still listed but could not read this run — those count
+    // as seen, so an outage never withdraws a posting the source is still publishing.
+    const seen = [...jobs.map((j) => j.external_id), ...(keepOpen || [])];
+    const c = await closeVanished(board.board_key, seen, { log });
     out.closed += c.expired + c.withdrawn;
     track(board.platform, { closed: c.expired + c.withdrawn });
   }

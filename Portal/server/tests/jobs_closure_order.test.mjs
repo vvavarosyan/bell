@@ -131,3 +131,40 @@ test('a FAILED read closes nothing, however many times it fails', { skip: skip()
   assert.equal(r.withdrawn, 0);
   assert.ok(await isOpen(), 'an outage is not evidence that anyone stopped hiring');
 });
+
+test('a stated expiry does NOT close a vacancy the board is still advertising', { skip: skip() }, async () => {
+  await clean();
+  // The live shape: on the classifieds crawl, 22 of 233 postings the site returned in its OWN list
+  // of active vacancies carried a date that had already passed. The poster typed that date months
+  // ago; the board is listing the job today. The board wins.
+  const stale = { ...JOB, expires_at: '2020-01-01T00:00:00Z' };
+  const r = await sweep([stale]);
+  assert.equal(r.expired, 0, 'still listed today — a stale typed date must not delete it');
+  assert.ok(await isOpen());
+});
+
+test('a stated expiry DOES close a vacancy the board has stopped advertising', { skip: skip() }, async () => {
+  await clean();
+  await sweep([{ ...JOB, expires_at: '2020-01-01T00:00:00Z' }]);
+  const r = await sweep([]);                    // gone from the board AND past its own date
+  assert.equal(r.expired, 1, 'no longer listed and past its stated date — closed at once');
+  const row = (await query('SELECT close_reason FROM jobs WHERE board_key = $1', [KEY])).rows[0];
+  assert.equal(row.close_reason, 'expired');
+});
+
+test('raw_payload is stored as jsonb, never a string spread into character keys', { skip: skip() }, async () => {
+  await clean();
+  // packRaw returns a JSON STRING. Two readers call it themselves, so packing again turned the
+  // payload into {"0":"{","1":"\"",…} with thousands of keys. Both shapes must land as an object.
+  await sweep([{ ...JOB, external_id: 'ZZORDER-PACKED', raw_payload: JSON.stringify({ a: 1, b: 'two' }) }]);
+  await sweep([{ ...JOB, external_id: 'ZZORDER-PACKED', raw_payload: JSON.stringify({ a: 1, b: 'two' }) },
+               { ...JOB, external_id: 'ZZORDER-OBJECT', raw: { a: 1, b: 'two' } }]);
+  const rows = (await query(
+    'SELECT external_id, raw_payload FROM jobs WHERE board_key = $1 ORDER BY external_id', [KEY])).rows;
+  for (const row of rows) {
+    const keys = Object.keys(row.raw_payload || {});
+    assert.ok(keys.length && keys.length < 50,
+      `${row.external_id}: raw_payload has ${keys.length} keys — a JSON string was packed twice`);
+    assert.ok(!keys.includes('0'), `${row.external_id}: raw_payload is character-indexed`);
+  }
+});

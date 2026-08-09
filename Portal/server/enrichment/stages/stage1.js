@@ -79,7 +79,17 @@ export async function wipeStaleEnrichmentAfterUrlReplace(companyId) {
 
   // 3. Drop jobs that were attributed to this company. linkedin_job_url is the
   //    unique key, so re-running Stage 4 will re-fetch only legitimate postings.
-  const jobsRes = await query(`DELETE FROM jobs WHERE company_id = $1 RETURNING id`, [companyId]);
+  //
+  // ⚠️ TOMBSTONE BEFORE DELETING. `jobs` is a MIRRORED table and production has ZERO delete
+  // triggers, so a hard delete here vanishes locally and lives on app.bell.qa forever — a vacancy
+  // Bell has decided belongs to the wrong company, still shown to customers with a real posted
+  // date, still feeding the hiring signals Bell sells. Harmless while `jobs` held 87 rows from one
+  // 2026-05-22 test run; `jobs` is now a live, growing, customer-facing dataset, which is exactly
+  // what activates it. Same discipline as company_locations.
+  const jobsRes = await query(`
+    WITH gone AS (DELETE FROM jobs WHERE company_id = $1 RETURNING id)
+    INSERT INTO sync_deletions (table_name, row_id) SELECT 'jobs', id FROM gone
+    RETURNING row_id`, [companyId]);
   summary.jobs_removed = jobsRes.rowCount;
 
   // 4. Drop ALL enrichment-derived contacts (LinkedIn Stage 2/3, website Stage 6),

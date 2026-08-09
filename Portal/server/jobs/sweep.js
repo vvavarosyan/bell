@@ -32,6 +32,17 @@ import { attributeJob } from './attribute.js';
 
 const MISSES_BEFORE_CLOSED = 2;
 
+/**
+ * ⚠️ packRaw RETURNS A JSON STRING, so packing an already-packed payload spreads that string into
+ * a character-indexed object — `{"0":"{","1":"\"","2":"i"…}` with 5,105 keys. Two of the readers
+ * already call packRaw themselves (rule 2.4 applies wherever the payload is built), so this must
+ * detect that and pass it straight through.
+ */
+const packedRaw = (j) => {
+  const r = j.raw_payload ?? j.raw ?? j;
+  return typeof r === 'string' ? r : packRaw(r);
+};
+
 /** null | string | string[] → a non-empty text[] or null. */
 const asArray = (v) => {
   if (v == null) return null;
@@ -162,7 +173,7 @@ export async function upsertJobs(board, jobs, { log = () => {} } = {}) {
        // claim and the link never get confused for each other.
        j.employer_stated || j.extra_fields?.employer_name || null,
        j.posted_at || null, j.expires_at || null,
-       extra ? packRaw(extra) : null, packRaw(j.raw_payload || j.raw || j)]);
+       extra ? packRaw(extra) : null, packedRaw(j)]);
     if (r.rows[0]?.was_insert) inserted++; else updated++;
   }
   if (inserted || updated) log(`    ${board.board_key}: ${inserted} new, ${updated} still open, ${attributed} tied to a company`);
@@ -175,16 +186,24 @@ export async function upsertJobs(board, jobs, { log = () => {} } = {}) {
  */
 export async function closeVanished(boardKey, seenExternalIds, { log = () => {} } = {}) {
   // An expiry the source stated, now past → closed immediately, no waiting.
+  //
+  // ⚠️ UNLESS THE BOARD IS STILL ADVERTISING IT. A poster-supplied expiry date goes stale while the
+  // listing stays up: on the live classifieds crawl, 22 of 233 vacancies the site returned in its
+  // OWN list of currently-active postings stated a date that had already passed. Closing those
+  // deletes real vacancies AND churns updated_at — the sync watermark — because the next sweep
+  // re-opens them and the one after re-closes them, republishing the flip-flop to production every
+  // push. A board that is listing a posting today outranks a date its author typed months ago.
+  const ids = seenExternalIds.map(String);
   const expired = await query(`
     UPDATE jobs SET closed_at = now(), close_reason = 'expired', is_active = false, updated_at = now()
      WHERE board_key = $1 AND closed_at IS NULL
        AND expires_at IS NOT NULL AND expires_at < now()
-    RETURNING id`, [boardKey]);
+       AND NOT (external_id = ANY($2::text[]))
+    RETURNING id`, [boardKey, ids]);
 
   // Absent from this good sweep. Counted, not closed on the first miss — a board can paginate
   // oddly or briefly drop a row, and a vacancy wrongly removed is exactly the misleading
   // information this is meant to prevent.
-  const ids = seenExternalIds.map(String);
   const misses = await query(`
     SELECT id, external_id,
            (SELECT count(*)::int FROM job_board_sweeps s
