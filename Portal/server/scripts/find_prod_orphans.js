@@ -20,21 +20,25 @@ import { query, pool } from '../db.js';
 import { getKey } from '../keychain.js';
 import { MIRROR_TABLES } from '../sync/tables.js';
 
-// ⚠️ PRODUCTION ORIGINATES SOME ROWS, AND THIS TOOL NEARLY DELETED THEM.
-// The premise "a row on prod that is not on the engine box is a deletion that failed to
-// propagate" is FALSE for one id band. sync/pull.js: research jobs started on bell.qa execute on
-// Railway and write NEW companies and people straight into the prod database, with ids from a
-// reserved HIGH band (migration 0017). A reverse pull, which runs just before each push, brings
-// them down. Between creation and that pull they exist ONLY on production — which is exactly the
-// shape this tool was built to hunt.
+// ⚠️ PRODUCTION ORIGINATES SOME ROWS, AND AN ID ALONE CANNOT TELL YOU WHICH.
+// The premise "a row on prod that is not on the engine box is a deletion that failed to propagate"
+// is FALSE for anything production created itself. Two writers do that:
+//   • research jobs started on bell.qa (sync/pull.js), which a reverse pull brings down;
+//   • the customer "+ New" contribution flow, which creates a PRIVATE person on prod that
+//     CONTRIB_EXCLUDE deliberately keeps out of the mirror until a lawyer-gated promotion.
 //
-// The first run flagged 7 such people (ids 2000040084-2000040090) as strays. Tombstoning them
-// would have destroyed real research output that had never reached the engine box, permanently,
-// and the reverse pull would have had nothing left to fetch.
+// Migration 017 meant the id band to identify the first kind. It cannot: this database's own
+// people_id_seq sits INSIDE the band (see migration 114), so the band holds local people,
+// prod-born contributed people AND prod research entities — three writers, one range.
 //
-// So the high band is never an orphan. It is reported separately, because a high-band row sitting
-// on prod for a long time means the reverse PULL is failing — a real problem, with the opposite
-// fix.
+// The 7 people this tool first flagged as strays turned out to be the SECOND kind: user-contributed
+// private records ("Jack", "Ashot Bleyan 1-5"). I described them as research output twice before
+// reading the rows. Deleting them would have been wrong; so would dismissing them, which is what
+// an earlier version of this comment did.
+//
+// So a high-band prod-only row is neither removed nor waved through. It is REPORTED FOR A LOOK,
+// because it can be any of: research awaiting its pull, a contributed record that should never
+// have been on prod at all, or a genuine stray. Only reading the row settles it.
 const HIGH_BASE = 2000000000;
 
 const args = process.argv.slice(2);
@@ -103,9 +107,10 @@ async function prodIds(base, token, table) {
     const orphans = missing.filter((id) => id < HIGH_BASE);
     const research = missing.filter((id) => id >= HIGH_BASE);
     if (research.length) {
-      console.log(`  ${name.padEnd(26)} ↩ ${n(research.length)} row(s) CREATED ON PRODUCTION by research, not yet pulled down`);
+      console.log(`  ${name.padEnd(26)} ? ${n(research.length)} row(s) PRODUCTION CREATED ITSELF — needs a look, never auto-removed`);
       console.log(`      ids: ${research.slice(0, 8).join(', ')}${research.length > 8 ? ` … +${research.length - 8} more` : ''}`);
-      console.log('      These are NOT strays and are never removed. If they persist, the reverse pull is failing.');
+      console.log('      Could be research awaiting its pull, or a private contributed record that');
+      console.log('      should never have reached production. Read the rows before deciding.');
     }
     // The other direction is NOT a defect — those are simply rows the next push will carry.
     const pending = [...local].filter((id) => !prod.has(id)).length;
