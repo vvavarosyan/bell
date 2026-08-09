@@ -69,23 +69,21 @@ export async function collectResearchPull(since) {
            AND action IN ('created','enriched')
            AND entity_id <> 0
            AND derived_at > $1
-      )
-      OR (c.id >= 2000000000 AND c.updated_at > $1)`,
+      )`,
     [since]
   );
 
-  // ⚠️ THE SECOND CLAUSE IS A SAFETY NET, AND IT IS NOT OPTIONAL.
-  // The ledger is how a prod-created person is found, so a person whose ledger row was never
-  // written is unreachable — no `since` value can fetch it, because there is nothing to fetch it
-  // BY. That happened: on 2026-08-09, 7 people sat on production with high-band ids and no ledger
-  // entry, invisible even to a pull from the epoch. The cause is fixed in research/ingest.js, but
-  // a cause fixed forward does not recover what is already stranded, and the same shape could
-  // arise from any future writer that forgets the ledger.
+  // ⚠️ DO NOT ADD A "PULL EVERYTHING IN THE HIGH BAND" CLAUSE HERE. I tried it on 2026-08-09 to
+  // recover 7 people whose ledger rows were never written, and it is unsafe on THIS database:
+  // migration 017's invariant (low ids = local-originated, high ids = prod-originated, disjoint)
+  // is VOID for people. The engine box's own people_id_seq sits at 2,000,073,304 — inside the
+  // research band — so 72,206 of its 72,398 people carry band ids that local itself issued.
+  // A high-band clause therefore selects essentially the WHOLE people table and upserts prod's
+  // copy back over local's, which is precisely the clobbering this module is written to avoid.
+  // It rewrote 12,846 rows before I caught it.
   //
-  // So the high band ITSELF is the second signal. Those ids only ever come from
-  // research_entity_id_seq (migration 017), so every one of them is a prod-originated entity that
-  // belongs on the engine box. Bounded by `since` on updated_at so a normal incremental pull stays
-  // small; a rewound watermark sweeps up everything that was ever missed.
+  // The ledger is the only correct signal. The real defect is the id space, not the pull —
+  // see the note in sync/pull.js.
   const people = await query(
     `SELECT p.* FROM people p
       WHERE p.id IN (
@@ -94,8 +92,7 @@ export async function collectResearchPull(since) {
            AND action IN ('created','enriched')
            AND entity_id <> 0
            AND derived_at > $1
-      )
-      OR (p.id >= 2000000000 AND p.updated_at > $1)`,
+      )`,
     [since]
   );
 
