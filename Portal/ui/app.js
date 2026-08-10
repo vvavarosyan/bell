@@ -257,12 +257,20 @@ function App({ initialUser, initialTenant, mode }) {
   }, []);
 
   const [credits, setCredits] = useState(null);
+  const [codeStale, setCodeStale] = useState(null);
 
   const refreshHeader = useCallback(async () => {
     try {
       const [s, h] = await Promise.all([api.stats(), api.health()]);
       setStats(s);
       setDbStatus(h.ok ? 'up' : 'down');
+      // ⚠️ A RUNNING PORTAL DOES NOT NOTICE THAT ITS OWN CODE CHANGED.
+      // 2026-08-10: the Portal had been running since 13:35, a server-side fix landed at 14:02,
+      // and Val tested at 14:49 and hit the ORIGINAL bug verbatim. The browser half of the same
+      // change worked instantly (UI files are re-served on every load); the server half needed a
+      // restart. The only visible evidence was an error that looked exactly like "the fix does
+      // not work". This says so, on screen, above everything.
+      setCodeStale(h.code_stale ? h.code_stale_note : null);
     } catch (err) {
       setDbStatus('down');
     }
@@ -306,6 +314,11 @@ function App({ initialUser, initialTenant, mode }) {
         mode=${mode?.mode || 'local-admin'}
       />
       <main class="app-main">
+        ${codeStale ? html`
+          <div style=${{ display: 'flex', alignItems: 'center', gap: '10px', padding: '9px 18px', background: 'rgba(245,158,11,0.16)', borderBottom: '1px solid rgba(245,158,11,0.55)', fontSize: '12.5px', color: 'var(--text)', lineHeight: 1.5 }}>
+            <span style=${{ fontSize: '15px' }}>♻️</span>
+            <span style=${{ flex: 1 }}><strong>This Portal is running older code than the files on your Mac.</strong> ${codeStale}</span>
+          </div>` : null}
         ${(() => { const imp = api.getImpersonation?.(); return imp ? html`
           <div style=${{ display: 'flex', alignItems: 'center', gap: '12px', padding: '7px 18px', background: 'rgba(232,142,168,0.16)', borderBottom: '1px solid rgba(232,142,168,0.5)', fontSize: '12.5px', color: 'var(--text)' }}>
             <span>👁 Viewing as <strong>${imp.name}</strong> — impersonating</span>

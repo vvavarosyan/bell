@@ -140,6 +140,34 @@ app.use(express.json({ limit: '10mb' }));
 // Health. `build` = the deployed commit (Railway injects RAILWAY_GIT_COMMIT_SHA),
 // so "which version is live?" is answered by GET /api/health — no more digging.
 const BUILD_SHA = String(process.env.RAILWAY_GIT_COMMIT_SHA || process.env.SOURCE_COMMIT || '').slice(0, 7) || null;
+
+// ⚠️ A RUNNING PORTAL DOES NOT NOTICE THAT ITS OWN CODE CHANGED, and nothing said so.
+//
+// 2026-08-10: Val's Portal started at 13:35. A server-side fix landed at 14:02. He tested at
+// 14:49 and hit the ORIGINAL bug, verbatim, because Node reads server code once at process start
+// — editing the file on disk changes nothing until the process restarts. The browser half of the
+// same change worked immediately, because UI files are served fresh on every page load. So a
+// hard refresh fixed one half of a fix and silently did not fix the other, and the only visible
+// evidence was an error message that looked exactly like "the fix does not work".
+//
+// This reads the commit the WORKING TREE is on, once at boot, and again on request. When they
+// differ, the Portal is serving code older than the files on disk and says so. Local only: on
+// Railway the process IS the deploy, so there is nothing to drift from.
+function gitHead() {
+  try {
+    const dir = path.join(__dirname, '..', '..', '.git');
+    const head = fs.readFileSync(path.join(dir, 'HEAD'), 'utf8').trim();
+    if (!head.startsWith('ref:')) return head.slice(0, 7);          // detached HEAD
+    const ref = head.slice(4).trim();
+    try { return fs.readFileSync(path.join(dir, ref), 'utf8').trim().slice(0, 7); } catch { /* packed */ }
+    // Freshly cloned or gc'd repos keep refs in packed-refs rather than as loose files.
+    const packed = fs.readFileSync(path.join(dir, 'packed-refs'), 'utf8');
+    const line = packed.split('\n').find((l) => l.endsWith(' ' + ref));
+    return line ? line.slice(0, 7) : null;
+  } catch { return null; }
+}
+const BOOT_COMMIT = gitHead();
+const BOOT_AT = new Date().toISOString();
 app.get('/api/health', async (req, res) => {
   try {
     const ok = await pingDatabase();
@@ -151,7 +179,20 @@ app.get('/api/health', async (req, res) => {
     // (the separate go.bell.qa Resend account). Confirms the firewall is wired without
     // exposing the key. Off until Val sets BDI_KEY_RESEND_OUTREACH.
     const outreachEmail = await getKey('resend-outreach').then((k) => !!k).catch(() => false);
-    res.json({ ok, db: ok ? 'connected' : 'down', build: BUILD_SHA, email, outreach_email: outreachEmail, ts: new Date().toISOString() });
+    // `code_stale` answers the question that cost Val a wasted test: is this process running the
+    // code that is on disk right now? Only meaningful locally — on Railway the process IS the
+    // deploy, so BOOT_COMMIT is null there and this is always false.
+    const onDisk = BOOT_COMMIT ? gitHead() : null;
+    const stale = !!(BOOT_COMMIT && onDisk && onDisk !== BOOT_COMMIT);
+    res.json({
+      ok, db: ok ? 'connected' : 'down', build: BUILD_SHA, email, outreach_email: outreachEmail,
+      running_commit: BOOT_COMMIT, disk_commit: onDisk, started_at: BOOT_AT,
+      code_stale: stale,
+      code_stale_note: stale
+        ? `This Portal has been running since ${BOOT_AT} on code ${BOOT_COMMIT}; the files on disk are now ${onDisk}. Server-side changes will NOT take effect until it is restarted — double-click "Restart Portal.command". A browser refresh only reloads the screen, not the server.`
+        : null,
+      ts: new Date().toISOString(),
+    });
   } catch (err) {
     res.status(500).json({ ok: false, db: 'down', error: err.message });
   }
