@@ -19,7 +19,7 @@ router.get('/', async (req, res, next) => {
     for (const r of dbRows.rows) settings[r.key] = r.value;
 
     const installedKeys = await listKeyNames();
-    const apiKeyStatus = { firecrawl: false, apify: false, mapbox: false };
+    const apiKeyStatus = { firecrawl: false, apify: false, mapbox: false, resend: false, 'resend-outreach': false };
     for (const name of installedKeys) {
       if (name in apiKeyStatus) apiKeyStatus[name] = true;
     }
@@ -47,6 +47,12 @@ router.patch('/', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+// ⚠️ 'resend' WAS MISSING FROM THE ALLOW-LIST, AND THAT IS WHY BELL COULD NOT EMAIL ITSELF.
+// The weekly data check and the duty alarm both send with the TRANSACTIONAL key ('resend');
+// only 'resend-outreach' was ever installed. With no way to set it from the Portal it could only
+// be added by hand on each machine — so it never was, and every internal self-report failed with
+// email_provider_key_missing, silently, from the day it was written. Val works by clicking: a key
+// he cannot paste in is a key that stays unset.
 // POST /api/settings/api-keys/:name { value }
 router.post('/api-keys/:name', async (req, res, next) => {
   try {
@@ -55,7 +61,7 @@ router.post('/api-keys/:name', async (req, res, next) => {
     if (typeof value !== 'string' || !value.trim()) {
       return res.status(400).json({ error: 'value_required' });
     }
-    if (!['firecrawl', 'apify', 'mapbox', 'sync-token'].includes(name)) {
+    if (!['firecrawl', 'apify', 'mapbox', 'sync-token', 'resend', 'resend-outreach'].includes(name)) {
       return res.status(400).json({ error: 'unknown_key_name', name });
     }
     await setKey(name, value.trim());
@@ -67,7 +73,7 @@ router.post('/api-keys/:name', async (req, res, next) => {
 router.delete('/api-keys/:name', async (req, res, next) => {
   try {
     const name = req.params.name;
-    if (!['firecrawl', 'apify', 'mapbox', 'sync-token'].includes(name)) {
+    if (!['firecrawl', 'apify', 'mapbox', 'sync-token', 'resend', 'resend-outreach'].includes(name)) {
       return res.status(400).json({ error: 'unknown_key_name', name });
     }
     const removed = await deleteKey(name);

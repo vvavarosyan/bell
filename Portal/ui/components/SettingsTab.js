@@ -17,8 +17,8 @@ const SECTIONS = [
 
 export function SettingsTab() {
   const [settings, setSettings] = useState({});
-  const [apiKeys, setApiKeys] = useState({ firecrawl: false, apify: false, mapbox: false });
-  const [drafts, setDrafts] = useState({ firecrawl: '', apify: '', mapbox: '' });
+  const [apiKeys, setApiKeys] = useState({ firecrawl: false, apify: false, mapbox: false, resend: false, 'resend-outreach': false });
+  const [drafts, setDrafts] = useState({ firecrawl: '', apify: '', mapbox: '', resend: '', 'resend-outreach': '' });
   const [loading, setLoading] = useState(true);
   const [activeSection, setActiveSection] = useState('api-keys');
   const [busy, setBusy] = useState('');   // which maintenance action is running
@@ -102,6 +102,8 @@ export function SettingsTab() {
         </div>
         ${renderKeyRow({ name: 'firecrawl', label: 'Firecrawl' })}
         ${renderKeyRow({ name: 'apify',     label: 'Apify' })}
+        ${renderKeyRow({ name: 'resend',    label: 'Resend — Bell\'s own email (bell.qa)' })}
+        ${renderKeyRow({ name: 'resend-outreach', label: 'Resend — cold outreach (go.bell.qa)' })}
       </div>
     `,
 
