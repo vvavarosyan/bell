@@ -179,6 +179,7 @@ export const api = {
   discoverySummary:       () => request('/api/discovery/summary'),
   discoveryGmaps:         (limit = 100) => request('/api/discovery/gmaps?limit=' + limit),
   discoverySpark:         (scope = 'qatar', limit = 100) => request('/api/discovery/spark?scope=' + scope + '&limit=' + limit),
+  discoveryHiring:        (limit = 200) => request('/api/discovery/hiring?limit=' + limit),
   promoteGmaps:           (id) => request(`/api/discovery/gmaps/${id}/promote`, { method: 'POST', body: '{}' }),
   ignoreGmaps:            (id) => request(`/api/discovery/gmaps/${id}/ignore`, { method: 'POST', body: '{}' }),
   promoteSpark:           (id) => request(`/api/discovery/spark/${id}/promote`, { method: 'POST', body: '{}' }),

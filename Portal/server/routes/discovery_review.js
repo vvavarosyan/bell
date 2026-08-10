@@ -63,15 +63,16 @@ router.get('/summary', async (_req, res, next) => {
   try {
     const g = await query(`SELECT count(*) FILTER (WHERE status='candidate_new')::int AS candidates FROM gmaps_places`);
     const s = await query(
-      `SELECT count(*) FILTER (WHERE status='new' AND country ILIKE '%qatar%')::int AS qatar,
-              count(*) FILTER (WHERE status='new' AND NOT (country ILIKE '%qatar%'))::int AS foreign
+      `SELECT count(*) FILTER (WHERE status='new' AND relation <> 'hiring' AND country ILIKE '%qatar%')::int AS qatar,
+              count(*) FILTER (WHERE status='new' AND relation <> 'hiring' AND NOT (country ILIKE '%qatar%'))::int AS foreign,
+              count(*) FILTER (WHERE status='new' AND relation = 'hiring')::int AS hiring
          FROM spark_discoveries`);
     const o = await query(
       `SELECT count(*)::int AS candidates FROM osm_places
         WHERE matched_company_id IS NULL AND review_status IS NULL
           AND name IS NOT NULL
           AND category_group = ANY($1) AND latitude IS NOT NULL`, [OSM_BUSINESS_GROUPS]).catch(() => ({ rows: [{ candidates: 0 }] }));
-    res.json({ gmaps_candidates: g.rows[0].candidates, spark_qatar: s.rows[0].qatar, spark_foreign: s.rows[0].foreign, osm_candidates: o.rows[0].candidates });
+    res.json({ gmaps_candidates: g.rows[0].candidates, spark_qatar: s.rows[0].qatar, spark_foreign: s.rows[0].foreign, hiring: s.rows[0].hiring, osm_candidates: o.rows[0].candidates });
   } catch (err) { next(err); }
 });
 
@@ -103,7 +104,8 @@ router.get('/spark', async (req, res, next) => {
     const rows = (await query(
       `SELECT id, name, country, website, relation, source_company_id, source_url, created_at
          FROM spark_discoveries
-        WHERE status='new' AND ${foreign ? `NOT (country ILIKE '%qatar%')` : `country ILIKE '%qatar%'`}
+        WHERE status='new' AND COALESCE(relation,'') <> 'hiring'
+          AND ${foreign ? `NOT (country ILIKE '%qatar%')` : `country ILIKE '%qatar%'`}
         ORDER BY id DESC LIMIT $1`, [limit])).rows;
     for (const r of rows) {
       if (r.source_company_id) {
@@ -111,6 +113,24 @@ router.get('/spark', async (req, res, next) => {
         r.source_company_name = sc.rows[0]?.name || null;
       }
     }
+    res.json({ rows });
+  } catch (err) { next(err); }
+});
+
+// GET /hiring — Qatar firms advertising vacancies that Bell has no company for.
+//
+// The evidence rides on the row: how many live vacancies name this employer, what they are, and
+// where. A company spending money to hire is trading, staffed and reachable — the best-evidenced
+// discovery lead Bell has. Promotion and rejection reuse the spark endpoints below.
+router.get('/hiring', async (req, res, next) => {
+  try {
+    const limit = Math.min(Number(req.query.limit ?? 200), 500);
+    const rows = (await query(
+      `SELECT id, name, raw, created_at
+         FROM spark_discoveries
+        WHERE status='new' AND relation='hiring'
+        ORDER BY COALESCE((raw->>'job_count')::int, 0) DESC, id DESC
+        LIMIT $1`, [limit])).rows;
     res.json({ rows });
   } catch (err) { next(err); }
 });
@@ -230,9 +250,42 @@ router.post('/spark/:id/promote', async (req, res, next) => {
     if (out.error === 'foreign_admin_only') return res.status(403).json(out);
     // Rescore AFTER commit (recompute uses the pool — can't see the uncommitted row).
     await recomputeBellScoreForCompany(out.company_id).catch(() => {});
-    res.json({ promoted: out.promoted, company_id: out.company_id, created: out.created, linked_to_existing: !out.created });
+    // ⚠️ THE VACANCIES THAT PROVED THIS COMPANY EXISTS MUST NOW FIND IT.
+    // A 'hiring' card is queued BECAUSE live adverts name an employer Bell has no record for.
+    // Approving it without attaching those adverts leaves them showing "as advertised" beside a
+    // company that now exists — the review would have achieved nothing visible. Runs after commit
+    // so the matcher (which uses the pool) can see the new row, and re-uses the SAME rule as the
+    // sweeper: exactly one active company, or nothing.
+    const linked = await linkJobsToNewCompany(out.company_id).catch(() => 0);
+    res.json({ promoted: out.promoted, company_id: out.company_id, created: out.created,
+               linked_to_existing: !out.created, jobs_linked: linked });
   } catch (err) { next(err); }
 });
+
+/**
+ * Attach unattributed vacancies whose stated employer now resolves to this company.
+ *
+ * Deliberately re-runs the shipped matcher rather than matching on the discovery's name: the
+ * promoted company may have been LINKED to an existing record rather than created, and its stored
+ * name can differ from the advert's wording. The matcher is the one place that decides whether a
+ * stated name means a company, and it must stay the only place.
+ */
+async function linkJobsToNewCompany(companyId) {
+  const { matchStatedEmployer } = await import('../jobs/attribute.js');
+  const rows = (await query(
+    `SELECT DISTINCT employer_stated FROM jobs
+      WHERE company_id IS NULL AND closed_at IS NULL AND employer_stated IS NOT NULL`)).rows;
+  let linked = 0;
+  for (const r of rows) {
+    const m = await matchStatedEmployer(r.employer_stated).catch(() => null);
+    if (!m || Number(m.company_id) !== Number(companyId)) continue;
+    const u = await query(
+      `UPDATE jobs SET company_id = $1, updated_at = now()
+        WHERE company_id IS NULL AND employer_stated = $2 RETURNING id`, [companyId, r.employer_stated]);
+    linked += u.rowCount;
+  }
+  return linked;
+}
 
 // POST /spark/:id/ignore
 router.post('/spark/:id/ignore', async (req, res, next) => {

@@ -44,6 +44,7 @@ const JOB_LABELS = {
   chain_auto_link: 'Chain links (branches)', bell_score_heal: 'Bell Score heal',
   weekly_data_check: 'Weekly data check email', self_update: 'Engine code self-update',
   duty_alarm: 'Self-check (emails you when a duty breaks)',
+  hiring_candidates: 'Companies hiring that Bell is missing',
 };
 
 export function EngineTab() {

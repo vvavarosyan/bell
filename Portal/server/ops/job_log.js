@@ -178,7 +178,7 @@ const SCHEDULED_KINDS = new Set([
   'self_update', 'tender_scan', 'award_reports', 'close_expired_tenders',
   // Added 2026-08-09: these three ride the nightly but were absent from this set, so they could
   // have stopped running without ever being flagged — the same blind spot in a different place.
-  'qse_scan', 'job_sweep', 'registry_merge',
+  'qse_scan', 'job_sweep', 'registry_merge', 'hiring_candidates',
   'chain_auto_link', 'bell_score_heal', 'weekly_data_check',
 ]);
 

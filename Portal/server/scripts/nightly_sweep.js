@@ -190,6 +190,13 @@ function withCeiling(p, ms, label) {
       // its own robots.txt states, so a night where it silently stops must not hide behind the
       // hundreds of vacancies the other readers bring in.
       await recordSourceOutcomes('job_sweep', js?.sources, (v) => (v?.inserted ?? 0) + (v?.updated ?? 0));
+      // A vacancy naming an employer Bell has no company for is not a gap in the job data — it is
+      // a Qatar firm, provably trading and provably hiring, that the database is missing. Queue it
+      // for review rather than leaving a blank cell. Nothing is created without Val's click.
+      const hc = await recordJob('hiring_candidates',
+        async () => (await import('../jobs/hiring_candidates.js')).queueHiringCandidates({ log: (m) => log(m) }),
+        { yield: (r) => r?.queued ?? 0, log });
+      if (hc?.queued) log(`✓ ${hc.queued} hiring company(ies) queued for review.`);
     } catch (err) { log(`✗ Job board sweep failed: ${err.message}`); }
     // REGISTRY MERGE (Val, 2026-07-22: "if CR number is matching let it link automatically").
     // Runs BEFORE chain linking on purpose: merging collapses exact duplicates, so the chain
