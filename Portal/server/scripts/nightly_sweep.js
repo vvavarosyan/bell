@@ -24,6 +24,7 @@ import { selfUpdate, recycleEngineAfterUpdate } from '../ops/self_update.js';
 import { recordJob, recordSourceOutcomes, openJob } from '../ops/job_log.js';
 import { recomputeBellScores } from '../assembly/bell_score.js';
 import { pool } from '../db.js';
+import { fileURLToPath } from 'node:url';
 
 const MAX_MS = Number(process.env.BELL_NIGHTLY_MAX_MS || 6.5 * 3600 * 1000);
 const CHUNK  = Number(process.env.BELL_NIGHTLY_CHUNK  || 300);
@@ -64,6 +65,30 @@ function withCeiling(p, ms, label) {
   // of swallowing it — the first version skipped silently on any untracked file and left the
   // ROG 4 commits behind for 12 days without a single visible symptom.
   const updated = await selfUpdate({ log });
+
+  // ⚠️ RE-EXEC IF THE PULL MOVED, OR THIS PROCESS RUNS TWO VERSIONS AT ONCE.
+  // Node resolves STATIC imports when the process launches — before selfUpdate has pulled — and
+  // DYNAMIC imports later, from whatever is on disk by then. So after a pull that moved, every
+  // `await import(...)` below loads NEW code against modules already cached from the OLD tree.
+  //
+  // That is not theoretical. On 2026-08-10 the weekly data check died with
+  //   "./job_log.js does not provide an export named 'silentSources'"
+  // because ops/gap_report.js is imported dynamically (line ~195) and got the new file, while
+  // ops/job_log.js was imported statically at line 24 and was still yesterday's. Both were correct
+  // and consistent on disk; only this process disagreed with itself.
+  //
+  // Re-exec is the only honest fix — you cannot un-cache an ES module. The guard env var stops a
+  // pull that somehow never settles from looping forever.
+  if (updated?.state === 'updated' && !process.env.BELL_NIGHTLY_REEXECED) {
+    log(`▸ code moved to ${updated.after} — restarting this run so one version does the whole night.`);
+    const { spawn } = await import('node:child_process');
+    spawn(process.execPath, [fileURLToPath(import.meta.url)], {
+      stdio: 'inherit', detached: false,
+      env: { ...process.env, BELL_NIGHTLY_REEXECED: updated.after },
+    }).on('exit', (code) => process.exit(code ?? 0));
+    return;   // the child owns the night from here
+  }
+
   // If the pull moved, end the always-on sweep so it comes back on the new code. The sweep cannot
   // do this for itself the first time — the process that would notice is the stale one.
   await recycleEngineAfterUpdate(updated, { log });

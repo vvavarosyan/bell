@@ -43,6 +43,7 @@ const JOB_LABELS = {
   job_sweep: 'Job boards', registry_merge: 'Registry merge (duplicates)',
   chain_auto_link: 'Chain links (branches)', bell_score_heal: 'Bell Score heal',
   weekly_data_check: 'Weekly data check email', self_update: 'Engine code self-update',
+  duty_alarm: 'Self-check (emails you when a duty breaks)',
 };
 
 export function EngineTab() {

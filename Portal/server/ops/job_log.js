@@ -171,6 +171,10 @@ function summarize(r) {
 // than no alarm.
 const SCHEDULED_KINDS = new Set([
   'nightly_sweep',
+  // The watcher is itself a scheduled duty. Without this it reported as 'ad-hoc' and never raised
+  // a flag — so an alarm that cannot send (a missing provider key makes EVERY internal report mute)
+  // would stay invisible, which defeats the point of having one.
+  'duty_alarm',
   'self_update', 'tender_scan', 'award_reports', 'close_expired_tenders',
   // Added 2026-08-09: these three ride the nightly but were absent from this set, so they could
   // have stopped running without ever being flagged — the same blind spot in a different place.
@@ -235,7 +239,9 @@ export async function jobHealth() {
           : j.status === 'error' ? 'failing'
           : ageH == null ? 'never run'
           : ageH > 36 ? 'overdue'
-          : j.status === 'zero' ? 'producing nothing'
+          // The alarm's healthy state is "nothing to report", which produces 0 — that is success,
+          // not silence, so it is exempt from the zero-yield flag every other duty gets.
+          : (j.status === 'zero' && j.kind !== 'duty_alarm') ? 'producing nothing'
           : sources?.some((x) => x.health === 'failing') ? 'a source is failing'
           : 'ok',
       };
@@ -264,7 +270,7 @@ const ALARM_STATES = new Set(['failing', 'started but never finished', 'overdue'
 export async function alarmOnBrokenDuties({ log = () => {} } = {}) {
   try {
     const jobs = (await jobHealth()).filter((j) => j.scheduled && ALARM_STATES.has(j.health));
-    if (!jobs.length) return { alarmed: 0 };
+    if (!jobs.length) return record({ alarmed: 0, broken: [] });
 
     const { getState, setState } = await import('../outreach/machine.js');
     const seen = (await getState('duty_alarm_last')) || {};
@@ -273,7 +279,7 @@ export async function alarmOnBrokenDuties({ log = () => {} } = {}) {
       const prev = seen[j.kind];
       return !(prev && prev.health === j.health && now - new Date(prev.at).getTime() < ALARM_COOLDOWN_H * 3.6e6);
     });
-    if (!fresh.length) return { alarmed: 0, suppressed: jobs.length };
+    if (!fresh.length) return record({ alarmed: 0, suppressed: jobs.length, broken: jobs.map((j) => j.kind) });
 
     const { sendEmail } = await import('../lib/email.js');
     const to = process.env.BDI_OPS_EMAIL || 'hello@bell.qa';
@@ -303,9 +309,27 @@ export async function alarmOnBrokenDuties({ log = () => {} } = {}) {
     for (const j of fresh) seen[j.kind] = { health: j.health, at: new Date().toISOString() };
     await setState('duty_alarm_last', seen);
     log(`▸ duty alarm emailed to ${to}: ${fresh.map((j) => j.kind).join(', ')}`);
-    return { alarmed: fresh.length, to };
+    return record({ alarmed: fresh.length, to, broken: fresh.map((j) => j.kind) });
   } catch (err) {
     log(`✗ duty alarm failed: ${err.message}`);
-    return { alarmed: 0, error: err.message };
+    return record({ alarmed: 0, broken: [] }, err.message);
   }
+}
+
+/**
+ * ⚠️ THE WATCHER MUST BE WATCHABLE. The first version of alarmOnBrokenDuties returned quietly on
+ * every path — no alarm needed, alarm suppressed by cooldown, alarm sent, alarm THREW. On the
+ * morning of 2026-08-10 a duty was failing and no mail arrived, and there was no way to tell
+ * whether the check had never run, decided not to alarm, or crashed on sendEmail. That is exactly
+ * the success-by-absence this whole file exists to end, reproduced inside the thing built to end
+ * it. Every outcome now leaves a row.
+ */
+async function record(outcome, error = null) {
+  try {
+    await query(
+      `INSERT INTO job_runs (id, kind, status, started_at, completed_at, result, error, triggered_by)
+       VALUES (gen_random_uuid(), 'duty_alarm', $1, now(), now(), $2::jsonb, $3, 'engine')`,
+      [error ? 'error' : 'ok', JSON.stringify(outcome), error]);
+  } catch { /* bookkeeping must never break the engine's round */ }
+  return outcome;
 }
