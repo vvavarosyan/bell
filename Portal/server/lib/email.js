@@ -25,8 +25,16 @@ const DEFAULT_FROM = 'Bell <hello@bell.qa>';
 export async function getFromAddress() {
   try {
     const r = await query(`SELECT value FROM settings WHERE key = 'crm_email_from'`);
-    const v = r.rows.length ? String(r.rows[0].value).replace(/^"|"$/g, '') : '';
-    return v || DEFAULT_FROM;
+    // ⚠️ settings.value is JSONB and the pg driver parses it, so `String(...)` on a non-string is
+    // not a no-op: jsonb `null` becomes the string "null", an object becomes "[object Object]",
+    // an array becomes "1,2". All three are truthy, so `|| DEFAULT_FROM` could never fire and one
+    // of those would have been handed to Resend as the From header. Not live today — nothing in
+    // the repo writes this key — but the jsonb-null shape does exist in this table already
+    // (SettingsTab's `|| null` idiom wrote it for mapbox_style), so it is one bad PATCH away.
+    // Take it only if it is genuinely a string AND genuinely an address.
+    const raw = r.rows[0]?.value;
+    const v = typeof raw === 'string' ? raw.trim().replace(/^"|"$/g, '') : '';
+    return (v && isSendableAddress(v)) ? v : DEFAULT_FROM;
   } catch { return DEFAULT_FROM; }
 }
 

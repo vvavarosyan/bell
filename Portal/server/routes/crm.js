@@ -17,7 +17,7 @@ import { Router } from 'express';
 import { query } from '../db.js';
 import { ensureCrmRecord, logActivity, markContacted, buildMergeVars, applyMerge, tenantMember,
          parseCrmQuery, buildCrmSearch } from '../lib/crm.js';
-import { sendEmail, getFromAddress, inboundReplyTo } from '../lib/email.js';
+import { sendEmail, getFromAddress, inboundReplyTo, isSendableAddress } from '../lib/email.js';
 import { getEmailBranding, renderBrandedEmail } from '../lib/email_branding.js';
 import { resolveSendIdentity, formatFrom } from '../lib/email_domains.js';
 import { checkDailyLimit } from '../lib/sendlimits.js';
@@ -537,11 +537,27 @@ router.post('/records/:id/email', async (req, res, next) => {
     // Contacts table first, legacy column only as a fallback — see crm/recipient.js. All three
     // send paths now resolve identically, so a record cannot be mailable one way and "no
     // recipient" another.
-    const { to } = await resolveRecipient(r0, req.body?.to);
+    const { to, bad_address: badAddress } = await resolveRecipient(r0, req.body?.to);
+    // "No email on file" and "the email on file is not an address" are different problems with
+    // different fixes, and Bell used to report both as the first one — or, worse, hand the broken
+    // value to Resend and report the 422 as an unexplained failure. Name the value; the person
+    // looking at the record can fix it in seconds. Bell does NOT guess what it was meant to be.
+    if (!to && badAddress) {
+      return res.status(400).json({
+        error: 'bad_address', value: badAddress,
+        reason: `The address on file — "${badAddress}" — is not a usable email address, so nothing was sent. Correct it on the record, or type an address here.`,
+      });
+    }
     if (!to) return res.status(400).json({ error: 'no_recipient', reason: 'No email address on file — enter one.' });
     const limit = await checkDailyLimit(tenantId(req), req.tenant?.plan);
     if (!limit.allowed) return res.status(429).json({ error: 'daily_limit', reason: `You've hit today's sending limit (${limit.limit}/day). It resets tomorrow — or upgrade your plan for more.` });
-    const cc = Array.isArray(req.body?.cc) ? req.body.cc.map((s) => String(s).trim()).filter((s) => s.includes('@')).slice(0, 25) : [];
+    // ⚠️ `includes('@')` is not a check. "LILAC.FASHION @HOTMAIL ,COM" contains an @ and is a
+    // guaranteed provider rejection — and 220 stored company addresses look like that. A cc that
+    // cannot be sent is dropped rather than refusing the whole email (the primary recipient still
+    // gets it, same reasoning as reply_to), and the caller is told which ones went.
+    const ccAsked = Array.isArray(req.body?.cc) ? req.body.cc.map((s) => String(s).trim()).filter(Boolean).slice(0, 25) : [];
+    const cc = ccAsked.filter(isSendableAddress);
+    const ccDropped = ccAsked.filter((s) => !isSendableAddress(s));
     // Personalize {tokens} for this recipient.
     const vars = buildMergeVars(r0);
     const subject  = applyMerge(String(req.body?.subject || '').trim(), vars);
@@ -606,6 +622,9 @@ router.post('/records/:id/email', async (req, res, next) => {
         // be Bell implying a threading it is not doing.
         reply_note: sent.reply_to_dropped
           ? `Sent — but "${sent.reply_to_dropped}" is not a usable email address, so replies will go to ${from} instead of to you. Set a real address on your account to receive them.`
+          : null,
+        cc_note: ccDropped.length
+          ? `Sent, but ${ccDropped.length === 1 ? 'one address was' : ccDropped.length + ' addresses were'} left off the copy list because ${ccDropped.length === 1 ? 'it is' : 'they are'} not usable: ${ccDropped.join(', ')}`
           : null,
       });
       logActivity(null, tenantId(req), id, 'email_out', {
@@ -699,7 +718,7 @@ router.get('/records/:id/recipients', async (req, res, next) => {
     const cc = [], reveal = [], seen = new Set();
     for (const p of ppl.rows) {
       const email = String(p.email || '').trim();
-      const validEmail = email.includes('@');
+      const validEmail = isSendableAddress(email);
       const label = p.full_name + (p.title ? ' · ' + p.title : '');
       if (revealed.has(Number(p.id))) {
         if (validEmail && !seen.has(email.toLowerCase())) {
@@ -717,7 +736,10 @@ router.get('/records/:id/recipients', async (req, res, next) => {
     const cont = await query(`SELECT value FROM company_contacts WHERE company_id=$1 AND type='email' LIMIT 20`, [companyId]).catch(() => ({ rows: [] }));
     for (const c of cont.rows) {
       const email = String(c.value || '').trim();
-      if (email.includes('@') && !seen.has(email.toLowerCase())) { seen.add(email.toLowerCase()); cc.push({ type: 'company', email, label: 'Company' }); }
+      // THE REAL FIX IS HERE, not at send time: this endpoint BUILDS the cc tick-box list Val
+      // sees. Offering an address Bell knows cannot be sent is Bell asserting something its own
+      // data does not support — the user ticks it, and the send silently loses it.
+      if (isSendableAddress(email) && !seen.has(email.toLowerCase())) { seen.add(email.toLowerCase()); cc.push({ type: 'company', email, label: 'Company' }); }
     }
     res.json({ cc, reveal });
   } catch (err) { next(err); }
@@ -1008,8 +1030,14 @@ router.post('/records/bulk', async (req, res, next) => {
       // depending on which button was pressed. One resolver now, two queries for the whole batch.
       const recipients = await resolveRecipients(recs.rows);
       const acknowledged = req.body?.acknowledge_prior_contact === true;
+      let badAddress = 0;
       for (const r0 of recs.rows) {
-        const to = recipients.get(Number(r0.id))?.to || '';
+        const resolved = recipients.get(Number(r0.id)) || {};
+        const to = resolved.to || '';
+        // Counted apart from "no email at all": a bulk send that reports 12 with no address, when
+        // in truth 12 records HAVE an address and it is broken, sends Val looking in the wrong
+        // place. These used to land in `failed` with no reason surfaced anywhere.
+        if (!to && resolved.bad_address) { badAddress++; continue; }
         if (!to) { noEmail++; continue; }
         if (remaining <= 0) { capped++; continue; }
         const vars = buildMergeVars(r0);
@@ -1044,7 +1072,7 @@ router.post('/records/bulk', async (req, res, next) => {
         }
       }
       return res.json({
-        action: 'send', requested: ids.length, sent, no_email: noEmail, capped, failed,
+        action: 'send', requested: ids.length, sent, no_email: noEmail, bad_address: badAddress, capped, failed,
         held: {
           suppressed: held.address_suppressed.length,
           duplicate: held.duplicate_email.length,

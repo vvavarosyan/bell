@@ -378,7 +378,27 @@ app.use((err, req, res, next) => {
   // Start the Qatar Open Data scheduler. Runs a catalog sync ~4s after boot,
   // auto-seeds records if od_records is empty, refreshes catalog every 6h,
   // and runs the full daily sync at 15:00 local.
-  startOpenDataScheduler();
+  //
+  // ⚠️ THIS WAS THE ONLY SCHEDULER ON THIS PAGE WITH NO GATE, and it is the most expensive one.
+  // od_records is deliberately NOT mirrored (sync/tables.js) — but that does not mean Railway is
+  // not paying for it, which is what "od_records is LOCAL-ONLY, it costs Railway nothing" in
+  // CLAUDE.md implied. It is not COPIED up; every deployment BUILDS ITS OWN from the open-data
+  // source, because this scheduler ran unconditionally everywhere. On the engine box that table
+  // is ~2.6 GB across ~4.0M rows, and each Railway Postgres was growing its own.
+  //
+  // Production genuinely needs it: openstats/sql.js derives Qatar Market Pulse from od_records and
+  // /api/open-stats is customer-facing. STAGING does not — nobody has ever queried it there, and
+  // it is very likely most of that environment's several GB.
+  //
+  // Two gates, both fail-safe (the default is unchanged behaviour, so nothing customer-facing can
+  // break by omission):
+  //   • MODE !== 'admin' — admin.bell.qa SHARES the production database with the user portal, so
+  //     its scheduler was a second worker syncing the same rows. This is exactly the hazard the
+  //     research-poller comment ten lines above already documents for the same reason.
+  //   • BDI_OPEN_DATA_SYNC=0 — an explicit opt-out for a deployment that does not need the data.
+  //     Set it on the staging services; production leaves it unset.
+  if (MODE !== 'admin' && process.env.BDI_OPEN_DATA_SYNC !== '0') startOpenDataScheduler();
+  else console.log(`[open_data] scheduler off on this service (${MODE === 'admin' ? 'admin shares the prod DB — the user portal syncs it' : 'BDI_OPEN_DATA_SYNC=0'}).`);
 
   // Start the Market Feed engine (news poller + enrichment). No-op unless
   // BDI_NEWS_ENGINE=1 — enable on exactly one service (the production portal).

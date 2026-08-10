@@ -29,6 +29,34 @@
 // wrong-recipient incident has started with.
 
 import { query } from '../db.js';
+import { isSendableAddress } from '../lib/email.js';
+
+// ⚠️ AN ADDRESS ON FILE IS NOT NECESSARILY AN ADDRESS.
+// Measured on the engine box 2026-08-10: of 19,449 company_contacts email rows, 220 are values a
+// mail provider will reject outright, and 236 of the 12,343 legacy companies.email values are too.
+// They are real stored data, not corruption — this is what Qatar company websites and registry
+// forms actually contain:
+//     "LILAC.FASHION @HOTMAIL ,COM"   "mmaa@ mmaa.gov.qa"      "amusaid@yahoo"
+//     "albateel@qatar.net .qa"        "EMARAT BLOCK@HOTMAIL.COM"  "info@buildimgsga0com"
+// Handed to Resend, every one is a 422, and routes/crm.js turned every failure into the same
+// blank "Could not send the email." So the record LOOKED mailable, the send LOOKED like a
+// mystery, and the actual cause — a broken value sitting in plain sight on the record — was never
+// shown to the person who could fix it in five seconds.
+//
+// ⚠️ AND BELL MUST NOT REPAIR THEM. "LILAC.FASHION @HOTMAIL ,COM" obviously "means"
+// lilac.fashion@hotmail.com. Writing that is a guess about a real person's mailbox, and Rule 2.1
+// does not bend because the guess feels safe. Report the value verbatim; a human decides.
+//
+// isSendableAddress, NOT normalizeEmail: the latter lowercases and rewrites a value for STORAGE,
+// which would silently change what Bell was handed. Here the only question is yes or no.
+
+/** Split a resolved value into a usable address or a named bad one. Never rewrites it. */
+function classify(value, source) {
+  const v = String(value || '').trim();
+  if (!v) return { to: null, source: null };
+  if (isSendableAddress(v)) return { to: v, source };
+  return { to: null, source, bad_address: v };
+}
 
 /**
  * Resolve the address for a CRM record.
@@ -41,7 +69,7 @@ import { query } from '../db.js';
  */
 export async function resolveRecipient(rec, override = null) {
   const typed = String(override || '').trim();
-  if (typed) return { to: typed, source: 'override' };
+  if (typed) return classify(typed, 'override');
   if (!rec) return { to: null, source: null };
 
   const isCompany = rec.entity_type === 'company';
@@ -56,10 +84,13 @@ export async function resolveRecipient(rec, override = null) {
       WHERE ${column} = $1 AND type = 'email'
       ORDER BY is_primary DESC, is_verified DESC, created_at ASC LIMIT 1`,
     [rec.entity_id]).catch(() => ({ rows: [] }));
-  if (best.rows[0]?.v) return { to: String(best.rows[0].v).trim(), source: 'contacts' };
+  // A broken contacts value does NOT fall through to the legacy column. The contacts table is the
+  // record's stated address; silently reaching past it to a different one would mail somebody the
+  // record does not name — the [[legacy-contact-column]] incident in a new costume.
+  if (best.rows[0]?.v) return classify(best.rows[0].v, 'contacts');
 
   const legacy = String((isCompany ? rec.company_email : rec.person_email) || '').trim();
-  if (legacy) return { to: legacy, source: 'legacy' };
+  if (legacy) return classify(legacy, 'legacy');
 
   return { to: null, source: null };
 }
@@ -98,9 +129,9 @@ export async function resolveRecipients(recs) {
 
   for (const rec of rows) {
     const hit = best[rec.entity_type]?.get(Number(rec.entity_id));
-    if (hit) { out.set(Number(rec.id), { to: hit, source: 'contacts' }); continue; }
+    if (hit) { out.set(Number(rec.id), classify(hit, 'contacts')); continue; }
     const legacy = String((rec.entity_type === 'company' ? rec.company_email : rec.person_email) || '').trim();
-    out.set(Number(rec.id), legacy ? { to: legacy, source: 'legacy' } : { to: null, source: null });
+    out.set(Number(rec.id), legacy ? classify(legacy, 'legacy') : { to: null, source: null });
   }
   return out;
 }

@@ -130,4 +130,62 @@ router.get('/overview', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+/**
+ * GET /api/stats/storage — what this deployment's database actually costs, in bytes.
+ *
+ * ⚠️ WHY THIS EXISTS. Val, on Railway: "the postgres uses almost 7gb ram continuously on
+ * production and over 5GB on staging… are you able to investigate this and see the actual usage
+ * with actual numbers?" Bell had no way to answer for anything but the engine box, so a cost
+ * conversation had to be conducted from an estimate — and the estimate was WRONG in a way that
+ * mattered: it treated od_records (2,479 MB, 4.0M rows) as engine-box-only because it is not in
+ * MIRROR_TABLES. It is not COPIED to Railway; every deployment BUILT ITS OWN, because the Qatar
+ * Open Data scheduler ran with no gate (server.js). Not mirrored is not the same as not there.
+ *
+ * Runs against whichever database the caller is talking to, so opening this on admin.bell.qa
+ * finally answers "how big is production" with production's own numbers rather than a guess from
+ * the Mac. Platform-admin only — it is an operational readout, not customer data.
+ */
+router.get('/storage', async (req, res, next) => {
+  try {
+    if (req.user?.role !== 'platform_admin' && process.env.BDI_MODE !== 'local-admin') {
+      return res.status(403).json({ error: 'admin_only' });
+    }
+    const db = await query(
+      `SELECT current_database() AS name,
+              pg_database_size(current_database())            AS bytes,
+              pg_size_pretty(pg_database_size(current_database())) AS pretty`);
+    // Heap and indexes separately: yesterday's saving came entirely from an index nothing used,
+    // and a single "total" would have hidden where the weight actually sits.
+    const tables = await query(
+      `SELECT c.relname                                        AS table,
+              pg_total_relation_size(c.oid)                    AS total_bytes,
+              pg_size_pretty(pg_total_relation_size(c.oid))    AS total,
+              pg_size_pretty(pg_relation_size(c.oid))          AS heap,
+              pg_size_pretty(pg_indexes_size(c.oid))           AS indexes,
+              c.reltuples::bigint                              AS approx_rows
+         FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace
+        WHERE n.nspname = 'public' AND c.relkind = 'r'
+        ORDER BY pg_total_relation_size(c.oid) DESC
+        LIMIT 25`);
+    // An index nobody has scanned since the last stats reset is a candidate for removal — the
+    // shape that found idx_companies_extra_fields_gin (114 MB, 0 scans in three weeks).
+    const idleIndexes = await query(
+      `SELECT indexrelname AS index, relname AS table, idx_scan AS scans,
+              pg_size_pretty(pg_relation_size(indexrelid)) AS size
+         FROM pg_stat_user_indexes
+        WHERE idx_scan < 10 AND pg_relation_size(indexrelid) > 20 * 1024 * 1024
+        ORDER BY pg_relation_size(indexrelid) DESC LIMIT 15`);
+    res.json({
+      mode: process.env.BDI_MODE || 'unknown',
+      database: db.rows[0],
+      tables: tables.rows,
+      // ⚠️ Reported, never acted on. idx_companies_search_blob_trgm shows up here with 9 scans and
+      // 205 MB, and dropping it would make Railway's memory WORSE, not better — a phrase search
+      // without it pulls 1,729 MB of pages through shared_buffers instead of 117 MB (measured
+      // 2026-08-10). Low scan count is a reason to LOOK, not a reason to drop.
+      rarely_scanned_indexes: idleIndexes.rows,
+    });
+  } catch (err) { next(err); }
+});
+
 export default router;

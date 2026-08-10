@@ -265,29 +265,38 @@ test('nothing on file resolves to nothing, not to an empty string', { skip: skip
 });
 
 // ── the index the guard depends on ───────────────────────────────────────────────────────────
-test('the planner can still use idx_crm_emails_recipient for the guard\'s own query', { skip: skip() }, async () => {
+test("migration 116's index still matches the expression the guard actually queries with", { skip: skip() }, async () => {
   // ⚠️ Migration 113's lesson, applied forward. An expression index whose expression drifts from
   // the query stops being used SILENTLY: every answer stays correct and every lookup quietly
   // becomes a scan of the tenant's whole email history — on the send path, per recipient, inside
-  // a bulk send. So this asserts the shipped index still matches the shipped WHERE clause.
+  // a bulk send.
+  //
+  // ⚠️ AND THIS ASSERTS THE INDEX DEFINITION, NOT A QUERY PLAN. The first version of this test
+  // ran EXPLAIN with enable_seqscan off and demanded this index by name. That passed, then failed
+  // an hour later for a reason that had nothing to do with drift: another test had cleaned its
+  // rows out of crm_emails, and against 3 rows the planner correctly preferred the cheaper
+  // (tenant_id, created_at) index. A test whose verdict moves with the row count cannot tell you
+  // whether an expression drifted — it tells you how big the table happens to be.
+  //
+  // The structural question is the real one, and it has a definite answer: does the SHIPPED index
+  // carry the SAME expression the SHIPPED guard compares on? Both sides are read from source here,
+  // so changing either one without the other fails this.
   const idx = await query(
-    `SELECT 1 FROM pg_indexes WHERE indexname = 'idx_crm_emails_recipient'`);
+    `SELECT indexdef FROM pg_indexes WHERE indexname = 'idx_crm_emails_recipient'`);
   if (!idx.rows.length) return;   // migration 116 not applied to this copy yet
+  const indexdef = idx.rows[0].indexdef.replace(/\s+/g, ' ');
 
-  const c = await pool.connect();
-  try {
-    // seqscan off does not force a bad plan into existence — if the expression no longer matched,
-    // the planner would still be unable to use this index and would fall back to something else.
-    await c.query('SET enable_seqscan = off');
-    const p = await c.query(`EXPLAIN
-      SELECT count(*) FROM crm_emails
-       WHERE tenant_id = 1 AND direction = 'out'
-         AND status = ANY(ARRAY['sent','delivered','opened','bounced','complained'])
-         AND lower(btrim(to_email)) = 'x@y.qa'`);
-    const plan = p.rows.map((r) => r['QUERY PLAN']).join('\n');
-    assert.match(plan, /idx_crm_emails_recipient/,
-      'the guard\'s WHERE clause and migration 116\'s expression have drifted apart');
-  } finally { c.release(); }
+  const { readFile } = await import('node:fs/promises');
+  const guardSrc = await readFile(new URL('../crm/contact_guard.js', import.meta.url), 'utf8');
+
+  // Every address comparison the guard makes, taken from its own source.
+  const compares = [...guardSrc.matchAll(/lower\(btrim\(to_email\)\)/g)].length;
+  assert.ok(compares >= 2, 'the guard should still compare addresses folded and trimmed');
+  assert.match(indexdef, /lower\(btrim\(to_email\)\)/,
+    'the guard folds and trims the address; migration 116 must index the same expression');
+  assert.match(indexdef, /tenant_id/, 'and lead on tenant_id, which every lookup is scoped by');
+  assert.match(indexdef, /WHERE \(direction = 'out'/,
+    'the partial predicate must still match the guard\'s direction filter');
 });
 
 test('batch and single resolution pick the SAME address', { skip: skip() }, async () => {
@@ -303,4 +312,49 @@ test('batch and single resolution pick the SAME address', { skip: skip() }, asyn
     assert.equal(many.to, one.to, `company ${company_id}: bulk and single must agree`);
     assert.equal(many.source, one.source);
   }
+});
+
+// ── an address on file is not necessarily an address ─────────────────────────────────────────
+test('a stored value that is not an address is reported, never passed on', { skip: skip() }, async () => {
+  // Measured on the engine box 2026-08-10: 220 of 19,449 company_contacts email rows and 236 of
+  // 12,343 legacy companies.email values are values a provider rejects outright — real stored
+  // data like "LILAC.FASHION @HOTMAIL ,COM" and "amusaid@yahoo". The resolver used to hand them
+  // straight to Resend, and every 422 came back to the user as an unexplained "could not send".
+  const r = await resolveRecipient(
+    { entity_type: 'company', entity_id: 0, company_email: 'LILAC.FASHION @HOTMAIL ,COM' });
+  assert.equal(r.to, null, 'it must not be offered as a recipient');
+  assert.equal(r.bad_address, 'LILAC.FASHION @HOTMAIL ,COM', 'and it is named VERBATIM');
+  assert.equal(r.source, 'legacy', 'with where it came from, so it can be corrected there');
+});
+
+test('Bell does NOT repair an address it can see is meant to be valid', { skip: skip() }, async () => {
+  // "LILAC.FASHION @HOTMAIL ,COM" obviously "means" lilac.fashion@hotmail.com. Writing that would
+  // be a guess about a real person's mailbox, and Rule 2.1 does not bend because a guess feels
+  // safe. Report it; a human decides.
+  const r = await resolveRecipient(
+    { entity_type: 'company', entity_id: 0, company_email: 'mmaa@ mmaa.gov.qa' });
+  assert.equal(r.to, null);
+  assert.equal(r.bad_address, 'mmaa@ mmaa.gov.qa', 'unchanged — no space stripped, nothing lowercased');
+});
+
+test('a typed override is checked too', { skip: skip() }, async () => {
+  const r = await resolveRecipient({ entity_type: 'company', entity_id: 0 }, 'not-an-address');
+  assert.equal(r.to, null);
+  assert.equal(r.bad_address, 'not-an-address');
+});
+
+test('a broken contacts value does not silently fall through to the legacy column', { skip: skip() }, async () => {
+  // That fall-through would mail an address the record does not state — the legacy-contact
+  // incident in a new costume. entity_id 0 has no contacts row, so this asserts the simpler half:
+  // a bad legacy value stops rather than being used.
+  const r = await resolveRecipient(
+    { entity_type: 'company', entity_id: 0, company_email: 'amusaid@yahoo' });
+  assert.equal(r.to, null);
+});
+
+test('batch resolution reports bad addresses the same way as single', { skip: skip() }, async () => {
+  const rec = { id: 991001, entity_type: 'company', entity_id: 0, company_email: 'albateel@qatar.net .qa' };
+  const one = await resolveRecipient(rec);
+  const many = (await resolveRecipients([rec])).get(991001);
+  assert.deepEqual(many, one, 'a bulk send must reach the same verdict as the Send button');
 });

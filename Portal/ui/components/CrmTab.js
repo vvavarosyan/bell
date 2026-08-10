@@ -868,9 +868,10 @@ function RecordDrawer({ recordId, members = [], onClose, onChanged }) {
         to: emTo.trim(), subject: emSubject, body: emBody, cc: [...ccSel],
         ...(acknowledgePriorContact ? { acknowledge_prior_contact: true } : {}),
       });
-      // reply_note is set when Bell had to send without the reply-to it wanted. The mail went;
-      // the replies will not come back to this user, and saying so is the whole point.
-      toast(r?.reply_note || 'Email sent', r?.reply_note ? 'info' : 'success');
+      // reply_note / cc_note are set when Bell had to send with less than it was asked for. The
+      // mail went; something about it is not what the user assumed, and saying so is the point.
+      const notes = [r?.reply_note, r?.cc_note].filter(Boolean);
+      toast(notes.length ? notes.join(' · ') : 'Email sent', notes.length ? 'info' : 'success');
       setComposing(false); setEmSubject(''); setEmBody('');
       await load(); onChanged?.();
     } catch (err) {
@@ -884,6 +885,9 @@ function RecordDrawer({ recordId, members = [], onClose, onChanged }) {
       // here would have the outer finally re-enable Send while the second attempt was in flight.
       if (err.status === 409 && err.body?.can_override) askAgain = reason;
       else if (err.status === 409) toast(reason, 'error');
+      // A record whose stored address is not an address: put the broken value in the To box so
+      // the user can see and correct it, instead of reading "could not send" and guessing.
+      else if (code === 'bad_address') { setEmTo(err.body?.value || ''); toast(reason, 'error'); }
       else toast(/admin_only/i.test(code) ? 'Email sending is admin-only for now' : reason, 'error');
     } finally { setSending(false); }
     if (askAgain && window.confirm(askAgain + '\n\nSend it anyway?')) return sendEmail(true);

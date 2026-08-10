@@ -39,6 +39,7 @@ import { SECTOR_GROUPS } from '../lib/industry_groups.js';
 import * as store from './store.js';
 import { formatQatar, parseQatarLocal } from '../lib/qatar_time.js';
 import { guardSend, describeHistory } from '../crm/contact_guard.js';
+import { isSendableAddress } from '../lib/email.js';
 import { resolveRecipient } from '../crm/recipient.js';
 
 const TOOL_TIMEOUT_MS = 12_000;
@@ -1518,7 +1519,8 @@ export const TOOLS = [
       // The route already accepts + forwards cc (filters on '@', caps at 25) and the mail
       // transport emits it — only this schema was missing it, so Bella could never cc.
       const cc = Array.isArray(args.cc)
-        ? args.cc.map((s) => String(s || '').trim()).filter((s) => s.includes('@'))
+        // Not includes('@') — see routes/crm.js. Bella must not pass on an address that cannot be sent.
+        ? args.cc.map((s) => String(s || '').trim()).filter(isSendableAddress)
         : [];
       const { status, payload } = await internalCall(crmRouter, 'POST', `/records/${Number(args.record_id)}/email`, ctx, {
         body: {
