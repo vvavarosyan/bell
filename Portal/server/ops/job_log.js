@@ -17,7 +17,23 @@
 //
 // Never throws — bookkeeping must not be able to break the night's work.
 
+import os from 'os';
 import { query } from '../db.js';
+
+// WHICH MACHINE IS THIS? Bell runs on two against one database — the Mac (control screen) and the
+// ROG (engine room) — and they do NOT have the same capabilities. API keys are stored per-machine
+// (keychain.js: macOS Keychain on the Mac, environment variables everywhere else), so the same
+// duty can genuinely succeed on one and fail on the other.
+//
+// That produced this, ninety seconds apart, and it read as a flapping bug:
+//     10:14:37  duty_alarm  ok
+//     10:16:08  duty_alarm  error   email_provider_key_missing
+// Both rows were true. Only the host was missing, and without it the only way to tell them apart
+// was to reason about timing. Stamped once at module load — it cannot change while the process
+// lives, and a hostname lookup must never be on the path of recording a failure.
+const HOST = (() => {
+  try { return `${os.hostname()} (${process.platform})`; } catch { return null; }
+})();
 
 /**
  * Run `fn`, record what happened, and return its result.
@@ -45,10 +61,10 @@ export async function recordJob(kind, fn, opts = {}) {
   const status = error ? 'error' : (produced === 0 ? 'zero' : 'ok');
   try {
     await query(
-      `INSERT INTO job_runs (id, kind, source, status, started_at, completed_at, result, error, triggered_by)
-       VALUES (gen_random_uuid(), $1, $2, $3, $4, now(), $5::jsonb, $6, 'engine')`,
+      `INSERT INTO job_runs (id, kind, source, status, started_at, completed_at, result, error, triggered_by, host)
+       VALUES (gen_random_uuid(), $1, $2, $3, $4, now(), $5::jsonb, $6, 'engine', $7)`,
       [kind, opts.source || null, status, started,
-       JSON.stringify({ produced, result: summarize(result) }), error],
+       JSON.stringify({ produced, result: summarize(result) }), error, HOST],
     );
   } catch { /* never let bookkeeping break the work */ }
 
@@ -88,9 +104,9 @@ export async function recordSourceOutcomes(kind, sources, yieldOf = (v) => (v?.i
     const status = error ? 'error' : (produced === 0 ? 'zero' : 'ok');
     try {
       await query(
-        `INSERT INTO job_runs (id, kind, source, status, started_at, completed_at, result, error, triggered_by)
-         VALUES (gen_random_uuid(), $1, $2, $3, now(), now(), $4::jsonb, $5, 'engine')`,
-        [kind + ':source', source, status, JSON.stringify({ produced, result: summarize(v) }), error]);
+        `INSERT INTO job_runs (id, kind, source, status, started_at, completed_at, result, error, triggered_by, host)
+         VALUES (gen_random_uuid(), $1, $2, $3, now(), now(), $4::jsonb, $5, 'engine', $6)`,
+        [kind + ':source', source, status, JSON.stringify({ produced, result: summarize(v) }), error, HOST]);
       recorded++;
     } catch { /* bookkeeping must never break the work */ }
   }
@@ -110,9 +126,9 @@ export async function openJob(kind, meta = {}) {
   let id = null;
   try {
     const r = await query(
-      `INSERT INTO job_runs (id, kind, source, status, started_at, result, triggered_by)
-       VALUES (gen_random_uuid(), $1, $2, 'running', now(), $3::jsonb, 'engine') RETURNING id`,
-      [kind, meta.source || null, JSON.stringify(meta)]);
+      `INSERT INTO job_runs (id, kind, source, status, started_at, result, triggered_by, host)
+       VALUES (gen_random_uuid(), $1, $2, 'running', now(), $3::jsonb, 'engine', $4) RETURNING id`,
+      [kind, meta.source || null, JSON.stringify(meta), HOST]);
     id = r.rows[0].id;
   } catch { /* bookkeeping must never break the work */ }
   return async (status, result = null, error = null) => {
@@ -193,10 +209,30 @@ export async function jobHealth() {
     // right. They are excluded here and attached to their parent below, so the dashboard shows
     // "tender_scan — 4 sources, 1 failing" instead of five unrelated-looking rows.
     const r = await query(`
-      SELECT DISTINCT ON (kind) kind, status, started_at, completed_at, error, result
+      SELECT DISTINCT ON (kind) kind, status, started_at, completed_at, error, result, host
         FROM job_runs
        WHERE kind NOT LIKE '%:source'
        ORDER BY kind, COALESCE(completed_at, started_at) DESC NULLS LAST`);
+    // ⚠️ THE LATEST ROW IS NOT THE WHOLE STORY WHEN TWO MACHINES RUN THE SAME DUTY.
+    // The Mac and the ROG both run the hourly duty alarm against this one database, and they do
+    // not have the same API keys, so one can succeed while the other fails. Taking only the newest
+    // row makes the card flip between green and red depending on which machine wrote last — and
+    // hides the fact that a whole machine is broken. This collects the latest outcome PER HOST for
+    // any duty where the hosts disagree, so the card can name the machine that is failing.
+    const split = await query(`
+      SELECT kind, host, status, error, at FROM (
+        SELECT DISTINCT ON (kind, host) kind, host, status, error,
+               COALESCE(completed_at, started_at) AS at
+          FROM job_runs
+         WHERE kind NOT LIKE '%:source' AND host IS NOT NULL
+           AND COALESCE(completed_at, started_at) > now() - interval '3 days'
+         ORDER BY kind, host, COALESCE(completed_at, started_at) DESC NULLS LAST) x
+       ORDER BY kind, at DESC`);
+    const byHost = new Map();
+    for (const x of split.rows) {
+      if (!byHost.has(x.kind)) byHost.set(x.kind, []);
+      byHost.get(x.kind).push({ host: x.host, status: x.status, error: x.error, last_run_at: x.at });
+    }
     // Latest outcome for each (parent kind, source).
     const per = await query(`
       SELECT DISTINCT ON (kind, source) kind, source, status, completed_at, error, result
@@ -221,6 +257,11 @@ export async function jobHealth() {
       const sources = bySource.get(j.kind) || null;
       const at = j.completed_at || j.started_at;
       const ageH = at ? (Date.now() - new Date(at).getTime()) / 3.6e6 : null;
+      // Only worth showing when the machines actually disagree — two green hosts is noise.
+      const hosts = byHost.get(j.kind) || null;
+      const hostsDisagree = !!hosts && hosts.length > 1
+        && new Set(hosts.map((h) => h.status === 'error')).size > 1;
+      const failingHost = hostsDisagree ? hosts.find((h) => h.status === 'error') : null;
       return {
         kind: j.kind,
         status: j.status,
@@ -228,6 +269,13 @@ export async function jobHealth() {
         hours_ago: ageH == null ? null : Math.round(ageH),
         produced: j.result?.produced ?? null,
         error: j.error || null,
+        host: j.host || null,
+        hosts: hostsDisagree ? hosts : null,
+        // "It works on one machine and not the other" is a different problem from "it is broken",
+        // and it needs a different action from Val — configure that machine, not fix the code.
+        machine_split: failingHost
+          ? `works on ${hosts.find((h) => h.status !== 'error')?.host || 'one machine'}, fails on ${failingHost.host}${failingHost.error ? ' — ' + failingHost.error : ''}`
+          : null,
         scheduled: SCHEDULED_KINDS.has(j.kind),
         sources,
         // A parent whose TOTAL looks healthy while one of its sources is dead is exactly the
@@ -327,9 +375,9 @@ export async function alarmOnBrokenDuties({ log = () => {} } = {}) {
 async function record(outcome, error = null) {
   try {
     await query(
-      `INSERT INTO job_runs (id, kind, status, started_at, completed_at, result, error, triggered_by)
-       VALUES (gen_random_uuid(), 'duty_alarm', $1, now(), now(), $2::jsonb, $3, 'engine')`,
-      [error ? 'error' : 'ok', JSON.stringify(outcome), error]);
+      `INSERT INTO job_runs (id, kind, status, started_at, completed_at, result, error, triggered_by, host)
+       VALUES (gen_random_uuid(), 'duty_alarm', $1, now(), now(), $2::jsonb, $3, 'engine', $4)`,
+      [error ? 'error' : 'ok', JSON.stringify(outcome), error, HOST]);
   } catch { /* bookkeeping must never break the engine's round */ }
   return outcome;
 }

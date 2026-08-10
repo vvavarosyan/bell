@@ -589,15 +589,25 @@ router.post('/records/:id/email', async (req, res, next) => {
       try { from = formatFrom(await resolveSendIdentity(tenantId(req))); } catch (e) { console.error('[crm] identity resolve failed:', e.message); }
       from = from || await getFromAddress();
       const sent = await sendEmail({ from, to, cc: cc.length ? cc : undefined, replyTo: effReplyTo, subject, html: bodyHtml || undefined, text: bodyOut, system: 'crm', tenantId: req.tenant?.id });
+      // Record the reply-to that was actually USED, not the one Bell wanted. If sendEmail had to
+      // drop an unusable value, storing the wanted one would make the timeline claim a routing
+      // that does not exist.
       await query(`UPDATE crm_emails SET status='sent', provider_message_id=$2, from_email=$3, reply_to=$4, sent_at=now() WHERE id=$1`,
-        [emailId, sent.id, from, effReplyTo]);
+        [emailId, sent.id, from, sent.reply_to_used || null]);
       // ANSWER AS SOON AS THE SEND IS RECORDED. The activity entry and the contacted stamp are
       // internal bookkeeping — nobody outside Bell sees them — but they used to sit between the
       // send and the reply, adding round-trips to the engine box inside Bella's 12-second window.
       // A caller that gives up there believes a delivered email failed, and retries it. They still
       // run, just after the caller has its answer; a failure to write them is logged, never
       // silently swallowed, because a missing activity row makes a record look uncontacted.
-      res.json({ id: emailId, status: 'sent', message_id: sent.id });
+      res.json({
+        id: emailId, status: 'sent', message_id: sent.id,
+        // Say it plainly when replies are not going where the sender assumes. Silence here would
+        // be Bell implying a threading it is not doing.
+        reply_note: sent.reply_to_dropped
+          ? `Sent — but "${sent.reply_to_dropped}" is not a usable email address, so replies will go to ${from} instead of to you. Set a real address on your account to receive them.`
+          : null,
+      });
       logActivity(null, tenantId(req), id, 'email_out', {
         actorUserId: actorUserId(req), actorEmail: replyTo,
         summary: 'Email sent: ' + (subject || '(no subject)'), payload: { to, email_id: emailId },
@@ -1023,7 +1033,8 @@ router.post('/records/bulk', async (req, res, next) => {
         const effReplyTo = inboundReplyTo(emailId) || replyTo;
         try {
           const s = await sendEmail({ from, to, replyTo: effReplyTo, subject, html: bodyHtml || undefined, text: bodyText, system: 'crm', tenantId: req.tenant?.id });
-          await query(`UPDATE crm_emails SET status='sent', provider_message_id=$2, from_email=$3, reply_to=$4, sent_at=now() WHERE id=$1`, [emailId, s.id, from, effReplyTo]);
+          // The reply-to that was USED, not the one asked for — see the single-send path.
+          await query(`UPDATE crm_emails SET status='sent', provider_message_id=$2, from_email=$3, reply_to=$4, sent_at=now() WHERE id=$1`, [emailId, s.id, from, s.reply_to_used || null]);
           await logActivity(null, tid, r0.id, 'email_out', { actorUserId: actorUserId(req), actorEmail: replyTo, summary: 'Email sent: ' + (subject || '(no subject)'), payload: { to, email_id: emailId, bulk: true } });
           await markContacted(null, tid, r0.id, replyTo);
           sent++; remaining--;

@@ -864,11 +864,13 @@ function RecordDrawer({ recordId, members = [], onClose, onChanged }) {
     setSending(true);
     let askAgain = null;
     try {
-      await api.crmSendEmail(recordId, {
+      const r = await api.crmSendEmail(recordId, {
         to: emTo.trim(), subject: emSubject, body: emBody, cc: [...ccSel],
         ...(acknowledgePriorContact ? { acknowledge_prior_contact: true } : {}),
       });
-      toast('Email sent');
+      // reply_note is set when Bell had to send without the reply-to it wanted. The mail went;
+      // the replies will not come back to this user, and saying so is the whole point.
+      toast(r?.reply_note || 'Email sent', r?.reply_note ? 'info' : 'success');
       setComposing(false); setEmSubject(''); setEmBody('');
       await load(); onChanged?.();
     } catch (err) {

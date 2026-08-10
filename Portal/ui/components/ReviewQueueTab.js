@@ -102,6 +102,32 @@ export function ReviewQueueTab() {
   const promote = (id) => act('promote', id, promoteFn, 'approve');
   const ignore  = (id) => act('ignore', id, ignoreFn, 'reject');
 
+  // ⚠️ act() takes (kind, id, fn, verb). The Hiring tab's two buttons called act(r.id, 'promote')
+  // — arguments swapped and fn never passed — so every click died on "fn is not a function" and
+  // the toast, built from the missing `verb`, opened with the word "undefined". Val hit it on the
+  // first card he tried. Hiring rows live in spark_discoveries, so they promote and ignore
+  // through the spark routes like every other Qatar discovery; these wrappers exist only to
+  // report the thing that makes this queue different.
+  //
+  // The vacancies ARE the point. A hiring card is queued because live adverts name an employer
+  // Bell has no record of, and the server attaches those adverts on approve and returns
+  // jobs_linked. A toast that said only "new company added" would hide the half Val is looking
+  // for — he would have to go to the Jobs tab to find out whether the click did anything.
+  const approveHiring = async (id) => {
+    setBusyId(id);
+    try {
+      const r = await api.promoteSpark(id);
+      setRows((rs) => rs.filter((x) => x.id !== id));
+      loadCounts();
+      const where = r.linked_to_existing ? 'Linked to a company Bell already held' : 'Added to Bell';
+      const n = Number(r.jobs_linked || 0);
+      toast(`${where} — ${n === 0 ? 'no vacancies attached yet' : n === 1 ? '1 vacancy attached' : n + ' vacancies attached'}.`,
+        n > 0 ? 'success' : 'info');
+    } catch (err) { toast('Could not add it: ' + (err.reason || err.message), 'error'); }
+    finally { setBusyId(null); }
+  };
+  const rejectHiring = (id) => act('ignore', id, api.ignoreSpark, 'reject');
+
   // Location pairs: confirm puts the company's own written address onto the pin;
   // reject is remembered on the pin row so the pair is never proposed again.
   const pairAct = async (pair, keepId, approve) => {
@@ -192,10 +218,10 @@ export function ReviewQueueTab() {
                   hiring: ${w.titles.slice(0, 4).join(' · ')}${w.job_count > 4 ? ' …' : ''}
                 </div>` : null}
               <div style=${{ display: 'flex', gap: '8px', marginTop: '10px' }}>
-                <button class="sys-btn" disabled=${busyId === r.id} onClick=${() => act(r.id, 'promote')}>
+                <button class="sys-btn" disabled=${busyId === r.id} onClick=${() => approveHiring(r.id)}>
                   ${busyId === r.id ? '…' : 'Add to Bell'}
                 </button>
-                <button class="sys-btn sys-btn-secondary" disabled=${busyId === r.id} onClick=${() => act(r.id, 'ignore')}>
+                <button class="sys-btn sys-btn-secondary" disabled=${busyId === r.id} onClick=${() => rejectHiring(r.id)}>
                   Not a company
                 </button>
               </div>

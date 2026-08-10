@@ -158,6 +158,9 @@ export function EngineTab() {
                 </span>
               </div>
               ${j.error ? html`<div style=${{ fontSize: '11px', color: 'var(--red, #ff5d5d)', marginLeft: '22px', marginTop: '2px' }}>${txt(j.error).slice(0, 160)}</div>` : null}
+              ${j.machine_split ? html`<div style=${{ fontSize: '11px', color: 'var(--amber, #f59e0b)', marginLeft: '22px', marginTop: '2px' }}>
+                🖥 ${txt(j.machine_split).slice(0, 200)}
+              </div>` : (j.host ? html`<div class="muted" style=${{ fontSize: '10.5px', marginLeft: '22px', marginTop: '2px' }}>ran on ${txt(j.host)}</div>` : null)}
               ${(j.sources || []).length ? html`<div style=${{ marginLeft: '22px', marginTop: '5px', display: 'flex', gap: '14px', flexWrap: 'wrap' }}>
                 ${j.sources.map((x) => html`<span key=${x.source} style=${{ fontSize: '11px', color: x.health === 'ok' ? 'var(--text-dim)' : (x.health === 'failing' ? 'var(--red, #ff5d5d)' : 'var(--amber, #f59e0b)') }}>
                   ${x.health === 'ok' ? '✓' : '✗'} ${x.source}${x.produced != null ? ` · ${nf(x.produced)}` : ''}${x.health !== 'ok' ? ` · ${x.health}` : ''}
