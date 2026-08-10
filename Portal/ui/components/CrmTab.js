@@ -854,17 +854,37 @@ function RecordDrawer({ recordId, members = [], onClose, onChanged }) {
     const t = templates.find(x => String(x.id) === String(id));
     if (t) { if (t.subject) setEmSubject(t.subject); if (t.body) setEmBody(t.body); }
   };
-  const sendEmail = async () => {
+  // ⚠️ CALL THIS WRAPPED — `onClick=${() => sendEmail()}`, never `onClick=${sendEmail}`.
+  // The first argument is now acknowledgePriorContact, and a bare handler reference is called
+  // with the click event, which is always truthy. That would tell the server the user had
+  // already been shown the prior-contact history and agreed — on their very first click, before
+  // they had been shown anything. The guard would be defeated by the way its own button is wired.
+  const sendEmail = async (acknowledgePriorContact = false) => {
     if (!emSubject.trim() && !emBody.trim()) { toast('Write a subject or message', 'error'); return; }
     setSending(true);
+    let askAgain = null;
     try {
-      await api.crmSendEmail(recordId, { to: emTo.trim(), subject: emSubject, body: emBody, cc: [...ccSel] });
+      await api.crmSendEmail(recordId, {
+        to: emTo.trim(), subject: emSubject, body: emBody, cc: [...ccSel],
+        ...(acknowledgePriorContact ? { acknowledge_prior_contact: true } : {}),
+      });
       toast('Email sent');
       setComposing(false); setEmSubject(''); setEmBody('');
       await load(); onChanged?.();
     } catch (err) {
-      toast(/admin_only/i.test(err.message) ? 'Email sending is admin-only for now' : (err.message || 'Send failed'), 'error');
+      // The server refuses a send it can prove is wrong, and says why. Show the reason, not the
+      // code — and where the refusal is the "you've already emailed them" one, offer the send
+      // again rather than leaving the user stuck. Val 2026-08-06: make the user aware, and stop
+      // sends going out without their knowledge. Being aware and choosing to send is the point.
+      const code = err.body?.error || '';
+      const reason = err.reason || err.message || 'Send failed';
+      // Ask AFTER the finally has settled the button, never inside it — a retry started from in
+      // here would have the outer finally re-enable Send while the second attempt was in flight.
+      if (err.status === 409 && err.body?.can_override) askAgain = reason;
+      else if (err.status === 409) toast(reason, 'error');
+      else toast(/admin_only/i.test(code) ? 'Email sending is admin-only for now' : reason, 'error');
     } finally { setSending(false); }
+    if (askAgain && window.confirm(askAgain + '\n\nSend it anyway?')) return sendEmail(true);
   };
 
   const sectionLabel = (t) => html`<div style=${{ fontSize: '10px', textTransform: 'uppercase', letterSpacing: '0.1em', fontWeight: 700, color: 'var(--text-dim)', margin: '20px 0 8px' }}>${t}</div>`;
@@ -951,7 +971,7 @@ function RecordDrawer({ recordId, members = [], onClose, onChanged }) {
                     style=${{ width: '100%', minHeight: '120px', background: 'rgba(255,255,255,0.04)', border: '1px solid var(--border)', color: 'var(--text)', padding: '8px 9px', borderRadius: '6px', fontSize: '12.5px', resize: 'vertical', fontFamily: 'inherit', boxSizing: 'border-box' }}></textarea>
                   <div style=${{ fontSize: '10.5px', color: 'var(--text-dim)', marginTop: '4px' }}>Personalize: ${'{name}'} ${'{first_name}'} ${'{company}'} ${'{industry}'} ${'{city}'} ${'{title}'}</div>
                   <div style=${{ display: 'flex', gap: '8px', marginTop: '8px' }}>
-                    <button onClick=${sendEmail} disabled=${sending}
+                    <button onClick=${() => sendEmail()} disabled=${sending}
                       style=${{ background: 'var(--accent)', border: '1px solid var(--accent)', color: '#fff', borderRadius: '6px', padding: '7px 16px', fontSize: '12px', fontWeight: 600, cursor: 'pointer' }}>
                       ${sending ? 'Sending…' : 'Send'}</button>
                     <button onClick=${() => setComposing(false)}

@@ -21,6 +21,8 @@ import { sendEmail, getFromAddress, inboundReplyTo } from '../lib/email.js';
 import { getEmailBranding, renderBrandedEmail } from '../lib/email_branding.js';
 import { resolveSendIdentity, formatFrom } from '../lib/email_domains.js';
 import { checkDailyLimit } from '../lib/sendlimits.js';
+import { guardSend, describeHistory } from '../crm/contact_guard.js';
+import { resolveRecipient, resolveRecipients } from '../crm/recipient.js';
 
 // Sender signature + header/footer branding now live in lib/email_branding.js
 // (getEmailBranding / renderBrandedEmail), applied on every send path below.
@@ -532,22 +534,10 @@ router.post('/records/:id/email', async (req, res, next) => {
     if (!rec.rows.length) return res.status(404).json({ error: 'not_found' });
     const r0 = rec.rows[0];
 
-    // Prefer the contacts table over the legacy companies.email / people.email column.
-    // The legacy column is only ever the mirror of a primary contact, and 44 companies
-    // have an email in company_contacts with the column still NULL — those used to come
-    // back as "no email on file" even though Bell holds a perfectly good address.
-    let onFile = r0.entity_type === 'company' ? r0.company_email : r0.person_email;
-    if (!req.body?.to) {
-      const tbl = r0.entity_type === 'company' ? 'company_contacts' : 'person_contacts';
-      const col = r0.entity_type === 'company' ? 'company_id' : 'person_id';
-      const best = await query(
-        `SELECT COALESCE(value_display, value) AS v FROM ${tbl}
-          WHERE ${col} = $1 AND type = 'email'
-          ORDER BY is_primary DESC, is_verified DESC, created_at ASC LIMIT 1`,
-        [r0.entity_id]).catch(() => ({ rows: [] }));
-      if (best.rows[0]?.v) onFile = best.rows[0].v;
-    }
-    const to = String(req.body?.to || onFile || '').trim();
+    // Contacts table first, legacy column only as a fallback — see crm/recipient.js. All three
+    // send paths now resolve identically, so a record cannot be mailable one way and "no
+    // recipient" another.
+    const { to } = await resolveRecipient(r0, req.body?.to);
     if (!to) return res.status(400).json({ error: 'no_recipient', reason: 'No email address on file — enter one.' });
     const limit = await checkDailyLimit(tenantId(req), req.tenant?.plan);
     if (!limit.allowed) return res.status(429).json({ error: 'daily_limit', reason: `You've hit today's sending limit (${limit.limit}/day). It resets tomorrow — or upgrade your plan for more.` });
@@ -557,6 +547,23 @@ router.post('/records/:id/email', async (req, res, next) => {
     const subject  = applyMerge(String(req.body?.subject || '').trim(), vars);
     const bodyText = applyMerge(String(req.body?.body || '').trim(), vars);
     if (!subject && !bodyText) return res.status(400).json({ error: 'empty_email' });
+    // Val 2026-08-06: "she does not consider that those companies have been reached out to
+    // already… make sure the user is aware, and PREVENT sending too many emails without the
+    // user's knowledge." The guard runs on the MERGED subject, because that is the email that
+    // would actually arrive — comparing the un-merged template would call two different messages
+    // duplicates and let two identical ones through.
+    const guard = await guardSend({
+      tenantId: tenantId(req), to, subject,
+      acknowledged: req.body?.acknowledge_prior_contact === true,
+    });
+    if (!guard.ok) {
+      return res.status(409).json({
+        error: guard.code, reason: guard.reason, history: guard.history,
+        // Only the ceiling can be waived, and only by someone who has been told. A suppressed
+        // address or a duplicate is not a decision the caller gets to make.
+        can_override: guard.code === 'recently_contacted',
+      });
+    }
     // Branding (Val 2026-07-12): wrap the message in the sender's header +
     // footer (+ signature) so it doesn't look plain. `text` is the plain-text
     // twin we store + send alongside; `html` is null when there's nothing to
@@ -981,15 +988,26 @@ router.post('/records/bulk', async (req, res, next) => {
       const lim0 = await checkDailyLimit(tid, req.tenant?.plan);
       let remaining = lim0.remaining;
       let sent = 0, noEmail = 0, capped = 0, failed = 0;
+      // Why a bulk send holds records back, so the answer can say which and how many.
+      const held = { address_suppressed: [], duplicate_email: [], recently_contacted: [] };
       // One branding lookup for the whole bulk batch (same sender) — the
       // header/footer/signature wrap every message (Val 2026-07-12).
       const bulkBranding = await getEmailBranding(actorUserId(req));
+      // ⚠️ This loop read the LEGACY companies.email column and nothing else, while the
+      // single-send route beside it read company_contacts first. Same record, two addresses,
+      // depending on which button was pressed. One resolver now, two queries for the whole batch.
+      const recipients = await resolveRecipients(recs.rows);
+      const acknowledged = req.body?.acknowledge_prior_contact === true;
       for (const r0 of recs.rows) {
-        const to = String((r0.entity_type === 'company' ? r0.company_email : r0.person_email) || '').trim();
+        const to = recipients.get(Number(r0.id))?.to || '';
         if (!to) { noEmail++; continue; }
         if (remaining <= 0) { capped++; continue; }
         const vars = buildMergeVars(r0);
         const subject = applyMerge(subjTpl, vars);
+        // A bulk send is the case Val is most exposed by: nobody reads 200 recipients before
+        // clicking. A held record is reported, never silently skipped and never silently sent.
+        const g = await guardSend({ tenantId: tid, to, subject, acknowledged });
+        if (!g.ok) { held[g.code].push({ record_id: Number(r0.id), to, reason: g.reason }); continue; }
         const perRecip = {
           header: applyMerge(bulkBranding.header, vars),
           footer: applyMerge(bulkBranding.footer, vars),
@@ -1014,7 +1032,20 @@ router.post('/records/bulk', async (req, res, next) => {
           failed++;
         }
       }
-      return res.json({ action: 'send', requested: ids.length, sent, no_email: noEmail, capped, failed });
+      return res.json({
+        action: 'send', requested: ids.length, sent, no_email: noEmail, capped, failed,
+        held: {
+          suppressed: held.address_suppressed.length,
+          duplicate: held.duplicate_email.length,
+          recently_contacted: held.recently_contacted.length,
+        },
+        // The detail, so the UI can name them rather than report a bare count. Capped so a
+        // 5,000-record batch cannot return a megabyte of explanation.
+        held_detail: [...held.address_suppressed, ...held.duplicate_email, ...held.recently_contacted].slice(0, 100),
+        // Only the ceiling can be waived. Re-sending with acknowledge_prior_contact releases
+        // those and those only; suppressed and duplicate stay held.
+        can_override: held.recently_contacted.length > 0,
+      });
     }
     return res.status(400).json({ error: 'unknown_action' });
   } catch (err) { next(err); }

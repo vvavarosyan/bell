@@ -546,9 +546,34 @@ export async function runBellaTurn({ ctx, conversationId, userText, clientContex
         // 'act'/'spend' gate unless the user chose no-approval in Settings.
         // Autonomous (scheduled) runs skip the gate for the REVERSIBLE tools only — the block
         // above has already refused anything that reaches outside Bell.
+        // ⚠️ THE CARD HAS TO CARRY WHAT THE USER NEEDS IN ORDER TO DECIDE.
+        // `describe()` is synchronous and sees only the arguments, so a card could never say
+        // anything that required a lookup — which is why "Send email to info@x.qa" could appear
+        // for an address that had already had three emails this week, and Val approved it
+        // believing it was a first contact. An optional async `preflight` runs BEFORE the gate:
+        //   • { refuse, reason }  → no card at all; the tool is refused with the reason. Used for
+        //     things that are wrong no matter who approves them (a suppressed address, the same
+        //     email twice). Raising a card for those would be asking permission to make a mistake.
+        //   • { note }            → the card is raised with the note appended, so the user
+        //     approves knowing it.
+        // A preflight that throws is ignored: it exists to inform a decision, never to block one
+        // because a lookup failed.
+        let preflight = null;
+        if (!autonomous && typeof tool?.preflight === 'function') {
+          try { preflight = await tool.preflight(tu.input || {}, ctx); } catch { preflight = null; }
+        }
+        if (preflight?.refuse) {
+          slots[i] = { type: 'tool_result', tool_use_id: tu.id, content: JSON.stringify({
+            refused: true, code: preflight.code || 'refused', note: preflight.reason,
+          }) };
+          metaSlots[i] = { name: tu.name, summary: preflight.summary || 'refused — ' + (preflight.code || 'blocked') };
+          continue;
+        }
+
         if (!autonomous && requiresApproval(tool, approvalMode, ctx) && !takeGrant(grant, tu.name)) {
           let summary;
           try { summary = tool.describe ? tool.describe(tu.input || {}) : 'Run ' + tu.name; } catch { summary = 'Run ' + tu.name; }
+          if (preflight?.note) summary += ` — ⚠️ ${preflight.note}`;
           const actionId = await store.proposeAction(tenantId, userId, convId, tu.name, tu.input || {}, summary);
           send('approval', { action_id: actionId, tool: tu.name, summary });
           meta.approvals = meta.approvals || [];

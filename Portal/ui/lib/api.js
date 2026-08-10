@@ -46,7 +46,15 @@ async function request(path, options = {}) {
   const body = ct.includes('application/json') ? await r.json() : await r.text();
   if (!r.ok) {
     const msg = body?.message || body?.error || ('HTTP ' + r.status);
-    throw new Error(msg);
+    const err = new Error(msg);
+    // Carry the server's own answer. A refusal that explains itself — "this address already had
+    // 3 emails this week", "that exact subject went out today" — is useless if the caller can
+    // only see the error CODE. The 401 branch above already did this; every other status threw
+    // away the reason, so a screen could show "recently_contacted" and nothing else.
+    err.status = r.status;
+    err.body = body;
+    err.reason = body?.reason || null;
+    throw err;
   }
   return body;
 }

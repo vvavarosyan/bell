@@ -38,6 +38,8 @@ import osmRouter       from '../routes/osm.js';
 import { SECTOR_GROUPS } from '../lib/industry_groups.js';
 import * as store from './store.js';
 import { formatQatar, parseQatarLocal } from '../lib/qatar_time.js';
+import { guardSend, describeHistory } from '../crm/contact_guard.js';
+import { resolveRecipient } from '../crm/recipient.js';
 
 const TOOL_TIMEOUT_MS = 12_000;
 
@@ -1459,9 +1461,48 @@ export const TOOLS = [
             type: 'array', items: { type: 'string' },
             description: "Email addresses to copy in. Use addresses from get_email_recipients (the company's revealed people + company addresses) or the user's own teammates from list_team_members. Never guess an address.",
           },
+          acknowledge_prior_contact: {
+            type: 'boolean',
+            description: "Set this ONLY after you have told the user, in your reply, how many emails this address has already had and when the last one was, AND they have said to send anyway. It waives nothing else: a bounced or unsubscribed address, and the same subject twice in a day, stay blocked whatever this says. Never set it on your own initiative to get past a refusal.",
+          },
         },
         required: ['record_id', 'subject', 'body'],
       },
+    },
+    // Runs BEFORE the approval card is raised. Two jobs: refuse what is wrong regardless of who
+    // approves it, and make sure the card the user DOES see states what has already been sent to
+    // this address. Val 2026-08-06: Bella "does not consider that those companies have been
+    // reached out to already… she needs to make sure the user is aware."
+    async preflight(args, ctx) {
+      const tenantId = ctx?.tenant?.id;
+      if (!tenantId) return null;
+      const rec = await query(
+        `SELECT r.entity_type, r.entity_id, c.email AS company_email, p.email AS person_email
+           FROM crm_records r
+           LEFT JOIN companies c ON r.entity_type='company' AND c.id=r.entity_id
+           LEFT JOIN people    p ON r.entity_type='person'  AND p.id=r.entity_id
+          WHERE r.id=$1 AND r.tenant_id=$2`, [Number(args.record_id), tenantId]);
+      if (!rec.rows.length) return null;      // the route will answer not_found; not our job here
+      const { to } = await resolveRecipient(rec.rows[0], args.to);
+      if (!to) return null;                   // the route answers no_recipient with a better message
+      const g = await guardSend({
+        tenantId, to, subject: String(args.subject || ''),
+        acknowledged: args.acknowledge_prior_contact === true,
+      });
+      if (!g.ok) {
+        return {
+          refuse: true, code: g.code,
+          summary: g.code === 'address_suppressed' ? 'refused — that address is on the do-not-send list'
+                 : g.code === 'duplicate_email'    ? 'refused — that exact email already went today'
+                 : 'refused — already contacted recently',
+          reason: g.reason + (g.code === 'recently_contacted'
+            ? ' If they confirm they want it sent anyway, call send_email again with acknowledge_prior_contact set.'
+            : ''),
+        };
+      }
+      // Nothing blocking, but the card should still say what came before it.
+      const note = g.history.total ? describeHistory(g.history) : null;
+      return note ? { note } : null;
     },
     // ⚠️ THE CARD MUST NAME THE RECIPIENT. It used to read "Send email to record #12" — the
     // address appeared NOWHERE on the thing the user approves, so approving it was an act of
@@ -1483,6 +1524,10 @@ export const TOOLS = [
         body: {
           subject: stripAiDashes(args.subject), body: stripAiDashes(args.body),
           to: args.to || undefined, cc: cc.length ? cc : undefined,
+          // The route re-runs the same guard. Belt and braces on purpose: preflight only runs on
+          // the interactive path, and a grant from an approved plan bundle skips the card
+          // entirely — the route is the one place every Bella send passes through.
+          acknowledge_prior_contact: args.acknowledge_prior_contact === true,
         },
       });
       return asResult(status, payload, ['id', 'status']);

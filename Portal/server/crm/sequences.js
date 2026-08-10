@@ -15,6 +15,8 @@ import { getEmailBrandingByEmail, renderBrandedEmail } from '../lib/email_brandi
 import { resolveSendIdentity, formatFrom } from '../lib/email_domains.js';
 import { checkDailyLimit } from '../lib/sendlimits.js';
 import { logActivity, markContacted, buildMergeVars, applyMerge } from '../lib/crm.js';
+import { guardSend } from './contact_guard.js';
+import { resolveRecipient } from './recipient.js';
 
 const TICK_MS = 60_000;
 let timer = null;
@@ -123,7 +125,10 @@ async function processEnrollment(enr) {
     await query(`UPDATE crm_sequence_enrollments SET status='stopped', error='record ${rec.status}' WHERE id=$1`, [enr.id]);
     return 'stopped';
   }
-  const to = (rec.entity_type === 'company' ? rec.company_email : rec.person_email) || null;
+  // Same resolver as both CRM send buttons — this path used to read the legacy column alone, so a
+  // record with its address in company_contacts errored here as "no recipient email" while the
+  // Send button on the very same record worked.
+  const { to } = await resolveRecipient(rec);
   if (!to) {
     await query(`UPDATE crm_sequence_enrollments SET status='errored', error='no recipient email' WHERE id=$1`, [enr.id]);
     return 'errored';
@@ -141,6 +146,29 @@ async function processEnrollment(enr) {
   // send (Val 2026-07-12).
   const vars = buildMergeVars(rec);
   const subject = applyMerge(step.subject, vars);
+
+  // ⚠️ THE ONE SEND NOBODY IS WATCHING. A sequence step fires on a scheduler, hours or days after
+  // anyone chose it, so the "user is aware" half of Val's requirement cannot be met at send time —
+  // it has to have been met at ENROLMENT. It was: the user wrote the steps and enrolled the record,
+  // which is exactly what acknowledging a cadence means. So the ceiling rule is pre-acknowledged
+  // here, and only here.
+  //
+  // What is NOT waived: a suppressed address and a duplicate subject. Neither is a cadence
+  // decision. An address that hard-bounced will bounce again on every remaining step, and each
+  // one counts against the sending domain — so the enrolment stops rather than working through
+  // its schedule bouncing.
+  const guard = await guardSend({ tenantId: enr.tenant_id, to, subject, acknowledged: true });
+  if (!guard.ok) {
+    await query(`UPDATE crm_sequence_enrollments SET status='stopped', error=$2 WHERE id=$1`,
+      [enr.id, String(guard.reason).slice(0, 400)]);
+    await logActivity(null, enr.tenant_id, enr.record_id, 'note', {
+      actorEmail: enr.enrolled_by || null,
+      summary: `Sequence stopped before step ${step.step_no}: ${guard.code}`,
+      payload: { to, code: guard.code, sequence_id: enr.sequence_id, step_no: step.step_no },
+    }).catch(() => {});
+    return 'stopped';
+  }
+
   const replyTo = enr.enrolled_by || null;
   const branding = await getEmailBrandingByEmail(enr.enrolled_by);
   branding.header = applyMerge(branding.header, vars);
