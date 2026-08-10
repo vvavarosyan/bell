@@ -40,10 +40,16 @@
 import { query } from '../db.js';
 import { normalizeEmail } from '../lib/contacts.js';
 
+// ⚠️ VAL'S CALL, 2026-08-10, asked in plain words and answered: stop and ask after THREE emails
+// in THIRTY days. Chosen over the stricter 2-in-14 it shipped with for a concrete reason — a
+// normal three-touch follow-up sequence should run to completion without interrupting him, and
+// only a FOURTH approach inside a month is worth a question. Do not "tighten" these back without
+// asking him again; they are his judgement about how Bell should treat a Qatari company, not a
+// measurement anybody derived.
 /** How many accepted emails inside RECENT_DAYS before a human has to be told. Policy, not fact. */
-export const RECENT_MAX = 2;
+export const RECENT_MAX = 3;
 /** The window rule 3 looks back over. Policy, not fact. */
-export const RECENT_DAYS = 14;
+export const RECENT_DAYS = 30;
 /** How far back an identical subject counts as the same email sent twice. */
 export const DUPLICATE_HOURS = 24;
 

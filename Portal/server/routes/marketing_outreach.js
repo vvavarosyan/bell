@@ -74,7 +74,9 @@ router.get('/machine', async (_req, res) => {
 
 // POST /api/marketing/machine/reset-breaker — admin investigated, resume sending.
 router.post('/machine/reset-breaker', async (_req, res) => {
-  try { await resetBreaker(); res.json({ ok: true }); }
+  // Report the requeue: resetting the breaker also gives back the targets whose email never
+  // actually left Bell, and the admin should see that number rather than discover it later.
+  try { const r = await resetBreaker(); res.json({ ok: true, requeued: r?.requeued || 0 }); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 

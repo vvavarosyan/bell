@@ -339,8 +339,29 @@ async function sendOne(c, t, { followUp = false } = {}) {
       replyTo: c.reply_to || OUTREACH_REPLY_TO(), headers, channel: 'outreach', system: 'outreach-engine',
     });
   } catch (e) {
-    await query(`UPDATE crm_emails SET status='failed', error=$2 WHERE id=$1`, [crmId, String(e.message).slice(0, 400)]).catch(() => {});
-    await query(`UPDATE outreach_targets SET status='failed', skip_reason=$2, next_touch_at=NULL, updated_at=now() WHERE id=$1`, [t.id, String(e.message).slice(0, 200)]).catch(() => {});
+    const msg = String(e.message || e);
+    // ⚠️ A TARGET WHOSE EMAIL NEVER LEFT BELL HAS NOT BEEN CONTACTED, and must not be spent as
+    // though it had. This branch marked every failure terminal (`next_touch_at=NULL`, a status the
+    // picker never selects again), which is right when the RECIPIENT is the reason — a suppressed
+    // address will be suppressed tomorrow too — and wrong when BELL is. A missing key, a malformed
+    // field or a provider outage says nothing about the company; it burned a real Qatar prospect
+    // for an error on Bell's side, permanently and silently.
+    //
+    // Recipient-fault reasons come from named throws in lib/email.js, so they are matched exactly
+    // rather than by sniffing the text of a provider message. Anything else is assumed to be
+    // Bell's fault, which is the safe direction: the cost of wrongly keeping a target is one
+    // retry, and the cost of wrongly discarding one is a company Bell never speaks to again.
+    const RECIPIENT_FAULT = new Set(['recipient_suppressed', 'missing_recipient']);
+    const bellsFault = !RECIPIENT_FAULT.has(msg.trim());
+    await query(`UPDATE crm_emails SET status='failed', error=$2 WHERE id=$1`, [crmId, msg.slice(0, 400)]).catch(() => {});
+    // never_sent (migration 118) is the flag resetBreaker() reads to put these back in the queue
+    // once the cause is fixed. A real column, not a sentinel buried in skip_reason — that text is
+    // written for a human to read and must stay free to change.
+    await query(
+      `UPDATE outreach_targets SET status='failed', skip_reason=$2, next_touch_at=NULL,
+              never_sent=$3, updated_at=now()
+        WHERE id=$1`,
+      [t.id, msg.slice(0, 200), bellsFault]).catch(() => {});
     return 'failed';
   }
 

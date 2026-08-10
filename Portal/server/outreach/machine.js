@@ -44,12 +44,87 @@ export async function tripBreaker(reason) {
   await setState('breaker', { tripped: true, reason, at: new Date().toISOString() });
   console.error('[outreach] CIRCUIT BREAKER TRIPPED: ' + reason);
 }
+/**
+ * Clear the breaker — and give back the targets that were never actually emailed.
+ *
+ * Resetting means "I have fixed what was wrong". The companies whose sends failed on Bell's side
+ * received nothing, so leaving them in the terminal 'failed' state would quietly delete real
+ * prospects as the price of a configuration mistake. They go back to 'pending' and take their
+ * turn again. Recipient-fault failures (a suppressed address) never carry never_sent and stay
+ * exactly where they are.
+ *
+ * @returns {{requeued:number}}
+ */
 export async function resetBreaker() {
   await setState('breaker', { tripped: false, reason: null, at: null });
+  let requeued = 0;
+  try {
+    const r = await query(
+      `UPDATE outreach_targets
+          SET status='pending', never_sent=false, skip_reason=NULL, updated_at=now()
+        WHERE never_sent = true AND status='failed'
+        RETURNING id`);
+    requeued = r.rowCount || 0;
+    if (requeued) console.log(`[outreach] breaker reset — ${requeued} target(s) that were never actually emailed put back in the queue.`);
+  } catch (e) {
+    // Never let the requeue stop the reset itself: a stuck breaker is worse than a lost requeue.
+    console.error('[outreach] breaker reset: requeue failed —', e.message);
+  }
+  return { requeued };
 }
+/**
+ * How many sends in a row have to fail before Bell stops trying.
+ *
+ * ⚠️ THIS IS A DIFFERENT FAILURE FROM THE ONE THE BREAKER WAS BUILT FOR, and it had no brake.
+ * The bounce/complaint rules below only look at mail that REACHED the provider — their window is
+ * `status IN ('sent','delivered','opened','bounced','complained')`, which excludes 'failed'
+ * entirely. So a fault on BELL's side (a malformed field, a missing key, a provider outage) was
+ * invisible to the breaker no matter how many times it happened.
+ *
+ * And it could not exhaust itself either. A failed send never stamps `sent_at`, and the daily
+ * allowance counts `sent_at` — so the allowance never went down, the 60-second tick pulled a
+ * fresh batch every time, and each batch was burned to `status='failed'` with `next_touch_at`
+ * cleared, which is terminal. Left alone through one Qatar working day that is thousands of real
+ * Qatar companies spent on an error that never sent them anything, with no alarm and no way back.
+ *
+ * Five is deliberately small. Nothing is learned from the sixth failure that the fifth did not
+ * already say, and every attempt past the brake costs a prospect.
+ */
+const CONSECUTIVE_FAILURES_TO_STOP = 5;
+
+/**
+ * Did the last few outreach sends ALL fail? Then the fault is Bell's, and Bell must stop.
+ *
+ * Deliberately reads the most recent sends of ANY outcome and asks whether the newest ones are
+ * uniformly failures — not "how many failures exist", which a long-running campaign would satisfy
+ * eventually from unrelated one-offs scattered over months.
+ */
+export async function consecutiveSendFailures() {
+  const r = await query(
+    `SELECT status, error FROM crm_emails
+      WHERE direction='out' AND sent_by IN ('outreach-engine','outreach-test')
+      ORDER BY COALESCE(sent_at, created_at) DESC LIMIT $1`, [CONSECUTIVE_FAILURES_TO_STOP]);
+  const rows = r.rows;
+  if (rows.length < CONSECUTIVE_FAILURES_TO_STOP) return { count: 0, lastError: null };
+  if (!rows.every((x) => x.status === 'failed')) return { count: 0, lastError: null };
+  return { count: rows.length, lastError: rows[0].error || null };
+}
+
 export async function checkBreaker() {
   const cur = await breakerStatus();
   if (cur.tripped) return cur;
+
+  // Bell's own failures first. Checked before the deliverability rules because it is the one that
+  // was running unbounded, and because its message must not be confused with a reputation
+  // problem — the fix is in Bell's configuration, not in who is being emailed.
+  const streak = await consecutiveSendFailures();
+  if (streak.count) {
+    await tripBreaker(
+      `${streak.count} sends in a row failed before leaving Bell — this is a fault on Bell's side, ` +
+      `not a deliverability problem. Nothing reached anyone. Last error: ${String(streak.lastError || 'unknown').slice(0, 200)}`);
+    return breakerStatus();
+  }
+
   const r = await query(
     `SELECT status FROM crm_emails
       WHERE direction='out' AND sent_by IN ('outreach-engine','outreach-test')
