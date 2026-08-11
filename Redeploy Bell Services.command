@@ -41,10 +41,23 @@ for i in $(seq 1 8); do
   sleep 30
   ALL_OK=1
   printf "\n  check %d:\n" "$i"
-  for u in "https://app.bell.qa" "https://admin.bell.qa" "https://app-staging.bell.qa" "https://admin-staging.bell.qa"; do
+  # ⚠️ PRODUCTION decides success; staging is OPTIONAL. Before 2026-08-11 this loop required all
+  # four hostnames, so deleting the staging environment (Val's cost decision) would make it spend
+  # 4 minutes and then call a perfectly good production deploy a failure.
+  for u in "https://app.bell.qa" "https://admin.bell.qa"; do
     B="$(curl -s --max-time 15 "$u/api/health" 2>/dev/null | grep -oE '"build":"[^"]*"' | head -1 | cut -d'"' -f4)"
     printf "    %-34s %s\n" "$u" "${B:-(no answer yet)}"
     [ "$B" = "$SHA" ] || ALL_OK=0
+  done
+  for u in "https://app-staging.bell.qa" "https://admin-staging.bell.qa"; do
+    B="$(curl -s --max-time 15 "$u/api/health" 2>/dev/null | grep -oE '"build":"[^"]*"' | head -1 | cut -d'"' -f4)"
+    if [ -n "$B" ]; then
+      printf "    %-34s %s\n" "$u" "$B"
+      # A staging that EXISTS but lags is worth a warning line, never a failed verdict.
+      [ "$B" = "$SHA" ] || printf "    %-34s %s\n" "" "(staging behind — fine, production is what matters)"
+    else
+      printf "    %-34s %s\n" "$u" "(not present — fine if staging was removed)"
+    fi
   done
   if [ "$ALL_OK" = "1" ]; then echo; echo "  ✅ All services are on $SHA — the failed build is cleared."; break; fi
 done
