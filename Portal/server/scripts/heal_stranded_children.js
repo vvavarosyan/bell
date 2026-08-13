@@ -66,7 +66,21 @@ async function main() {
      WHERE c.canonical_id IS NOT NULL`)).rows[0].n);
   console.log('  ' + 'branch links'.padEnd(26) + String(strandedParents).padStart(7) + ' row(s) stranded');
 
-  const total = Object.values(before).reduce((a, b) => a + b, 0) + strandedTenders + strandedParents;
+  // RELATIONSHIPS — the table every completeness pass missed until 2026-08-13. Either endpoint
+  // can point at a merged-away company, and 61 of the 367 measured describe an edge BETWEEN two
+  // records that merged into one — re-pointing those would make a company partner of itself.
+  const strandedRels = Number((await query(`
+    SELECT count(*)::int n FROM company_relationships cr
+     WHERE EXISTS (SELECT 1 FROM companies c WHERE c.id IN (cr.source_company_id, cr.target_company_id)
+                     AND c.canonical_id IS NOT NULL)`)).rows[0].n);
+  console.log('  ' + 'relationships'.padEnd(26) + String(strandedRels).padStart(7) + ' row(s) stranded');
+  const strandedOsm = Number((await query(`
+    SELECT count(*)::int n FROM osm_places o JOIN companies c ON c.id = o.matched_company_id
+     WHERE c.canonical_id IS NOT NULL`)).rows[0].n);
+  console.log('  ' + 'map places (OSM)'.padEnd(26) + String(strandedOsm).padStart(7) + ' row(s) stranded');
+
+  const total = Object.values(before).reduce((a, b) => a + b, 0) + strandedTenders + strandedParents
+    + strandedRels + strandedOsm;
   console.log('  ' + 'TOTAL'.padEnd(26) + String(total).padStart(7));
 
   if (!total) { console.log('\nNothing to reconnect.\n'); return; }
@@ -122,6 +136,59 @@ async function main() {
       FROM s WHERE c.parent_company_id = s.from_id AND c.id <> s.to_id`);
   if (bp.rowCount) console.log('  moved ' + String(bp.rowCount).padStart(6) + '  branch links (parent company)');
   moved += bp.rowCount;
+
+  // RELATIONSHIPS — same rules as the merge itself (assembly/dedup.js), in the same order.
+  // 1. Edges whose two endpoints resolve to the SAME survivor are self-loops-in-waiting: an edge
+  //    from a record to itself states nothing. Deleted WITH tombstones — the table is mirrored.
+  const loops = await query(`
+    WITH s AS (${SURVIVOR}),
+    gone AS (
+      DELETE FROM company_relationships cr
+       USING (SELECT cr2.id
+                FROM company_relationships cr2
+                LEFT JOIN s ss ON ss.from_id = cr2.source_company_id
+                LEFT JOIN s st ON st.from_id = cr2.target_company_id
+               WHERE (ss.from_id IS NOT NULL OR st.from_id IS NOT NULL)
+                 AND COALESCE(ss.to_id, cr2.source_company_id) = COALESCE(st.to_id, cr2.target_company_id)) bad
+       WHERE cr.id = bad.id
+      RETURNING cr.id)
+    INSERT INTO sync_deletions (table_name, row_id) SELECT 'company_relationships', id FROM gone`);
+  if (loops.rowCount) console.log('  removed ' + String(loops.rowCount).padStart(4) + '  relationships that would have made a company its own partner (tombstoned)');
+  // 2. Outgoing edges move to the survivor unless it already claims the same edge —
+  //    uq_company_relationships_edge is (source_company_id, relation_type, lower(btrim(target_name))).
+  const relSrc = await query(`
+    WITH s AS (${SURVIVOR})
+    UPDATE company_relationships r SET source_company_id = s.to_id, updated_at = now()
+      FROM s WHERE r.source_company_id = s.from_id
+        AND NOT EXISTS (SELECT 1 FROM company_relationships k
+                         WHERE k.source_company_id = s.to_id AND k.relation_type = r.relation_type
+                           AND lower(btrim(k.target_name)) = lower(btrim(r.target_name)))`);
+  if (relSrc.rowCount) console.log('  moved ' + String(relSrc.rowCount).padStart(6) + '  relationships (outgoing)');
+  moved += relSrc.rowCount;
+  //    Colliding leftovers: the survivor's own copy of the edge wins; the duplicate's is withdrawn.
+  const relDup = await query(`
+    WITH s AS (${SURVIVOR}),
+    gone AS (
+      DELETE FROM company_relationships cr USING s
+       WHERE cr.source_company_id = s.from_id
+      RETURNING cr.id)
+    INSERT INTO sync_deletions (table_name, row_id) SELECT 'company_relationships', id FROM gone`);
+  if (relDup.rowCount) console.log('  removed ' + String(relDup.rowCount).padStart(4) + '  relationships the survivor already stated (tombstoned)');
+  // 3. Incoming edges carry no unique key — plain touch-and-move.
+  const relTgt = await query(`
+    WITH s AS (${SURVIVOR})
+    UPDATE company_relationships r SET target_company_id = s.to_id, updated_at = now()
+      FROM s WHERE r.target_company_id = s.from_id`);
+  if (relTgt.rowCount) console.log('  moved ' + String(relTgt.rowCount).padStart(6) + '  relationships (incoming)');
+  moved += relTgt.rowCount;
+
+  // OSM map places — no unique key on matched_company_id; mirrored, so the watermark is stamped.
+  const osm = await query(`
+    WITH s AS (${SURVIVOR})
+    UPDATE osm_places o SET matched_company_id = s.to_id, updated_at = now()
+      FROM s WHERE o.matched_company_id = s.from_id`);
+  if (osm.rowCount) console.log('  moved ' + String(osm.rowCount).padStart(6) + '  map places (OSM)');
+  moved += osm.rowCount;
 
   console.log(`\nReconnected ${moved.toLocaleString()} row(s) to the company that survived the merge.`);
   console.log('Rows still left are exact duplicates the survivor already holds — nothing lost.');

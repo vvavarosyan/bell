@@ -663,6 +663,51 @@ export async function mergeCompanies(canonicalId, duplicateId, jobLog = null) {
       INSERT INTO sync_deletions (table_name, row_id) SELECT 'company_registrations', id FROM gone`,
       [duplicateId]));
 
+    // ── company_relationships — the table every completeness pass missed ─────────────────
+    // Measured 2026-08-13: 367 rows already pointed at merged-away companies, and 61 of them
+    // describe a relationship BETWEEN the two records being merged — re-pointing those would
+    // make a company partner of itself. Mirrored with a syncWhere, so: updated_at = now() on
+    // every move (the watermark), tombstones on every delete.
+    //
+    // Order matters. First remove edges that live strictly BETWEEN the pair (they become
+    // self-loops the moment the two ids become one — an edge from a record to itself states
+    // nothing). Then move the duplicate's outgoing edges where the survivor does not already
+    // hold the same edge — uq_company_relationships_edge is (source_company_id, relation_type,
+    // lower(btrim(target_name))), so "already holds" is a name-keyed question, not an id one.
+    // Colliding leftovers are withdrawn with tombstones: the survivor's own copy of the edge
+    // is the one that stays. Finally re-point incoming edges, which carry no unique key.
+    await timed('TOMBSTONE + DELETE intra-pair relationships', () => client.query(`
+      WITH gone AS (
+        DELETE FROM company_relationships
+         WHERE source_company_id IN ($1, $2)
+           AND target_company_id IN ($1, $2)
+        RETURNING id)
+      INSERT INTO sync_deletions (table_name, row_id) SELECT 'company_relationships', id FROM gone`,
+      [canonicalId, duplicateId]));
+    await timed('UPDATE re-parent outgoing relationships', () => client.query(`
+      UPDATE company_relationships r SET source_company_id = $1, updated_at = now()
+       WHERE r.source_company_id = $2
+         AND NOT EXISTS (
+           SELECT 1 FROM company_relationships k
+            WHERE k.source_company_id = $1 AND k.relation_type = r.relation_type
+              AND lower(btrim(k.target_name)) = lower(btrim(r.target_name)))`,
+      [canonicalId, duplicateId]));
+    await timed('TOMBSTONE + DELETE colliding outgoing relationships', () => client.query(`
+      WITH gone AS (DELETE FROM company_relationships WHERE source_company_id = $1 RETURNING id)
+      INSERT INTO sync_deletions (table_name, row_id) SELECT 'company_relationships', id FROM gone`,
+      [duplicateId]));
+    await timed('UPDATE re-parent incoming relationships', () => client.query(`
+      UPDATE company_relationships SET target_company_id = $1, updated_at = now()
+       WHERE target_company_id = $2`,
+      [canonicalId, duplicateId]));
+
+    // osm_places — the map layer's link back to a company. Mirrored; no unique key on
+    // matched_company_id (many places can match one company), so a plain touch-and-move.
+    await timed('UPDATE re-parent osm_places', () => client.query(`
+      UPDATE osm_places SET matched_company_id = $1, updated_at = now()
+       WHERE matched_company_id = $2`,
+      [canonicalId, duplicateId]));
+
     // 3. Mark the duplicate as merged
     await timed('UPDATE dup merge_status', () => client.query(`
       UPDATE companies
