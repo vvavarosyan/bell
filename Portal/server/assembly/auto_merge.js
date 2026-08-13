@@ -68,15 +68,121 @@ export async function findExactRegistrationGroups() {
 }
 
 /**
+ * Groups where DIFFERENT registry bodies state the SAME national CR for different rows.
+ *
+ * ⚠️ WHY THIS SECOND FINDER EXISTS. The same-body finder above found ZERO groups for five
+ * consecutive nights ('zero' in job_runs) while 6,934 cross-body duplicate groups sat in the
+ * data — QCCI writes the CR as "00036876" and CRA as "36876", so an exact-string, same-body
+ * group can never see them. Val reported the symptom on 2026-08-05 (iHorizons ×5).
+ *
+ * The join is NOT the number-collision trap the file header warns about, and that is proven,
+ * not assumed: MOCI, QCCI and CRA all type these rows 'commercial_registration', and on the
+ * 4,312 companies that carry BOTH a MOCI and a QCCI row themselves, the two numbers agree
+ * 94.3% of the time (measured 2026-08-13) — they are the same national register. company_record,
+ * QFC, QFCRA and MoPH number their own registers independently and stay excluded.
+ *
+ * That same 94.3% is also why a name guard still exists: ~6% of QCCI-stated CRs disagree with
+ * MOCI's on the very same company, so the number alone can be a typo. Merging happens only in
+ * three tiers of CONCLUSIVE evidence; everything else is held and reported:
+ *   exact         — every member's normalized name is identical (registry + name agree).
+ *   shell         — the group is nameless registry shells ("MOCI CR-109498 (name missing)")
+ *                   plus exactly ONE named company. The shell asserts nothing but the CR, and
+ *                   the CR matches; filling it is not a guess.
+ *   corroborated  — the two members share a PHONE (last 8 digits) or WEBSITE DOMAIN. Names like
+ *                   "Al Wadi Al Akhdar" / "Green Valley Trading" are the same firm translated,
+ *                   and no string similarity can prove that — an independent shared contact can.
+ * Held groups include real danger: "almustaqbal Engineering" vs "Diplomat For Men's Supplies"
+ * share a base CR and are plainly not one firm. A wrong number on one side does exist; that is
+ * what the tiers are for.
+ *
+ * Branch registrations (…/2) never enter: `number !~ '/'` excludes them by construction, so this
+ * cannot fight chain_link.js over the same rows.
+ */
+export async function findCrossBodyBaseCrGroups({ onlyBases = null } = {}) {
+  // onlyBases: test hook — the suite creates fixtures with distinctive base CRs on the disposable
+  // copy and must not depend on (or pay for) the thousands of real groups also present there.
+  const r = await query(`
+    SELECT ltrim(split_part(r.number,'/',1),'0') AS base,
+           array_agg(c.id ORDER BY COALESCE(c.bell_score,0) DESC, c.id) AS ids,
+           array_agg(c.name ORDER BY COALESCE(c.bell_score,0) DESC, c.id) AS names,
+           array_agg(DISTINCT r.body) AS bodies
+      FROM company_registrations r
+      JOIN companies c ON c.id = r.company_id
+     WHERE COALESCE(c.archived, false) = false
+       AND c.canonical_id IS NULL
+       AND r.body IN ('MOCI','QCCI','CRA')
+       AND r.registration_type = 'commercial_registration'
+       AND r.number !~ '/'
+       AND length(ltrim(split_part(r.number,'/',1),'0')) >= $1
+       AND ($2::text[] IS NULL OR ltrim(split_part(r.number,'/',1),'0') = ANY($2::text[]))
+     GROUP BY 1
+    HAVING count(DISTINCT r.company_id) > 1`, [MIN_NUMBER_LEN, onlyBases]);
+
+  const out = [];
+  for (const row of r.rows) {
+    const ids = [...new Set(row.ids.map(Number))];
+    if (ids.length < 2) continue;
+    const named = row.names.filter((n) => !/\(name missing\)\s*$/.test(String(n || '')));
+    const norms = new Set(named.map((n) => normalizeName(n) || String(n || '').toLowerCase().trim()));
+    let tier = 'held';
+    if (named.length >= 1 && norms.size <= 1 && named.length < row.names.length) tier = 'shell';
+    else if (norms.size === 1 && named.length === row.names.length) tier = 'exact';
+    else if (ids.length === 2) {
+      // Corroboration: an independent contact both rows state. Checked only for pairs — a
+      // 3+ group with disagreeing names needs eyes, not transitivity.
+      const c = await query(`
+        SELECT EXISTS (
+          SELECT 1 FROM company_contacts p1 JOIN company_contacts p2
+            ON p1.type='phone' AND p2.type='phone'
+           AND right(regexp_replace(p1.value,'\\D','','g'),8) = right(regexp_replace(p2.value,'\\D','','g'),8)
+           AND length(regexp_replace(p1.value,'\\D','','g')) >= 8
+         WHERE p1.company_id = $1 AND p2.company_id = $2) AS phone,
+        (SELECT lower(regexp_replace(regexp_replace(a.website,'^https?://',''),'^www\\.|/.*$','','g'))
+           FROM companies a WHERE a.id = $1 AND a.website IS NOT NULL AND btrim(a.website) <> '') IS NOT DISTINCT FROM
+        (SELECT lower(regexp_replace(regexp_replace(b.website,'^https?://',''),'^www\\.|/.*$','','g'))
+           FROM companies b WHERE b.id = $2 AND b.website IS NOT NULL AND btrim(b.website) <> '')
+        AND EXISTS (SELECT 1 FROM companies a WHERE a.id = $1 AND a.website IS NOT NULL AND btrim(a.website) <> '') AS domain`,
+        [ids[0], ids[1]]);
+      if (c.rows[0].phone || c.rows[0].domain) tier = 'corroborated';
+    }
+    out.push({ key: `base CR ${row.base} (${row.bodies.join('+')})`, base: row.base, ids, names: row.names, tier });
+  }
+  return out;
+}
+
+/**
  * Merge every group the registry identifies AND whose names agree.
  * @param {object} opts
  * @param {boolean} [opts.apply=false]  false = report only, nothing written
  * @param {function} [opts.log]
+ * @param {number}  [opts.crossBodyLimit=250]  merges per run from the cross-body finder — keeps
+ *                  the first (bulk) night inside a predictable window; the rest drain nightly.
  */
-export async function autoMergeExactRegistrations({ apply = false, log = () => {} } = {}) {
+export async function autoMergeExactRegistrations({ apply = false, log = () => {}, crossBodyLimit = 250 } = {}) {
   const groups = await findExactRegistrationGroups();
   const eligible = groups.filter((g) => g.agree);
   const held = groups.filter((g) => !g.agree);
+
+  // Cross-body pass: same national CR stated by different registry bodies. Only the three
+  // conclusive tiers merge; 'held' groups are counted, never queued — ~5,800 of them would
+  // drown any review queue, and Val's standing constraint is automation on conclusive
+  // evidence, not bulk eyeballing (2026-08-06).
+  const cross = await findCrossBodyBaseCrGroups();
+  const crossEligible = cross.filter((g) => g.tier !== 'held').slice(0, Math.max(0, crossBodyLimit));
+  const crossHeld = cross.filter((g) => g.tier === 'held');
+  log(`  cross-body CR: ${cross.length} group(s) — ${cross.filter((g) => g.tier !== 'held').length} conclusive (${crossEligible.length} this run) · ${crossHeld.length} held for stronger evidence`);
+  for (const g of crossEligible) {
+    // Survivor: for shell groups the NAMED row must survive regardless of score — the shell has
+    // nothing worth keeping and its name is a placeholder that must not win.
+    if (g.tier === 'shell') {
+      const namedIdx = g.names.findIndex((n) => !/\(name missing\)\s*$/.test(String(n || '')));
+      if (namedIdx > 0) {
+        g.ids = [g.ids[namedIdx], ...g.ids.filter((_, i) => i !== namedIdx)];
+        g.names = [g.names[namedIdx], ...g.names.filter((_, i) => i !== namedIdx)];
+      }
+    }
+    eligible.push({ key: `${g.key} [${g.tier}]`, ids: g.ids, names: g.names, agree: true });
+  }
 
   // A group whose names disagree is reported, never merged, and never silently dropped: it is
   // either a registry error or two genuinely different firms, and both need a human.

@@ -312,6 +312,24 @@ export async function runPush({ full = false, reset = false, only = null } = {})
     await reconcileContributedDeletions(base, token, summary);
     // …and withdraw anything that has since stopped meeting its table's publish rule.
     await reconcileDisqualified(base, token, summary, wm, full || reset);
+    // Tenant data follows the merge survivors — on PROD (where those tables live) and locally
+    // (the local Portal has Val's own CRM). Failure here must not sink the push: the next push
+    // retries it, and nothing downstream depends on it inside this run.
+    try {
+      const r = await fetch(base + '/api/sync/reconcile-merged', {
+        method: 'POST', headers: { Authorization: 'Bearer ' + token } });
+      if (r.ok) {
+        const j = await r.json();
+        const n = Object.values(j.repointed || {}).reduce((a, b) => a + (Number(b) || 0), 0);
+        if (n) console.log(`[sync] prod re-pointed ${n} tenant row(s) from merged duplicates to their survivors.`);
+        const c = Object.entries(j.collisions || {}).filter(([, v]) => v);
+        if (c.length) console.log('[sync] ⚠ tenant rows left on merged duplicates (tenant tracks both):', JSON.stringify(j.collisions));
+      }
+      const { reconcileMergedEntityRefs } = await import('./reconcile_merged.js');
+      await reconcileMergedEntityRefs();
+    } catch (err) {
+      console.log('[sync] reconcile-merged skipped: ' + err.message);
+    }
   }
 
   // Per-table isolation: one failing table (e.g. a table prod's code doesn't

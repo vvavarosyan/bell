@@ -48,6 +48,21 @@ router.post('/ingest', requireSyncToken, async (req, res, next) => {
 
 // Apply deletions (PRODUCTION receiver). Mirrors hard-deletes that happened on
 // the local engine so prod stays an exact row-for-row copy. Token-auth.
+// POST /api/sync/reconcile-merged — re-point TENANT data at merge survivors.
+//
+// Called by the push after deletions are applied. Runs HERE because the tenant tables (CRM
+// records, paid reveals, list members, contributed datapoints) exist only on this deployment and
+// are not mirrored — no local UPDATE can repair them. The mapping duplicate→canonical arrives
+// with every push in companies.canonical_id, so by the time this runs the pointer is fresh.
+// Idempotent, never deletes; collisions (a tenant tracking BOTH duplicates) are reported, not
+// resolved — resolving one means deleting a record carrying the tenant's own notes.
+router.post('/reconcile-merged', requireSyncToken, async (req, res, next) => {
+  try {
+    const { reconcileMergedEntityRefs } = await import('../sync/reconcile_merged.js');
+    res.json(await reconcileMergedEntityRefs());
+  } catch (err) { next(err); }
+});
+
 router.post('/delete', requireSyncToken, async (req, res, next) => {
   try {
     const { table, ids } = req.body || {};

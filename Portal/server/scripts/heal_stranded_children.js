@@ -182,6 +182,15 @@ async function main() {
   if (relTgt.rowCount) console.log('  moved ' + String(relTgt.rowCount).padStart(6) + '  relationships (incoming)');
   moved += relTgt.rowCount;
 
+  // 4. Edges that ALREADY point at themselves — 305 measured 2026-08-13, written by an engine
+  //    long before merges were involved. An edge from a company to itself states nothing,
+  //    whatever put it there. Tombstoned: the table is mirrored and prod holds them too.
+  const selfLoops = await query(`
+    WITH gone AS (
+      DELETE FROM company_relationships WHERE source_company_id = target_company_id RETURNING id)
+    INSERT INTO sync_deletions (table_name, row_id) SELECT 'company_relationships', id FROM gone`);
+  if (selfLoops.rowCount) console.log('  removed ' + String(selfLoops.rowCount).padStart(4) + '  edges that pointed a company at itself (tombstoned)');
+
   // OSM map places — no unique key on matched_company_id; mirrored, so the watermark is stamped.
   const osm = await query(`
     WITH s AS (${SURVIVOR})
