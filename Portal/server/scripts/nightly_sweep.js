@@ -190,6 +190,21 @@ function withCeiling(p, ms, label) {
       // its own robots.txt states, so a night where it silently stops must not hide behind the
       // hundreds of vacancies the other readers bring in.
       await recordSourceOutcomes('job_sweep', js?.sources, (v) => (v?.inserted ?? 0) + (v?.updated ?? 0));
+      // QCCI directory re-crawl (Val 2026-08-15: "use ROG… to not use Firecrawl credits").
+      // A ~1,000-listing chunk of the stalest entries per night — full 41,951-listing cycle in
+      // ~6 weeks, continuously, for free. The runner PROBES first and THROWS if this machine's
+      // browser is being challenged by Cloudflare, so a blocked night reads as a red error naming
+      // the cause, never as "ran fine, produced nothing". Env override: BDI_QCCI_NIGHTLY_LIMIT
+      // (0 disables).
+      try {
+        const qLimit = Number(process.env.BDI_QCCI_NIGHTLY_LIMIT ?? 1000);
+        if (qLimit > 0) {
+          const qc = await recordJob('qcci_recrawl',
+            async () => (await import('./qatarcid_recrawl.js')).recrawlQatarcid({ limit: qLimit, log: (m) => log(m) }),
+            { yield: (r) => r?.parsed ?? 0, log });
+          if (qc?.parsed) log(`✓ QCCI directory: ${qc.parsed} listings refreshed (${qc.unreadable} unreadable) — no credits spent.`);
+        }
+      } catch (err) { log(`✗ QCCI re-crawl failed: ${err.message}`); }
       // A vacancy naming an employer Bell has no company for is not a gap in the job data — it is
       // a Qatar firm, provably trading and provably hiring, that the database is missing. Queue it
       // for review rather than leaving a blank cell. Nothing is created without Val's click.

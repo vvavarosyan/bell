@@ -45,6 +45,7 @@ const JOB_LABELS = {
   weekly_data_check: 'Weekly data check email', self_update: 'Engine code self-update',
   duty_alarm: 'Self-check (emails you when a duty breaks)',
   hiring_candidates: 'Companies hiring that Bell is missing',
+  qcci_recrawl: 'QCCI directory refresh (free, own browser)',
 };
 
 export function EngineTab() {
