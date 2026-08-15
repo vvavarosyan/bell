@@ -540,10 +540,25 @@ export async function mergeCompanies(canonicalId, duplicateId, jobLog = null) {
     ));
 
     // company_contacts — re-parent, then drop dupes (UNIQUE on ref+type+value).
+    //
+    // ⚠️ TWO unique rules guard this table, and ON CONFLICT can only name ONE of them.
+    // (company_id, type, value) is handled by the conflict target — but idx_company_contacts_
+    // primary is a PARTIAL unique index, (company_id, type) WHERE is_primary, and a violation of
+    // THAT one still throws. When both companies had a primary email — which is the NORMAL case
+    // for a real duplicate — the whole merge aborted. This single line failed 87 of the 210
+    // cross-body merges on the first night (2026-08-14), including iHorizons, the very company
+    // Val reported. The survivor's primary wins: a copied row keeps is_primary only if the
+    // canonical has no primary of that type, and only ONE copied row per type may claim it
+    // (two primaries in the duplicate's own rows would otherwise collide with each other).
     await timed('INSERT company_contacts re-parent', () => client.query(
       `INSERT INTO company_contacts (company_id, type, value, value_display, source, source_url, source_label, is_primary, is_verified, verified_at, extra_fields)
-       SELECT $1, type, value, value_display, source, source_url, source_label, is_primary, is_verified, verified_at, extra_fields
-       FROM company_contacts WHERE company_id = $2
+       SELECT $1, d.type, d.value, d.value_display, d.source, d.source_url, d.source_label,
+              d.is_primary
+                AND row_number() OVER (PARTITION BY d.type ORDER BY d.is_primary DESC, d.created_at, d.id) = 1
+                AND NOT EXISTS (SELECT 1 FROM company_contacts k
+                                 WHERE k.company_id = $1 AND k.type = d.type AND k.is_primary),
+              d.is_verified, d.verified_at, d.extra_fields
+       FROM company_contacts d WHERE d.company_id = $2
        ON CONFLICT (company_id, type, value) DO NOTHING`,
       [canonicalId, duplicateId],
     ));

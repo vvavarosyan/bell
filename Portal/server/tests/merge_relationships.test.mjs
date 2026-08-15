@@ -143,3 +143,35 @@ test('merging is idempotent — running it again changes nothing and breaks noth
   const after_ = await query(`SELECT count(*)::int n FROM company_relationships WHERE source_company_id=$1 OR target_company_id=$1`, [A]);
   assert.equal(after_.rows[0].n, before_.rows[0].n);
 });
+
+test('a duplicate with its OWN primary contacts does not abort the merge', { skip: skip() }, async () => {
+  // The bug that failed 87 of 210 cross-body merges on their first night (2026-08-14), iHorizons
+  // among them. ON CONFLICT (company_id, type, value) names one unique rule, but
+  // idx_company_contacts_primary — (company_id, type) WHERE is_primary — is a SECOND one, and
+  // when both companies had a primary email the copy violated it and threw. The survivor's
+  // primary must win; the duplicate's contacts still arrive, demoted.
+  const X = Number((await query(
+    `INSERT INTO companies (name, name_normalized, country, is_active) VALUES ('ZZMERGE PrimA','zzmerge prima','Qatar',true) RETURNING id`)).rows[0].id);
+  const Y = Number((await query(
+    `INSERT INTO companies (name, name_normalized, country, is_active) VALUES ('ZZMERGE PrimB','zzmerge primb','Qatar',true) RETURNING id`)).rows[0].id);
+  await query(`INSERT INTO company_contacts (company_id, type, value, source, is_primary) VALUES
+    ($1,'email','keep@zzmerge.invalid','t',true), ($2,'email','arrive@zzmerge.invalid','t',true),
+    ($2,'email','second@zzmerge.invalid','t',true)`, [X, Y]).catch(async () => {
+    // two primaries on one company may be rejected by the same index — insert the second demoted
+    await query(`INSERT INTO company_contacts (company_id, type, value, source, is_primary) VALUES
+      ($1,'email','keep@zzmerge.invalid','t',true), ($2,'email','arrive@zzmerge.invalid','t',true),
+      ($2,'email','second@zzmerge.invalid','t',false)`, [X, Y]);
+  });
+
+  const r = await mergeCompanies(X, Y);
+  assert.equal(r.merged, true, 'the merge must survive both sides having a primary');
+
+  const c = await query(
+    `SELECT value, is_primary FROM company_contacts WHERE company_id=$1 AND type='email' ORDER BY value`, [X]);
+  assert.equal(c.rows.length, 3, 'every contact arrived');
+  const primaries = c.rows.filter((x) => x.is_primary);
+  assert.equal(primaries.length, 1, 'exactly one primary per type');
+  assert.equal(primaries[0].value, 'keep@zzmerge.invalid', "and it is the SURVIVOR's own");
+
+  await query(`DELETE FROM company_contacts WHERE value LIKE '%zzmerge.invalid'`);
+});
