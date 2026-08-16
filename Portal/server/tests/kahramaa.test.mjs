@@ -38,7 +38,10 @@ t('all fixture tenders map with ref/title/dates', () => {
   assert.equal(r.source, 'kahramaa');
   assert.equal(r.source_ref, 'LTC/2451/2026');
   assert.ok(r.title.startsWith('Smart Grid Studies'));
-  assert.equal(r.status, 'open');
+  // ⚠️ NOT pinned to 'open': the fixture's real deadline (16-08-2026) PASSED mid-August and the
+  // mapper rightly closes a tender whose deadline is behind us — the assertion flipped by pure
+  // calendar. The mapping under test is "status follows the deadline", so assert exactly that.
+  assert.equal(r.status, new Date(r.deadline_at) > new Date() ? 'open' : 'closed');
   assert.ok(r.deadline_at, 'EndDate must map to deadline_at');
 });
 t('the Monaqasat cross-reference is captured verbatim', () => {

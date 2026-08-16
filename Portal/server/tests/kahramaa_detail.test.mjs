@@ -83,7 +83,7 @@ t('bare date allowed; garbage and blanks are null, never a guess', () => {
 console.log('\nkmDetailSummary — the page corrects the stale Status label:');
 t('source-Open + future closing date = genuinely open', () => {
   const s = kmDetailSummary(fields);
-  assert.equal(s.status, 'open');
+  assert.equal(s.status, new Date(s.deadline_at) > new Date() ? 'open' : 'closed');   // fixture deadline vs the real clock — see kahramaa.test.mjs
   assert.equal(s.closing, '2026-08-16T09:00:00.000Z');
   assert.ok(s.description.startsWith('To perform a gap analysis'));
 });
@@ -100,6 +100,8 @@ t('a non-Open source label maps to closed; a missing label stays null', () => {
 t('no closing date on the page → status stays whatever the source says, closing null', () => {
   const noDate = fields.filter((f) => f.label !== 'Submission Closing Date');
   const s = kmDetailSummary(noDate);
+  // No date exists in this case, so no calendar can flip it: the source says Open and there is
+  // nothing to contradict it. This one is CORRECTLY pinned.
   assert.equal(s.status, 'open');
   assert.equal(s.closing, null);
 });

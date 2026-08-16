@@ -205,6 +205,27 @@ function withCeiling(p, ms, label) {
           if (qc?.parsed) log(`✓ QCCI directory: ${qc.parsed} listings refreshed (${qc.unreadable} unreadable) — no credits spent.`);
         }
       } catch (err) { log(`✗ QCCI re-crawl failed: ${err.message}`); }
+      // The website-candidate gate (task #96 + Operation Data Trust B1): examine search-found
+      // candidates against the page's own statement of the company name + Qatar context.
+      // Precision-first — measured 1% auto-approve on the first 300; every approval hands the
+      // harvester a verified site that yields an email ~2 times in 3.
+      try {
+        const cg = await recordJob('candidate_gate',
+          async () => (await import('./confirm_website_candidates.js')).confirmCandidates({ limit: 600, apply: true, log: (m) => log(m) }),
+          { yield: (r) => r?.approved ?? 0, log });
+        if (cg?.checked) log(`✓ Website candidates: ${cg.approved} confirmed · ${cg.rejected} parked/dead · ${cg.pending} stay queued.`);
+      } catch (err) { log(`✗ candidate gate failed: ${err.message}`); }
+      // Free email verification (Val 2026-08-17: "free of charge, we can use the ROG").
+      // DNS tier marks dead-domain addresses invalid (conclusive, the resolver's own answer);
+      // SMTP tier asks each domain's own mail server — never sending DATA — and stores only
+      // what the server states: verified / invalid / catch-all. Port-25 egress is probed first,
+      // so a blocked network reads as a red error, never as "checked fine, all unknown".
+      try {
+        const ev = await recordJob('email_verify',
+          async () => (await import('../ops/email_verify.js')).runEmailVerify({ dnsLimit: 3000, smtpLimit: 400, log: (m) => log(m) }),
+          { yield: (r) => (r?.dns?.marked ?? 0) + (r?.smtp?.verified ?? 0) + (r?.smtp?.invalid ?? 0), log });
+        if (ev?.smtp?.verified != null) log(`✓ Email verify: ${ev.smtp.verified} confirmed by their own servers · ${(ev.dns?.marked ?? 0) + (ev.smtp.invalid ?? 0)} proven invalid · ${ev.smtp.catch_all ?? 0} catch-all.`);
+      } catch (err) { log(`✗ email verify failed: ${err.message}`); }
       // A vacancy naming an employer Bell has no company for is not a gap in the job data — it is
       // a Qatar firm, provably trading and provably hiring, that the database is missing. Queue it
       // for review rather than leaving a blank cell. Nothing is created without Val's click.
