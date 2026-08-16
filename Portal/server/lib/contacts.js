@@ -167,6 +167,25 @@ export async function upsertContact(kind, refId, contact) {
 
   if (contact.type === 'email' && isJunkEmail(normalized)) return null;
 
+  // ⚠️ THE FAN-OUT GUARD — a contact value on many unrelated companies is a web template, not a
+  // contact. Measured 2026-08-18 before this line existed: one London landline (+442072550717)
+  // stored as the phone of 640 Qatar companies, Facebook's own share-button URL as the social
+  // profile of 120, a hosting panel's page on 49 — 135 template values across 4,743 rows, all
+  // written by website harvesting, one page at a time, each write looking reasonable alone.
+  //
+  // The guard applies ONLY to values arriving from a website read (stage7/harvest sources). A
+  // REGISTRY stating one number for fifty branches is a statement and passes; a scrape finding
+  // the same value on its 10th unrelated company is finding the template, not the company.
+  // Sits here because this is the single chokepoint every contact write passes through — a
+  // guard on one caller is a coincidence, not a rule.
+  if (kind === 'company' && /stage7|website|harvest/i.test(contact.source || '')) {
+    const fan = await query(
+      `SELECT count(DISTINCT company_id)::int AS n FROM company_contacts
+        WHERE type = $1 AND value = $2 AND company_id <> $3`,
+      [contact.type, normalized, refId]).catch(() => ({ rows: [{ n: 0 }] }));
+    if (Number(fan.rows[0].n) >= 10) return null;
+  }
+
   const display = contact.value_display
     || (contact.type === 'phone' ? contact.value : normalized);
   const source  = contact.source || 'manual';

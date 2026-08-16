@@ -128,6 +128,23 @@ export function gateDecision({ companyName, url, status, html }) {
   return { verdict: 'approve', why: 'page states the name', matched: tokens };
 }
 
+/**
+ * Does the DOMAIN itself spell out the company's name? Exact concatenations only — 'novo' being
+ * a substring of 'novoresume' is precisely the failure this rule exists to prevent. Used by the
+ * contamination cleanup to decide which sharer of a guessed domain may actually own it; exported
+ * from here so the cleanup and the gate can never drift apart.
+ */
+export function domainMatchesName(companyName, url) {
+  const dom = domainCompressed(url);
+  const core = employerCore(companyName).split(/\s+/).filter(Boolean);
+  const tokens = distinctiveTokens(companyName);
+  const joins = new Set([core.join(''), tokens.join('')]);
+  if (tokens.length >= 2) joins.add(tokens.slice(0, 2).join(''));
+  if (tokens.length === 1 && tokens[0].length >= 6) joins.add(tokens[0]);
+  return [...joins].some((j) => j.length >= 6 &&
+    (dom === j || dom === j + 'qatar' || dom === j + 'qa' || dom === j + 'group' || dom === 'al' + j));
+}
+
 async function fetchPage(url) {
   const ctl = new AbortController();
   const to = setTimeout(() => ctl.abort(), FETCH_TIMEOUT);
