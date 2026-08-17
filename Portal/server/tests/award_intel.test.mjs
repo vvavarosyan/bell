@@ -109,6 +109,41 @@ test('composeAward speaks the Ashghal shape — raw.bidders, values verbatim', a
   assert.equal(await composeAward({ raw: { bidders: [] } }), null, 'an empty bidder list is no award result');
 });
 
+test('composeAward speaks the Kahramaa shape — every winner, not just the first', async () => {
+  const t = {
+    currency: 'QAR',
+    award_company_name: 'Lucky Star Alloys',
+    award_company_id: null,
+    raw: {
+      winners: [
+        { name: 'Lucky Star Alloys', amount: '5,555,555.00' },
+        { name: 'Al Khurdah for Metal Trading', amount: '141,000.00' },
+        { name: 'Nameless', amount: 'n/a' },
+      ],
+    },
+  };
+  const a = await composeAward(t, { admin: false });
+  assert.equal(a.kind, 'winners', 'Kahramaa publishes no bidder list — every row IS a winner');
+  assert.equal(a.bids.length, 3, 'all three winners surface, not just award_company_name');
+  assert.ok(a.bids.every((b) => b.is_winner));
+  assert.equal(a.bids[0].proposal_amount, 5555555, 'the formatted amount becomes a number');
+  assert.equal(a.bids[2].proposal_amount, null, 'an amount that is not a figure stays absent');
+  assert.equal(await composeAward({ raw: { winners: [] } }), null);
+});
+
+test('winner-name matching uses the indexed expression (companies_employer_tight_idx)', async () => {
+  const idx = await query(`SELECT 1 FROM pg_indexes WHERE indexname = 'companies_employer_tight_idx'`);
+  assert.equal(idx.rows.length, 1);
+  const { SQL_TIGHT } = await import('../jobs/attribute.js');
+  const plan = await query(
+    `EXPLAIN (FORMAT JSON)
+     SELECT c.id FROM companies c
+      WHERE COALESCE(c.archived,false) = false AND c.canonical_id IS NULL
+        AND ${SQL_TIGHT} = ANY($1::text[])`, [['luckystaralloys']]);
+  assert.ok(JSON.stringify(plan.rows).includes('companies_employer_tight_idx'),
+    'the drawer\'s winner lookup rides the index — a rolled-own normalization seq-scans 197k rows per view');
+});
+
 test('migration 119 drift guard: the shipped containment query rides the GIN index', async () => {
   const idx = await query(`SELECT 1 FROM pg_indexes WHERE indexname = 'idx_tenders_award_bids_gin'`);
   assert.equal(idx.rows.length, 1, 'idx_tenders_award_bids_gin exists (migration 119)');

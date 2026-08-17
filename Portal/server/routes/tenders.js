@@ -16,6 +16,8 @@ import { query } from '../db.js';
 import { requireRole } from '../lib/auth.js';
 import { getKey } from '../keychain.js';
 import { ingestTenders } from '../tenders/ingest.js';
+// One normalization, one index: SQL_TIGHT is the expression companies_employer_tight_idx holds.
+import { employerKey, SQL_TIGHT } from '../jobs/attribute.js';
 import { runTenderScan } from '../tenders/scrape.js';
 
 const router = Router();
@@ -362,6 +364,57 @@ export async function matchBidCrs(crs) {
   return new Map(r.rows.map((x) => [x.base, { id: Number(x.id), name: x.name }]));
 }
 
+/** Resolve winner NAMES to companies for the sources that publish no CR numbers (Ashghal,
+ *  Kahramaa). Deliberately the SAME rule linkTenderCompanies uses to write award_company_id —
+ *  normalized exact match, nothing fuzzy — so a name shown as a link means exactly what a
+ *  stored link means. A name held by two live companies is ambiguous and resolves to nothing:
+ *  the employer-matcher rule, refuse rather than pick. */
+async function matchWinnerNames(names) {
+  const keys = [...new Set(names.map(nameKey).filter((k) => k.length >= 6))];
+  if (!keys.length) return new Map();
+  // ⚠️ SQL_TIGHT and nameKey are the SAME normalization, and the expression below is the one
+  // companies_employer_tight_idx indexes — byte for byte. Rolling my own (strip '&' instead of
+  // expanding it to 'and') answered correctly while seq-scanning 197k companies on every drawer
+  // open: 312 ms and 32k buffer pages, per view. The migration-113 lesson in miniature.
+  const r = await query(
+    `SELECT key, min(id) AS id, count(*)::int AS n FROM (
+       SELECT ${SQL_TIGHT} AS key, c.id
+         FROM companies c
+        WHERE COALESCE(c.archived,false) = false AND c.canonical_id IS NULL
+          AND ${SQL_TIGHT} = ANY($1::text[])) x
+      GROUP BY key`, [keys]);
+  // A name held by two live companies is ambiguous: it resolves to nothing.
+  return new Map(r.rows.filter((x) => x.n === 1).map((x) => [x.key, Number(x.id)]));
+}
+const nameKey = (n) => employerKey(n).replace(/ /g, '');
+
+/** Kahramaa publishes an award CATEGORY with every firm that won a share of it and the amount
+ *  each was awarded — raw.winners: [{name, amount}]. 332 awarded rows hold 503 winners, and the
+ *  drawer showed only the first: 171 winners and their amounts were invisible. No bidder list
+ *  exists here, so every row IS a winner and the block says so (kind 'winners'). */
+async function kahramaaAward(t) {
+  const ws = t.raw?.winners;
+  if (!Array.isArray(ws) || !ws.length || !ws.some((w) => w && w.name)) return null;
+  const named = ws.filter((w) => w && w.name);
+  const matched = await matchWinnerNames(named.map((w) => w.name));
+  return {
+    kind: 'winners',
+    winner: { name: t.award_company_name || named[0].name, company_id: t.award_company_id || null,
+              approved_value: null, currency: t.currency || 'QAR' },
+    bids: named.map((w) => ({
+      name: w.name,
+      company_id: matched.get(nameKey(w.name)) || null,
+      // The amount arrives formatted ("5,555,555.00") — kept as a number for the UI's
+      // formatter, and left null rather than guessed if it is not a plain figure.
+      proposal_amount: (() => { const v = Number(String(w.amount ?? '').replace(/[^0-9.]/g, '')); return Number.isFinite(v) && v > 0 ? v : null; })(),
+      currency: t.currency || 'QAR',
+      financial_result: null,
+      icv: null,
+      is_winner: true,
+    })),
+  };
+}
+
 /** Ashghal stores its bidder table in a different shape (raw.bidders: name/rank/icv/
  *  accepted_price/winner, no CR numbers) — translate it to the award_report shape so the same
  *  drawer renders it. 45 awarded Ashghal tenders carried this unread. Values verbatim: the ICV
@@ -371,6 +424,7 @@ function ashghalAward(t) {
   if (!Array.isArray(bids) || !bids.length || !bids.some((b) => b && b.name)) return null;
   const winner = bids.find((b) => b.winner === true) || null;
   return {
+    kind: 'bids',
     winner: winner ? { name: winner.name, approved_value: null, currency: 'QAR' } : null,
     bids: bids.filter((b) => b && b.name).map((b) => ({
       name: b.name,
@@ -388,7 +442,10 @@ function ashghalAward(t) {
 /** Shape raw->award_report for the product: parsed, company-matched, report URL admin-only. */
 export async function composeAward(t, { admin = false } = {}) {
   const ar = t.raw?.award_report;
-  if (!ar) return ashghalAward(t);
+  // Each source publishes its award differently; the drawer renders one shape. Monaqasat and
+  // Ashghal give the full bidder list, Kahramaa only the winners. QatarEnergy states one winner
+  // and its price, both of which the drawer already prints — a one-row block would be noise.
+  if (!ar) return ashghalAward(t) || await kahramaaAward(t);
   const bids = Array.isArray(ar.bids) ? ar.bids : [];
   const allCrs = bids.flatMap((b) => b.registrations || []);
   const matched = await matchBidCrs(allCrs);

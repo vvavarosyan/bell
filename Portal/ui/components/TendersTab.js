@@ -355,7 +355,9 @@ export function TendersTab({ embedded = false } = {}) {
               ${detail.award && Array.isArray(detail.award.bids) && detail.award.bids.length ? html`
                 <div style=${{ marginTop: '16px' }}>
                   <div style=${{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.06em', color: 'var(--text)', marginBottom: '7px' }}>
-                    Award result · ${detail.award.bids.length} bid${detail.award.bids.length === 1 ? '' : 's'}
+                    Award result · ${detail.award.bids.length} ${detail.award.kind === 'winners'
+                      ? (detail.award.bids.length === 1 ? 'winner' : 'winners')
+                      : (detail.award.bids.length === 1 ? 'bid' : 'bids')}
                   </div>
                   ${detail.award.bids.map((b, i) => html`
                     <div key=${i} style=${{ display: 'flex', alignItems: 'baseline', gap: '9px', padding: '5px 0', fontSize: '12px', borderBottom: '1px solid var(--border)', background: b.is_winner ? 'rgba(111,207,151,0.06)' : 'transparent' }}>
@@ -370,7 +372,11 @@ export function TendersTab({ embedded = false } = {}) {
                       ${b.proposal_amount != null ? html`<span style=${{ flex: '0 0 auto', fontVariantNumeric: 'tabular-nums', color: 'var(--text)' }}>${fmtMoney(b.proposal_amount, b.currency)}</span>` : null}
                     </div>`)}
                   ${detail.award.winner?.approved_value ? html`<div class="muted small" style=${{ marginTop: '6px' }}>Approved contract value: ${fmtMoney(detail.award.winner.approved_value, detail.award.winner.currency)}</div>` : null}
-                  <div class="muted small" style=${{ marginTop: '4px' }}>Every figure as stated on the buyer's own award report — including who lost, and by how much.</div>
+                  <div class="muted small" style=${{ marginTop: '4px' }}>
+                    ${detail.award.kind === 'winners'
+                      ? "Every firm awarded a share of this contract, and the amount each was awarded — as the buyer published it."
+                      : "Every figure as stated on the buyer's own award report — including who lost, and by how much."}
+                  </div>
                 </div>` : null}
 
               ${Array.isArray(raw.activities) && raw.activities.length ? html`
