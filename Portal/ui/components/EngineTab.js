@@ -48,6 +48,7 @@ const JOB_LABELS = {
   qcci_recrawl: 'QCCI directory refresh (free, own browser)',
   candidate_gate: 'Found-website confirmation (name on page)',
   email_verify: 'Email verification (free, DNS + mail-server answers)',
+  guess_recheck: 'Guessed-website re-check (confirm or withdraw)',
 };
 
 export function EngineTab() {

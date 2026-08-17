@@ -94,7 +94,15 @@ async function getBrowser() {
  */
 export async function renderPage(url, opts = {}) {
   if (await crawl4aiAvailable()) {
-    const r = await crawl4aiRender(url, { timeoutMs: opts.timeoutMs || 45_000 });
+    const r = await crawl4aiRender(url, {
+      timeoutMs: opts.timeoutMs || 45_000,
+      // settleMs/stealth used to stop here and only reach the Playwright
+      // fallback — on the ROG (where Crawl4AI serves) a challenge page was
+      // captured before its JS could resolve.
+      settleMs: opts.settleMs || 0,
+      waitSelector: opts.waitSelector || null,
+      stealth: !!opts.stealth,
+    });
     if (r && r.ok) return r;
   }
   return renderPagePlaywright(url, opts);

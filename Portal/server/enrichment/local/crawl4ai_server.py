@@ -63,14 +63,22 @@ def _make_crawler():
     flags keep per-tab memory low on an 8GB machine; the try/except means an
     older crawl4ai simply falls back and still works."""
     from crawl4ai import AsyncWebCrawler
+    flags = [
+        "--disable-dev-shm-usage", "--disable-gpu", "--no-sandbox",
+        "--disable-extensions", "--disable-background-networking",
+        "--disable-back-forward-cache", "--renderer-process-limit=1",
+        "--js-flags=--max-old-space-size=256",
+    ]
     try:
         from crawl4ai import BrowserConfig
-        bc = BrowserConfig(headless=True, extra_args=[
-            "--disable-dev-shm-usage", "--disable-gpu", "--no-sandbox",
-            "--disable-extensions", "--disable-background-networking",
-            "--disable-back-forward-cache", "--renderer-process-limit=1",
-            "--js-flags=--max-old-space-size=256",
-        ])
+        # enable_stealth patches the headless fingerprint (navigator.webdriver
+        # etc.) — Cloudflare challenged the ROG's headless browser on QCCI
+        # (2026-08-17) precisely on that fingerprint. Newer crawl4ai only;
+        # unknown kwarg → fall through to the plain config.
+        try:
+            bc = BrowserConfig(headless=True, enable_stealth=True, extra_args=flags)
+        except Exception:
+            bc = BrowserConfig(headless=True, extra_args=flags)
         return AsyncWebCrawler(config=bc, verbose=False)
     except Exception:
         return AsyncWebCrawler(verbose=False)
@@ -139,7 +147,7 @@ except Exception as e:  # pragma: no cover
     READY = False
 
 
-async def _do_crawl(url, wait_for, js_code=None, wait_selector=None, settle_ms=None):
+async def _do_crawl(url, wait_for, js_code=None, wait_selector=None, settle_ms=None, stealth=None):
     await _maybe_recycle()
     cfg = None
     try:
@@ -160,7 +168,19 @@ async def _do_crawl(url, wait_for, js_code=None, wait_selector=None, settle_ms=N
                 kwargs["delay_before_return_html"] = float(settle_ms) / 1000.0
             except Exception:
                 pass
-        cfg = CrawlerRunConfig(**kwargs)
+        if stealth:
+            # crawl4ai's anti-bot bundle: magic patches automation tells,
+            # simulate_user moves the mouse, override_navigator fixes the
+            # navigator object. Requested per-crawl (QCCI probe), not default —
+            # simulated interaction slows ordinary harvests for nothing.
+            kwargs.update(magic=True, simulate_user=True, override_navigator=True)
+        try:
+            cfg = CrawlerRunConfig(**kwargs)
+        except TypeError:
+            # Older crawl4ai without the stealth kwargs — drop them, keep the rest.
+            for k in ("magic", "simulate_user", "override_navigator"):
+                kwargs.pop(k, None)
+            cfg = CrawlerRunConfig(**kwargs)
     except Exception:
         cfg = None
     r = await (_crawler.arun(url=url, config=cfg) if cfg is not None else _crawler.arun(url=url))
@@ -179,9 +199,9 @@ async def _do_crawl(url, wait_for, js_code=None, wait_selector=None, settle_ms=N
     }
 
 
-def crawl_sync(url, wait_for, js_code=None, wait_selector=None, settle_ms=None):
+def crawl_sync(url, wait_for, js_code=None, wait_selector=None, settle_ms=None, stealth=None):
     fut = asyncio.run_coroutine_threadsafe(
-        _do_crawl(url, wait_for, js_code=js_code, wait_selector=wait_selector, settle_ms=settle_ms),
+        _do_crawl(url, wait_for, js_code=js_code, wait_selector=wait_selector, settle_ms=settle_ms, stealth=stealth),
         _loop)
     # Allow extra wall-clock when JS expansion is requested (DataTables "All" can
     # take a while to render thousands of rows).
@@ -227,6 +247,7 @@ class Handler(BaseHTTPRequestHandler):
                 js_code=b.get("js_code"),
                 wait_selector=b.get("wait_selector"),
                 settle_ms=b.get("settle_ms"),
+                stealth=b.get("stealth"),
             ))
         except Exception as e:
             self._send(200, {"ok": False, "error": str(e)[:300]})

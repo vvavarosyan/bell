@@ -215,6 +215,20 @@ function withCeiling(p, ms, label) {
           { yield: (r) => r?.approved ?? 0, log });
         if (cg?.checked) log(`✓ Website candidates: ${cg.approved} confirmed · ${cg.rejected} parked/dead · ${cg.pending} stay queued.`);
       } catch (err) { log(`✗ candidate gate failed: ${err.message}`); }
+      // The guessed-website re-check (Operation Data Trust B2): 13k standing website claims the
+      // old finder invented from company names, examined ~400/night against the live page with
+      // the same gate. Confirmed claims stop being guesses; parked/dead claims are withdrawn on
+      // the SECOND night they fail (one bad night is never evidence); unproven ones are stamped
+      // and left standing. Env override: BDI_GUESS_RECHECK_LIMIT (0 disables).
+      try {
+        const grLimit = Number(process.env.BDI_GUESS_RECHECK_LIMIT ?? 400);
+        if (grLimit > 0) {
+          const gr = await recordJob('guess_recheck',
+            async () => (await import('./guess_recheck.js')).recheckGuessedWebsites({ limit: grLimit, log: (m) => log(m) }),
+            { yield: (r) => (r?.confirmed ?? 0) + (r?.cleared ?? 0), log });
+          if (gr?.checked) log(`✓ Guessed websites: ${gr.confirmed} confirmed by the page · ${gr.cleared} withdrawn · ${gr.unproven} unproven, left standing.`);
+        }
+      } catch (err) { log(`✗ guessed-website re-check failed: ${err.message}`); }
       // Free email verification (Val 2026-08-17: "free of charge, we can use the ROG").
       // DNS tier marks dead-domain addresses invalid (conclusive, the resolver's own answer);
       // SMTP tier asks each domain's own mail server — never sending DATA — and stores only

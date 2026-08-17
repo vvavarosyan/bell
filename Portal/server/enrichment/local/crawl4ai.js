@@ -41,7 +41,7 @@ export async function crawl4aiAvailable() {
  * ({ ok, status, finalUrl, html, text, links, meta, mailto, tel, rendered }) or
  * null on any failure (the caller then falls back to the local headless renderer).
  */
-export async function crawl4aiRender(url, { timeoutMs = 45_000, waitFor = 0 } = {}) {
+export async function crawl4aiRender(url, { timeoutMs = 45_000, waitFor = 0, settleMs = 0, waitSelector = null, jsCode = null, stealth = false } = {}) {
   if (!(await crawl4aiAvailable())) return null;
   try {
     const ctl = new AbortController();
@@ -49,7 +49,17 @@ export async function crawl4aiRender(url, { timeoutMs = 45_000, waitFor = 0 } = 
     const res = await fetch(BASE + '/crawl', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ url, wait_for: waitFor }),
+      body: JSON.stringify({
+        url, wait_for: waitFor,
+        // These three were silently dropped until 2026-08-17 — a caller's
+        // settleMs only reached the Playwright FALLBACK, so on a machine where
+        // Crawl4AI serves (the ROG), a challenge page was captured before its
+        // JS could resolve. Forward everything the server understands.
+        ...(settleMs ? { settle_ms: settleMs } : {}),
+        ...(waitSelector ? { wait_selector: waitSelector } : {}),
+        ...(jsCode ? { js_code: jsCode } : {}),
+        ...(stealth ? { stealth: true } : {}),
+      }),
       signal: ctl.signal,
     }).finally(() => clearTimeout(to));
     if (!res.ok) return null;

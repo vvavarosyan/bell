@@ -145,7 +145,7 @@ export function domainMatchesName(companyName, url) {
     (dom === j || dom === j + 'qatar' || dom === j + 'qa' || dom === j + 'group' || dom === 'al' + j));
 }
 
-async function fetchPage(url) {
+export async function fetchPage(url) {
   const ctl = new AbortController();
   const to = setTimeout(() => ctl.abort(), FETCH_TIMEOUT);
   try {

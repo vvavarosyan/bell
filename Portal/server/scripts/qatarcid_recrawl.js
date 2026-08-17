@@ -65,7 +65,10 @@ export async function recrawlQatarcid({ limit = 1000, log = console.log } = {}) 
     const url = targets[i].source_url;
     let rec = null;
     try {
-      const page = await renderPage(url, { timeoutMs: 60_000, settleMs: 8_000 });
+      // stealth: Cloudflare challenged the ROG's headless fingerprint on the
+      // first overnight probe (2026-08-17) — magic/simulate_user/override_navigator
+      // plus the settle finally reaching Crawl4AI is the retry.
+      const page = await renderPage(url, { timeoutMs: 60_000, settleMs: 8_000, stealth: true });
       rec = parseListing(page, url);
     } catch { rec = null; }
     if (rec) records.push(rec); else unreadable++;
