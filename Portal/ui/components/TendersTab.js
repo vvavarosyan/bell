@@ -152,7 +152,7 @@ export function TendersTab({ embedded = false } = {}) {
 
   const openDetail = useCallback((id) => {
     setSelected(id); setDetailLoading(true); setDetail(null);
-    api.tenderItem(id).then((r) => setDetail(r.tender ? { ...r.tender, twin: r.twin || null } : null)).catch(() => {}).finally(() => setDetailLoading(false));
+    api.tenderItem(id).then((r) => setDetail(r.tender ? { ...r.tender, twin: r.twin || null, award: r.award || null } : null)).catch(() => {}).finally(() => setDetailLoading(false));
   }, []);
   const closeDetail = () => { setSelected(null); setDetail(null); };
 
@@ -348,6 +348,30 @@ export function TendersTab({ embedded = false } = {}) {
               ${detail.award_company_name ? line('Awarded to', detail.award_company_id
                 ? html`<button onClick=${() => navigateTo('companies', detail.award_company_id)} style=${{ background: 'transparent', border: 'none', padding: 0, color: 'var(--accent-bright, #a5c3ff)', fontSize: '12.5px', fontWeight: 600, cursor: 'pointer' }}>${detail.award_company_name} →</button>`
                 : detail.award_company_name) : null}
+
+              <!-- Award intelligence (Operation Data Trust D2): the full bidder table — who
+                   competed, what they offered, their ICV — from the portal's own award report.
+                   23,058 of these sat invisible in raw storage until 2026-08-17. -->
+              ${detail.award && Array.isArray(detail.award.bids) && detail.award.bids.length ? html`
+                <div style=${{ marginTop: '16px' }}>
+                  <div style=${{ fontSize: '11px', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '.06em', color: 'var(--text)', marginBottom: '7px' }}>
+                    Award result · ${detail.award.bids.length} bid${detail.award.bids.length === 1 ? '' : 's'}
+                  </div>
+                  ${detail.award.bids.map((b, i) => html`
+                    <div key=${i} style=${{ display: 'flex', alignItems: 'baseline', gap: '9px', padding: '5px 0', fontSize: '12px', borderBottom: '1px solid var(--border)', background: b.is_winner ? 'rgba(111,207,151,0.06)' : 'transparent' }}>
+                      <span style=${{ flex: '0 0 14px' }}>${b.is_winner ? '🏆' : ''}</span>
+                      <span style=${{ flex: 1, minWidth: 0 }}>
+                        ${b.company_id
+                          ? html`<button onClick=${() => navigateTo('companies', b.company_id)} style=${{ background: 'transparent', border: 'none', padding: 0, color: 'var(--accent-bright, #a5c3ff)', fontSize: '12px', cursor: 'pointer', textAlign: 'left' }}>${b.name}</button>`
+                          : html`<span style=${{ color: 'var(--text)' }}>${b.name}</span>`}
+                        ${b.financial_result && !b.is_winner ? html`<span class="muted"> · ${b.financial_result}</span>` : null}
+                      </span>
+                      ${b.icv != null ? html`<span class="muted" title="In-Country Value" style=${{ flex: '0 0 auto' }}>ICV ${b.icv}%</span>` : null}
+                      ${b.proposal_amount != null ? html`<span style=${{ flex: '0 0 auto', fontVariantNumeric: 'tabular-nums', color: 'var(--text)' }}>${fmtMoney(b.proposal_amount, b.currency)}</span>` : null}
+                    </div>`)}
+                  ${detail.award.winner?.approved_value ? html`<div class="muted small" style=${{ marginTop: '6px' }}>Approved contract value: ${fmtMoney(detail.award.winner.approved_value, detail.award.winner.currency)}</div>` : null}
+                  <div class="muted small" style=${{ marginTop: '4px' }}>Every figure as stated on the buyer's own award report — including who lost, and by how much.</div>
+                </div>` : null}
 
               ${Array.isArray(raw.activities) && raw.activities.length ? html`
                 <div style=${{ marginTop: '16px' }}>

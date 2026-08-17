@@ -107,6 +107,35 @@ const pick = (s, rx) => { const m = String(s || '').match(rx); return m ? m[1].t
 const num = (s) => { if (!s) return null; const n = Number(String(s).replace(/[^0-9.]/g, '')); return Number.isFinite(n) ? n : null; };
 const normTitle = (s) => String(s || '').toLowerCase().replace(/[^a-z0-9]/g, '').slice(0, 120);
 
+// Monaqasat prints a status banner ABOVE some card titles and the card text
+// arrives as "<banner>\n\n<title>". The banner is a STATUS statement, not part
+// of the title — 1,937 stored tenders carried "Tender is violation due to
+// delay" as the first line of their title (found 2026-08-17 when the award
+// blocks surfaced them). Exactly these four banner strings exist across all
+// 27k stored titles; anything else before a \n\n is a genuine multi-line
+// title, so ONLY these verbatim strings are ever stripped. The banner is kept
+// in raw.status_banner — moved, never discarded.
+export const STATUS_BANNERS = [
+  'Tender is violation due to delay',
+  'The tender has been suspended',
+  'مناقصة مخالفة بسبب التأخير',
+  'تم إيقاف المناقصة',
+];
+export function splitStatusBanner(title) {
+  const t = String(title || '');
+  for (const b of STATUS_BANNERS) {
+    if (t.startsWith(b)) {
+      const rest = t.slice(b.length).replace(/^\s+/, '').trim();
+      // A remainder shorter than the scraper's own 6-char title minimum is not
+      // a usable title (some cards print the banner over a literal "0") —
+      // leave those untouched rather than blank them.
+      if (rest.length >= 6) return { banner: b, title: rest };
+      return { banner: b, title: t };
+    }
+  }
+  return { banner: null, title: t };
+}
+
 // ── listing parse ────────────────────────────────────────────────────────────
 /** Parse one listing page's {html,text} into tender rows (card-level fields). */
 export function parseListing(page, status) {
@@ -161,9 +190,13 @@ export function parseListing(page, status) {
     if (!numM) continue;
     const source_ref = numM[1];
     const rest = card.slice(numM[0].length);
-    const title = (rest.split(new RegExp(LABELS))[0] || '').trim();
-    if (!title || title.length < 6) continue;
-    const detailId = matchDetailId(title);
+    const rawTitle = (rest.split(new RegExp(LABELS))[0] || '').trim();
+    if (!rawTitle || rawTitle.length < 6) continue;
+    // Strip the status banner BEFORE detail-id matching too: the anchor's text
+    // is the bare title, so the stripped form pairs exactly instead of via the
+    // weaker "card contains anchor title" fallback.
+    const { banner: statusBanner, title } = splitStatusBanner(rawTitle);
+    const detailId = matchDetailId(title) || (statusBanner ? matchDetailId(rawTitle) : null);
 
     const pubStr   = pick(card, /Publish date\s*([\d/]+)/i);
     const awdStr   = pick(card, /Award date\s*([\d/]+)/i);
@@ -199,6 +232,7 @@ export function parseListing(page, status) {
         detail_id: detailId, type: typ, sector,
         tender_bond: num(bond), documents_value: num(docVal),
         publish_date: pubStr, award_date: awdStr, close_date: closeStr,
+        ...(statusBanner ? { status_banner: statusBanner } : {}),
       },
     });
   }

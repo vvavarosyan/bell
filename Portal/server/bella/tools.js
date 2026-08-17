@@ -464,6 +464,29 @@ export const TOOLS = [
 
   {
     definition: {
+      name: 'get_company_awards',
+      description: "A company's GOVERNMENT TENDER RECORD from the buyers' own award reports — every tender it WON (with the approved contract value) and every tender it BID ON AND LOST (with who beat it). This is intelligence no other database in Qatar surfaces: 23,000+ award reports carrying 71,000+ competitor bids with amounts and ICV scores. Use for 'has X won government work?', 'who does X compete against?', 'how strong is X in tenders?' — and to qualify a prospect (a company winning QAR 100M of awards is a very different customer from one that never bids).",
+      input_schema: {
+        type: 'object',
+        properties: { company_id: { type: 'integer', description: 'The Bell company id (from search_companies / get_company).' } },
+        required: ['company_id'],
+      },
+    },
+    async execute(args, ctx) {
+      const { payload } = await internalCall(tendersRouter, 'GET', `/awards/company/${Number(args.company_id)}`, ctx, {});
+      if (!payload || payload.error) return { error: payload?.error || 'not_found' };
+      return {
+        won_count: payload.won_count, won_value_qar: payload.won_value, lost_count: payload.lost_count,
+        recent_wins: (payload.wins || []).slice(0, 8).map((t) => pick(t, ['id', 'title', 'buyer', 'awarded_at', 'approved_value', 'value_amount', 'bid_count'])),
+        recent_lost_bids: (payload.lost || []).slice(0, 8).map((t) => pick(t, ['id', 'title', 'buyer', 'awarded_at', 'award_company_name', 'bid_count'])),
+        note: payload.won_count + payload.lost_count === 0 ? 'No award-report record — this company has not appeared in the awarded tenders Bell holds.' : undefined,
+      };
+    },
+    summarize: (args, r) => r?.error ? 'no record' : `won ${r.won_count} · lost bids ${r.lost_count}`,
+  },
+
+  {
+    definition: {
       name: 'get_buyers',
       description: "WHO'S BUYING — Qatar entities actively procuring right now, ranked by fit to the user's ICP and urgency (soonest tender deadline). Each buyer shows how many OPEN tenders, which industries they're procuring in (their line of business), when the soonest one closes, and whether it matches the user's ICP. Use for 'who's buying in my space?', 'who should I reach out to?', or any buyer-intent question. icp=true ranks by the user's ICP industries.",
       input_schema: {

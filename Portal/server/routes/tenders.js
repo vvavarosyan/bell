@@ -341,6 +341,113 @@ router.get('/sync-status', async (_req, res, next) => {
   } catch (err) { next(err); }
 });
 
+// ── Award intelligence (Operation Data Trust D2) ─────────────────────────────────────────────
+// 23,058 award reports — winner, every LOSING bidder with CR numbers, proposal amounts, ICV —
+// sat in tenders.raw with no route, no UI and no Bella tool reading them. This is the dataset
+// no competitor holds; a customer could see win-counts and nothing else.
+
+/** Resolve bid CR numbers to live companies in ONE query. Returns Map<baseCr, {id,name}>. */
+export async function matchBidCrs(crs) {
+  const bases = [...new Set(crs.map((c) => String(c || '').replace(/^0+/, '').split('/')[0]).filter((c) => c.length >= 4))];
+  if (!bases.length) return new Map();
+  const r = await query(
+    `SELECT DISTINCT ON (base) base, id, name FROM (
+       SELECT ltrim(split_part(r.number,'/',1),'0') AS base, c.id, c.name,
+              (r.body IN ('MOCI','QCCI','company_record','CRA')) AS registry
+         FROM company_registrations r
+         JOIN companies c ON c.id = r.company_id
+        WHERE COALESCE(c.archived,false) = false AND c.canonical_id IS NULL
+          AND ltrim(split_part(r.number,'/',1),'0') = ANY($1::text[])) x
+     ORDER BY base, registry DESC, id`, [bases]);
+  return new Map(r.rows.map((x) => [x.base, { id: Number(x.id), name: x.name }]));
+}
+
+/** Shape raw->award_report for the product: parsed, company-matched, report URL admin-only. */
+export async function composeAward(t, { admin = false } = {}) {
+  const ar = t.raw?.award_report;
+  if (!ar) return null;
+  const bids = Array.isArray(ar.bids) ? ar.bids : [];
+  const allCrs = bids.flatMap((b) => b.registrations || []);
+  const matched = await matchBidCrs(allCrs);
+  const findCo = (regs) => {
+    for (const c of regs || []) {
+      const hit = matched.get(String(c).replace(/^0+/, '').split('/')[0]);
+      if (hit) return hit;
+    }
+    return null;
+  };
+  const winnerName = ar.winner?.name || t.award_company_name || null;
+  return {
+    winner: winnerName ? {
+      name: winnerName,
+      company_id: t.award_company_id || findCo(ar.winner?.registrations)?.id || null,
+      approved_value: ar.winner?.approved_value ?? null,
+      currency: ar.winner?.currency || 'QAR',
+    } : null,
+    bids: bids.map((b) => {
+      const co = findCo(b.registrations);
+      return {
+        name: b.name,
+        company_id: co?.id || null,
+        proposal_amount: b.proposal_amount ?? null,
+        currency: b.currency || 'QAR',
+        // The page's own wording ("Winner", "Regretted", …) — stated, never derived.
+        financial_result: b.financial_result || null,
+        // ICV — In-Country Value, stated on the award page as a ratio.
+        icv: b.local_value_ratio ?? null,
+        is_winner: !!winnerName && String(b.name).trim() === String(winnerName).trim(),
+      };
+    }),
+    ...(admin ? { report_url: ar.url || null } : {}),
+  };
+}
+
+// GET /api/tenders/awards/company/:id — a company's full competitive record.
+router.get('/awards/company/:id', async (req, res, next) => {
+  try {
+    const id = Number(req.params.id);
+    if (!Number.isFinite(id)) return res.status(400).json({ error: 'bad_request' });
+    // Wins: the plain column, re-parented on merge since 2026-08-09.
+    const wins = await query(
+      `SELECT id, title, buyer, awarded_at, value_amount, currency,
+              raw->'award_report'->'winner'->>'approved_value' AS approved_value,
+              jsonb_array_length(COALESCE(raw->'award_report'->'bids','[]'::jsonb)) AS bid_count
+         FROM tenders WHERE award_company_id = $1
+         ORDER BY awarded_at DESC NULLS LAST LIMIT 100`, [id]);
+    // Lost bids: awards whose bidder list carries one of this company's CR numbers but somebody
+    // else won. Containment probes ride idx_tenders_award_bids_gin (migration 119) — the
+    // expression here and the index expression must never drift apart (the migration-113 lesson).
+    const crs = (await query(
+      `SELECT DISTINCT ltrim(split_part(number,'/',1),'0') AS base
+         FROM company_registrations WHERE company_id = $1
+          AND length(ltrim(split_part(number,'/',1),'0')) >= 4`, [id])).rows.map((x) => x.base);
+    let lost = { rows: [] };
+    if (crs.length) {
+      // A bid records the CR as printed (zero-padded) AND Bell needs the base form — probe both.
+      const variants = [...new Set(crs.flatMap((c) => [c, c.padStart(8, '0'), c.padStart(5, '0')]))];
+      lost = await query(
+        `SELECT DISTINCT t.id, t.title, t.buyer, t.awarded_at, t.award_company_name,
+                jsonb_array_length(COALESCE(t.raw->'award_report'->'bids','[]'::jsonb)) AS bid_count
+           FROM tenders t, unnest($2::text[]) AS cr
+          WHERE t.raw->'award_report' IS NOT NULL
+            AND t.raw->'award_report'->'bids' @> jsonb_build_array(jsonb_build_object('registrations', jsonb_build_array(cr)))
+            AND COALESCE(t.award_company_id, 0) <> $1
+          ORDER BY t.awarded_at DESC NULLS LAST LIMIT 100`, [id, variants]);
+    }
+    const winTotal = await query(
+      `SELECT count(*)::int n,
+              COALESCE(sum(NULLIF(raw->'award_report'->'winner'->>'approved_value','')::numeric), 0) AS total_value
+         FROM tenders WHERE award_company_id = $1`, [id]);
+    res.json({
+      company_id: id,
+      wins: wins.rows, lost: lost.rows,
+      won_count: winTotal.rows[0].n,
+      won_value: Number(winTotal.rows[0].total_value) || 0,
+      lost_count: lost.rows.length,
+    });
+  } catch (err) { next(err); }
+});
+
 router.get('/:id', async (req, res, next) => {
   try {
     const id = Number(req.params.id);
@@ -370,7 +477,12 @@ router.get('/:id', async (req, res, next) => {
             AND regexp_replace(source_ref,'^0+','') = regexp_replace($1,'^0+','') LIMIT 1`,
         [String(t.raw.monaqasat_number)])).rows[0] || null;
     }
-    res.json({ tender: t, twin });
+    // The award block — winner, every bidder with amounts + ICV, company-matched by CR.
+    // Served parsed so the UI never digs in raw; the report URL stays admin-only (the
+    // hide-sources-from-users decision, 2026-08-07).
+    const award = await composeAward(t, { admin: req.user?.role === 'platform_admin' || process.env.BDI_MODE === 'local-admin' })
+      .catch(() => null);
+    res.json({ tender: t, twin, award });
   } catch (err) { next(err); }
 });
 

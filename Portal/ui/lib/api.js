@@ -340,6 +340,7 @@ export const api = {
   // Customer-facing relationships: evidenced edges only, each with the page that states it.
   // The line above is the ADMIN view (every edge incl. derived competitor guesses, engine fields).
   companyRelationships:   (companyId) => request(`/api/companies/${companyId}/relationships`),
+  companyAwards:          (companyId) => request(`/api/tenders/awards/company/${companyId}`),
   enrichmentJob:          (id, since = 0) => request(`/api/enrichment/jobs/${id}?since=${since}`),
   harvestHistory:         (limit = 50) => request('/api/enrichment/harvest-history?limit=' + limit),
   // Manual Company Lookup — type a name, local engines find everything, approve/reject.

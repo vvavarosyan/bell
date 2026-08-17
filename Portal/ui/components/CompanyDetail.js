@@ -614,6 +614,38 @@ const REG_BODY_LABELS = {
   CRA: 'Communications Regulatory Authority', company_record: 'Stated on the company record',
 };
 
+// Government tender record — Operation Data Trust D2. Wins from the award column; LOSSES from
+// the award reports' own bidder lists, joined by the company's CR numbers. The losing bids are
+// the intelligence nobody else surfaces: who this company competes against, and at what prices.
+function AwardsBlock({ companyId }) {
+  const [aw, setAw] = useState(null);
+  useEffect(() => {
+    let dead = false;
+    api.companyAwards(companyId).then((r) => { if (!dead) setAw(r); }).catch(() => { if (!dead) setAw({ won_count: 0, lost_count: 0, wins: [], lost: [] }); });
+    return () => { dead = true; };
+  }, [companyId]);
+  if (!aw || (!aw.won_count && !aw.lost_count)) return null;
+  const money = (v) => v ? 'QAR ' + Number(v).toLocaleString() : null;
+  const row = (t, tag) => html`
+    <div key=${tag + t.id} style=${{ display: 'flex', gap: '9px', alignItems: 'baseline', padding: '5px 0', borderBottom: '1px solid var(--border)', fontSize: '12px' }}>
+      <span style=${{ flex: '0 0 44px', fontWeight: 700, color: tag === 'won' ? 'var(--green, #22c55e)' : 'var(--text-dim)' }}>${tag === 'won' ? 'WON' : 'BID'}</span>
+      <span style=${{ flex: 1, minWidth: 0, color: 'var(--text)' }}>${String(t.title || '').slice(0, 90)}</span>
+      <span class="muted" style=${{ flex: '0 0 auto' }}>${t.awarded_at ? String(t.awarded_at).slice(0, 10) : ''}</span>
+      ${tag === 'won' && (t.approved_value || t.value_amount) ? html`<span style=${{ flex: '0 0 auto', fontVariantNumeric: 'tabular-nums' }}>${money(t.approved_value || t.value_amount)}</span>` : null}
+      ${tag === 'lost' && t.award_company_name ? html`<span class="muted" style=${{ flex: '0 0 auto', fontSize: '11px' }}>lost to ${String(t.award_company_name).slice(0, 26)}</span>` : null}
+    </div>`;
+  return html`
+    <section class="group" key="awards">
+      <h3>Government tenders — won ${aw.won_count}${aw.won_value ? ' (QAR ' + Number(aw.won_value).toLocaleString() + ')' : ''}${aw.lost_count ? ' · bid without winning ' + aw.lost_count : ''}</h3>
+      <p style=${{ margin: '2px 0 8px', color: 'var(--text-muted)', fontSize: '12.5px' }}>
+        From the buyers' own award reports — including the bids this company LOST, and to whom.
+      </p>
+      ${aw.wins.slice(0, 6).map((t) => row(t, 'won'))}
+      ${aw.lost.slice(0, 6).map((t) => row(t, 'lost'))}
+      ${(aw.wins.length > 6 || aw.lost.length > 6) ? html`<div class="muted small" style=${{ marginTop: '5px' }}>Showing the most recent — the Tenders tab has the full record.</div>` : null}
+    </section>`;
+}
+
 function CompanyTab({ company, extra, similar, relationships, contacts, branches = [], registrations = [], parentCompany = null, onReload, needsReveal = false, onReveal, isUser = false, isLocalEngine = false }) {
   const saveField = async (field, value) => {
     try {
@@ -797,6 +829,8 @@ function CompanyTab({ company, extra, similar, relationships, contacts, branches
           <${SearchProofBlock} companyId=${company.id} />
         </section>
       ` : null}
+
+      <${AwardsBlock} companyId=${company.id} />
 
       ${registrations.length > 1 ? html`
         <section class="group" key="registrations">
