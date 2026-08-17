@@ -10,7 +10,40 @@ import { getKey } from '../keychain.js';
 import { query } from '../db.js';
 import { filterSuppressed } from './suppression.js';
 
+import { smtpConfigFromRow, sendViaSmtp } from './smtp.js';
+import { newOpenToken, withOpenPixel } from './open_tracking.js';
+
 const RESEND_URL = 'https://api.resend.com/emails';
+const APP_URL = (process.env.BELL_APP_URL || 'https://app.bell.qa').replace(/\/$/, '');
+
+/**
+ * Does this tenant send through their OWN mail server? Returns the connection settings, or null
+ * for every other case — and "null" must always mean "use Resend", never an error, or Bell's own
+ * transactional mail would start failing for anyone who has not configured SMTP.
+ *
+ * The identity must be USABLE (status 'verified') before it can carry mail: an unverified server
+ * is one whose password Bell has never proven, and discovering that at send time means a
+ * customer's email silently did not go. The same rule already gates custom domains.
+ */
+async function resolveTenantSmtp(tenantId) {
+  try {
+    const { rows } = await query(
+      `SELECT id, transport, status, smtp_host, smtp_port, smtp_secure,
+              smtp_username, smtp_password_enc
+         FROM tenant_email_domains
+        WHERE tenant_id = $1 AND is_default = true AND transport = 'smtp'
+        LIMIT 1`, [tenantId]);
+    const row = rows[0];
+    if (!row || row.status !== 'verified') return null;
+    const config = await smtpConfigFromRow(row);
+    return config ? { identityId: row.id, config } : null;
+  } catch (err) {
+    // A missing column (before migration 122 runs) or an unreadable secret must not take the
+    // send path down — Bell falls back to its own provider and says so in the log.
+    console.warn('[email] tenant SMTP lookup failed, using Bell\'s provider:', err.message);
+    return null;
+  }
+}
 // Transactional mail (team invites, notifications, template tests) must NOT come from an
 // "outreach@" mailbox: it reads as marketing on a login invite, and it mixes Bell's
 // transactional identity with its marketing identity — the one thing every deliverability
@@ -81,8 +114,23 @@ async function logSend({ system, channel, tenantId, from, to, subject, ok, provi
 
 export async function sendEmail({ from, to, replyTo, subject, html, text, cc, headers, channel, system, tenantId }) {
   const isOutreach = channel === 'outreach';
-  const key = await getKey(isOutreach ? 'resend-outreach' : 'resend');
-  if (!key) throw new Error(isOutreach ? 'outreach_channel_not_configured' : 'email_provider_key_missing');
+
+  // ── WHICH WIRE DOES THIS MESSAGE LEAVE ON? ────────────────────────────────────────────────
+  // A tenant may send their CRM mail through their OWN server. Resolved here, at the single
+  // chokepoint, and nowhere else: a transport branch per route is how a guard gets forgotten on
+  // the third path (contact_guard.js exists because that happened three times).
+  //
+  // ⚠️ OUTREACH IS NEVER A TENANT'S SERVER. Bell's cold outreach rides its own isolated Resend
+  // account on go.bell.qa so a reputation problem there can never touch transactional mail —
+  // and by the same logic Bell's own bulk sending must never leave from a customer's domain.
+  //   ⚠️ No tenant → Resend. Local-admin mode has no tenant at all (routes/crm.js passes
+  //   req.tenant?.id, which is undefined there), and that must keep working, not error.
+  const smtp = (!isOutreach && tenantId) ? await resolveTenantSmtp(tenantId) : null;
+
+  // The Resend key is required only when Resend is the one carrying it. A tenant sending
+  // through their own server must not be blocked because BELL's provider key is absent.
+  const key = smtp ? null : await getKey(isOutreach ? 'resend-outreach' : 'resend');
+  if (!smtp && !key) throw new Error(isOutreach ? 'outreach_channel_not_configured' : 'email_provider_key_missing');
   if (!to) throw new Error('missing_recipient');
 
   // Accuracy loop: never send to a suppressed address (hard bounce / complaint /
@@ -136,6 +184,42 @@ export async function sendEmail({ from, to, replyTo, subject, html, text, cc, he
   // opt-out. Was impossible before: the body had no headers field, so no marketing email
   // could carry it. Harmless when unset (existing callers pass nothing).
   if (headers && typeof headers === 'object' && Object.keys(headers).length) body.headers = headers;
+
+  // ── DELIVERY ──────────────────────────────────────────────────────────────────────────────
+  // Everything above this line — suppression, the from identity, the reply-to decision, the
+  // headers — is transport-independent and stays that way. Only the wire changes here, and the
+  // ledger below records the send either way.
+  if (smtp) {
+    // Opens: with no provider in the path, the only signal is Bell's own pixel. Minted here so
+    // the token cannot disagree with the html that was actually sent, and returned so the
+    // caller can store it against the row it wrote.
+    const openToken = body.html ? newOpenToken() : null;
+    const htmlOut = openToken ? withOpenPixel(body.html, openToken, APP_URL) : body.html;
+    try {
+      const info = await sendViaSmtp(smtp.config, {
+        from: body.from, to: toAllowed, cc: ccAllowed, replyTo: body.reply_to,
+        subject: body.subject, html: htmlOut, text: body.text, headers: body.headers,
+      });
+      // A server that accepted the envelope but rejected every recipient has not sent anything.
+      if (Array.isArray(info.accepted) && info.accepted.length === 0) {
+        const why = 'the mail server accepted no recipient' + (info.response ? ': ' + info.response : '');
+        await logSend({ system, channel, tenantId, from: body.from, to: toAllowed, subject, ok: false, error: 'smtp: ' + why });
+        throw Object.assign(new Error('smtp_rejected: ' + why), { code: 'smtp_rejected', smtp_response: info.response || null });
+      }
+      await logSend({ system, channel, tenantId, from: body.from, to: toAllowed, subject, ok: true, providerMessageId: info.messageId });
+      return {
+        id: info.messageId, raw: info, transport: 'smtp', open_token: openToken,
+        reply_to_dropped: replyToDropped, reply_to_used: body.reply_to || null,
+      };
+    } catch (err) {
+      if (err.code === 'smtp_rejected') throw err;      // already logged, already explained
+      // The mail server's own words, unedited — never "Could not send the email."
+      const said = err?.response || err?.message || String(err);
+      await logSend({ system, channel, tenantId, from: body.from, to: toAllowed, subject, ok: false, error: 'smtp: ' + String(said).slice(0, 300) });
+      throw Object.assign(new Error('smtp_failed: ' + String(said).slice(0, 300)),
+        { code: 'smtp_failed', smtp_response: String(said).slice(0, 300) });
+    }
+  }
 
   const res = await fetch(RESEND_URL, {
     method: 'POST',

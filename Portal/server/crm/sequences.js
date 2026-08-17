@@ -189,8 +189,13 @@ async function processEnrollment(enr) {
     const res = await sendEmail({ from, to, replyTo: effReplyTo, subject, html: bodyHtml || undefined, text: bodyText, system: 'sequence', tenantId: enr.tenant_id });
     // The reply-to that was USED — sendEmail drops one it cannot send with, and recording the
     // wanted value would make the timeline claim a routing that does not exist.
-    await query(`UPDATE crm_emails SET status='sent', provider_message_id=$2, from_email=$3, reply_to=$4, sent_at=now() WHERE id=$1`,
-      [emailId, res.id, from, res.reply_to_used || null]);
+    // Same bookkeeping as the two CRM paths: which transport carried it, and the token that
+    // lets an open be recognised when there is no provider to report one.
+    await query(
+      `UPDATE crm_emails SET status='sent', provider_message_id=$2, from_email=$3, reply_to=$4,
+              provider=$5, open_token=$6, sent_at=now() WHERE id=$1`,
+      [emailId, res.id, from, res.reply_to_used || null,
+       res.transport === 'smtp' ? 'smtp' : 'resend', res.open_token || null]);
   } catch (e) {
     await query(`UPDATE crm_emails SET status='failed', error=$2 WHERE id=$1`, [emailId, String(e.message).slice(0, 400)]);
     await query(`UPDATE crm_sequence_enrollments SET status='errored', error=$2 WHERE id=$1`, [enr.id, String(e.message).slice(0, 400)]);

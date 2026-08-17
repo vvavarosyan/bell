@@ -83,6 +83,10 @@ export function AccountTab() {
   // Sending-identity hooks MUST be declared above the early return (Rules of Hooks).
   const [identities, setIdentities] = useState(null);
   const [domainForm, setDomainForm] = useState({ domain: '', from_email: '' });
+  // Per-tenant SMTP. Declared HERE with the other sending-identity hooks, above the early
+  // return at the end of this block — Rules of Hooks (Rule 2.6): a hook below it blanks the page.
+  const [smtpOpen, setSmtpOpen] = useState(null);     // identity id whose panel is expanded
+  const [smtpForm, setSmtpForm] = useState({});
   const [domBusy, setDomBusy] = useState('');
   useEffect(() => {
     if (section !== 'domain' || identities !== null) return;
@@ -252,6 +256,56 @@ export function AccountTab() {
   const statusColor = (st) => st === 'verified' ? '#3fb950' : st === 'failed' ? '#e5534b' : st === 'active' ? 'var(--accent)' : 'var(--text-muted)';
   const statusLabel = { active: 'Active', verified: 'Verified', pending: 'Pending verification', failed: 'Verification failed' };
 
+  // ── Per-tenant SMTP ─────────────────────────────────────────────────────────────────────
+  // The password box is deliberately empty on every load: Bell cannot read a stored password
+  // back, and showing dots that are not the real value would be a lie about what is saved.
+  // Leaving it blank on save keeps what is stored.
+  const openSmtp = (idn) => {
+    setSmtpOpen(smtpOpen === idn.id ? null : idn.id);
+    setSmtpForm({
+      host: idn.smtp_host || '', port: idn.smtp_port || 587, secure: !!idn.smtp_secure,
+      username: idn.smtp_username || '', password: '',
+      imap_host: idn.imap_host || '', imap_port: idn.imap_port || 993,
+      imap_secure: idn.imap_secure !== false, imap_username: idn.imap_username || '', imap_password: '',
+    });
+  };
+  const setSmtpField = (k, v) => setSmtpForm((f) => ({ ...f, [k]: v }));
+  const saveSmtp = async (id) => {
+    setDomBusy('smtp' + id);
+    try {
+      await api.saveTenantSmtp(id, { ...smtpForm, transport: 'smtp' });
+      await loadIdentities();
+      toast('Mail server settings saved. Test the connection to start sending through it.', 'success');
+    } catch (e) { toast(e.reason || e.message || 'Could not save', 'error'); }
+    finally { setDomBusy(''); }
+  };
+  const testSmtp = async (id) => {
+    setDomBusy('smtptest' + id);
+    try {
+      const r = await api.testTenantSmtp(id);
+      await loadIdentities();
+      // The mail server's own words on failure — never a paraphrase.
+      if (r.ok) toast('Connected and signed in. This identity can now send through your server.', 'success');
+      else toast('Your mail server refused it: ' + (r.error || 'no reason given'), 'error');
+    } catch (e) { toast(e.reason || e.message || 'Could not test', 'error'); }
+    finally { setDomBusy(''); }
+  };
+  const useBellAgain = async (id) => {
+    setDomBusy('smtp' + id);
+    try {
+      await api.saveTenantSmtp(id, { transport: 'resend' });
+      await loadIdentities();
+      toast('Back to sending through Bell.', 'success');
+    } catch (e) { toast(e.reason || e.message || 'Could not switch', 'error'); }
+    finally { setDomBusy(''); }
+  };
+  const smtpInput = (k, lbl, opts = {}) => html`
+    <div style=${{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
+      <label style=${{ fontSize: '11px', color: 'var(--text-muted)' }}>${lbl}</label>
+      <input class="sys-input" type=${opts.type || 'text'} placeholder=${opts.ph || ''}
+        value=${smtpForm[k] ?? ''} onInput=${(e) => setSmtpField(k, opts.type === 'number' ? Number(e.target.value) : e.target.value)} />
+    </div>`;
+
   const renderIdentity = (idn) => html`
     <div key=${idn.id} style=${{ border: '1px solid var(--border)', background: 'var(--bg-elev)', padding: '12px 14px', marginBottom: '10px' }}>
       <div style=${{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
@@ -281,6 +335,75 @@ export function AccountTab() {
           </table>
           <button class="sys-btn" disabled=${domBusy === 'verify' + idn.id} onClick=${() => verifyDomain(idn.id)}>${domBusy === 'verify' + idn.id ? 'Checking…' : 'Verify'}</button>
         </div>` : null}
+
+      <!-- Send through your own mail server. Per identity, because transport is a per-identity
+           choice: a tenant can keep the Bell address on Bell and put their own domain on their
+           own server. -->
+      <div style=${{ marginTop: '10px', borderTop: '1px solid var(--border)', paddingTop: '10px' }}>
+        <div style=${{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+          <div>
+            <span style=${{ fontSize: '12.5px', fontWeight: 600 }}>
+              ${idn.transport === 'smtp' ? 'Sends through your mail server' : 'Sends through Bell'}
+            </span>
+            ${idn.transport === 'smtp' && idn.smtp_verified_at
+              ? html`<span style=${{ ...domBadge, color: '#3fb950', borderColor: '#3fb950' }}>connection verified</span>` : null}
+            ${idn.transport === 'smtp' && !idn.smtp_verified_at
+              ? html`<span style=${{ ...domBadge, color: '#e5534b', borderColor: '#e5534b' }}>not verified — Bell will not use it</span>` : null}
+          </div>
+          <div style=${{ display: 'flex', gap: '8px' }}>
+            <button class="sys-btn" onClick=${() => openSmtp(idn)}>${smtpOpen === idn.id ? 'Close' : (idn.smtp_host ? 'Edit mail server' : 'Use my own mail server')}</button>
+            ${idn.transport === 'smtp' ? html`<button class="sys-btn" disabled=${domBusy === 'smtp' + idn.id} onClick=${() => useBellAgain(idn.id)}>Send through Bell instead</button>` : null}
+          </div>
+        </div>
+        ${idn.smtp_last_error ? html`<div class="sys-hint" style=${{ color: '#e5534b', marginTop: '6px' }}>Your mail server said: ${idn.smtp_last_error}</div>` : null}
+
+        ${smtpOpen === idn.id ? html`
+          <div style=${{ marginTop: '10px', display: 'grid', gap: '10px' }}>
+            <div class="sys-hint">
+              Outgoing mail (SMTP). Port 587 with STARTTLS suits most providers; 465 is for
+              implicit TLS. Bell stores the password encrypted and never shows it again — leave
+              it blank when editing to keep the one already saved.
+            </div>
+            <div style=${{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '8px' }}>
+              ${smtpInput('host', 'Server address', { ph: 'smtp.yourcompany.qa' })}
+              ${smtpInput('port', 'Port', { type: 'number', ph: '587' })}
+              ${smtpInput('username', 'Username', { ph: 'you@yourcompany.qa' })}
+              ${smtpInput('password', 'Password', { type: 'password', ph: idn.smtp_password_set ? '•••• (saved — leave blank to keep)' : '' })}
+            </div>
+            <label style=${{ fontSize: '12px', display: 'flex', gap: '7px', alignItems: 'center' }}>
+              <input type="checkbox" checked=${!!smtpForm.secure} onChange=${(e) => setSmtpField('secure', e.target.checked)} />
+              Use implicit TLS (tick this only for port 465)
+            </label>
+
+            <div class="sys-hint" style=${{ marginTop: '4px' }}>
+              Incoming mail (IMAP) — optional, and this is the part that keeps your list clean.
+              When a message bounces, your mail server delivers the failure report to this
+              mailbox. Bell reads those reports and stops emailing dead addresses. Without it,
+              nothing tells Bell an address has died. Bell reads only; it never marks your mail
+              as read and never deletes anything.
+            </div>
+            <div style=${{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: '8px' }}>
+              ${smtpInput('imap_host', 'IMAP server', { ph: 'imap.yourcompany.qa' })}
+              ${smtpInput('imap_port', 'IMAP port', { type: 'number', ph: '993' })}
+              ${smtpInput('imap_username', 'IMAP username', { ph: 'you@yourcompany.qa' })}
+              ${smtpInput('imap_password', 'IMAP password', { type: 'password', ph: idn.imap_password_set ? '•••• (saved — leave blank to keep)' : '' })}
+            </div>
+            ${idn.imap_last_error ? html`<div class="sys-hint" style=${{ color: '#e5534b' }}>Bell could not read that mailbox: ${idn.imap_last_error}</div>` : null}
+
+            <div style=${{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+              <button class="sys-btn" disabled=${domBusy === 'smtp' + idn.id} onClick=${() => saveSmtp(idn.id)}>
+                ${domBusy === 'smtp' + idn.id ? 'Saving…' : 'Save settings'}
+              </button>
+              <button class="sys-btn" disabled=${domBusy === 'smtptest' + idn.id} onClick=${() => testSmtp(idn.id)}>
+                ${domBusy === 'smtptest' + idn.id ? 'Connecting…' : 'Test connection'}
+              </button>
+            </div>
+            <div class="sys-hint">
+              The test signs in and hangs up — it sends no email to anyone. Bell will not send
+              through a server it has not signed in to successfully.
+            </div>
+          </div>` : null}
+      </div>
     </div>`;
 
   const field = (k, lbl, opts = {}) => html`

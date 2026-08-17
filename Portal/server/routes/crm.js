@@ -608,8 +608,14 @@ router.post('/records/:id/email', async (req, res, next) => {
       // Record the reply-to that was actually USED, not the one Bell wanted. If sendEmail had to
       // drop an unusable value, storing the wanted one would make the timeline claim a routing
       // that does not exist.
-      await query(`UPDATE crm_emails SET status='sent', provider_message_id=$2, from_email=$3, reply_to=$4, sent_at=now() WHERE id=$1`,
-        [emailId, sent.id, from, sent.reply_to_used || null]);
+      // provider + open_token record HOW this left and how an open can be recognised later.
+      // 'sent' stays 'sent': a mail server accepting a relay is not delivery to a mailbox, and
+      // email_outcome.js locks that word as neutral on purpose.
+      await query(
+        `UPDATE crm_emails SET status='sent', provider_message_id=$2, from_email=$3, reply_to=$4,
+                provider=$5, open_token=$6, sent_at=now() WHERE id=$1`,
+        [emailId, sent.id, from, sent.reply_to_used || null,
+         sent.transport === 'smtp' ? 'smtp' : 'resend', sent.open_token || null]);
       // ANSWER AS SOON AS THE SEND IS RECORDED. The activity entry and the contacted stamp are
       // internal bookkeeping — nobody outside Bell sees them — but they used to sit between the
       // send and the reply, adding round-trips to the engine box inside Bella's 12-second window.
@@ -634,7 +640,16 @@ router.post('/records/:id/email', async (req, res, next) => {
       markContacted(null, tenantId(req), id, replyTo)
         .catch((e) => console.error('[crm] markContacted after send failed:', e.message));
     } catch (err) {
-      const safe = /key_missing/i.test(err.message) ? 'Email is not configured yet (set the Resend key).' : 'Could not send the email.';
+      // ⚠️ NAME THE CAUSE. Everything that was not a missing key used to collapse into "Could not
+      // send the email." — the blankness that cost a whole investigation in August. A tenant's own
+      // mail server refusing a login says so, in its own words.
+      const safe = /key_missing/i.test(err.message)
+        ? 'Email is not configured yet (set the Resend key).'
+        : (err.code === 'smtp_failed' || err.code === 'smtp_rejected')
+          ? `Your mail server refused it: ${String(err.smtp_response || err.message).slice(0, 200)}`
+          : /recipient_suppressed/i.test(err.message)
+            ? 'That address is on the do-not-email list (it bounced or unsubscribed), so nothing was sent.'
+            : 'Could not send the email.';
       await query(`UPDATE crm_emails SET status='failed', error=$2 WHERE id=$1`, [emailId, String(err.message).slice(0, 500)]);
       console.error('[crm] email send failed:', err.message);
       res.status(502).json({ error: 'send_failed', reason: safe });
@@ -1062,7 +1077,7 @@ router.post('/records/bulk', async (req, res, next) => {
         try {
           const s = await sendEmail({ from, to, replyTo: effReplyTo, subject, html: bodyHtml || undefined, text: bodyText, system: 'crm', tenantId: req.tenant?.id });
           // The reply-to that was USED, not the one asked for — see the single-send path.
-          await query(`UPDATE crm_emails SET status='sent', provider_message_id=$2, from_email=$3, reply_to=$4, sent_at=now() WHERE id=$1`, [emailId, s.id, from, s.reply_to_used || null]);
+          await query(`UPDATE crm_emails SET status='sent', provider_message_id=$2, from_email=$3, reply_to=$4, provider=$5, open_token=$6, sent_at=now() WHERE id=$1`, [emailId, s.id, from, s.reply_to_used || null, s.transport === 'smtp' ? 'smtp' : 'resend', s.open_token || null]);
           await logActivity(null, tid, r0.id, 'email_out', { actorUserId: actorUserId(req), actorEmail: replyTo, summary: 'Email sent: ' + (subject || '(no subject)'), payload: { to, email_id: emailId, bulk: true } });
           await markContacted(null, tid, r0.id, replyTo);
           sent++; remaining--;

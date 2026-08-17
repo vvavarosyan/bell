@@ -7,6 +7,7 @@ import { Router } from 'express';
 import {
   ensureBellIdentity, listIdentities, connectCustomDomain,
   verifyCustomDomain, removeCustomDomain, updateIdentity,
+  saveSmtpSettings, verifySmtpSettings,
 } from '../lib/email_domains.js';
 
 const router = Router();
@@ -57,6 +58,56 @@ router.patch('/identities/:id', async (req, res, next) => {
     });
     res.json({ identity: row });
   } catch (e) { next(e); }
+});
+
+// ── Per-tenant SMTP ───────────────────────────────────────────────────────────────────────────
+// PUT  /api/outreach/identities/:id/smtp        save the mail-server settings
+// POST /api/outreach/identities/:id/smtp/test   prove them (connect + authenticate, send nothing)
+//
+// The password is write-only: it goes in here and never comes back out of any endpoint. Sending
+// it empty on a later save keeps the stored one, which is the only way an edit can work when the
+// UI cannot read it back.
+
+router.put('/identities/:id/smtp', async (req, res, next) => {
+  try {
+    const b = req.body || {};
+    const row = await saveSmtpSettings(req.tenant.id, req.params.id, {
+      transport: b.transport, host: b.host, port: b.port, secure: b.secure,
+      username: b.username, password: b.password,
+      imap_host: b.imap_host, imap_port: b.imap_port, imap_secure: b.imap_secure,
+      imap_username: b.imap_username, imap_password: b.imap_password,
+    });
+    res.json({ identity: row });
+  } catch (e) {
+    if (e.message === 'not_found') return res.status(404).json({ error: 'not_found' });
+    // Say WHICH thing is missing. "Encryption is not configured on this deployment" is a fact an
+    // operator can act on; a generic failure is not.
+    if (e.message === 'secrets_not_configured') {
+      return res.status(503).json({ error: 'secrets_not_configured',
+        reason: 'This deployment has no encryption key, so Bell will not store a mail password. Set BDI_KEY_PII and try again.' });
+    }
+    next(e);
+  }
+});
+
+router.post('/identities/:id/smtp/test', async (req, res, next) => {
+  try {
+    const out = await verifySmtpSettings(req.tenant.id, req.params.id);
+    // Not an HTTP error: the request worked, the mail server said no. The server's own words are
+    // the answer, unedited.
+    res.json({ ok: out.ok, error: out.error, identity: out.identity });
+  } catch (e) {
+    if (e.message === 'not_found') return res.status(404).json({ error: 'not_found' });
+    if (e.message === 'smtp_not_configured') {
+      return res.status(400).json({ error: 'smtp_not_configured',
+        reason: 'Enter the server address, username and password first.' });
+    }
+    if (e.message === 'smtp_module_missing') {
+      return res.status(503).json({ error: 'smtp_module_missing',
+        reason: 'The SMTP client is not installed on this deployment.' });
+    }
+    next(e);
+  }
 });
 
 export default router;

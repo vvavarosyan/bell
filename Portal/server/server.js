@@ -76,6 +76,8 @@ import marketingInboundRouter  from './routes/marketing_inbound.js';
 import marketingOptinRouter    from './routes/marketing_optin.js';
 import marketingContactRouter  from './routes/marketing_contact.js';
 import outreachUnsubRouter     from './routes/outreach_unsub.js';
+import openPixelRouter        from './routes/open_pixel.js';
+import { startSmtpBouncePoller } from './crm/smtp_bounce_poller.js';
 import resendWebhookRouter     from './routes/resend_webhook.js';
 import detailRequestsRouter    from './routes/detail_requests.js';
 import outreachRouter          from './routes/outreach.js';
@@ -341,6 +343,9 @@ app.use('/api/sync',               syncRouter);
 // Public one-click unsubscribe for outreach (RFC 8058) — NOT Clerk-gated; recipients aren't
 // logged in. Token-scoped, so it exposes nothing.
 app.use('/u',                      outreachUnsubRouter);
+// Open-tracking pixel for mail sent through a TENANT'S OWN server (no provider to report it).
+// Public by nature — the fetcher is a mail client. Token-scoped; always returns the image.
+app.use('/t',                      openPixelRouter);
 // Inbound email webhook — machine-to-machine, self-gated by BDI_CRM_INBOUND_TOKEN.
 app.use('/api/crm-inbound',        crmInboundRouter);
 // Outreach REPLY webhook — machine-to-machine, self-gated by BDI_OUTREACH_INBOUND_TOKEN.
@@ -452,6 +457,10 @@ app.use((err, req, res, next) => {
   // CRM inbound reply reader (IMAP). Enabled only where BDI_CRM_IMAP_* are set
   // (one service). Reads the reply mailbox and threads replies into the CRM.
   startInboundPoller();
+      // Bounces for tenants sending through their OWN mail server: no provider webhook exists,
+      // so Bell reads the delivery reports out of the mailbox they nominated. Gated to ONE
+      // service by BDI_SMTP_BOUNCE_POLLER=1 — admin shares production's database.
+      startSmtpBouncePoller();
 
   // Bella's scheduled/overnight task runner. Local engine: always on.
   // Prod: BDI_BELLA_SCHEDULER=1 on exactly ONE service (app.bell.qa).

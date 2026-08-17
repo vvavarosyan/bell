@@ -14,6 +14,7 @@
     "express": "^4.19.2",
     "imapflow": "^1.0.164",
     "mailparser": "^3.7.1",
+    "nodemailer": "^9.0.5",
     "pg": "^8.12.0",
     "stripe": "^22.1.1",
     "svix": "^1.94.0"

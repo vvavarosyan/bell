@@ -61,14 +61,53 @@ export async function ensureBellIdentity(tenant) {
   });
 }
 
-/** All sending identities for a tenant (default first). */
+/**
+ * The ONLY shape of an identity that may leave the server.
+ *
+ * ⚠️ THREE FUNCTIONS BELOW USE `RETURNING *` AND THEIR ROWS GO STRAIGHT INTO HTTP RESPONSES.
+ * The moment migration 122 added smtp_password_enc / imap_password_enc, those responses would
+ * have carried a tenant's encrypted mail-server passwords to the browser. An explicit
+ * allow-list is the fix, and it must stay an ALLOW-list: a deny-list would leak the next
+ * secret column somebody adds. Connection settings ARE included (a customer must see and edit
+ * their own host and username); the two encrypted secrets never are.
+ */
+export function publicIdentity(row) {
+  if (!row) return null;
+  const {
+    id, kind, domain, from_email, from_name, signature_html, resend_domain_id, dns_records,
+    status, is_default, created_at, verified_at,
+    transport, smtp_host, smtp_port, smtp_secure, smtp_username, smtp_verified_at, smtp_last_error,
+    imap_host, imap_port, imap_secure, imap_username, imap_last_polled_at, imap_last_error,
+  } = row;
+  return {
+    id, kind, domain, from_email, from_name, signature_html, resend_domain_id, dns_records,
+    status, is_default, created_at, verified_at,
+    transport: transport || 'resend',
+    smtp_host: smtp_host || null, smtp_port: smtp_port || null, smtp_secure: smtp_secure ?? null,
+    smtp_username: smtp_username || null,
+    smtp_verified_at: smtp_verified_at || null, smtp_last_error: smtp_last_error || null,
+    // Whether a password is stored is a fact the UI needs ("leave blank to keep"); the value is not.
+    smtp_password_set: !!row.smtp_password_enc,
+    imap_host: imap_host || null, imap_port: imap_port || null, imap_secure: imap_secure ?? null,
+    imap_username: imap_username || null,
+    imap_password_set: !!row.imap_password_enc,
+    imap_last_polled_at: imap_last_polled_at || null, imap_last_error: imap_last_error || null,
+  };
+}
+
+/** All sending identities for a tenant (default first). Secrets never included. */
 export async function listIdentities(tenantId) {
   const r = await query(
     `SELECT id, kind, domain, from_email, from_name, signature_html, resend_domain_id,
-            dns_records, status, is_default, created_at, verified_at
+            dns_records, status, is_default, created_at, verified_at,
+            transport, smtp_host, smtp_port, smtp_secure, smtp_username,
+            smtp_verified_at, smtp_last_error, (smtp_password_enc IS NOT NULL) AS smtp_password_enc,
+            imap_host, imap_port, imap_secure, imap_username,
+            (imap_password_enc IS NOT NULL) AS imap_password_enc,
+            imap_last_polled_at, imap_last_error
        FROM tenant_email_domains WHERE tenant_id = $1
       ORDER BY is_default DESC, created_at ASC`, [Number(tenantId)]);
-  return r.rows;
+  return r.rows.map(publicIdentity);
 }
 
 const usableIdentity = (x) => x && (x.kind === 'bell' || x.status === 'verified');
@@ -113,7 +152,7 @@ export async function connectCustomDomain(tenantId, domainRaw, fromEmail, fromNa
        SET resend_domain_id = EXCLUDED.resend_domain_id, dns_records = EXCLUDED.dns_records, status = 'pending'
      RETURNING *`,
     [Number(tenantId), domain, from, fromName || null, resendId, JSON.stringify(records)]);
-  return r.rows[0];
+  return publicIdentity(r.rows[0]);          // never the raw row: it now carries encrypted secrets
 }
 
 /** Re-check a custom domain's verification with Resend. */
@@ -135,7 +174,7 @@ export async function verifyCustomDomain(tenantId, id) {
             verified_at = CASE WHEN $3 = 'verified' THEN now() ELSE verified_at END
       WHERE id = $1 AND tenant_id = $2 RETURNING *`,
     [Number(id), Number(tenantId), status, recs ? JSON.stringify(recs) : null]);
-  return upd.rows[0];
+  return publicIdentity(upd.rows[0]);        // never the raw row
 }
 
 /** Remove a custom domain (also from Resend). The Bell identity cannot be removed. */
@@ -168,5 +207,99 @@ export async function updateIdentity(tenantId, id, { fromName, signatureHtml, ma
     if (fromName !== undefined) await client.query(`UPDATE tenant_email_domains SET from_name = $3 WHERE id = $1 AND tenant_id = $2`, [Number(id), Number(tenantId), fromName]);
     if (signatureHtml !== undefined) await client.query(`UPDATE tenant_email_domains SET signature_html = $3 WHERE id = $1 AND tenant_id = $2`, [Number(id), Number(tenantId), signatureHtml]);
   });
-  return (await query(`SELECT * FROM tenant_email_domains WHERE id = $1 AND tenant_id = $2`, [Number(id), Number(tenantId)])).rows[0];
+  return publicIdentity((await query(
+    `SELECT * FROM tenant_email_domains WHERE id = $1 AND tenant_id = $2`,
+    [Number(id), Number(tenantId)])).rows[0]);   // never the raw row
+}
+
+// ── PER-TENANT SMTP ───────────────────────────────────────────────────────────────────────────
+// A tenant may send through their OWN mail server instead of Bell's provider. Two things follow
+// from that, and both are handled here rather than in a route:
+//   · the password is encrypted before it touches the database (lib/secrets.js), and a blank
+//     password on an update KEEPS the stored one — the "leave blank" pattern, so a customer
+//     editing a port number does not have to retype a credential;
+//   · saving new settings RESETS verification. Settings that have not been proven must never be
+//     allowed to carry mail: the send path refuses anything but status='verified'.
+
+import { encryptSecret, secretsConfigured } from './secrets.js';
+import { verifySmtp, smtpConfigFromRow } from './smtp.js';
+
+/**
+ * Store a tenant's mail-server settings on one identity.
+ *
+ * @param patch {host, port, secure, username, password?, imap_host?, imap_port?, imap_secure?,
+ *               imap_username?, imap_password?, transport?}
+ * A password of undefined or '' means "keep what is stored"; the caller cannot read it back to
+ * re-send it, so this is the only way an edit can work.
+ */
+export async function saveSmtpSettings(tenantId, id, patch = {}) {
+  if (!(await secretsConfigured())) throw new Error('secrets_not_configured');
+  const cur = (await query(
+    `SELECT * FROM tenant_email_domains WHERE id = $1 AND tenant_id = $2`,
+    [Number(id), Number(tenantId)])).rows[0];
+  if (!cur) throw new Error('not_found');
+
+  const host = patch.host !== undefined ? String(patch.host || '').trim() : cur.smtp_host;
+  const username = patch.username !== undefined ? String(patch.username || '').trim() : cur.smtp_username;
+  const secure = patch.secure !== undefined ? !!patch.secure : cur.smtp_secure;
+  const port = patch.port !== undefined ? (Number(patch.port) || null) : cur.smtp_port;
+  const passwordEnc = patch.password ? await encryptSecret(String(patch.password)) : cur.smtp_password_enc;
+
+  const imapHost = patch.imap_host !== undefined ? String(patch.imap_host || '').trim() || null : cur.imap_host;
+  const imapUser = patch.imap_username !== undefined ? String(patch.imap_username || '').trim() || null : cur.imap_username;
+  const imapSecure = patch.imap_secure !== undefined ? !!patch.imap_secure : cur.imap_secure;
+  const imapPort = patch.imap_port !== undefined ? (Number(patch.imap_port) || null) : cur.imap_port;
+  const imapPassEnc = patch.imap_password ? await encryptSecret(String(patch.imap_password)) : cur.imap_password_enc;
+
+  // Anything that changes HOW Bell connects invalidates the proof. Changing only the IMAP side
+  // does not: sending was already proven and is unaffected by where bounces are read from.
+  const sendingChanged = host !== cur.smtp_host || username !== cur.smtp_username
+    || secure !== cur.smtp_secure || port !== cur.smtp_port
+    || passwordEnc !== cur.smtp_password_enc;
+
+  const r = await query(
+    `UPDATE tenant_email_domains
+        SET smtp_host = $3, smtp_port = $4, smtp_secure = $5, smtp_username = $6,
+            smtp_password_enc = $7,
+            imap_host = $8, imap_port = $9, imap_secure = $10, imap_username = $11,
+            imap_password_enc = $12,
+            transport = COALESCE($13, transport),
+            smtp_verified_at = CASE WHEN $14 THEN NULL ELSE smtp_verified_at END,
+            smtp_last_error  = CASE WHEN $14 THEN NULL ELSE smtp_last_error END,
+            status = CASE WHEN $14 AND COALESCE($13, transport) = 'smtp' THEN 'pending' ELSE status END
+      WHERE id = $1 AND tenant_id = $2
+      RETURNING *`,
+    [Number(id), Number(tenantId), host || null, port, secure, username || null, passwordEnc,
+     imapHost, imapPort, imapSecure, imapUser, imapPassEnc,
+     patch.transport === 'smtp' || patch.transport === 'resend' ? patch.transport : null,
+     sendingChanged]);
+  return publicIdentity(r.rows[0]);
+}
+
+/**
+ * Prove the stored settings by connecting and authenticating — and by sending NOTHING.
+ *
+ * On success the identity becomes 'verified', which is what the send path requires. On failure
+ * the mail server's own words are stored and returned; Bell never paraphrases them into
+ * "Could not send the email."
+ */
+export async function verifySmtpSettings(tenantId, id) {
+  const row = (await query(
+    `SELECT * FROM tenant_email_domains WHERE id = $1 AND tenant_id = $2`,
+    [Number(id), Number(tenantId)])).rows[0];
+  if (!row) throw new Error('not_found');
+  const config = await smtpConfigFromRow(row);
+  if (!config) throw new Error('smtp_not_configured');
+
+  const out = await verifySmtp(config);
+  const r = await query(
+    `UPDATE tenant_email_domains
+        SET smtp_verified_at = CASE WHEN $3 THEN now() ELSE NULL END,
+            smtp_last_error  = $4,
+            status = CASE WHEN $3 THEN 'verified'
+                          WHEN transport = 'smtp' THEN 'failed' ELSE status END
+      WHERE id = $1 AND tenant_id = $2
+      RETURNING *`,
+    [Number(id), Number(tenantId), out.ok, out.ok ? null : out.error]);
+  return { ok: out.ok, error: out.error, identity: publicIdentity(r.rows[0]) };
 }

@@ -619,6 +619,8 @@ export const api = {
   outreachConnectDomain:  (domain, from_email, from_name) => request('/api/outreach/domains', { method: 'POST', body: JSON.stringify({ domain, from_email, from_name }) }),
   outreachVerifyDomain:   (id) => request('/api/outreach/domains/' + id + '/verify', { method: 'POST' }),
   outreachRemoveDomain:   (id) => request('/api/outreach/domains/' + id, { method: 'DELETE' }),
+  saveTenantSmtp:         (id, cfg) => request('/api/outreach/identities/' + id + '/smtp', { method: 'PUT', body: JSON.stringify(cfg) }),
+  testTenantSmtp:         (id) => request('/api/outreach/identities/' + id + '/smtp/test', { method: 'POST' }),
   outreachUpdateIdentity: (id, patch) => request('/api/outreach/identities/' + id, { method: 'PATCH', body: JSON.stringify(patch) }),
 
   // Company profile + ICP (per-tenant) — drives Signals + Bella.
