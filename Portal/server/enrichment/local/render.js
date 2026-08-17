@@ -88,11 +88,94 @@ async function getBrowser() {
 }
 
 /**
+ * A SECOND, VISIBLE browser, kept apart from the shared headless one.
+ *
+ * Its own instance on purpose: the headless browser is shared across a whole harvest run and
+ * must not be torn down and relaunched because one site needs a window. Launched lazily, so a
+ * machine that never asks for headed rendering never starts one. Automation-controlled is
+ * disabled the same way as the headless launch — the difference being tested is the window.
+ */
+// Measured on qatarcid.com, 2026-08-18, all from this network:
+//   Crawl4AI headless                     → challenged 5/5
+//   Crawl4AI headless + stealth           → challenged 5/5
+//   Playwright headed (bundled Chromium)  → challenged 3/3
+//   a genuine browser, same IP            → the page loads in full (82 KB)
+// So the block is the AUTOMATION FINGERPRINT, not the address. The remaining free lever is the
+// real Chrome binary driven through a PERSISTENT profile: same executable a person runs, and a
+// profile that keeps the clearance cookie once a challenge has been satisfied, instead of
+// arriving as a brand-new visitor on every page.
+const HEADED_PROFILE = path.join(__dirname, '..', '..', '..', '..', '.bell-headed-profile');
+let _headedCtx = null;
+let _headedPromise = null;
+async function getHeadedContext() {
+  const pw = loadPlaywright();
+  if (!pw) throw new Error('playwright_not_installed');
+  if (_headedCtx) return _headedCtx;
+  if (!_headedPromise) {
+    const opts = {
+      headless: false,
+      viewport: { width: 1280, height: 900 },
+      ignoreHTTPSErrors: true,
+      args: ['--disable-blink-features=AutomationControlled'],
+    };
+    // Real Chrome when it is installed; the bundled Chromium is the fallback and says so by
+    // simply working less well — never a silent substitution the caller cannot see.
+    _headedPromise = pw.chromium.launchPersistentContext(HEADED_PROFILE, { ...opts, channel: 'chrome' })
+      .catch(() => pw.chromium.launchPersistentContext(HEADED_PROFILE, opts))
+      .then((c) => { _headedCtx = c; return c; })
+      .catch((err) => { _headedPromise = null; throw err; });
+  }
+  return _headedPromise;
+}
+
+/** Close the visible browser, if one was ever opened. */
+export async function closeHeadedRenderer() {
+  try { if (_headedCtx) await _headedCtx.close(); } catch { /* already gone */ }
+  _headedCtx = null; _headedPromise = null;
+}
+
+/** Render through the visible, persistent-profile browser. Same return shape as everything else. */
+async function renderPageHeaded(url, { timeoutMs = 60_000, settleMs = 3000 } = {}) {
+  const blank = { ok: false, status: 0, finalUrl: url, html: '', text: '', links: [], meta: {}, mailto: [], tel: [], rendered: true };
+  let page;
+  try {
+    const ctx = await getHeadedContext();
+    page = await ctx.newPage();
+    const res = await page.goto(url, { waitUntil: 'domcontentloaded', timeout: timeoutMs });
+    if (settleMs) await page.waitForTimeout(settleMs);
+    const html = await page.content();
+    const finalUrl = page.url() || url;
+    return {
+      ok: !!html, status: res?.status() || 200, finalUrl, html,
+      text: htmlToText(html), links: extractLinks(html, finalUrl), meta: extractMeta(html, finalUrl),
+      ...extractMailtoTel(html), rendered: true,
+    };
+  } catch (err) {
+    return { ...blank, error: err.message };
+  } finally {
+    try { if (page) await page.close(); } catch { /* the context outlives the page */ }
+  }
+}
+
+/**
  * Render one page. Prefers Crawl4AI (free local server — cracks JS-heavy /
  * anti-bot sites) and falls back to local Playwright. Returns the fetchPage shape:
  *   { ok, status, finalUrl, html, text, links, meta, mailto, tel, rendered, error }
  */
 export async function renderPage(url, opts = {}) {
+  // A HEADED browser is the last resort for a site that fingerprints headless Chromium.
+  // Proven on qatarcid.com 2026-08-18: Crawl4AI WITH stealth was still challenged 5/5, so the
+  // remaining difference is a real window. It skips Crawl4AI entirely (that service is headless
+  // by construction) and never runs unless a caller asks AND the machine allows it — a window
+  // popping up on a laptop mid-harvest would be its own bug. On the engine box the scheduled
+  // tasks run under Interactive logon, so a window there disturbs nobody.
+  // Allowed by default on the ENGINE BOX (Windows), whose scheduled tasks run under Interactive
+  // logon precisely so browsers can open — a window there disturbs nobody. Everywhere else it
+  // is opt-in, because a window appearing unbidden on a laptop mid-harvest is its own bug.
+  // BDI_ALLOW_HEADED=0 turns it off even on the engine box.
+  const allowHeaded = process.env.BDI_ALLOW_HEADED === '1'
+    || (process.platform === 'win32' && process.env.BDI_ALLOW_HEADED !== '0');
+  if (opts.headed && allowHeaded) return renderPageHeaded(url, opts);
   if (await crawl4aiAvailable()) {
     const r = await crawl4aiRender(url, {
       timeoutMs: opts.timeoutMs || 45_000,

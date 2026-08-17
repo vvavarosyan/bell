@@ -54,6 +54,12 @@ export async function recrawlQatarcid({ limit = 1000, log = console.log } = {}) 
   // the engine box Crawl4AI is a long-lived task: the nightly pull rewrites its Python while the
   // RUNNING process keeps yesterday's code, and an unknown option is accepted and ignored. Say so
   // rather than posting into the void and blaming the site for the empty result.
+  // Proven 2026-08-18 on this network: Crawl4AI WITH stealth was challenged on 5 of 5 pages,
+  // so the only remaining lever is a real window. Opt-in twice over (a caller flag AND the
+  // machine's own BDI_ALLOW_HEADED), because a browser window appearing unbidden is its own bug.
+  // Always REQUEST it; render.js decides whether this machine allows a window (engine box: yes).
+  const HEADED = true;
+  log('  asking for a visible real-Chrome window — every headless variant is challenged here.');
   const stealthReady = await crawl4aiSupports('stealth');
   if (!stealthReady) {
     log('  ⚠ the Crawl4AI service on this machine predates the stealth option — it will be ignored.');
@@ -78,7 +84,7 @@ export async function recrawlQatarcid({ limit = 1000, log = console.log } = {}) 
       // stealth: Cloudflare challenged the ROG's headless fingerprint on the
       // first overnight probe (2026-08-17) — magic/simulate_user/override_navigator
       // plus the settle finally reaching Crawl4AI is the retry.
-      const page = await renderPage(url, { timeoutMs: 60_000, settleMs: 8_000, stealth: true });
+      const page = await renderPage(url, { timeoutMs: 60_000, settleMs: 8_000, stealth: true, headed: HEADED });
       rec = parseListing(page, url);
     } catch { rec = null; }
     if (rec) records.push(rec); else unreadable++;

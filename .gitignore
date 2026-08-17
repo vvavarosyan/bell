@@ -104,3 +104,6 @@ npm-debug.log*
 out/
 yarn-debug.log*
 yarn-error.log*
+
+# Bell headed-browser profile (Cloudflare clearance cookies, machine-local)
+.bell-headed-profile/
