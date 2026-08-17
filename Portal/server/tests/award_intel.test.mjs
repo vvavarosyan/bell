@@ -105,6 +105,47 @@ test('migration 119 drift guard: the shipped containment query rides the GIN ind
     'planner uses the award-bids GIN — if this fails the query and migration 119 have drifted apart');
 });
 
+test('migration 120 drift guard: base-CR lookups ride idx_company_registrations_base', async () => {
+  const idx = await query(`SELECT 1 FROM pg_indexes WHERE indexname = 'idx_company_registrations_base'`);
+  assert.equal(idx.rows.length, 1, 'idx_company_registrations_base exists (migration 120)');
+  // The EXACT lookup shape matchBidCrs / the awards route / linkAwardWinnersByCr ship.
+  const plan = await query(
+    `EXPLAIN (FORMAT JSON)
+     SELECT r.company_id FROM company_registrations r
+      WHERE ltrim(split_part(r.number,'/',1),'0') = ANY($1::text[])`, [['65011']]);
+  assert.ok(JSON.stringify(plan.rows).includes('idx_company_registrations_base'),
+    'planner uses the base-CR index — if this fails the expression and migration 120 have drifted');
+});
+
+test('linkAwardWinnersByCr links by stated CR and refuses ambiguity', async () => {
+  const { linkAwardWinnersByCr } = await import('../tenders/ingest.js');
+  const coId = await makeCompany('Award CR Link Co', 'MOCI', '98765429');
+  const otherId = await makeCompany('Award CR Other Co', 'MOCI', '98765428');
+
+  const mkTender = async (ref, regs) => {
+    const t = (await query(
+      `INSERT INTO tenders (source, source_ref, title, status, raw)
+       VALUES ('monaqasat', $1, 'CR link test tender', 'awarded',
+               jsonb_build_object('award_report', jsonb_build_object(
+                 'winner', jsonb_build_object('name', 'AWARD CR LINK CO', 'registrations', $2::jsonb))))
+       RETURNING id`, [ref, JSON.stringify(regs)])).rows[0];
+    cleanup.push(() => query(`DELETE FROM tenders WHERE id = $1`, [t.id]));
+    return Number(t.id);
+  };
+
+  // A zero-padded stated CR resolves to the registry company.
+  const t1 = await mkTender('99001/2099', ['00098765429']);
+  // Two stated CRs resolving to two DIFFERENT companies — must be refused, not guessed.
+  const t2 = await mkTender('99002/2099', ['98765429', '98765428']);
+
+  await linkAwardWinnersByCr();
+  const r1 = (await query(`SELECT award_company_id FROM tenders WHERE id = $1`, [t1])).rows[0];
+  const r2 = (await query(`SELECT award_company_id FROM tenders WHERE id = $1`, [t2])).rows[0];
+  assert.equal(r1.award_company_id, coId, 'stated CR links the winner');
+  assert.equal(r2.award_company_id, null, 'ambiguous CRs refuse rather than pick');
+  assert.notEqual(coId, otherId);
+});
+
 test('splitStatusBanner strips only the four verbatim banners', () => {
   assert.equal(STATUS_BANNERS.length, 4);
   const s1 = splitStatusBanner('Tender is violation due to delay \n\n MAINTENANCE CONTRACT');

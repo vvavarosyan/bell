@@ -85,11 +85,55 @@ export async function ingestTenders(rows = []) {
       console.error('[tenders] upsert failed:', err.message);
     }
   }
-  const linked = await linkTenderCompanies();
+  // CR first (the registry's own number), then the name pass fills what CRs cannot.
+  const linkedByCr = await linkAwardWinnersByCr().catch((err) => { console.error('[tenders] cr-link:', err.message); return 0; });
+  const linked = (await linkTenderCompanies()) + linkedByCr;
   // Cross-posted Kahramaa↔Monaqasat tenders collapse into ONE row naming both
   // sources (Val 2026-07-12) — runs after every batch so re-scans re-merge.
   await mergeCrossPostedTenders().catch((err) => console.error('[tenders] merge:', err.message));
   return { inserted, updated, linked };
+}
+
+/**
+ * Link award winners by their STATED CR number — the registry's own identifier, printed on the
+ * buyer's own award page. Strictly stronger evidence than the name match below, so it runs
+ * FIRST and the name pass only fills what CRs cannot. Found 2026-08-17: 3,807 awarded tenders
+ * carried winner CRs and no link at all, and the name pass had linked tender 34778 to a
+ * registration-less near-namesake while the stated CR named the real registry company.
+ *
+ * Guards: base form ≥4 chars (matchBidCrs rule); live, canonical companies only; registry
+ * bodies outrank harvest rows; a winner whose CRs resolve to MORE THAN ONE distinct company is
+ * REFUSED, not guessed (the employer-matcher rule — ambiguity refuses rather than picks).
+ * Only fills NULLs — re-pointing an existing link is a different, reviewed operation.
+ */
+export async function linkAwardWinnersByCr() {
+  const r = await query(`
+    WITH winners AS (
+      SELECT t.id AS tender_id, ltrim(split_part(reg.val, '/', 1), '0') AS base
+        FROM tenders t,
+             LATERAL jsonb_array_elements_text(t.raw->'award_report'->'winner'->'registrations') reg(val)
+       WHERE t.award_company_id IS NULL
+         AND length(ltrim(split_part(reg.val, '/', 1), '0')) >= 4),
+    resolved AS (
+      SELECT w.tender_id,
+             (SELECT c.id FROM company_registrations r
+                JOIN companies c ON c.id = r.company_id
+               WHERE COALESCE(c.archived, false) = false AND c.canonical_id IS NULL
+                 AND ltrim(split_part(r.number, '/', 1), '0') = w.base
+               ORDER BY (r.body IN ('MOCI','QCCI','company_record','CRA')) DESC, c.id
+               LIMIT 1) AS company_id
+        FROM (SELECT DISTINCT tender_id, base FROM winners) w),
+    unambiguous AS (
+      SELECT tender_id, min(company_id) AS company_id
+        FROM resolved
+       WHERE company_id IS NOT NULL
+       GROUP BY tender_id
+      HAVING count(DISTINCT company_id) = 1)
+    UPDATE tenders t
+       SET award_company_id = u.company_id, updated_at = now()
+      FROM unambiguous u
+     WHERE t.id = u.tender_id`);
+  return r.rowCount || 0;
 }
 
 /**
