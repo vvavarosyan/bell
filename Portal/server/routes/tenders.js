@@ -362,10 +362,33 @@ export async function matchBidCrs(crs) {
   return new Map(r.rows.map((x) => [x.base, { id: Number(x.id), name: x.name }]));
 }
 
+/** Ashghal stores its bidder table in a different shape (raw.bidders: name/rank/icv/
+ *  accepted_price/winner, no CR numbers) — translate it to the award_report shape so the same
+ *  drawer renders it. 45 awarded Ashghal tenders carried this unread. Values verbatim: the ICV
+ *  keeps only its number (the UI adds the %), the page's own rank wording rides financial_result. */
+function ashghalAward(t) {
+  const bids = t.raw?.bidders;
+  if (!Array.isArray(bids) || !bids.length || !bids.some((b) => b && b.name)) return null;
+  const winner = bids.find((b) => b.winner === true) || null;
+  return {
+    winner: winner ? { name: winner.name, approved_value: null, currency: 'QAR' } : null,
+    bids: bids.filter((b) => b && b.name).map((b) => ({
+      name: b.name,
+      company_id: null,          // Ashghal states no CR numbers — names only, never guessed
+      proposal_amount: b.accepted_price ?? null,
+      currency: 'QAR',
+      financial_result: b.rank != null && String(b.rank) !== '' ?
+        (/^\d+$/.test(String(b.rank)) ? 'rank ' + b.rank : String(b.rank)) : null,
+      icv: b.icv != null ? String(b.icv).replace(/\s*%$/, '') : null,
+      is_winner: b.winner === true,
+    })),
+  };
+}
+
 /** Shape raw->award_report for the product: parsed, company-matched, report URL admin-only. */
 export async function composeAward(t, { admin = false } = {}) {
   const ar = t.raw?.award_report;
-  if (!ar) return null;
+  if (!ar) return ashghalAward(t);
   const bids = Array.isArray(ar.bids) ? ar.bids : [];
   const allCrs = bids.flatMap((b) => b.registrations || []);
   const matched = await matchBidCrs(allCrs);

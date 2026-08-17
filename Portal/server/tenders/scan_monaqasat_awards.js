@@ -202,7 +202,15 @@ export async function scanMonaqasatAwards({ pages = Infinity, startPage = 1, for
 
   for (let p = startPage; p < startPage + pages; p++) {
     const list = await fetchPage(LIST(p), { respectRobots: false, timeoutMs: 30_000, retries: 1 });
-    if (!list.ok) { log(`  page ${p}: unreachable — stopping.`); break; }
+    // The FIRST page failing is a dead source, and a dead source must be a red error, never a
+    // clean zero — this exact break let a 2026-08-06 TLS rotation read as "ran fine, produced
+    // nothing" for twelve nights while awards piled up unread (the Kahramaa lesson, again).
+    // A LATER page failing still stops gracefully: the night keeps what it read.
+    if (!list.ok) {
+      if (p === startPage) throw new Error(`Monaqasat award list page ${p} unreachable (${list.error || 'status ' + list.status}) — the whole scan is blind, not empty`);
+      log(`  page ${p}: unreachable — stopping.`);
+      break;
+    }
     const ids = reportIdsOnPage(list.html);
     if (!ids.length) { log(`  page ${p}: no award reports — end of the archive.`); break; }
     tally.pages++;

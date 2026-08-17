@@ -49,6 +49,7 @@ const JOB_LABELS = {
   candidate_gate: 'Found-website confirmation (name on page)',
   email_verify: 'Email verification (free, DNS + mail-server answers)',
   guess_recheck: 'Guessed-website re-check (confirm or withdraw)',
+  award_candidates: 'Tender winners that Bell is missing',
 };
 
 export function EngineTab() {

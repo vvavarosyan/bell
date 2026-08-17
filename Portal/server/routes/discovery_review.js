@@ -63,16 +63,17 @@ router.get('/summary', async (_req, res, next) => {
   try {
     const g = await query(`SELECT count(*) FILTER (WHERE status='candidate_new')::int AS candidates FROM gmaps_places`);
     const s = await query(
-      `SELECT count(*) FILTER (WHERE status='new' AND relation <> 'hiring' AND country ILIKE '%qatar%')::int AS qatar,
-              count(*) FILTER (WHERE status='new' AND relation <> 'hiring' AND NOT (country ILIKE '%qatar%'))::int AS foreign,
-              count(*) FILTER (WHERE status='new' AND relation = 'hiring')::int AS hiring
+      `SELECT count(*) FILTER (WHERE status='new' AND COALESCE(relation,'') NOT IN ('hiring','awarded') AND country ILIKE '%qatar%')::int AS qatar,
+              count(*) FILTER (WHERE status='new' AND COALESCE(relation,'') NOT IN ('hiring','awarded') AND NOT (country ILIKE '%qatar%'))::int AS foreign,
+              count(*) FILTER (WHERE status='new' AND relation = 'hiring')::int AS hiring,
+              count(*) FILTER (WHERE status='new' AND relation = 'awarded')::int AS awarded
          FROM spark_discoveries`);
     const o = await query(
       `SELECT count(*)::int AS candidates FROM osm_places
         WHERE matched_company_id IS NULL AND review_status IS NULL
           AND name IS NOT NULL
           AND category_group = ANY($1) AND latitude IS NOT NULL`, [OSM_BUSINESS_GROUPS]).catch(() => ({ rows: [{ candidates: 0 }] }));
-    res.json({ gmaps_candidates: g.rows[0].candidates, spark_qatar: s.rows[0].qatar, spark_foreign: s.rows[0].foreign, hiring: s.rows[0].hiring, osm_candidates: o.rows[0].candidates });
+    res.json({ gmaps_candidates: g.rows[0].candidates, spark_qatar: s.rows[0].qatar, spark_foreign: s.rows[0].foreign, hiring: s.rows[0].hiring, awarded: s.rows[0].awarded, osm_candidates: o.rows[0].candidates });
   } catch (err) { next(err); }
 });
 
@@ -104,7 +105,7 @@ router.get('/spark', async (req, res, next) => {
     const rows = (await query(
       `SELECT id, name, country, website, relation, source_company_id, source_url, created_at
          FROM spark_discoveries
-        WHERE status='new' AND COALESCE(relation,'') <> 'hiring'
+        WHERE status='new' AND COALESCE(relation,'') NOT IN ('hiring','awarded')
           AND ${foreign ? `NOT (country ILIKE '%qatar%')` : `country ILIKE '%qatar%'`}
         ORDER BY id DESC LIMIT $1`, [limit])).rows;
     for (const r of rows) {
@@ -130,6 +131,24 @@ router.get('/hiring', async (req, res, next) => {
          FROM spark_discoveries
         WHERE status='new' AND relation='hiring'
         ORDER BY COALESCE((raw->>'job_count')::int, 0) DESC, id DESC
+        LIMIT $1`, [limit])).rows;
+    res.json({ rows });
+  } catch (err) { next(err); }
+});
+
+// GET /awarded — Qatar firms that WON government tenders and Bell has no company for.
+//
+// The state's own award page names the firm AND its commercial registration number; the CR
+// resolves to nothing Bell holds. Stronger evidence than any advert. On approve, the promote
+// path records the stated CR and the CR linker attaches the tenders it won.
+router.get('/awarded', async (req, res, next) => {
+  try {
+    const limit = Math.min(Number(req.query.limit ?? 200), 500);
+    const rows = (await query(
+      `SELECT id, name, raw, created_at
+         FROM spark_discoveries
+        WHERE status='new' AND relation='awarded'
+        ORDER BY COALESCE((raw->>'tender_count')::int, 0) DESC, id DESC
         LIMIT $1`, [limit])).rows;
     res.json({ rows });
   } catch (err) { next(err); }
@@ -240,10 +259,23 @@ router.post('/spark/:id/promote', async (req, res, next) => {
         name: d.name, website: d.website, country: 'Qatar',
         source: 'spark', sourceRecordId: 'spark:' + d.id, raw: d.raw,
       });
+      // An 'awarded' card exists BECAUSE the state's award page printed a CR that resolves to
+      // nothing. Recording that stated number (body company_record — the generic stated-CR
+      // body, 16k rows precedent) is what lets the CR linker attach the won tenders after
+      // commit. Verbatim from the card's evidence; never invented.
+      if (d.relation === 'awarded' && Array.isArray(d.raw?.crs)) {
+        for (const cr of d.raw.crs) {
+          if (!/^\d{4,}$/.test(String(cr))) continue;
+          await client.query(
+            `INSERT INTO company_registrations (company_id, body, registration_type, number)
+             VALUES ($1, 'company_record', 'commercial_registration', $2)
+             ON CONFLICT DO NOTHING`, [companyId, String(cr)]);
+        }
+      }
       await client.query(
         `UPDATE spark_discoveries SET status='promoted', promoted_company_id=$2, updated_at=now() WHERE id=$1`,
         [id, companyId]);
-      return { promoted: id, company_id: companyId, created };
+      return { promoted: id, company_id: companyId, created, relation: d.relation };
     });
     if (out.error === 'not_found') return res.status(404).json(out);
     if (out.error === 'not_new') return res.status(409).json(out);
@@ -257,8 +289,16 @@ router.post('/spark/:id/promote', async (req, res, next) => {
     // so the matcher (which uses the pool) can see the new row, and re-uses the SAME rule as the
     // sweeper: exactly one active company, or nothing.
     const linked = await linkJobsToNewCompany(out.company_id).catch(() => 0);
+    // ⚠️ THE TENDERS THAT PROVED THIS COMPANY EXISTS MUST NOW FIND IT — the hiring rule,
+    // applied to awards. Runs the SHIPPED CR linker after commit (it can now see the stated
+    // registration recorded above); the linker is the one place that decides a CR match.
+    let tendersLinked = 0;
+    if (out.relation === 'awarded') {
+      const { linkAwardWinnersByCr } = await import('../tenders/ingest.js');
+      tendersLinked = await linkAwardWinnersByCr().catch(() => 0);
+    }
     res.json({ promoted: out.promoted, company_id: out.company_id, created: out.created,
-               linked_to_existing: !out.created, jobs_linked: linked });
+               linked_to_existing: !out.created, jobs_linked: linked, tenders_linked: tendersLinked });
   } catch (err) { next(err); }
 });
 

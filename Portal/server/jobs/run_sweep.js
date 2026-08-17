@@ -213,7 +213,11 @@ export async function runJobSweep({ limit = 40, staleHours = 12, ownSiteStaleHou
     } catch (err) {
       out.failed++;
       track(board.platform, { failed: 1 });
-      bySource[board.platform].error = err.message.slice(0, 200);
+      // Keep the message as a SAMPLE, not as the source's verdict. own_site sweeps ~69 pages a
+      // night; one 403 among 42 good reads was overwriting the platform's error field and turned
+      // the whole source red for six straight nights (found 2026-08-18). Whether the source
+      // actually failed is decided after the loop, from structure — read === 0.
+      bySource[board.platform].sample_error = err.message.slice(0, 200);
       if (!dryRun) await recordSweep(board.board_key, { ok: false, error: err.message });
       log(`  ✗ ${board.board_key}: ${err.message.slice(0, 80)}`);
       continue;   // rule 3: a board that cannot be read closes NOTHING
@@ -245,6 +249,12 @@ export async function runJobSweep({ limit = 40, staleHours = 12, ownSiteStaleHou
 
   log(`  boards ${out.read} read · ${out.failed} unreadable · ${out.skipped} no reader yet`);
   out.sources = bySource;
+  // A source FAILED only when it is structurally unreadable — nothing at all could be read.
+  // Per-page failures stay visible as counts (failed: N) and a sample message, but 42 good
+  // reads with 27 bad pages is a working source with bad pages, not a dead source.
+  for (const b of Object.values(bySource)) {
+    if (b.sample_error && b.read === 0 && b.boards > 0) b.error = b.sample_error;
+  }
   for (const [platform, b] of Object.entries(bySource)) {
     log(`  · ${platform}: ${b.read}/${b.boards} read` + (b.failed ? `, ${b.failed} FAILED` : '') +
         `, ${b.inserted} new, ${b.updated} still open` + (b.closed ? `, ${b.closed} closed` : ''));

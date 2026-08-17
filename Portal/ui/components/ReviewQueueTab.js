@@ -24,6 +24,7 @@ const TABS = [
   { key: 'loctwins', label: 'Address twins',  blurb: 'The same site written twice — two of a company\'s own addresses that clearly describe one place. Pick which written form survives; it inherits the other\'s map pin. Different sites → never asked again.' },
   { key: 'chains', label: 'Chains',  blurb: 'One brand, many branch records sharing the operator\'s website — Yateem-style. Link → every branch keeps its own record and registration, but the profile, drawer and map show ONE family. Not a chain → never asked again.' },
   { key: 'hiring',  label: 'Hiring in Qatar',  blurb: 'Companies advertising real vacancies right now that Bell has no record of. The advert names the employer; Bell holds no company by that name. A firm spending money to hire is trading, staffed and reachable — the best-evidenced lead Bell has. Approve → a real Qatar company (dedup-guarded, same as every other queue).' },
+  { key: 'awarded', label: 'Won tenders',      blurb: 'Companies that WON Qatar government tenders and are not in Bell. The buyer\'s own award page states the firm\'s name AND its commercial registration number — the state says this company exists, and it wins contracts. Approve → a real Qatar company with its stated CR recorded, and the tenders it won attach automatically.' },
   { key: 'qatar',   label: 'Spark · Qatar',    blurb: 'Qatar companies Spark discovered while researching others. Approve → a real Qatar company.' },
   { key: 'foreign', label: 'Spark · foreign',  blurb: 'Non-Qatar companies — kept admin-only for future Middle-East expansion. Never enter Bell.' },
 ];
@@ -55,6 +56,7 @@ export function ReviewQueueTab() {
         : tab === 'loctwins' ? await api.locTwins(100)
         : tab === 'chains' ? await api.chainsGroups(50)
         : tab === 'hiring' ? await api.discoveryHiring(200)
+        : tab === 'awarded' ? await api.discoveryAwarded(200)
         : await api.discoverySpark(tab, 200);
       setRows(r.rows || []);
     } catch (err) { if (!silent) toast('Load failed: ' + err.message, 'error'); }
@@ -128,6 +130,22 @@ export function ReviewQueueTab() {
   };
   const rejectHiring = (id) => act('ignore', id, api.ignoreSpark, 'reject');
 
+  // Won-tenders cards: the server records the stated CR on approve and the CR linker attaches
+  // the tenders the firm won — the toast reports that half, same reason as the hiring toast.
+  const approveAwarded = async (id) => {
+    setBusyId(id);
+    try {
+      const r = await api.promoteSpark(id);
+      setRows((rs) => rs.filter((x) => x.id !== id));
+      loadCounts();
+      const where = r.linked_to_existing ? 'Linked to a company Bell already held' : 'Added to Bell';
+      const n = Number(r.tenders_linked || 0);
+      toast(`${where} — ${n === 0 ? 'no tenders attached yet' : n === 1 ? '1 won tender attached' : n + ' won tenders attached'}.`,
+        n > 0 ? 'success' : 'info');
+    } catch (err) { toast('Could not add it: ' + (err.reason || err.message), 'error'); }
+    finally { setBusyId(null); }
+  };
+
   // Location pairs: confirm puts the company's own written address onto the pin;
   // reject is remembered on the pin row so the pair is never proposed again.
   const pairAct = async (pair, keepId, approve) => {
@@ -169,7 +187,7 @@ export function ReviewQueueTab() {
   };
 
   const chip = (t) => {
-    const n = t.key === 'gmaps' ? counts.gmaps_candidates : t.key === 'osm' ? counts.osm_candidates : t.key === 'locpairs' ? counts.loc_pairs : t.key === 'loctwins' ? counts.loc_twins : t.key === 'chains' ? counts.chain_groups : t.key === 'hiring' ? counts.hiring : t.key === 'qatar' ? counts.spark_qatar : counts.spark_foreign;
+    const n = t.key === 'gmaps' ? counts.gmaps_candidates : t.key === 'osm' ? counts.osm_candidates : t.key === 'locpairs' ? counts.loc_pairs : t.key === 'loctwins' ? counts.loc_twins : t.key === 'chains' ? counts.chain_groups : t.key === 'hiring' ? counts.hiring : t.key === 'awarded' ? counts.awarded : t.key === 'qatar' ? counts.spark_qatar : counts.spark_foreign;
     return html`<button key=${t.key} class=${'toolbar-toggle' + (tab === t.key ? ' accent' : '')}
       onClick=${() => setTab(t.key)} style=${{ whiteSpace: 'nowrap' }}>${t.label}${n ? ` · ${Number(n).toLocaleString()}` : ''}</button>`;
   };
@@ -219,6 +237,30 @@ export function ReviewQueueTab() {
                 </div>` : null}
               <div style=${{ display: 'flex', gap: '8px', marginTop: '10px' }}>
                 <button class="sys-btn" disabled=${busyId === r.id} onClick=${() => approveHiring(r.id)}>
+                  ${busyId === r.id ? '…' : 'Add to Bell'}
+                </button>
+                <button class="sys-btn sys-btn-secondary" disabled=${busyId === r.id} onClick=${() => rejectHiring(r.id)}>
+                  Not a company
+                </button>
+              </div>
+            </div>`; })}
+          </div>`
+        : tab === 'awarded' ? html`<div style=${{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: 'calc(100vh - 230px)', overflowY: 'auto', paddingRight: '4px' }}>
+            ${rows.map((r) => { const w = r.raw || {}; return html`<div key=${r.id} style=${{ border: '1px solid var(--border)', borderRadius: '10px', padding: '10px 12px' }}>
+              <div style=${{ display: 'flex', alignItems: 'baseline', gap: '10px', flexWrap: 'wrap' }}>
+                <b style=${{ fontSize: '14.5px' }}>${r.name}</b>
+                <span class="muted" style=${{ fontSize: '12px' }}>
+                  won ${w.tender_count} tender${w.tender_count === 1 ? '' : 's'}
+                  ${w.total_value ? ' · QAR ' + Number(w.total_value).toLocaleString() : ''}
+                  ${Array.isArray(w.crs) && w.crs.length ? ' · CR ' + w.crs.join(', ') : ''}
+                </span>
+              </div>
+              ${Array.isArray(w.buyers) && w.buyers.length ? html`
+                <div class="muted" style=${{ fontSize: '12px', marginTop: '5px', lineHeight: 1.6 }}>
+                  awarded by: ${w.buyers.filter(Boolean).slice(0, 4).join(' · ')}
+                </div>` : null}
+              <div style=${{ display: 'flex', gap: '8px', marginTop: '10px' }}>
+                <button class="sys-btn" disabled=${busyId === r.id} onClick=${() => approveAwarded(r.id)}>
                   ${busyId === r.id ? '…' : 'Add to Bell'}
                 </button>
                 <button class="sys-btn sys-btn-secondary" disabled=${busyId === r.id} onClick=${() => rejectHiring(r.id)}>

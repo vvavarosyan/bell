@@ -247,6 +247,12 @@ function withCeiling(p, ms, label) {
         async () => (await import('../jobs/hiring_candidates.js')).queueHiringCandidates({ log: (m) => log(m) }),
         { yield: (r) => r?.queued ?? 0, log });
       if (hc?.queued) log(`✓ ${hc.queued} hiring company(ies) queued for review.`);
+      // Same idea, stronger evidence: award winners whose STATED CR resolves to no company are
+      // firms the state says exist — queued for review, never created without a click.
+      const ac = await recordJob('award_candidates',
+        async () => (await import('../tenders/award_candidates.js')).queueAwardWinnerCandidates({ log: (m) => log(m) }),
+        { yield: (r) => r?.queued ?? 0, log });
+      if (ac?.queued) log(`✓ ${ac.queued} tender-winning company(ies) queued for review.`);
     } catch (err) { log(`✗ Job board sweep failed: ${err.message}`); }
     // REGISTRY MERGE (Val, 2026-07-22: "if CR number is matching let it link automatically").
     // Runs BEFORE chain linking on purpose: merging collapses exact duplicates, so the chain

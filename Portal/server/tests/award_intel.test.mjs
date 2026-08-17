@@ -90,6 +90,25 @@ test('composeAward: winner by stated name, ICV passthrough, absent stays absent'
   assert.equal(await composeAward({ raw: {} }), null, 'no award report → null, not an empty shape');
 });
 
+test('composeAward speaks the Ashghal shape — raw.bidders, values verbatim', async () => {
+  const t = {
+    raw: {
+      bidders: [
+        { name: 'Galaxy Food Centre [Alternative]', rank: '1', icv: '24.66%', accepted_price: 10877777.3, winner: true },
+        { name: 'Fabulous Trading & Services', rank: 'Out of ICV Boundary', icv: '20.53%', accepted_price: 13088286.99, winner: false },
+      ],
+    },
+  };
+  const a = await composeAward(t, { admin: false });
+  assert.equal(a.winner.name, 'Galaxy Food Centre [Alternative]');
+  assert.equal(a.bids[0].is_winner, true);
+  assert.equal(a.bids[0].icv, '24.66', 'ICV keeps only its number — the UI adds the %');
+  assert.equal(a.bids[0].financial_result, 'rank 1');
+  assert.equal(a.bids[1].financial_result, 'Out of ICV Boundary', "the page's own wording, verbatim");
+  assert.equal(a.bids[1].company_id, null, 'Ashghal states no CRs — names never guessed to companies');
+  assert.equal(await composeAward({ raw: { bidders: [] } }), null, 'an empty bidder list is no award result');
+});
+
 test('migration 119 drift guard: the shipped containment query rides the GIN index', async () => {
   const idx = await query(`SELECT 1 FROM pg_indexes WHERE indexname = 'idx_tenders_award_bids_gin'`);
   assert.equal(idx.rows.length, 1, 'idx_tenders_award_bids_gin exists (migration 119)');

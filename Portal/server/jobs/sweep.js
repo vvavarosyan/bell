@@ -69,11 +69,12 @@ export async function recordSweep(boardKey, { ok, jobsSeen = 0, error = null }) 
     [boardKey, !!ok, Number(jobsSeen) || 0, error ? String(error).slice(0, 500) : null]);
   if (ok) {
     await query(
-      `UPDATE job_boards SET last_ok_at = now(), last_error = NULL, consecutive_failures = 0,
-              updated_at = now() WHERE board_key = $1`, [boardKey]);
+      `UPDATE job_boards SET last_ok_at = now(), last_attempt_at = now(), last_error = NULL,
+              consecutive_failures = 0, updated_at = now() WHERE board_key = $1`, [boardKey]);
   } else {
     await query(
-      `UPDATE job_boards SET last_error = $2, consecutive_failures = consecutive_failures + 1,
+      `UPDATE job_boards SET last_error = $2, last_attempt_at = now(),
+              consecutive_failures = consecutive_failures + 1,
               updated_at = now() WHERE board_key = $1`,
       [boardKey, error ? String(error).slice(0, 500) : 'unknown']);
   }
@@ -241,7 +242,12 @@ export async function boardsDue({ limit = 50, staleHours = 12, platforms = null 
       FROM job_boards
      WHERE active AND attribution <> 'rejected'
        AND ($3::text[] IS NULL OR platform = ANY($3::text[]))
-       AND (last_ok_at IS NULL OR last_ok_at < now() - ($2 || ' hours')::interval)
+       -- Due when: never attempted at all · succeeded but the success is stale · only ever
+       -- failed, and the last ATTEMPT is stale. The old form (last_ok_at IS NULL = due) made
+       -- 3,138 never-succeeded careers boards due every night, defeating their weekly cadence.
+       AND ( (last_ok_at IS NULL AND last_attempt_at IS NULL)
+          OR (last_ok_at IS NOT NULL AND last_ok_at < now() - ($2 || ' hours')::interval)
+          OR (last_ok_at IS NULL AND last_attempt_at < now() - ($2 || ' hours')::interval) )
        -- A board that has failed many times in a row is backed off rather than hammered; it is
        -- still listed for a human, and its jobs are NOT closed (rule 3).
        AND consecutive_failures < 10

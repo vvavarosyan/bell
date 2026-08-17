@@ -9,6 +9,9 @@
 import pg from 'pg';
 import os from 'os';
 import fs from 'fs';
+// Every Bell process trusts the DigiCert intermediate mof.gov.qa forgot to send (2026-08-06
+// cert rotation broke every plain fetch to Monaqasat). db.js is the one module they all load.
+import './lib/tls_trust.js';
 
 const { Pool } = pg;
 
