@@ -34,7 +34,7 @@
 // proven end-to-end on a disposable copy before this was allowed to run unattended.
 
 import { query } from '../db.js';
-import { mergeCompanies } from './dedup.js';
+import { mergeCompanies, registrationBases } from './dedup.js';
 import { normalizeName } from '../ingest/normalize.js';
 
 const MIN_NUMBER_LEN = 5;
@@ -190,7 +190,20 @@ export async function autoMergeExactRegistrations({ apply = false, log = () => {
     log(`  held (names differ) [${g.key}] ${g.names.map((n) => String(n).slice(0, 40)).join(' || ')}`);
   }
 
-  let merged = 0, failed = 0;
+  // The same branch-stripped base form the guard uses (a "/2" suffix is the same legal entity).
+  const baseOf = (s) => {
+    const v = String(s || '').trim();
+    if (!v) return null;
+    let x = v.split('/')[0];
+    if (/^\d+$/.test(x)) x = x.replace(/^0+/, '') || '0';
+    return x.length >= 4 ? x : null;
+  };
+  let merged = 0, failed = 0, queuedForReview = 0;
+  // ⚠️ WHY A MERGE FAILED USED TO EXIST ONLY IN A WINDOWS TASK LOG. `failed: 12` reached
+  // job_runs with no reason attached, and answering "were those correct refusals?" took a
+  // full investigation. summarize() keeps nested NUMBERS, so a tally of reasons survives into
+  // job_runs.result — the next person reads it instead of re-deriving it.
+  const failedBy = { registration_conflict: 0, sibling_branches: 0, other: 0 };
   const done = [];
   for (const g of eligible) {
     // Survivor = the most complete record (highest Bell Score, oldest on a tie) — the array was
@@ -198,17 +211,46 @@ export async function autoMergeExactRegistrations({ apply = false, log = () => {
     const [survivor, ...dups] = g.ids;
     for (const dup of dups) {
       if (!apply) { merged++; done.push({ key: g.key, survivor, dup, name: g.names[0] }); continue; }
+      // ⚠️ THE GUARD GOT MORE PERMISSIVE TODAY, AND THE AUTOMATIC PATH DELIBERATELY DOES NOT
+      // FOLLOW IT ALL THE WAY. Correcting the licence-vs-CR comparison unblocks ~110 pairs that
+      // were refused for years. Most are real duplicates — but "Tadmur Holding" and "Tadmur
+      // Trading" state each other's CRs and may still be two legal entities in one group, which
+      // is exactly the merge Val objected to on iHorizons. So when the two records disagree
+      // about their PRIMARY number, the pair goes to the Dedup Queue with its evidence instead
+      // of being merged tonight. Nothing is lost; the decision moves to a human.
+      const [pa, pb] = await Promise.all([registrationBases(survivor), registrationBases(dup)]);
+      const primaryA = baseOf(pa.primary), primaryB = baseOf(pb.primary);
+      if (primaryA && primaryB && primaryA !== primaryB) {
+        const shared = [...pa.bases].filter((x) => pb.bases.has(x));
+        queuedForReview++;
+        await query(
+          `INSERT INTO dedup_candidates (company_a_id, company_b_id, similarity_score, similarity_reasons)
+           VALUES (LEAST($1,$2), GREATEST($1,$2), 0.900, $3::jsonb)
+           ON CONFLICT (company_a_id, company_b_id) DO NOTHING`,
+          [survivor, dup, JSON.stringify([
+            `both_state_cr(${shared.join(',') || 'none'})`,
+            `primary_numbers_differ(${primaryA} vs ${primaryB})`,
+            `finder_tier(${g.key})`,
+          ])]).catch(() => {});
+        log(`  → review #${dup} ↔ #${survivor} [${g.key}]: share CR ${shared.join(',')}, primaries differ ${primaryA} vs ${primaryB}`);
+        continue;
+      }
       try {
-        await mergeCompanies(survivor, dup, () => {});
+        // Pass the real logger: the guard explains its own refusals, and swallowing that line
+        // is how "failed: 12" became unanswerable.
+        await mergeCompanies(survivor, dup, (m) => log(m));
         merged++;
         done.push({ key: g.key, survivor, dup, name: g.names[0] });
         log(`  merged #${dup} → #${survivor}  [${g.key}]  ${String(g.names[0]).slice(0, 50)}`);
       } catch (err) {
         failed++;
+        const code = err.code === 'registration_conflict' || err.code === 'sibling_branches' ? err.code : 'other';
+        failedBy[code]++;
         log(`  ✗ #${dup} → #${survivor} [${g.key}]: ${err.message}`);
       }
     }
   }
 
-  return { groups: groups.length, eligible: eligible.length, held: held.length, merged, failed, applied: apply, done, heldGroups: held };
+  if (queuedForReview) log(`  ${queuedForReview} pair(s) sent to the Dedup Queue instead of merging (primary numbers differ)`);
+  return { groups: groups.length, eligible: eligible.length, held: held.length, merged, failed, failedBy, queuedForReview, applied: apply, done, heldGroups: held };
 }

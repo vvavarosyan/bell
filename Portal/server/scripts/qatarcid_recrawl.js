@@ -30,6 +30,7 @@ import fs from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { query, pool } from '../db.js';
 import { renderPage, rendererAvailable } from '../enrichment/local/render.js';
+import { crawl4aiSupports } from '../enrichment/local/crawl4ai.js';
 import { parseListing } from '../sources/qatarcid/reader.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -48,6 +49,15 @@ const DELAY_MS = 2000;        // politeness between page loads — a directory, 
 export async function recrawlQatarcid({ limit = 1000, log = console.log } = {}) {
   if (!(await rendererAvailable())) {
     throw new Error('no browser engine available on this machine — the site 403s anything less');
+  }
+  // Cloudflare challenges a plain headless fingerprint here, so this crawl asks for stealth. On
+  // the engine box Crawl4AI is a long-lived task: the nightly pull rewrites its Python while the
+  // RUNNING process keeps yesterday's code, and an unknown option is accepted and ignored. Say so
+  // rather than posting into the void and blaming the site for the empty result.
+  const stealthReady = await crawl4aiSupports('stealth');
+  if (!stealthReady) {
+    log('  ⚠ the Crawl4AI service on this machine predates the stealth option — it will be ignored.');
+    log('    Restart the Crawl4AI task so it picks up the updated code, then run this again.');
   }
 
   // Stalest first. last_seen_at is bumped by the ingest for every record in the file, so a
@@ -81,6 +91,9 @@ export async function recrawlQatarcid({ limit = 1000, log = console.log } = {}) 
       throw new Error(
         `Cloudflare is challenging this machine's headless browser (${PROBE}/${PROBE} pages unreadable). ` +
         'The interactive test passed, so the site is crawlable — this engine is not. ' +
+        (stealthReady
+          ? 'Stealth WAS in effect and did not get through, so the next move is a headed browser, not another retry. '
+          : 'The Crawl4AI service here is running code older than the stealth option, so stealth never applied — restart that task and this may pass. ') +
         'Nothing was written; no listing was marked seen.');
     }
     if (i < targets.length - 1) await new Promise((r) => setTimeout(r, DELAY_MS));

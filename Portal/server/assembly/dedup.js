@@ -146,6 +146,42 @@ function baseRegistration(s) {
   return x.length >= 4 ? x : null;
 }
 
+/**
+ * Every base commercial registration a company states — the multi-row truth, not the single
+ * `primary_registration_no` scalar (which may hold a QFC LICENCE, or an arbitrary one of
+ * several CRs). Exported because the merge guard and the automatic merger must agree about
+ * what a company's numbers ARE; two implementations would drift, and this exact question is
+ * what decides whether two records are one firm.
+ */
+export async function registrationBases(id) {
+  const { rows } = await query(
+    `SELECT c.primary_registration_no AS primary,
+            COALESCE(array_agg(r.number) FILTER (WHERE r.number IS NOT NULL), '{}') AS numbers
+       FROM companies c
+       LEFT JOIN company_registrations r
+         ON r.company_id = c.id
+        AND r.registration_type = 'commercial_registration'
+        AND r.body IN ('MOCI','QCCI','CRA','company_record')
+      WHERE c.id = $1
+      GROUP BY c.primary_registration_no`, [id]);
+  const row = rows[0] || {};
+  const bases = new Set();
+  for (const n of row.numbers || []) {
+    const b = baseRegistration(n);
+    if (b) bases.add(b);
+  }
+  // The primary field is a FALLBACK, never an addition: on a company that states real
+  // commercial registrations it may hold a QFC licence, and folding a licence number into the
+  // CR set could manufacture an overlap with a stranger's CR — the "number 00003 exists under
+  // three unrelated registers" problem this module was built around. On a thin record with no
+  // registration rows it is the only number there is, so it stands in.
+  if (!bases.size) {
+    const b = baseRegistration(row.primary);
+    if (b) bases.add(b);
+  }
+  return { bases, primary: row.primary || null };
+}
+
 // ---------------------------------------------------------------------------
 // Find candidate pairs across all signals — returns Map<pairKey, { a, b, reasons[] }>
 // ---------------------------------------------------------------------------
@@ -390,13 +426,21 @@ export async function mergeCompanies(canonicalId, duplicateId, jobLog = null) {
   // merge; only a differing base blocks. Fails loudly (throws) rather than
   // returning quietly, so a caller can never record it as a successful merge.
   {
-    const [{ rows: [cr] }, { rows: [dr] }] = await Promise.all([
-      query('SELECT primary_registration_no FROM companies WHERE id = $1', [canonicalId]),
-      query('SELECT primary_registration_no FROM companies WHERE id = $1', [duplicateId]),
-    ]);
-    const regA = baseRegistration(cr?.primary_registration_no);
-    const regB = baseRegistration(dr?.primary_registration_no);
-    if (regA && regB && regA !== regB) {
+    // ⚠️ A COMPANY HAS MORE THAN ONE NUMBER, AND primary_registration_no IS ONLY ONE OF THEM.
+    // This guard used to compare that single scalar on each side and refuse whenever the two
+    // differed. Measured 2026-08-18 across the 5,831 live cross-body pairs: it refused 110, and
+    // in 110 of 110 BOTH companies themselves state the shared base CR in company_registrations.
+    // Every refusal was wrong, and the reasons were spectacular — #3973's "primary" is its QFC
+    // LICENCE 02087 while the company also states commercial registration 00040727, so a licence
+    // number was being compared against a CR; "Buzwair Holding" states MOCI 32396 AND 45676 and
+    // its primary happened to name the other one. Compare the SETS of stated commercial
+    // registrations (plus the primary field, which may be the only number on a thin record), and
+    // refuse only when they are DISJOINT — that is what "different legal entity" actually means.
+    const [A, B] = await Promise.all([registrationBases(canonicalId), registrationBases(duplicateId)]);
+    const regA = baseRegistration(A.primary);
+    const regB = baseRegistration(B.primary);
+    const disjoint = A.bases.size && B.bases.size && ![...A.bases].some((b) => B.bases.has(b));
+    if (disjoint) {
       jobLog?.(`    ⚠ skip #${duplicateId} → #${canonicalId}: registration conflict ${regA} vs ${regB} (distinct legal entities — not merged)`);
       throw Object.assign(new Error('registration_conflict'), { code: 'registration_conflict', regA, regB });
     }
@@ -406,7 +450,7 @@ export async function mergeCompanies(canonicalId, duplicateId, jobLog = null) {
     // record. Only a DIFFERENT suffix blocks: base↔suffix (42828 vs 42828/2) keeps
     // merging, because MOCI does list the same head office both ways.
     const sfx = (s) => (String(s || '').match(/\/(\d+)\s*$/) || [])[1] || null;
-    const sA = sfx(cr?.primary_registration_no), sB = sfx(dr?.primary_registration_no);
+    const sA = sfx(A.primary), sB = sfx(B.primary);
     if (regA && regA === regB && sA && sB && sA !== sB) {
       jobLog?.(`    ⚠ skip #${duplicateId} → #${canonicalId}: sibling branch registrations ${regA}/${sA} vs ${regB}/${sB} — two branches of one firm, not duplicates`);
       throw Object.assign(new Error('sibling_branches'), { code: 'sibling_branches', regA, sA, sB });

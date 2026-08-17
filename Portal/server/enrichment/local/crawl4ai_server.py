@@ -225,7 +225,12 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self):
         if self.path.startswith("/health"):
-            self._send(200, {"ok": bool(READY), "engine": "crawl4ai", "warm": _crawler is not None, "error": IMPORT_ERROR})
+            # "features" exists so a caller can tell an OLD SERVER from a server that ran its
+            # request and found nothing. This service is a long-lived Windows task: a git pull
+            # updates this file on disk while the RUNNING process keeps the previous code, so a
+            # newly-added option would otherwise be accepted and silently ignored.
+            self._send(200, {"ok": bool(READY), "engine": "crawl4ai", "warm": _crawler is not None,
+                             "features": ["stealth"], "error": IMPORT_ERROR})
         else:
             self._send(404, {"ok": False})
 

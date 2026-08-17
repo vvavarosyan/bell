@@ -18,6 +18,7 @@ const BASE = (process.env.BELL_CRAWL4AI_URL || 'http://127.0.0.1:11235').replace
 const ENABLED = process.env.BELL_CRAWL4AI !== '0';
 
 let _healthy = null;        // null = unknown; true/false = last check
+let _features = [];         // what the RUNNING server says it can do (see crawl4aiSupports)
 let _checkedAt = 0;
 const HEALTH_TTL = 60_000;
 
@@ -32,8 +33,21 @@ export async function crawl4aiAvailable() {
     const r = await fetch(BASE + '/health', { signal: ctl.signal }).finally(() => clearTimeout(to));
     const d = r.ok ? await r.json().catch(() => null) : null;
     _healthy = !!(d && d.ok);
-  } catch { _healthy = false; }
+    _features = Array.isArray(d?.features) ? d.features : [];
+  } catch { _healthy = false; _features = []; }
   return _healthy;
+}
+
+/**
+ * Does the RUNNING server support a named option? This service is a long-lived task on the
+ * engine box: the nightly git pull rewrites crawl4ai_server.py on disk while the process keeps
+ * executing the code it started with. A new option would then be posted, accepted and ignored —
+ * the caller sees "ran fine, found nothing", which is the failure shape this codebase keeps
+ * being bitten by. Ask instead of assuming; a server too old to answer reports no features.
+ */
+export async function crawl4aiSupports(feature) {
+  if (!(await crawl4aiAvailable())) return false;
+  return _features.includes(feature);
 }
 
 /**
