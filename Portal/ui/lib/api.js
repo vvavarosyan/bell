@@ -189,6 +189,7 @@ export const api = {
   discoverySpark:         (scope = 'qatar', limit = 100) => request('/api/discovery/spark?scope=' + scope + '&limit=' + limit),
   discoveryHiring:        (limit = 200) => request('/api/discovery/hiring?limit=' + limit),
   discoveryAwarded:       (limit = 200) => request('/api/discovery/awarded?limit=' + limit),
+  approveAwardedMany:     (minTenders = 5) => request('/api/discovery/awarded/approve-many', { method: 'POST', body: JSON.stringify({ min_tenders: minTenders }) }),
   promoteGmaps:           (id) => request(`/api/discovery/gmaps/${id}/promote`, { method: 'POST', body: '{}' }),
   ignoreGmaps:            (id) => request(`/api/discovery/gmaps/${id}/ignore`, { method: 'POST', body: '{}' }),
   promoteSpark:           (id) => request(`/api/discovery/spark/${id}/promote`, { method: 'POST', body: '{}' }),

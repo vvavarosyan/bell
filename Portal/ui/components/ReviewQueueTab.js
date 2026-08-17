@@ -146,6 +146,22 @@ export function ReviewQueueTab() {
     finally { setBusyId(null); }
   };
 
+  // Bulk approve of the well-evidenced end of the won-tenders queue. Reloads rather than
+  // filtering locally: the server decides which rows it actually took, and a screen that
+  // guesses would drift from the truth the moment one row was skipped.
+  const approveAwardedBulk = async () => {
+    setBusyId('bulk');
+    try {
+      const r = await api.approveAwardedMany(5);
+      await load();
+      loadCounts();
+      const added = Number(r.created || 0), linked = Number(r.linked_to_existing || 0), t = Number(r.tenders_linked || 0);
+      toast(`${added} new compan${added === 1 ? 'y' : 'ies'} added · ${linked} linked to records Bell already held · ${t} won tender${t === 1 ? '' : 's'} attached` +
+            (r.failed ? ` · ${r.failed} could not be added` : ''), 'success');
+    } catch (err) { toast('Could not add them: ' + (err.reason || err.message), 'error'); }
+    finally { setBusyId(null); }
+  };
+
   // Location pairs: confirm puts the company's own written address onto the pin;
   // reject is remembered on the pin row so the pair is never proposed again.
   const pairAct = async (pair, keepId, approve) => {
@@ -246,6 +262,18 @@ export function ReviewQueueTab() {
             </div>`; })}
           </div>`
         : tab === 'awarded' ? html`<div style=${{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: 'calc(100vh - 230px)', overflowY: 'auto', paddingRight: '4px' }}>
+            ${(() => { const n = rows.filter((r) => Number(r.raw?.tender_count || 0) >= 5).length; return n ? html`
+              <div style=${{ border: '1px solid var(--border)', borderRadius: '10px', padding: '10px 12px', background: 'rgba(111,207,151,0.05)' }}>
+                <b>${n} of these won 5 or more government tenders each.</b>
+                <div class="muted" style=${{ fontSize: '12px', marginTop: '4px', lineHeight: 1.6 }}>
+                  A firm the state has paid five separate times is not a claim, it is a record. Adding them
+                  together runs the same duplicate check as each button below — a name Bell already holds
+                  links to that record instead of making a second one.
+                </div>
+                <button class="sys-btn" style=${{ marginTop: '9px' }} disabled=${busyId === 'bulk'} onClick=${approveAwardedBulk}>
+                  ${busyId === 'bulk' ? 'Adding…' : `Add all ${n} to Bell`}
+                </button>
+              </div>` : null; })()}
             ${rows.map((r) => { const w = r.raw || {}; return html`<div key=${r.id} style=${{ border: '1px solid var(--border)', borderRadius: '10px', padding: '10px 12px' }}>
               <div style=${{ display: 'flex', alignItems: 'baseline', gap: '10px', flexWrap: 'wrap' }}>
                 <b style=${{ fontSize: '14.5px' }}>${r.name}</b>

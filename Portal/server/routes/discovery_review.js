@@ -136,6 +136,63 @@ router.get('/hiring', async (req, res, next) => {
   } catch (err) { next(err); }
 });
 
+// POST /awarded/approve-many  { min_tenders?: 3, limit?: 200 }
+//
+// 577 cards is not clickable one at a time (the OSM lesson, same shape). What makes a bulk
+// button defensible HERE is the evidence: the buyer's own award page states the firm's name AND
+// its commercial registration number, and every promotion runs the SAME dedup guard as the
+// single button — a candidate matching an existing company LINKS to it instead of duplicating,
+// and the stated CR is recorded on whichever record wins. A threshold on won tenders is the
+// operator's own dial: 5+ awards is an established contractor, 1 is a single page's word.
+router.post('/awarded/approve-many', async (req, res, next) => {
+  try {
+    const minTenders = Math.min(Math.max(Number(req.body?.min_tenders) || 3, 1), 100);
+    const limit = Math.min(Math.max(Number(req.body?.limit) || 200, 1), 300);
+    const rows = (await query(
+      `SELECT id FROM spark_discoveries
+        WHERE status='new' AND relation='awarded'
+          AND COALESCE((raw->>'tender_count')::int, 0) >= $1
+        ORDER BY COALESCE((raw->>'tender_count')::int, 0) DESC, id
+        LIMIT $2`, [minTenders, limit])).rows;
+
+    let created = 0, linked = 0, failed = 0, tendersLinked = 0;
+    for (const r of rows) {
+      try {
+        const out = await withTransaction(async (client) => {
+          const cur = await client.query(`SELECT * FROM spark_discoveries WHERE id=$1 FOR UPDATE`, [r.id]);
+          const d = cur.rows[0];
+          if (!d || d.status !== 'new') return null;
+          const { companyId, created: wasCreated } = await promoteToCompany(client, {
+            name: d.name, website: d.website, country: 'Qatar',
+            source: 'spark', sourceRecordId: 'spark:' + d.id, raw: d.raw,
+          });
+          for (const cr of (Array.isArray(d.raw?.crs) ? d.raw.crs : [])) {
+            if (!/^\d{4,}$/.test(String(cr))) continue;
+            await client.query(
+              `INSERT INTO company_registrations (company_id, body, registration_type, number)
+               VALUES ($1, 'company_record', 'commercial_registration', $2)
+               ON CONFLICT DO NOTHING`, [companyId, String(cr)]);
+          }
+          await client.query(
+            `UPDATE spark_discoveries SET status='promoted', promoted_company_id=$2, updated_at=now() WHERE id=$1`,
+            [r.id, companyId]);
+          return { companyId, wasCreated };
+        });
+        if (!out) continue;
+        if (out.wasCreated) created++; else linked++;
+        await recomputeBellScoreForCompany(out.companyId).catch(() => {});
+      } catch { failed++; }
+    }
+    // ONE linker pass for the whole batch — it resolves every newly recorded CR at once, so
+    // running it per company would repeat the same scan N times for the same answer.
+    if (created + linked > 0) {
+      const { linkAwardWinnersByCr } = await import('../tenders/ingest.js');
+      tendersLinked = await linkAwardWinnersByCr().catch(() => 0);
+    }
+    res.json({ considered: rows.length, created, linked_to_existing: linked, failed, tenders_linked: tendersLinked });
+  } catch (err) { next(err); }
+});
+
 // GET /awarded — Qatar firms that WON government tenders and Bell has no company for.
 //
 // The state's own award page names the firm AND its commercial registration number; the CR
